@@ -1,0 +1,33 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+.idea/
+*.sublime-*
+.vscode/
+
+# Local development
+*.local
+.env
+
+# Application data (user-specific)
+# Note: ~/Library/Application Support/AIAgentPM/ is not in repo
+
+# Test/development databases
+data/*.db
+data/*.db-shm
+data/*.db-wal
