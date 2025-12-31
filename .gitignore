@@ -31,3 +31,8 @@ DerivedData/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+
+# Generated files
+dist/
+*.xcodeproj/
+DerivedData/

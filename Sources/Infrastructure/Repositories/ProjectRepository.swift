@@ -1,6 +1,5 @@
 // Sources/Infrastructure/Repositories/ProjectRepository.swift
 // 参照: docs/architecture/DATABASE_SCHEMA.md - projects テーブル
-// 参照: docs/guide/CLEAN_ARCHITECTURE.md - Repository パターン
 
 import Foundation
 import GRDB
@@ -14,20 +13,39 @@ struct ProjectRecord: Codable, FetchableRecord, PersistableRecord {
 
     var id: String
     var name: String
+    var description: String
+    var status: String
+    var createdAt: Date
+    var updatedAt: Date
 
-    // Domain Entityへの変換
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case description
+        case status
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
     func toDomain() -> Project {
         Project(
             id: ProjectID(value: id),
-            name: name
+            name: name,
+            description: description,
+            status: ProjectStatus(rawValue: status) ?? .active,
+            createdAt: createdAt,
+            updatedAt: updatedAt
         )
     }
 
-    // Domain EntityからRecordへの変換
     static func fromDomain(_ project: Project) -> ProjectRecord {
         ProjectRecord(
             id: project.id.value,
-            name: project.name
+            name: project.name,
+            description: project.description,
+            status: project.status.rawValue,
+            createdAt: project.createdAt,
+            updatedAt: project.updatedAt
         )
     }
 }
@@ -35,14 +53,13 @@ struct ProjectRecord: Codable, FetchableRecord, PersistableRecord {
 // MARK: - ProjectRepository
 
 /// プロジェクトのリポジトリ
-public final class ProjectRepository: Sendable {
+public final class ProjectRepository: ProjectRepositoryProtocol, Sendable {
     private let db: DatabaseQueue
 
     public init(database: DatabaseQueue) {
         self.db = database
     }
 
-    /// IDでプロジェクトを取得
     public func findById(_ id: ProjectID) throws -> Project? {
         try db.read { db in
             try ProjectRecord
@@ -52,23 +69,21 @@ public final class ProjectRepository: Sendable {
         }
     }
 
-    /// 全プロジェクトを取得
     public func findAll() throws -> [Project] {
         try db.read { db in
             try ProjectRecord
+                .order(Column("updated_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }
     }
 
-    /// プロジェクトを保存（作成または更新）
     public func save(_ project: Project) throws {
         try db.write { db in
             try ProjectRecord.fromDomain(project).save(db)
         }
     }
 
-    /// プロジェクトを削除
     public func delete(_ id: ProjectID) throws {
         try db.write { db in
             _ = try ProjectRecord.deleteOne(db, key: id.value)

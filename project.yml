@@ -1,0 +1,67 @@
+name: AIAgentPM
+options:
+  bundleIdPrefix: com.aiagentpm
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+
+packages:
+  AIAgentPM:
+    path: .
+
+targets:
+  AIAgentPMApp:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/App
+        type: group
+    dependencies:
+      - package: AIAgentPM
+        product: Domain
+      - package: AIAgentPM
+        product: UseCase
+      - package: AIAgentPM
+        product: Infrastructure
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.app
+        PRODUCT_NAME: AIAgentPM
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+        ENABLE_PREVIEWS: YES
+
+  AIAgentPMUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+        type: group
+    dependencies:
+      - target: AIAgentPMApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.uitests
+        TEST_HOST: ""
+        TEST_TARGET_NAME: AIAgentPMApp
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+
+schemes:
+  AIAgentPM:
+    build:
+      targets:
+        AIAgentPMApp: all
+        AIAgentPMUITests: [test]
+    run:
+      config: Debug
+      executable: AIAgentPMApp
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - AIAgentPMUITests

@@ -1238,8 +1238,75 @@ final class SetupManager {
 
 ---
 
+## 進捗トラッキング
+
+### 現在の状態 (最終更新: 2025-12-31)
+
+| Step | 状態 | 進捗 |
+|------|------|------|
+| Step 1: プロジェクト再構成 | ✅ 完了 | Package.swift更新済み |
+| Step 2: Domain層完成 | ✅ 完了 | 全Entity、ValueObject、Repository Protocol定義完了 |
+| Step 3: Infrastructure層完成 | ✅ 完了 | 全Repository実装、EventRecorder実装完了 |
+| Step 4: UseCase層 | ✅ 完了 | 全UseCase実装完了 |
+| Step 5: App層 - 基盤 | ✅ 完了 | Router、DependencyContainer実装完了 |
+| Step 6: App層 - 画面実装 | ✅ 完了 | 6画面実装完了（ProjectList, TaskBoard, TaskDetail, AgentManagement, Handoff, Settings）|
+| Step 7: MCP Server拡張 | ✅ 完了 | 17 Tools, 9 Resources, 4 Prompts実装完了 |
+| Step 8: アプリバンドル | ✅ 完了 | SetupManager, build-release.sh, SETUP_GUIDE.md作成 |
+
+### ビルド状態
+
+- **MCPサーバー**: ✅ ビルド成功 (`mcp-server-pm`)
+- **Macアプリ**: ✅ ビルド成功 (`AIAgentPM`)
+- **テスト**: ✅ 11テスト全パス
+
+### MCP Server実装詳細
+
+| カテゴリ | 数 | 内容 |
+|----------|-----|------|
+| Tools | 17 | Profile(1), Session(2), Task(7), Subtask(3), Context(2), Handoff(3) |
+| Resources | 9 | project://(3), agent://(3), task://(3) |
+| Prompts | 4 | handoff, context-summary, task-breakdown, status-report |
+
+### 完了した作業
+
+#### 2025-12-31 (Step 8)
+- SetupManager実装: Claude Code設定の生成・インストール機能
+- build-release.sh作成: MCP サーバー・アプリの自動ビルドスクリプト
+- SETUP_GUIDE.md作成: 手動作業の詳細手順書（コード署名、DMG作成等）
+- MCP Server実装確認: 17 Tools, 9 Resources, 4 Prompts完全実装
+- テスト修正: Agent初期化子のprojectId対応
+- 全11テストパス確認
+
+#### 2025-01-01
+- Domain層: Agent, Task, Project, Session, Context, Handoff, Subtask, StateChangeEvent エンティティ完成
+- Infrastructure層: 全Repository + EventRecorder実装
+- UseCase層: Task/Session/Context/Handoff/Subtask各種UseCase実装
+- App層: 全6画面実装（ProjectList, TaskBoard, TaskDetail, AgentManagement, Handoff, Settings）
+- 型衝突の解決（Domain.Task vs _Concurrency.Task）
+- ビルドエラー修正完了
+
+### 残作業
+
+1. **アプリバンドル (Step 8)** ✅ 完了
+   - [x] SetupManager実装（Claude Code設定管理）
+   - [x] build-release.sh作成（自動ビルド）
+   - [x] SETUP_GUIDE.md作成（手順書）
+   - [ ] Xcodeプロジェクト構成 → 手順書参照（手動作業）
+   - [ ] コード署名・公証 → 手順書参照（手動作業）
+   - [ ] 配布用DMG作成 → 手順書参照（手動作業）
+
+2. **追加テスト (オプション)**
+   - [ ] より包括的なUseCase層テスト
+   - [ ] Repository統合テスト
+   - [ ] MCPサーバーE2Eテスト
+
+---
+
 ## 変更履歴
 
 | 日付 | バージョン | 変更内容 |
 |------|-----------|----------|
 | 2024-12-30 | 1.0.0 | 初版作成 |
+| 2025-01-01 | 1.1.0 | 進捗トラッキングセクション追加、Step 1-6完了 |
+| 2025-12-31 | 1.2.0 | Step 7完了、テスト修正、全11テストパス |
+| 2025-12-31 | 2.0.0 | Step 8完了、PHASE2全Step完了（SetupManager, build-release.sh, SETUP_GUIDE.md）|

@@ -101,11 +101,12 @@ struct Serve: ParsableCommand {
         // デフォルトエージェント作成
         let agent = Agent(
             id: AgentID(value: AppConstants.defaultAgentId),
+            projectId: projectId,
             name: AppConstants.defaultAgentName,
             role: "AI Assistant",
             type: .ai
         )
-        try agentRepo.save(agent, projectId: projectId)
+        try agentRepo.save(agent)
 
         FileHandle.standardError.write("[mcp-server-pm] Auto-setup completed\n".data(using: .utf8)!)
     }
@@ -153,11 +154,12 @@ struct Setup: ParsableCommand {
         // エージェント作成
         let agent = Agent(
             id: AgentID(value: AppConstants.defaultAgentId),
+            projectId: projectId,
             name: AppConstants.defaultAgentName,
             role: "AI Assistant",
             type: .ai
         )
-        try agentRepo.save(agent, projectId: projectId)
+        try agentRepo.save(agent)
         print("✓ エージェント作成: \(agent.name) (\(agent.id.value))")
 
         // サンプルタスク

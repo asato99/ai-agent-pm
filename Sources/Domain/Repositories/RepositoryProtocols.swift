@@ -1,0 +1,94 @@
+// Sources/Domain/Repositories/RepositoryProtocols.swift
+// 参照: docs/guide/CLEAN_ARCHITECTURE.md - Repository Pattern
+
+import Foundation
+
+// MARK: - ProjectRepositoryProtocol
+
+/// プロジェクトリポジトリのプロトコル
+public protocol ProjectRepositoryProtocol: Sendable {
+    func findById(_ id: ProjectID) throws -> Project?
+    func findAll() throws -> [Project]
+    func save(_ project: Project) throws
+    func delete(_ id: ProjectID) throws
+}
+
+// MARK: - AgentRepositoryProtocol
+
+/// エージェントリポジトリのプロトコル
+public protocol AgentRepositoryProtocol: Sendable {
+    func findById(_ id: AgentID) throws -> Agent?
+    func findByProject(_ projectId: ProjectID) throws -> [Agent]
+    func findAll(projectId: ProjectID) throws -> [Agent]
+    func findByType(_ type: AgentType, projectId: ProjectID) throws -> [Agent]
+    func save(_ agent: Agent) throws
+    func delete(_ id: AgentID) throws
+}
+
+// MARK: - TaskRepositoryProtocol
+
+/// タスクリポジトリのプロトコル
+public protocol TaskRepositoryProtocol: Sendable {
+    func findById(_ id: TaskID) throws -> Task?
+    func findAll(projectId: ProjectID) throws -> [Task]
+    func findByProject(_ projectId: ProjectID, status: TaskStatus?) throws -> [Task]
+    func findByAssignee(_ agentId: AgentID) throws -> [Task]
+    func findByStatus(_ status: TaskStatus, projectId: ProjectID) throws -> [Task]
+    func findByParent(_ parentTaskId: TaskID) throws -> [Task]
+    func save(_ task: Task) throws
+    func delete(_ id: TaskID) throws
+}
+
+// MARK: - SessionRepositoryProtocol
+
+/// セッションリポジトリのプロトコル
+public protocol SessionRepositoryProtocol: Sendable {
+    func findById(_ id: SessionID) throws -> Session?
+    func findActive(agentId: AgentID) throws -> Session?
+    func findByProject(_ projectId: ProjectID) throws -> [Session]
+    func findByAgent(_ agentId: AgentID) throws -> [Session]
+    func save(_ session: Session) throws
+}
+
+// MARK: - ContextRepositoryProtocol
+
+/// コンテキストリポジトリのプロトコル
+public protocol ContextRepositoryProtocol: Sendable {
+    func findById(_ id: ContextID) throws -> Context?
+    func findByTask(_ taskId: TaskID) throws -> [Context]
+    func findBySession(_ sessionId: SessionID) throws -> [Context]
+    func findLatest(taskId: TaskID) throws -> Context?
+    func save(_ context: Context) throws
+    func delete(_ id: ContextID) throws
+}
+
+// MARK: - HandoffRepositoryProtocol
+
+/// ハンドオフリポジトリのプロトコル
+public protocol HandoffRepositoryProtocol: Sendable {
+    func findById(_ id: HandoffID) throws -> Handoff?
+    func findByTask(_ taskId: TaskID) throws -> [Handoff]
+    func findPending(agentId: AgentID?) throws -> [Handoff]
+    func findByFromAgent(_ agentId: AgentID) throws -> [Handoff]
+    func save(_ handoff: Handoff) throws
+}
+
+// MARK: - SubtaskRepositoryProtocol
+
+/// サブタスクリポジトリのプロトコル
+public protocol SubtaskRepositoryProtocol: Sendable {
+    func findById(_ id: SubtaskID) throws -> Subtask?
+    func findByTask(_ taskId: TaskID) throws -> [Subtask]
+    func save(_ subtask: Subtask) throws
+    func delete(_ id: SubtaskID) throws
+}
+
+// MARK: - EventRepositoryProtocol
+
+/// イベントリポジトリのプロトコル
+public protocol EventRepositoryProtocol: Sendable {
+    func findByProject(_ projectId: ProjectID, limit: Int?) throws -> [StateChangeEvent]
+    func findByEntity(type: EntityType, id: String) throws -> [StateChangeEvent]
+    func findRecent(projectId: ProjectID, since: Date) throws -> [StateChangeEvent]
+    func save(_ event: StateChangeEvent) throws
+}

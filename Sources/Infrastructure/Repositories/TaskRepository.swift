@@ -1,6 +1,5 @@
 // Sources/Infrastructure/Repositories/TaskRepository.swift
 // 参照: docs/architecture/DATABASE_SCHEMA.md - tasks テーブル
-// 参照: docs/prd/TASK_MANAGEMENT.md - タスク管理
 
 import Foundation
 import GRDB
@@ -15,36 +14,85 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
     var id: String
     var projectId: String
     var title: String
+    var description: String
     var status: String
+    var priority: String
     var assigneeId: String?
+    var parentTaskId: String?
+    var dependencies: String?
+    var estimatedMinutes: Int?
+    var actualMinutes: Int?
+    var createdAt: Date
+    var updatedAt: Date
+    var completedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
         case projectId = "project_id"
         case title
+        case description
         case status
+        case priority
         case assigneeId = "assignee_id"
+        case parentTaskId = "parent_task_id"
+        case dependencies
+        case estimatedMinutes = "estimated_minutes"
+        case actualMinutes = "actual_minutes"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case completedAt = "completed_at"
     }
 
-    // Domain Entityへの変換
     func toDomain() -> Task {
-        Task(
+        var deps: [TaskID] = []
+        if let depsJson = dependencies,
+           let data = depsJson.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode([String].self, from: data) {
+            deps = parsed.map { TaskID(value: $0) }
+        }
+
+        return Task(
             id: TaskID(value: id),
             projectId: ProjectID(value: projectId),
             title: title,
+            description: description,
             status: TaskStatus(rawValue: status) ?? .backlog,
-            assigneeId: assigneeId.map { AgentID(value: $0) }
+            priority: TaskPriority(rawValue: priority) ?? .medium,
+            assigneeId: assigneeId.map { AgentID(value: $0) },
+            parentTaskId: parentTaskId.map { TaskID(value: $0) },
+            dependencies: deps,
+            estimatedMinutes: estimatedMinutes,
+            actualMinutes: actualMinutes,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            completedAt: completedAt
         )
     }
 
-    // Domain EntityからRecordへの変換
     static func fromDomain(_ task: Task) -> TaskRecord {
-        TaskRecord(
+        var depsJson: String?
+        if !task.dependencies.isEmpty {
+            let depIds = task.dependencies.map { $0.value }
+            if let data = try? JSONEncoder().encode(depIds) {
+                depsJson = String(data: data, encoding: .utf8)
+            }
+        }
+
+        return TaskRecord(
             id: task.id.value,
             projectId: task.projectId.value,
             title: task.title,
+            description: task.description,
             status: task.status.rawValue,
-            assigneeId: task.assigneeId?.value
+            priority: task.priority.rawValue,
+            assigneeId: task.assigneeId?.value,
+            parentTaskId: task.parentTaskId?.value,
+            dependencies: depsJson,
+            estimatedMinutes: task.estimatedMinutes,
+            actualMinutes: task.actualMinutes,
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+            completedAt: task.completedAt
         )
     }
 }
@@ -52,14 +100,13 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
 // MARK: - TaskRepository
 
 /// タスクのリポジトリ
-public final class TaskRepository: Sendable {
+public final class TaskRepository: TaskRepositoryProtocol, Sendable {
     private let db: DatabaseQueue
 
     public init(database: DatabaseQueue) {
         self.db = database
     }
 
-    /// IDでタスクを取得
     public func findById(_ id: TaskID) throws -> Task? {
         try db.read { db in
             try TaskRecord
@@ -69,45 +116,66 @@ public final class TaskRepository: Sendable {
         }
     }
 
-    /// プロジェクト内の全タスクを取得
     public func findAll(projectId: ProjectID) throws -> [Task] {
         try db.read { db in
             try TaskRecord
                 .filter(Column("project_id") == projectId.value)
+                .order(Column("updated_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }
     }
 
-    /// 担当者でタスクを取得
+    public func findByProject(_ projectId: ProjectID, status: TaskStatus?) throws -> [Task] {
+        try db.read { db in
+            var request = TaskRecord.filter(Column("project_id") == projectId.value)
+            if let status = status {
+                request = request.filter(Column("status") == status.rawValue)
+            }
+            return try request
+                .order(Column("priority"), Column("updated_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
     public func findByAssignee(_ agentId: AgentID) throws -> [Task] {
         try db.read { db in
             try TaskRecord
                 .filter(Column("assignee_id") == agentId.value)
+                .order(Column("priority"), Column("updated_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }
     }
 
-    /// ステータスでタスクを取得
     public func findByStatus(_ status: TaskStatus, projectId: ProjectID) throws -> [Task] {
         try db.read { db in
             try TaskRecord
                 .filter(Column("project_id") == projectId.value)
                 .filter(Column("status") == status.rawValue)
+                .order(Column("priority"), Column("updated_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }
     }
 
-    /// タスクを保存（作成または更新）
+    public func findByParent(_ parentTaskId: TaskID) throws -> [Task] {
+        try db.read { db in
+            try TaskRecord
+                .filter(Column("parent_task_id") == parentTaskId.value)
+                .order(Column("created_at"))
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
     public func save(_ task: Task) throws {
         try db.write { db in
             try TaskRecord.fromDomain(task).save(db)
         }
     }
 
-    /// タスクを削除
     public func delete(_ id: TaskID) throws {
         try db.write { db in
             _ = try TaskRecord.deleteOne(db, key: id.value)
