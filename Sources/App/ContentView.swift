@@ -48,6 +48,9 @@ struct ContentView: View {
         .onOpenURL { url in
             router.handleDeepLink(url)
         }
+        // XCUITest用: ルートビューをアクセシビリティ階層に確実に公開
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("MainContentView")
     }
 
     @ViewBuilder

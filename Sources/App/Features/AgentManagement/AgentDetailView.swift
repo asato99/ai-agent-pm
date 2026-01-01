@@ -42,13 +42,16 @@ struct AgentDetailView: View {
                     }
                     .padding()
                 }
+                .accessibilityIdentifier("AgentDetailView")
             } else if isLoading {
                 ProgressView()
+                    .accessibilityIdentifier("LoadingIndicator")
             } else {
                 ContentUnavailableView(
                     "Agent Not Found",
                     systemImage: "person.crop.circle.badge.questionmark"
                 )
+                .accessibilityIdentifier("AgentNotFound")
             }
         }
         .navigationTitle(agent?.name ?? "Agent")
@@ -58,8 +61,9 @@ struct AgentDetailView: View {
                     Button {
                         router.showSheet(.editAgent(agentId))
                     } label: {
-                        Image(systemName: "pencil")
+                        Label("Edit", systemImage: "pencil")
                     }
+                    .accessibilityIdentifier("EditAgentButton")
                 }
             }
         }

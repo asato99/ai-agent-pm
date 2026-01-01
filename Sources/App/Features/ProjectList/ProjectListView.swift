@@ -29,8 +29,10 @@ struct ProjectListView: View {
             ForEach(filteredProjects, id: \.id) { project in
                 ProjectRow(project: project)
                     .tag(project.id)
+                    .accessibilityIdentifier("ProjectRow_\(project.id.value)")
             }
         }
+        .accessibilityIdentifier("ProjectList")
         .searchable(text: $searchText, prompt: "Search projects")
         .navigationTitle("Projects")
         .toolbar {
@@ -38,20 +40,40 @@ struct ProjectListView: View {
                 Button {
                     router.showSheet(.newProject)
                 } label: {
-                    Image(systemName: "plus")
+                    Label("New Project", systemImage: "plus")
                 }
-                .help("New Project")
+                .accessibilityIdentifier("NewProjectButton")
+                .accessibilityLabel("New Project")
+                .accessibilityAddTraits(.isButton)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .help("New Project (⇧⌘N)")
             }
         }
         .overlay {
             if isLoading {
                 ProgressView()
+                    .accessibilityIdentifier("LoadingIndicator")
             } else if projects.isEmpty {
-                ContentUnavailableView(
-                    "No Projects",
-                    systemImage: "folder.badge.plus",
-                    description: Text("Create a new project to get started.")
-                )
+                VStack(spacing: 16) {
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.secondary)
+                    Text("プロジェクトがありません")
+                        .font(.headline)
+                    Text("最初のプロジェクトを作成してAIエージェントとの協働を始めましょう")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("新規プロジェクト作成") {
+                        router.showSheet(.newProject)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("CreateFirstProjectButton")
+                    .accessibilityLabel("新規プロジェクト作成")
+                    .accessibilityAddTraits(.isButton)
+                }
+                .padding()
+                .accessibilityIdentifier("EmptyState")
             }
         }
         .task {
@@ -59,6 +81,12 @@ struct ProjectListView: View {
         }
         .refreshable {
             await loadProjects()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .testDataSeeded)) { _ in
+            // UIテストデータシード完了後に再読み込み
+            _Concurrency.Task {
+                await loadProjects()
+            }
         }
     }
 

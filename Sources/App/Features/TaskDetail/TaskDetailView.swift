@@ -50,13 +50,16 @@ struct TaskDetailView: View {
                     }
                     .padding()
                 }
+                .accessibilityIdentifier("TaskDetailView")
             } else if isLoading {
                 ProgressView()
+                    .accessibilityIdentifier("LoadingIndicator")
             } else {
                 ContentUnavailableView(
                     "Task Not Found",
                     systemImage: "doc.questionmark"
                 )
+                .accessibilityIdentifier("TaskNotFound")
             }
         }
         .navigationTitle(task?.title ?? "Task")
@@ -66,17 +69,22 @@ struct TaskDetailView: View {
                     Button {
                         router.showSheet(.editTask(taskId))
                     } label: {
-                        Image(systemName: "pencil")
+                        Label("Edit", systemImage: "pencil")
                     }
+                    .accessibilityIdentifier("EditTaskButton")
+                    .keyboardShortcut("e", modifiers: [.command])
+                    .help("Edit Task (⌘E)")
                 }
 
                 ToolbarItem {
                     Button {
                         router.showSheet(.handoff(taskId))
                     } label: {
-                        Image(systemName: "arrow.right.arrow.left")
+                        Label("Handoff", systemImage: "arrow.right.arrow.left")
                     }
-                    .help("Create Handoff")
+                    .accessibilityIdentifier("HandoffButton")
+                    .keyboardShortcut("h", modifiers: [.command, .shift])
+                    .help("Create Handoff (⇧⌘H)")
                 }
             }
         }
@@ -90,13 +98,17 @@ struct TaskDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 PriorityBadge(priority: task.priority)
+                    .accessibilityIdentifier("TaskPriority")
                 StatusBadge(status: task.status)
+                    .accessibilityIdentifier("TaskStatus")
             }
 
             Text(task.title)
                 .font(.title)
                 .fontWeight(.bold)
+                .accessibilityIdentifier("TaskTitle")
         }
+        .accessibilityIdentifier("TaskHeader")
     }
 
     @ViewBuilder
@@ -151,6 +163,7 @@ struct TaskDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Subtasks")
                 .font(.headline)
+                .accessibilityIdentifier("SubtasksHeader")
 
             ForEach(subtasks, id: \.id) { subtask in
                 HStack {
@@ -161,16 +174,19 @@ struct TaskDetailView: View {
                             .foregroundStyle(subtask.isCompleted ? .green : .secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("SubtaskCheckbox_\(subtask.id.value)")
 
                     Text(subtask.title)
                         .strikethrough(subtask.isCompleted)
                         .foregroundStyle(subtask.isCompleted ? .secondary : .primary)
                 }
+                .accessibilityIdentifier("Subtask_\(subtask.id.value)")
             }
 
             HStack {
                 TextField("Add subtask...", text: $newSubtaskTitle)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("NewSubtaskField")
                     .onSubmit {
                         addSubtask()
                     }
@@ -179,25 +195,31 @@ struct TaskDetailView: View {
                     addSubtask()
                 }
                 .disabled(newSubtaskTitle.isEmpty)
+                .accessibilityIdentifier("AddSubtaskButton")
             }
         }
+        .accessibilityIdentifier("SubtasksSection")
     }
 
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Context History")
                 .font(.headline)
+                .accessibilityIdentifier("ContextHeader")
 
             if contexts.isEmpty {
                 Text("No context saved yet")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
+                    .accessibilityIdentifier("NoContextMessage")
             } else {
                 ForEach(contexts, id: \.id) { context in
                     ContextCard(context: context)
+                        .accessibilityIdentifier("Context_\(context.id.value)")
                 }
             }
         }
+        .accessibilityIdentifier("ContextSection")
     }
 
     private func loadData() async {

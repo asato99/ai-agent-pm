@@ -27,33 +27,40 @@ struct TaskBoardView: View {
                         tasks: tasks.filter { $0.status == status },
                         agents: agents
                     )
+                    .accessibilityIdentifier("TaskColumn_\(status.rawValue)")
                 }
             }
             .padding()
         }
+        .accessibilityIdentifier("TaskBoard")
         .navigationTitle("Task Board")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     router.showSheet(.newTask(projectId))
                 } label: {
-                    Image(systemName: "plus")
+                    Label("New Task", systemImage: "plus")
                 }
-                .help("New Task")
+                .accessibilityIdentifier("NewTaskButton")
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .help("New Task (⇧⌘T)")
             }
 
             ToolbarItem {
                 Button {
                     AsyncTask { await loadData() }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .help("Refresh")
+                .accessibilityIdentifier("RefreshButton")
+                .keyboardShortcut("r", modifiers: [.command])
+                .help("Refresh (⌘R)")
             }
         }
         .overlay {
             if isLoading {
                 ProgressView()
+                    .accessibilityIdentifier("LoadingIndicator")
             }
         }
         .task {
@@ -87,6 +94,7 @@ struct TaskColumnView: View {
             HStack {
                 Text(status.displayName)
                     .font(.headline)
+                    .accessibilityIdentifier("ColumnHeader_\(status.rawValue)")
                 Spacer()
                 Text("\(tasks.count)")
                     .font(.caption)
@@ -94,6 +102,7 @@ struct TaskColumnView: View {
                     .padding(.vertical, 2)
                     .background(.quaternary)
                     .clipShape(Capsule())
+                    .accessibilityIdentifier("ColumnCount_\(status.rawValue)")
             }
             .padding(.horizontal, 8)
 
@@ -102,6 +111,7 @@ struct TaskColumnView: View {
                 LazyVStack(spacing: 8) {
                     ForEach(tasks, id: \.id) { task in
                         TaskCardView(task: task, agents: agents)
+                            .accessibilityIdentifier("TaskCard_\(task.id.value)")
                             .onTapGesture {
                                 router.selectTask(task.id)
                             }
@@ -125,29 +135,41 @@ struct TaskCardView: View {
         return agents.first { $0.id == assigneeId }?.name
     }
 
+    var assigneeIcon: String {
+        guard let assigneeId = task.assigneeId,
+              let agent = agents.first(where: { $0.id == assigneeId }) else {
+            return "👻"
+        }
+        return agent.type == .ai ? "🤖" : "👤"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(task.title)
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .lineLimit(2)
+                .accessibilityIdentifier("TaskTitle")
 
             if !task.description.isEmpty {
                 Text(task.description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityIdentifier("TaskDescription")
             }
 
             HStack {
                 PriorityBadge(priority: task.priority)
+                    .accessibilityIdentifier("PriorityBadge_\(task.priority.rawValue)")
 
                 Spacer()
 
                 if let name = assigneeName {
-                    Text(name)
+                    Text("\(assigneeIcon) \(name)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("TaskAssignee")
                 }
             }
         }
@@ -155,6 +177,8 @@ struct TaskCardView: View {
         .background(.background)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Task: \(task.title)")
     }
 }
 
