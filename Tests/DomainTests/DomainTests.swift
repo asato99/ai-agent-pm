@@ -47,18 +47,12 @@ final class DomainTests: XCTestCase {
         XCTAssertTrue(id.value.hasPrefix("hnd_"), "Handoff ID must start with 'hnd_'")
     }
 
-    func testSubtaskIDGeneration() {
-        let id = SubtaskID.generate()
-        XCTAssertTrue(id.value.hasPrefix("sub_"), "Subtask ID must start with 'sub_'")
-    }
-
     // MARK: - Agent Tests (PRD: AGENT_CONCEPT.md)
 
     func testAgentCreation() {
         // PRD: Agent { id, name, role, type, roleType, capabilities, systemPrompt, status }
         let agent = Agent(
             id: AgentID.generate(),
-            projectId: ProjectID.generate(),
             name: "frontend-dev",
             role: "フロントエンド開発担当",
             type: .ai
@@ -101,23 +95,23 @@ final class DomainTests: XCTestCase {
     }
 
     func testTaskStatusValues() {
-        // PRD: TaskStatus { backlog, todo, inProgress, review, done, blocked }
+        // 要件: TaskStatus { backlog, todo, inProgress, blocked, done, cancelled }
         XCTAssertEqual(TaskStatus.backlog.rawValue, "backlog")
         XCTAssertEqual(TaskStatus.todo.rawValue, "todo")
         XCTAssertEqual(TaskStatus.inProgress.rawValue, "in_progress")
-        XCTAssertEqual(TaskStatus.inReview.rawValue, "in_review")
-        XCTAssertEqual(TaskStatus.done.rawValue, "done")
         XCTAssertEqual(TaskStatus.blocked.rawValue, "blocked")
+        XCTAssertEqual(TaskStatus.done.rawValue, "done")
+        XCTAssertEqual(TaskStatus.cancelled.rawValue, "cancelled")
     }
 
     func testTaskStatusIsActive() {
-        // PRD: inProgress と review は「アクティブ」な状態
+        // 要件: inProgress のみが「アクティブ」な状態
         XCTAssertTrue(TaskStatus.inProgress.isActive)
-        XCTAssertTrue(TaskStatus.inReview.isActive)
         XCTAssertFalse(TaskStatus.todo.isActive)
         XCTAssertFalse(TaskStatus.backlog.isActive)
         XCTAssertFalse(TaskStatus.done.isActive)
         XCTAssertFalse(TaskStatus.blocked.isActive)
+        XCTAssertFalse(TaskStatus.cancelled.isActive)
     }
 
     func testTaskStatusIsCompleted() {
@@ -155,43 +149,6 @@ final class DomainTests: XCTestCase {
         XCTAssertFalse(task.isCompleted)
     }
 
-    // MARK: - Subtask Tests (PRD: TASK_MANAGEMENT.md - タスクの階層)
-
-    func testSubtaskCreation() {
-        // PRD: Subtask { id, parentTaskId, title, isCompleted, createdBy, createdAt }
-        let subtask = Subtask(
-            id: SubtaskID.generate(),
-            taskId: TaskID.generate(),
-            title: "JWTトークン生成"
-        )
-
-        XCTAssertEqual(subtask.title, "JWTトークン生成")
-        XCTAssertFalse(subtask.isCompleted, "New subtask should not be completed")
-        XCTAssertNil(subtask.completedAt)
-    }
-
-    func testSubtaskCompletion() {
-        // PRD: サブタスクの完了/未完了の切り替え
-        var subtask = Subtask(
-            id: SubtaskID.generate(),
-            taskId: TaskID.generate(),
-            title: "Test Subtask"
-        )
-
-        XCTAssertFalse(subtask.isCompleted)
-        XCTAssertNil(subtask.completedAt)
-
-        subtask.complete()
-
-        XCTAssertTrue(subtask.isCompleted)
-        XCTAssertNotNil(subtask.completedAt)
-
-        subtask.uncomplete()
-
-        XCTAssertFalse(subtask.isCompleted)
-        XCTAssertNil(subtask.completedAt)
-    }
-
     // MARK: - Project Tests (PRD: UI 01_project_list.md)
 
     func testProjectCreation() {
@@ -207,10 +164,9 @@ final class DomainTests: XCTestCase {
     }
 
     func testProjectStatusValues() {
-        // PRD UI: Active / Archived / Completed
+        // 要件: Active / Archived のみ（Completed は削除）
         XCTAssertEqual(ProjectStatus.active.rawValue, "active")
         XCTAssertEqual(ProjectStatus.archived.rawValue, "archived")
-        XCTAssertEqual(ProjectStatus.completed.rawValue, "completed")
     }
 
     // MARK: - Session Tests (PRD: AGENT_CONCEPT.md - Session)
@@ -411,14 +367,13 @@ final class DomainTests: XCTestCase {
     }
 
     func testEntityTypeValues() {
-        // PRD: EntityType { project, task, agent, session, handoff, context, subtask }
+        // PRD: EntityType { project, task, agent, session, handoff, context }
         XCTAssertEqual(EntityType.project.rawValue, "project")
         XCTAssertEqual(EntityType.task.rawValue, "task")
         XCTAssertEqual(EntityType.agent.rawValue, "agent")
         XCTAssertEqual(EntityType.session.rawValue, "session")
         XCTAssertEqual(EntityType.handoff.rawValue, "handoff")
         XCTAssertEqual(EntityType.context.rawValue, "context")
-        XCTAssertEqual(EntityType.subtask.rawValue, "subtask")
     }
 
     func testEventTypeValues() {
@@ -436,13 +391,13 @@ final class DomainTests: XCTestCase {
     // MARK: - Display Name Tests (PRD UI仕様)
 
     func testTaskStatusDisplayNames() {
-        // PRD UI: ステータスの表示名
+        // 要件: ステータスの表示名（inReview削除済み）
         XCTAssertFalse(TaskStatus.backlog.displayName.isEmpty)
         XCTAssertFalse(TaskStatus.todo.displayName.isEmpty)
         XCTAssertFalse(TaskStatus.inProgress.displayName.isEmpty)
-        XCTAssertFalse(TaskStatus.inReview.displayName.isEmpty)
-        XCTAssertFalse(TaskStatus.done.displayName.isEmpty)
         XCTAssertFalse(TaskStatus.blocked.displayName.isEmpty)
+        XCTAssertFalse(TaskStatus.done.displayName.isEmpty)
+        XCTAssertFalse(TaskStatus.cancelled.displayName.isEmpty)
     }
 
     func testTaskPriorityDisplayNames() {
@@ -454,9 +409,9 @@ final class DomainTests: XCTestCase {
     }
 
     func testProjectStatusDisplayNames() {
+        // 要件: completed削除済み
         XCTAssertFalse(ProjectStatus.active.displayName.isEmpty)
         XCTAssertFalse(ProjectStatus.archived.displayName.isEmpty)
-        XCTAssertFalse(ProjectStatus.completed.displayName.isEmpty)
     }
 
     func testSessionStatusDisplayNames() {

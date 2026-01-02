@@ -16,11 +16,13 @@ public protocol ProjectRepositoryProtocol: Sendable {
 // MARK: - AgentRepositoryProtocol
 
 /// エージェントリポジトリのプロトコル
+/// 要件: エージェントはプロジェクト非依存のトップレベルエンティティ
 public protocol AgentRepositoryProtocol: Sendable {
     func findById(_ id: AgentID) throws -> Agent?
-    func findByProject(_ projectId: ProjectID) throws -> [Agent]
-    func findAll(projectId: ProjectID) throws -> [Agent]
-    func findByType(_ type: AgentType, projectId: ProjectID) throws -> [Agent]
+    func findAll() throws -> [Agent]
+    func findByType(_ type: AgentType) throws -> [Agent]
+    func findByParent(_ parentAgentId: AgentID?) throws -> [Agent]
+    func findRootAgents() throws -> [Agent]
     func save(_ agent: Agent) throws
     func delete(_ id: AgentID) throws
 }
@@ -71,16 +73,6 @@ public protocol HandoffRepositoryProtocol: Sendable {
     func findPending(agentId: AgentID?) throws -> [Handoff]
     func findByFromAgent(_ agentId: AgentID) throws -> [Handoff]
     func save(_ handoff: Handoff) throws
-}
-
-// MARK: - SubtaskRepositoryProtocol
-
-/// サブタスクリポジトリのプロトコル
-public protocol SubtaskRepositoryProtocol: Sendable {
-    func findById(_ id: SubtaskID) throws -> Subtask?
-    func findByTask(_ taskId: TaskID) throws -> [Subtask]
-    func save(_ subtask: Subtask) throws
-    func delete(_ id: SubtaskID) throws
 }
 
 // MARK: - EventRepositoryProtocol

@@ -93,9 +93,8 @@ struct HandoffView: View {
 
         do {
             task = try container.taskRepository.findById(taskId)
-            if let task = task {
-                agents = try container.getAgentsUseCase.execute(projectId: task.projectId)
-            }
+            // エージェントはプロジェクト非依存なので全件取得
+            agents = try container.getAgentsUseCase.execute()
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }

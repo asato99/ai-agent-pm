@@ -26,11 +26,6 @@ enum ToolDefinitions {
             updateTaskStatus,
             assignTask,
 
-            // Subtasks
-            addSubtask,
-            completeSubtask,
-            uncompleteSubtask,
-
             // Context
             saveContext,
             getTaskContext,
@@ -239,60 +234,6 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["task_id"]
-        ]
-    ]
-
-    // MARK: - Subtask Tools
-
-    /// add_subtask - サブタスク追加
-    static let addSubtask: [String: Any] = [
-        "name": "add_subtask",
-        "description": "タスクにサブタスク（チェックリスト項目）を追加します。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [
-                "task_id": [
-                    "type": "string",
-                    "description": "親タスクのID"
-                ],
-                "title": [
-                    "type": "string",
-                    "description": "サブタスクのタイトル"
-                ]
-            ] as [String: Any],
-            "required": ["task_id", "title"]
-        ]
-    ]
-
-    /// complete_subtask - サブタスク完了
-    static let completeSubtask: [String: Any] = [
-        "name": "complete_subtask",
-        "description": "サブタスクを完了にします。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [
-                "subtask_id": [
-                    "type": "string",
-                    "description": "サブタスクのID"
-                ]
-            ] as [String: Any],
-            "required": ["subtask_id"]
-        ]
-    ]
-
-    /// uncomplete_subtask - サブタスク未完了に戻す
-    static let uncompleteSubtask: [String: Any] = [
-        "name": "uncomplete_subtask",
-        "description": "完了したサブタスクを未完了に戻します。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [
-                "subtask_id": [
-                    "type": "string",
-                    "description": "サブタスクのID"
-                ]
-            ] as [String: Any],
-            "required": ["subtask_id"]
         ]
     ]
 

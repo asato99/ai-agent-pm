@@ -46,11 +46,12 @@ public final class Router {
         case editProject(ProjectID)
         case newTask(ProjectID)
         case editTask(TaskID)
-        case newAgent(ProjectID)
+        case newAgent
         case editAgent(AgentID)
         case taskDetail(TaskID)
         case agentDetail(AgentID)
         case handoff(TaskID)
+        case addContext(TaskID)
         case settings
 
         public var id: String {
@@ -63,8 +64,8 @@ public final class Router {
                 return "newTask-\(id.value)"
             case .editTask(let id):
                 return "editTask-\(id.value)"
-            case .newAgent(let id):
-                return "newAgent-\(id.value)"
+            case .newAgent:
+                return "newAgent"
             case .editAgent(let id):
                 return "editAgent-\(id.value)"
             case .taskDetail(let id):
@@ -73,6 +74,8 @@ public final class Router {
                 return "agentDetail-\(id.value)"
             case .handoff(let id):
                 return "handoff-\(id.value)"
+            case .addContext(let id):
+                return "addContext-\(id.value)"
             case .settings:
                 return "settings"
             }

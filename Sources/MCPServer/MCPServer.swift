@@ -19,7 +19,6 @@ final class MCPServer {
     private let sessionRepository: SessionRepository
     private let contextRepository: ContextRepository
     private let handoffRepository: HandoffRepository
-    private let subtaskRepository: SubtaskRepository
     private let eventRepository: EventRepository
 
     // IDs
@@ -39,7 +38,6 @@ final class MCPServer {
         self.sessionRepository = SessionRepository(database: database)
         self.contextRepository = ContextRepository(database: database)
         self.handoffRepository = HandoffRepository(database: database)
-        self.subtaskRepository = SubtaskRepository(database: database)
         self.eventRepository = EventRepository(database: database)
         self.agentId = AgentID(value: agentId)
         self.projectId = ProjectID(value: projectId)
@@ -223,24 +221,6 @@ final class MCPServer {
             let assigneeId = arguments["assignee_id"] as? String
             return try assignTask(taskId: taskId, assigneeId: assigneeId)
 
-        // Subtasks
-        case "add_subtask":
-            guard let taskId = arguments["task_id"] as? String,
-                  let title = arguments["title"] as? String else {
-                throw MCPError.missingArguments(["task_id", "title"])
-            }
-            return try addSubtask(taskId: taskId, title: title)
-        case "complete_subtask":
-            guard let subtaskId = arguments["subtask_id"] as? String else {
-                throw MCPError.missingArguments(["subtask_id"])
-            }
-            return try completeSubtask(subtaskId: subtaskId)
-        case "uncomplete_subtask":
-            guard let subtaskId = arguments["subtask_id"] as? String else {
-                throw MCPError.missingArguments(["subtask_id"])
-            }
-            return try uncompleteSubtask(subtaskId: subtaskId)
-
         // Context
         case "save_context":
             guard let taskId = arguments["task_id"] as? String else {
@@ -385,7 +365,7 @@ final class MCPServer {
                 throw MCPError.projectNotFound(projectIdStr)
             }
             let tasks = try taskRepository.findAll(projectId: project.id)
-            let agents = try agentRepository.findAll(projectId: project.id)
+            let agents = try agentRepository.findAll()
 
             let projectDict: [String: Any] = [
                 "id": project.id.value,
@@ -409,7 +389,7 @@ final class MCPServer {
             let tasks = try taskRepository.findAll(projectId: ProjectID(value: projectIdStr))
             return tasks.map { taskToDict($0) }
         case "agents":
-            let agents = try agentRepository.findAll(projectId: ProjectID(value: projectIdStr))
+            let agents = try agentRepository.findAll()
             return agents.map { agentToDict($0) }
         default:
             throw MCPError.invalidResourceURI(uri)
@@ -463,10 +443,8 @@ final class MCPServer {
 
         switch resource {
         case "detail":
-            let subtasks = try subtaskRepository.findByTask(taskId)
             let latestContext = try contextRepository.findLatest(taskId: taskId)
             var result = taskToDict(task)
-            result["subtasks"] = subtasks.map { subtaskToDict($0) }
             if let ctx = latestContext {
                 result["latest_context"] = contextToDict(ctx)
             }
@@ -578,7 +556,6 @@ final class MCPServer {
             throw MCPError.taskNotFound(taskId)
         }
 
-        let subtasks = try subtaskRepository.findByTask(task.id)
         let contexts = try contextRepository.findByTask(task.id)
 
         var contextInfo = ""
@@ -592,8 +569,6 @@ final class MCPServer {
             """
         }
 
-        let subtaskInfo = subtasks.isEmpty ? "サブタスクなし" : subtasks.map { "- [\($0.isCompleted ? "x" : " ")] \($0.title)" }.joined(separator: "\n")
-
         let prompt = """
         以下のタスクについてハンドオフを作成してください。
 
@@ -603,9 +578,6 @@ final class MCPServer {
         - 説明: \(task.description)
         - ステータス: \(task.status.rawValue)
         - 優先度: \(task.priority.rawValue)
-
-        サブタスク:
-        \(subtaskInfo)
 
         \(contextInfo)
 
@@ -652,11 +624,8 @@ final class MCPServer {
             throw MCPError.taskNotFound(taskId)
         }
 
-        let existingSubtasks = try subtaskRepository.findByTask(task.id)
-        let existingInfo = existingSubtasks.isEmpty ? "なし" : existingSubtasks.map { "- \($0.title)" }.joined(separator: "\n")
-
         let prompt = """
-        以下のタスクを実行可能なサブタスクに分解してください。
+        以下のタスクを実行可能なステップに分解してください。
 
         タスク情報:
         - ID: \(task.id.value)
@@ -664,16 +633,12 @@ final class MCPServer {
         - 説明: \(task.description)
         - 優先度: \(task.priority.rawValue)
 
-        既存のサブタスク:
-        \(existingInfo)
-
-        以下の観点でサブタスクを提案してください:
-        1. 各サブタスクは1つの具体的なアクションであること
+        以下の観点でステップを提案してください:
+        1. 各ステップは1つの具体的なアクションであること
         2. 完了の判断が明確であること
         3. 依存関係がある場合は順序を考慮すること
-        4. 既存のサブタスクと重複しないこと
 
-        提案するサブタスクのリストを作成してください。
+        提案するステップのリストを作成してください。
         """
 
         return [
@@ -687,7 +652,7 @@ final class MCPServer {
         }
 
         let tasks = try taskRepository.findAll(projectId: projectId)
-        let agents = try agentRepository.findAll(projectId: projectId)
+        let agents = try agentRepository.findAll()
 
         let tasksByStatus = Dictionary(grouping: tasks) { $0.status }
 
@@ -834,11 +799,9 @@ final class MCPServer {
             throw MCPError.taskNotFound(taskId)
         }
 
-        let subtasks = try subtaskRepository.findByTask(id)
         let latestContext = try contextRepository.findLatest(taskId: id)
 
         var result = taskToDict(task)
-        result["subtasks"] = subtasks.map { subtaskToDict($0) }
         if let ctx = latestContext {
             result["latest_context"] = contextToDict(ctx)
         }
@@ -1029,62 +992,6 @@ final class MCPServer {
         return [
             "success": true,
             "task": taskToDict(task)
-        ]
-    }
-
-    /// add_subtask
-    private func addSubtask(taskId: String, title: String) throws -> [String: Any] {
-        let id = TaskID(value: taskId)
-        guard try taskRepository.findById(id) != nil else {
-            throw MCPError.taskNotFound(taskId)
-        }
-
-        let existingSubtasks = try subtaskRepository.findByTask(id)
-        let order = existingSubtasks.count
-
-        let subtask = Subtask(
-            id: SubtaskID.generate(),
-            taskId: id,
-            title: title,
-            isCompleted: false,
-            order: order
-        )
-
-        try subtaskRepository.save(subtask)
-
-        return [
-            "success": true,
-            "subtask": subtaskToDict(subtask)
-        ]
-    }
-
-    /// complete_subtask
-    private func completeSubtask(subtaskId: String) throws -> [String: Any] {
-        guard var subtask = try subtaskRepository.findById(SubtaskID(value: subtaskId)) else {
-            throw MCPError.subtaskNotFound(subtaskId)
-        }
-
-        subtask.complete()
-        try subtaskRepository.save(subtask)
-
-        return [
-            "success": true,
-            "subtask": subtaskToDict(subtask)
-        ]
-    }
-
-    /// uncomplete_subtask
-    private func uncompleteSubtask(subtaskId: String) throws -> [String: Any] {
-        guard var subtask = try subtaskRepository.findById(SubtaskID(value: subtaskId)) else {
-            throw MCPError.subtaskNotFound(subtaskId)
-        }
-
-        subtask.uncomplete()
-        try subtaskRepository.save(subtask)
-
-        return [
-            "success": true,
-            "subtask": subtaskToDict(subtask)
         ]
     }
 
@@ -1321,23 +1228,6 @@ final class MCPServer {
         return dict
     }
 
-    private func subtaskToDict(_ subtask: Subtask) -> [String: Any] {
-        var dict: [String: Any] = [
-            "id": subtask.id.value,
-            "task_id": subtask.taskId.value,
-            "title": subtask.title,
-            "is_completed": subtask.isCompleted,
-            "order": subtask.order,
-            "created_at": ISO8601DateFormatter().string(from: subtask.createdAt)
-        ]
-
-        if let completedAt = subtask.completedAt {
-            dict["completed_at"] = ISO8601DateFormatter().string(from: completedAt)
-        }
-
-        return dict
-    }
-
     private func contextToDict(_ context: Context) -> [String: Any] {
         var dict: [String: Any] = [
             "id": context.id.value,
@@ -1428,7 +1318,6 @@ enum MCPError: Error, CustomStringConvertible {
     case taskNotFound(String)
     case projectNotFound(String)
     case sessionNotFound(String)
-    case subtaskNotFound(String)
     case handoffNotFound(String)
     case invalidStatus(String)
     case invalidStatusTransition(from: String, to: String)
@@ -1451,8 +1340,6 @@ enum MCPError: Error, CustomStringConvertible {
             return "Project not found: \(id)"
         case .sessionNotFound(let id):
             return "Session not found: \(id)"
-        case .subtaskNotFound(let id):
-            return "Subtask not found: \(id)"
         case .handoffNotFound(let id):
             return "Handoff not found: \(id)"
         case .invalidStatus(let status):

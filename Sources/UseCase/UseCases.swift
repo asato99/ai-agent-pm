@@ -17,6 +17,12 @@ public enum UseCaseError: Error, Sendable {
     case sessionAlreadyActive(SessionID)
     case unauthorized
     case validationFailed(String)
+
+    // 依存関係ブロック
+    case dependencyNotComplete(taskId: TaskID, blockedByTasks: [TaskID])
+
+    // リソース可用性ブロック
+    case maxParallelTasksReached(agentId: AgentID, maxParallel: Int, currentCount: Int)
 }
 
 extension UseCaseError: LocalizedError {
@@ -40,6 +46,11 @@ extension UseCaseError: LocalizedError {
             return "Unauthorized operation"
         case .validationFailed(let message):
             return "Validation failed: \(message)"
+        case .dependencyNotComplete(let taskId, let blockedByTasks):
+            let blockedIds = blockedByTasks.map { $0.value }.joined(separator: ", ")
+            return "Task \(taskId.value) is blocked by incomplete dependencies: \(blockedIds)"
+        case .maxParallelTasksReached(let agentId, let maxParallel, let currentCount):
+            return "Agent \(agentId.value) has reached max parallel tasks limit (\(currentCount)/\(maxParallel))"
         }
     }
 }
@@ -86,6 +97,7 @@ public struct CreateProjectUseCase: Sendable {
 // MARK: - Agent UseCases
 
 /// エージェント一覧取得ユースケース
+/// 要件: エージェントはプロジェクト非依存
 public struct GetAgentsUseCase: Sendable {
     private let agentRepository: any AgentRepositoryProtocol
 
@@ -93,12 +105,13 @@ public struct GetAgentsUseCase: Sendable {
         self.agentRepository = agentRepository
     }
 
-    public func execute(projectId: ProjectID) throws -> [Agent] {
-        try agentRepository.findByProject(projectId)
+    public func execute() throws -> [Agent] {
+        try agentRepository.findAll()
     }
 }
 
 /// エージェント作成ユースケース
+/// 要件: エージェントはプロジェクト非依存、階層構造をサポート
 public struct CreateAgentUseCase: Sendable {
     private let agentRepository: any AgentRepositoryProtocol
 
@@ -107,11 +120,12 @@ public struct CreateAgentUseCase: Sendable {
     }
 
     public func execute(
-        projectId: ProjectID,
         name: String,
         role: String,
         roleType: AgentRoleType = .developer,
         type: AgentType = .ai,
+        parentAgentId: AgentID? = nil,
+        maxParallelTasks: Int = 1,
         systemPrompt: String? = nil
     ) throws -> Agent {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -120,11 +134,12 @@ public struct CreateAgentUseCase: Sendable {
 
         let agent = Agent(
             id: AgentID.generate(),
-            projectId: projectId,
             name: name,
             role: role,
             type: type,
             roleType: roleType,
+            parentAgentId: parentAgentId,
+            maxParallelTasks: maxParallelTasks,
             systemPrompt: systemPrompt
         )
 
@@ -178,25 +193,23 @@ public struct GetTasksByAssigneeUseCase: Sendable {
 }
 
 /// タスク詳細取得ユースケース
+/// 要件: サブタスク概念は削除（タスク間の関係は依存関係のみ）
 public struct GetTaskDetailUseCase: Sendable {
     private let taskRepository: any TaskRepositoryProtocol
-    private let subtaskRepository: any SubtaskRepositoryProtocol
     private let contextRepository: any ContextRepositoryProtocol
 
     public init(
         taskRepository: any TaskRepositoryProtocol,
-        subtaskRepository: any SubtaskRepositoryProtocol,
         contextRepository: any ContextRepositoryProtocol
     ) {
         self.taskRepository = taskRepository
-        self.subtaskRepository = subtaskRepository
         self.contextRepository = contextRepository
     }
 
     public struct Result: Sendable {
         public let task: Task
-        public let subtasks: [Subtask]
         public let contexts: [Context]
+        public let dependentTasks: [Task]
     }
 
     public func execute(taskId: TaskID) throws -> Result {
@@ -204,10 +217,17 @@ public struct GetTaskDetailUseCase: Sendable {
             throw UseCaseError.taskNotFound(taskId)
         }
 
-        let subtasks = try subtaskRepository.findByTask(taskId)
         let contexts = try contextRepository.findByTask(taskId)
 
-        return Result(task: task, subtasks: subtasks, contexts: contexts)
+        // 依存タスクを取得
+        var dependentTasks: [Task] = []
+        for depId in task.dependencies {
+            if let depTask = try taskRepository.findById(depId) {
+                dependentTasks.append(depTask)
+            }
+        }
+
+        return Result(task: task, contexts: contexts, dependentTasks: dependentTasks)
     }
 }
 

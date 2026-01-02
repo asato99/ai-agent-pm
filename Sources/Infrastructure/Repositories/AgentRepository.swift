@@ -1,5 +1,6 @@
 // Sources/Infrastructure/Repositories/AgentRepository.swift
 // 参照: docs/architecture/DATABASE_SCHEMA.md - agents テーブル
+// 要件: エージェントはプロジェクト非依存、階層構造をサポート
 
 import Foundation
 import GRDB
@@ -12,11 +13,12 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "agents"
 
     var id: String
-    var projectId: String
     var name: String
     var role: String
     var type: String
     var roleType: String
+    var parentAgentId: String?
+    var maxParallelTasks: Int
     var capabilities: String?
     var systemPrompt: String?
     var status: String
@@ -25,11 +27,12 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case projectId = "project_id"
         case name
         case role
         case type
         case roleType = "role_type"
+        case parentAgentId = "parent_agent_id"
+        case maxParallelTasks = "max_parallel_tasks"
         case capabilities
         case systemPrompt = "system_prompt"
         case status
@@ -47,11 +50,12 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
 
         return Agent(
             id: AgentID(value: id),
-            projectId: ProjectID(value: projectId),
             name: name,
             role: role,
             type: AgentType(rawValue: type) ?? .ai,
             roleType: AgentRoleType(rawValue: roleType) ?? .developer,
+            parentAgentId: parentAgentId.map { AgentID(value: $0) },
+            maxParallelTasks: maxParallelTasks,
             capabilities: caps,
             systemPrompt: systemPrompt,
             status: AgentStatus(rawValue: status) ?? .active,
@@ -69,11 +73,12 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
 
         return AgentRecord(
             id: agent.id.value,
-            projectId: agent.projectId.value,
             name: agent.name,
             role: agent.role,
             type: agent.type.rawValue,
             roleType: agent.roleType.rawValue,
+            parentAgentId: agent.parentAgentId?.value,
+            maxParallelTasks: agent.maxParallelTasks,
             capabilities: capsJson,
             systemPrompt: agent.systemPrompt,
             status: agent.status.rawValue,
@@ -102,29 +107,45 @@ public final class AgentRepository: AgentRepositoryProtocol, Sendable {
         }
     }
 
-    public func findByProject(_ projectId: ProjectID) throws -> [Agent] {
+    public func findAll() throws -> [Agent] {
         try db.read { db in
             try AgentRecord
-                .filter(Column("project_id") == projectId.value)
                 .order(Column("name"))
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }
     }
 
-    public func findAll(projectId: ProjectID) throws -> [Agent] {
-        try findByProject(projectId)
-    }
-
-    public func findByType(_ type: AgentType, projectId: ProjectID) throws -> [Agent] {
+    public func findByType(_ type: AgentType) throws -> [Agent] {
         try db.read { db in
             try AgentRecord
-                .filter(Column("project_id") == projectId.value)
                 .filter(Column("type") == type.rawValue)
                 .order(Column("name"))
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }
+    }
+
+    public func findByParent(_ parentAgentId: AgentID?) throws -> [Agent] {
+        try db.read { db in
+            if let parentId = parentAgentId {
+                return try AgentRecord
+                    .filter(Column("parent_agent_id") == parentId.value)
+                    .order(Column("name"))
+                    .fetchAll(db)
+                    .map { $0.toDomain() }
+            } else {
+                return try AgentRecord
+                    .filter(Column("parent_agent_id") == nil)
+                    .order(Column("name"))
+                    .fetchAll(db)
+                    .map { $0.toDomain() }
+            }
+        }
+    }
+
+    public func findRootAgents() throws -> [Agent] {
+        try findByParent(nil)
     }
 
     public func save(_ agent: Agent) throws {

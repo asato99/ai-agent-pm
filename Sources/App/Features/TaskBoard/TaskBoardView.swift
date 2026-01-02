@@ -16,7 +16,7 @@ struct TaskBoardView: View {
     @State private var agents: [Agent] = []
     @State private var isLoading = false
 
-    private let columns: [TaskStatus] = [.backlog, .todo, .inProgress, .inReview, .done]
+    private let columns: [TaskStatus] = [.backlog, .todo, .inProgress, .blocked, .done]
 
     var body: some View {
         ScrollView(.horizontal) {
@@ -74,7 +74,7 @@ struct TaskBoardView: View {
 
         do {
             tasks = try container.getTasksUseCase.execute(projectId: projectId, status: nil)
-            agents = try container.getAgentsUseCase.execute(projectId: projectId)
+            agents = try container.getAgentsUseCase.execute()
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }
@@ -94,6 +94,7 @@ struct TaskColumnView: View {
             HStack {
                 Text(status.displayName)
                     .font(.headline)
+                    .accessibilityLabel(status.displayName)  // 明示的にラベルを設定
                     .accessibilityIdentifier("ColumnHeader_\(status.rawValue)")
                 Spacer()
                 Text("\(tasks.count)")
@@ -110,11 +111,9 @@ struct TaskColumnView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(tasks, id: \.id) { task in
-                        TaskCardView(task: task, agents: agents)
-                            .accessibilityIdentifier("TaskCard_\(task.id.value)")
-                            .onTapGesture {
-                                router.selectTask(task.id)
-                            }
+                        TaskCardButton(task: task, agents: agents) {
+                            router.selectTask(task.id)
+                        }
                     }
                 }
                 .padding(.horizontal, 4)
@@ -149,13 +148,15 @@ struct TaskCardView: View {
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .lineLimit(2)
-                .accessibilityIdentifier("TaskTitle")
+                .accessibilityLabel(task.title)  // 明示的にラベルを設定
+                .accessibilityIdentifier("TaskTitle_\(task.id.value)")
 
             if !task.description.isEmpty {
                 Text(task.description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityLabel(task.description)  // 明示的にラベルを設定
                     .accessibilityIdentifier("TaskDescription")
             }
 
@@ -176,9 +177,8 @@ struct TaskCardView: View {
         .padding(12)
         .background(.background)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .contentShape(RoundedRectangle(cornerRadius: 8))  // タップ領域を明確に定義
         .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Task: \(task.title)")
     }
 }
 
@@ -202,19 +202,37 @@ struct PriorityBadge: View {
             .background(color.opacity(0.15))
             .foregroundStyle(color)
             .clipShape(Capsule())
+            .accessibilityLabel("Priority")
+            .accessibilityValue(priority.rawValue.capitalized)
     }
 }
 
-extension TaskStatus {
-    var displayName: String {
-        switch self {
-        case .backlog: return "Backlog"
-        case .todo: return "To Do"
-        case .inProgress: return "In Progress"
-        case .inReview: return "In Review"
-        case .blocked: return "Blocked"
-        case .done: return "Done"
-        case .cancelled: return "Cancelled"
+/// タスクカードボタン
+/// XCUITestでタイトルが認識できるよう、キーボードアクセシブルなButtonを使用
+struct TaskCardButton: View {
+    let task: Task
+    let agents: [Agent]
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            TaskCardView(task: task, agents: agents)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isFocused ? Color.accentColor : Color.clear, lineWidth: 2)
+                )
         }
+        .buttonStyle(.plain)
+        .focusable()
+        .focused($isFocused)
+        // アクセシビリティ設定
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(task.title)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("TaskCard_\(task.id.value)")
     }
 }
+
+// displayName is already defined in Domain/Entities/Task.swift

@@ -35,16 +35,20 @@ final class MockAgentRepository: AgentRepositoryProtocol {
         agents[id]
     }
 
-    func findByProject(_ projectId: ProjectID) throws -> [Agent] {
-        agents.values.filter { $0.projectId == projectId }
+    func findAll() throws -> [Agent] {
+        Array(agents.values)
     }
 
-    func findAll(projectId: ProjectID) throws -> [Agent] {
-        try findByProject(projectId)
+    func findByType(_ type: AgentType) throws -> [Agent] {
+        agents.values.filter { $0.type == type }
     }
 
-    func findByType(_ type: AgentType, projectId: ProjectID) throws -> [Agent] {
-        agents.values.filter { $0.projectId == projectId && $0.type == type }
+    func findByParent(_ parentAgentId: AgentID?) throws -> [Agent] {
+        agents.values.filter { $0.parentAgentId == parentAgentId }
+    }
+
+    func findRootAgents() throws -> [Agent] {
+        agents.values.filter { $0.parentAgentId == nil }
     }
 
     func save(_ agent: Agent) throws {
@@ -151,26 +155,6 @@ final class MockContextRepository: ContextRepositoryProtocol {
     }
 }
 
-final class MockSubtaskRepository: SubtaskRepositoryProtocol {
-    var subtasks: [SubtaskID: Subtask] = [:]
-
-    func findById(_ id: SubtaskID) throws -> Subtask? {
-        subtasks[id]
-    }
-
-    func findByTask(_ taskId: TaskID) throws -> [Subtask] {
-        subtasks.values.filter { $0.taskId == taskId }
-    }
-
-    func save(_ subtask: Subtask) throws {
-        subtasks[subtask.id] = subtask
-    }
-
-    func delete(_ id: SubtaskID) throws {
-        subtasks.removeValue(forKey: id)
-    }
-}
-
 final class MockEventRepository: EventRepositoryProtocol {
     var events: [EventID: StateChangeEvent] = [:]
 
@@ -204,7 +188,6 @@ final class UseCaseTests: XCTestCase {
     var taskRepo: MockTaskRepository!
     var sessionRepo: MockSessionRepository!
     var contextRepo: MockContextRepository!
-    var subtaskRepo: MockSubtaskRepository!
     var eventRepo: MockEventRepository!
 
     override func setUp() {
@@ -213,7 +196,6 @@ final class UseCaseTests: XCTestCase {
         taskRepo = MockTaskRepository()
         sessionRepo = MockSessionRepository()
         contextRepo = MockContextRepository()
-        subtaskRepo = MockSubtaskRepository()
         eventRepo = MockEventRepository()
     }
 
@@ -268,17 +250,13 @@ final class UseCaseTests: XCTestCase {
         XCTAssertEqual(projects.count, 2)
     }
 
-    // MARK: - Agent UseCase Tests (PRD: AGENT_CONCEPT.md)
+    // MARK: - Agent UseCase Tests (要件: エージェントはプロジェクト非依存)
 
     func testCreateAgentUseCaseSuccess() throws {
-        // PRD: エージェントの作成
-        let project = Project(id: ProjectID.generate(), name: "Test")
-        projectRepo.projects[project.id] = project
-
+        // 要件: エージェントの作成（プロジェクト非依存）
         let useCase = CreateAgentUseCase(agentRepository: agentRepo)
 
         let agent = try useCase.execute(
-            projectId: project.id,
             name: "frontend-dev",
             role: "フロントエンド開発",
             roleType: .developer,
@@ -286,17 +264,16 @@ final class UseCaseTests: XCTestCase {
         )
 
         XCTAssertEqual(agent.name, "frontend-dev")
-        XCTAssertEqual(agent.type, .ai)
-        XCTAssertEqual(agent.roleType, .developer)
-        XCTAssertEqual(agent.status, .active)
+        XCTAssertEqual(agent.type, AgentType.ai)
+        XCTAssertEqual(agent.roleType, AgentRoleType.developer)
+        XCTAssertEqual(agent.status, AgentStatus.active)
     }
 
     func testCreateAgentUseCaseEmptyNameFails() throws {
-        // PRD: 名前は必須
+        // 要件: 名前は必須
         let useCase = CreateAgentUseCase(agentRepository: agentRepo)
 
         XCTAssertThrowsError(try useCase.execute(
-            projectId: ProjectID.generate(),
             name: "",
             role: "Role"
         )) { error in
@@ -312,7 +289,6 @@ final class UseCaseTests: XCTestCase {
         // PRD: エージェントプロファイル取得（get_my_profile）
         let agent = Agent(
             id: AgentID.generate(),
-            projectId: ProjectID.generate(),
             name: "test-agent",
             role: "Tester"
         )
@@ -389,7 +365,7 @@ final class UseCaseTests: XCTestCase {
 
     func testGetMyTasksUseCase() throws {
         // PRD: 自分のタスク取得（get_my_tasks）
-        let agent = Agent(id: AgentID.generate(), projectId: ProjectID.generate(), name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         agentRepo.agents[agent.id] = agent
 
         let task1 = Task(id: TaskID.generate(), projectId: ProjectID.generate(), title: "Task1", assigneeId: agent.id)
@@ -405,10 +381,10 @@ final class UseCaseTests: XCTestCase {
         XCTAssertEqual(myTasks.count, 2)
     }
 
-    // MARK: - Task Status Transition Tests (PRD: TASK_MANAGEMENT.md - ステータスフロー)
+    // MARK: - Task Status Transition Tests (要件: ステータスフロー - inReview削除済み)
 
     func testUpdateTaskStatusValidTransitions() throws {
-        // PRD: 有効なステータス遷移
+        // 要件: 有効なステータス遷移（inReview削除後: backlog → todo → inProgress → done）
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
@@ -428,11 +404,7 @@ final class UseCaseTests: XCTestCase {
         task = try useCase.execute(taskId: task.id, newStatus: .inProgress, agentId: nil, sessionId: nil, reason: nil)
         XCTAssertEqual(task.status, .inProgress)
 
-        // inProgress → inReview
-        task = try useCase.execute(taskId: task.id, newStatus: .inReview, agentId: nil, sessionId: nil, reason: nil)
-        XCTAssertEqual(task.status, .inReview)
-
-        // inReview → done
+        // inProgress → done
         task = try useCase.execute(taskId: task.id, newStatus: .done, agentId: nil, sessionId: nil, reason: nil)
         XCTAssertEqual(task.status, .done)
         XCTAssertNotNil(task.completedAt, "completedAt should be set when task is done")
@@ -490,12 +462,11 @@ final class UseCaseTests: XCTestCase {
     }
 
     func testStatusTransitionCanTransitionFunction() throws {
-        // PRD: ステータス遷移ルールの検証
+        // 要件: ステータス遷移ルールの検証（inReview削除済み）
         // 有効な遷移
         XCTAssertTrue(UpdateTaskStatusUseCase.canTransition(from: .backlog, to: .todo))
         XCTAssertTrue(UpdateTaskStatusUseCase.canTransition(from: .todo, to: .inProgress))
-        XCTAssertTrue(UpdateTaskStatusUseCase.canTransition(from: .inProgress, to: .inReview))
-        XCTAssertTrue(UpdateTaskStatusUseCase.canTransition(from: .inReview, to: .done))
+        XCTAssertTrue(UpdateTaskStatusUseCase.canTransition(from: .inProgress, to: .done))
         XCTAssertTrue(UpdateTaskStatusUseCase.canTransition(from: .inProgress, to: .blocked))
         XCTAssertTrue(UpdateTaskStatusUseCase.canTransition(from: .blocked, to: .inProgress))
         XCTAssertTrue(UpdateTaskStatusUseCase.canTransition(from: .backlog, to: .cancelled))
@@ -514,7 +485,7 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         agentRepo.agents[agent.id] = agent
 
         let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task")
@@ -542,7 +513,7 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         agentRepo.agents[agent.id] = agent
 
         let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", assigneeId: agent.id)
@@ -599,7 +570,7 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         agentRepo.agents[agent.id] = agent
 
         let useCase = StartSessionUseCase(
@@ -621,7 +592,7 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         agentRepo.agents[agent.id] = agent
 
         let existingSession = Session(id: SessionID.generate(), projectId: project.id, agentId: agent.id, status: .active)
@@ -647,7 +618,7 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         agentRepo.agents[agent.id] = agent
 
         let session = Session(id: SessionID.generate(), projectId: project.id, agentId: agent.id, status: .active)
@@ -688,7 +659,7 @@ final class UseCaseTests: XCTestCase {
 
     func testGetActiveSessionUseCase() throws {
         // PRD: アクティブセッション取得
-        let agent = Agent(id: AgentID.generate(), projectId: ProjectID.generate(), name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         agentRepo.agents[agent.id] = agent
 
         let session = Session(id: SessionID.generate(), projectId: ProjectID.generate(), agentId: agent.id, status: .active)
@@ -708,7 +679,7 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         agentRepo.agents[agent.id] = agent
 
         let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task")
@@ -806,17 +777,17 @@ final class UseCaseTests: XCTestCase {
     // MARK: - Task Detail UseCase Tests
 
     func testGetTaskDetailUseCase() throws {
-        // PRD: タスク詳細取得（サブタスク、コンテキスト含む）
+        // PRD: タスク詳細取得（コンテキスト、依存タスク含む）
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        let task = Task(id: TaskID.generate(), projectId: project.id, title: "API実装")
-        taskRepo.tasks[task.id] = task
+        // 依存元タスク
+        let depTask = Task(id: TaskID.generate(), projectId: project.id, title: "設計")
+        taskRepo.tasks[depTask.id] = depTask
 
-        let subtask1 = Subtask(id: SubtaskID.generate(), taskId: task.id, title: "設計")
-        let subtask2 = Subtask(id: SubtaskID.generate(), taskId: task.id, title: "実装")
-        subtaskRepo.subtasks[subtask1.id] = subtask1
-        subtaskRepo.subtasks[subtask2.id] = subtask2
+        // メインタスク（依存タスクを設定）
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "API実装", dependencies: [depTask.id])
+        taskRepo.tasks[task.id] = task
 
         let context = Context(
             id: ContextID.generate(),
@@ -829,15 +800,15 @@ final class UseCaseTests: XCTestCase {
 
         let useCase = GetTaskDetailUseCase(
             taskRepository: taskRepo,
-            subtaskRepository: subtaskRepo,
             contextRepository: contextRepo
         )
 
         let result = try useCase.execute(taskId: task.id)
 
         XCTAssertEqual(result.task.title, "API実装")
-        XCTAssertEqual(result.subtasks.count, 2)
         XCTAssertEqual(result.contexts.count, 1)
+        XCTAssertEqual(result.dependentTasks.count, 1)
+        XCTAssertEqual(result.dependentTasks.first?.title, "設計")
     }
 
     // MARK: - Event Recording Tests (PRD: STATE_HISTORY.md)

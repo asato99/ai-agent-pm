@@ -106,6 +106,12 @@ struct AIAgentPMApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command])
 
+                // エージェントはプロジェクト非依存のトップレベルエンティティ
+                Button("New Agent") {
+                    router.showSheet(.newAgent)
+                }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+
                 if let projectId = router.selectedProject {
                     Divider()
 
@@ -113,11 +119,6 @@ struct AIAgentPMApp: App {
                         router.showSheet(.newTask(projectId))
                     }
                     .keyboardShortcut("t", modifiers: [.command])
-
-                    Button("New Agent") {
-                        router.showSheet(.newAgent(projectId))
-                    }
-                    .keyboardShortcut("a", modifiers: [.command, .shift])
                 }
             }
 
@@ -129,6 +130,24 @@ struct AIAgentPMApp: App {
                     // Trigger refresh
                 }
                 .keyboardShortcut("r", modifiers: [.command])
+            }
+
+            // UIテスト用コマンド（-UITestingフラグ時のみ有効）
+            if Self.isUITesting {
+                CommandGroup(after: .newItem) {
+                    Divider()
+                    // 依存タスクを選択（Cmd+Shift+D）
+                    Button("Select Dependent Task (UITest)") {
+                        router.selectTask(TaskID(value: "uitest_dependent_task"))
+                    }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
+
+                    // リソーステストタスクを選択（Cmd+Shift+G）
+                    Button("Select Resource Test Task (UITest)") {
+                        router.selectTask(TaskID(value: "uitest_resource_task"))
+                    }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                }
             }
         }
 
@@ -197,9 +216,9 @@ private final class TestDataSeeder {
         try await projectRepository.save(project)
 
         // エージェント作成（Human - Manager）
+        // 要件: エージェントはプロジェクト非依存のトップレベルエンティティ
         let ownerAgent = Agent(
             id: .generate(),
-            projectId: project.id,
             name: "owner",
             role: "プロジェクトオーナー",
             type: .human,
@@ -212,14 +231,16 @@ private final class TestDataSeeder {
         )
         try await agentRepository.save(ownerAgent)
 
-        // エージェント作成（AI - Developer）
+        // エージェント作成（AI - Developer、並列数1）
+        // maxParallelTasks: 1 でリソースブロックテスト用
         let devAgent = Agent(
             id: .generate(),
-            projectId: project.id,
             name: "backend-dev",
             role: "バックエンド開発",
             type: .ai,
             roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 1,  // 並列数1でテスト用
             capabilities: ["Swift", "Python", "API設計"],
             systemPrompt: "バックエンド開発を担当するAIエージェントです",
             status: .active,
@@ -228,12 +249,57 @@ private final class TestDataSeeder {
         )
         try await agentRepository.save(devAgent)
 
+        // 依存関係テスト用: まず先行タスク（未完了）を作成
+        // 注意: backlogステータスにして、todoカラムのスクロール問題を回避
+        // UIテスト用に固定IDを使用
+        let prerequisiteTaskId = TaskID(value: "uitest_prerequisite_task")
+        let prerequisiteTask = Task(
+            id: prerequisiteTaskId,
+            projectId: project.id,
+            title: "先行タスク",
+            description: "この先行タスクが完了しないと次のタスクを開始できません",
+            status: .backlog,  // backlogで未完了（doneではないので依存タスクはブロックされる）
+            priority: .high,
+            assigneeId: nil,
+            parentTaskId: nil,
+            dependencies: [],
+            estimatedMinutes: nil,
+            actualMinutes: nil,
+            createdAt: Date(),
+            updatedAt: Date(),
+            completedAt: nil
+        )
+        try await taskRepository.save(prerequisiteTask)
+
+        // 依存関係テスト用: 先行タスクに依存するタスク
+        // UIテスト用に固定IDを使用
+        let dependentTaskId = TaskID(value: "uitest_dependent_task")
+        let dependentTask = Task(
+            id: dependentTaskId,
+            projectId: project.id,
+            title: "依存タスク",
+            description: "先行タスク完了後に開始可能（依存関係テスト用）",
+            status: .todo,
+            priority: .medium,
+            assigneeId: devAgent.id,
+            parentTaskId: nil,
+            dependencies: [prerequisiteTaskId],  // 先行タスクに依存
+            estimatedMinutes: nil,
+            actualMinutes: nil,
+            createdAt: Date(),
+            updatedAt: Date(),
+            completedAt: nil
+        )
+        try await taskRepository.save(dependentTask)
+
         // 各ステータスのタスクを作成
+        // 要件: TaskStatusは backlog, todo, in_progress, blocked, done, cancelled のみ
+        // 注意: todoカラムには依存タスク・追加開発タスクがあるので、
+        //       他のtodoタスクは最小限にしてスクロール問題を回避
         let taskStatuses: [(TaskStatus, String, String, TaskPriority)] = [
             (.backlog, "UI設計", "画面レイアウトの設計", .low),
-            (.todo, "DB設計", "データベーススキーマの設計", .medium),
+            // todoには依存テスト用タスクと追加開発タスクのみ
             (.inProgress, "API実装", "REST APIエンドポイントの実装", .high),
-            (.inReview, "ログイン機能", "ユーザー認証機能のレビュー", .medium),
             (.done, "要件定義", "プロジェクト要件の定義完了", .high),
             (.blocked, "API統合", "外部APIとの統合（認証待ち）", .urgent),
         ]
@@ -257,6 +323,28 @@ private final class TestDataSeeder {
             )
             try await taskRepository.save(task)
         }
+
+        // リソースブロックテスト用: devAgentに追加のtodoタスクをアサイン
+        // devAgentは既にAPI実装(inProgress)を持っており、maxParallelTasks=1
+        // UIテスト用に固定IDを使用
+        let resourceTestTaskId = TaskID(value: "uitest_resource_task")
+        let additionalTaskForResourceTest = Task(
+            id: resourceTestTaskId,
+            projectId: project.id,
+            title: "追加開発タスク",
+            description: "リソースブロックテスト用（並列数上限確認）",
+            status: .todo,  // todoから直接in_progressに遷移を試みる
+            priority: .medium,
+            assigneeId: devAgent.id,  // devAgentにアサイン
+            parentTaskId: nil,
+            dependencies: [],
+            estimatedMinutes: nil,
+            actualMinutes: nil,
+            createdAt: Date(),
+            updatedAt: Date(),
+            completedAt: nil
+        )
+        try await taskRepository.save(additionalTaskForResourceTest)
     }
 
     /// 空のプロジェクト状態をシード（プロジェクトなし）
@@ -280,10 +368,10 @@ private final class TestDataSeeder {
             try await projectRepository.save(project)
 
             // 各プロジェクトに基本的なエージェントを追加
+            // 要件: エージェントはプロジェクト非依存
             let agent = Agent(
                 id: .generate(),
-                projectId: project.id,
-                name: "developer",
+                name: "developer-\(name)",
                 role: "開発者",
                 type: .ai,
                 roleType: .developer,

@@ -51,6 +51,7 @@ public struct StateChangeEvent: Identifiable, Equatable, Sendable {
 // MARK: - EntityType
 
 /// エンティティの種類
+/// 要件: subtask は削除（タスク間の関係は依存関係のみで表現）
 public enum EntityType: String, Codable, Sendable {
     case project
     case task
@@ -58,7 +59,6 @@ public enum EntityType: String, Codable, Sendable {
     case session
     case context
     case handoff
-    case subtask
 
     public var displayName: String {
         switch self {
@@ -68,7 +68,6 @@ public enum EntityType: String, Codable, Sendable {
         case .session: return "Session"
         case .context: return "Context"
         case .handoff: return "Handoff"
-        case .subtask: return "Subtask"
         }
     }
 }

@@ -227,9 +227,10 @@ final class AgentTypeBadgeTests: XCTestCase {
 final class RoleTypeBadgeTests: XCTestCase {
 
     func testRoleTypeBadgeDisplay() throws {
-        let ownerBadge = RoleTypeBadge(roleType: .owner)
-        let ownerText = try ownerBadge.inspect().text().string()
-        XCTAssertEqual(ownerText, "Owner")
+        // 要件: AgentRoleType には owner は存在しない。manager を使用
+        let managerBadge = RoleTypeBadge(roleType: .manager)
+        let managerText = try managerBadge.inspect().text().string()
+        XCTAssertEqual(managerText, "Manager")
 
         let developerBadge = RoleTypeBadge(roleType: .developer)
         let developerText = try developerBadge.inspect().text().string()
@@ -328,24 +329,21 @@ final class TaskColumnViewTests: XCTestCase {
         )
 
         let view = try column.inspect()
-        let vstack = try view.vStack()
-        let header = try vstack.hStack(0)
-        // カウントは2番目のText
-        let countText = try header.text(1).string()
+        // accessibilityIdentifierを使ってカウントTextを取得
+        let countText = try view.find(viewWithAccessibilityIdentifier: "ColumnCount_todo").text().string()
         XCTAssertEqual(countText, "2")
     }
 }
 
-// MARK: - PRD Task Status Display Name Tests
+// MARK: - Task Status Display Name Tests
 
 final class TaskStatusDisplayTests: XCTestCase {
 
-    /// PRD 02_task_board.md: カラム表示名
+    /// 要件 02_task_board.md: カラム表示名（inReview削除済み）
     func testTaskStatusDisplayNames() {
         XCTAssertEqual(TaskStatus.backlog.displayName, "Backlog")
         XCTAssertEqual(TaskStatus.todo.displayName, "To Do")
         XCTAssertEqual(TaskStatus.inProgress.displayName, "In Progress")
-        XCTAssertEqual(TaskStatus.inReview.displayName, "In Review")
         XCTAssertEqual(TaskStatus.blocked.displayName, "Blocked")
         XCTAssertEqual(TaskStatus.done.displayName, "Done")
         XCTAssertEqual(TaskStatus.cancelled.displayName, "Cancelled")
@@ -356,7 +354,7 @@ final class TaskStatusDisplayTests: XCTestCase {
 
 final class SheetDestinationTests: XCTestCase {
 
-    /// PRD: 各シートに一意のIDがあること
+    /// 要件: 各シートに一意のIDがあること（エージェントはプロジェクト非依存）
     func testSheetDestinationIds() {
         let projectId = ProjectID(value: "p1")
         let taskId = TaskID(value: "t1")
@@ -366,7 +364,7 @@ final class SheetDestinationTests: XCTestCase {
         XCTAssertEqual(Router.SheetDestination.editProject(projectId).id, "editProject-p1")
         XCTAssertEqual(Router.SheetDestination.newTask(projectId).id, "newTask-p1")
         XCTAssertEqual(Router.SheetDestination.editTask(taskId).id, "editTask-t1")
-        XCTAssertEqual(Router.SheetDestination.newAgent(projectId).id, "newAgent-p1")
+        XCTAssertEqual(Router.SheetDestination.newAgent.id, "newAgent")
         XCTAssertEqual(Router.SheetDestination.editAgent(agentId).id, "editAgent-a1")
         XCTAssertEqual(Router.SheetDestination.taskDetail(taskId).id, "taskDetail-t1")
         XCTAssertEqual(Router.SheetDestination.agentDetail(agentId).id, "agentDetail-a1")

@@ -99,22 +99,6 @@ public struct HandoffID: Hashable, Codable, Sendable, CustomStringConvertible {
     public var description: String { value }
 }
 
-// MARK: - SubtaskID
-
-public struct SubtaskID: Hashable, Codable, Sendable, CustomStringConvertible {
-    public let value: String
-
-    public init(value: String) {
-        self.value = value
-    }
-
-    public static func generate() -> SubtaskID {
-        SubtaskID(value: "sub_\(UUID().uuidString.prefix(12).lowercased())")
-    }
-
-    public var description: String { value }
-}
-
 // MARK: - EventID
 
 public struct EventID: Hashable, Codable, Sendable, CustomStringConvertible {

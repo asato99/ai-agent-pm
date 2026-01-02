@@ -209,6 +209,48 @@ public final class DatabaseSetup {
             try db.create(indexOn: "state_change_events", columns: ["entity_type", "entity_id"])
         }
 
+        // v3: 要件変更 - エージェント階層化、サブタスク削除
+        migrator.registerMigration("v3_agent_hierarchy") { db in
+            // subtasks テーブルを削除
+            try db.drop(table: "subtasks")
+
+            // agents テーブルを再構築（project_id削除、parent_agent_id追加）
+            // SQLiteはALTER TABLE DROP COLUMNをサポートしないため、テーブル再構築が必要
+
+            // 1. 一時テーブルを作成（self-referencing FKは後で追加）
+            try db.execute(sql: """
+                CREATE TABLE agents_new (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    role_type TEXT DEFAULT 'developer',
+                    parent_agent_id TEXT,
+                    max_parallel_tasks INTEGER DEFAULT 1,
+                    capabilities TEXT,
+                    system_prompt TEXT,
+                    status TEXT DEFAULT 'active',
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """)
+
+            // 2. データを移行（project_idは破棄）
+            try db.execute(sql: """
+                INSERT INTO agents_new (id, name, role, type, role_type, capabilities, system_prompt, status, created_at, updated_at)
+                SELECT id, name, role, type, role_type, capabilities, system_prompt, status, created_at, updated_at FROM agents
+            """)
+
+            // 3. 古いテーブルを削除
+            try db.drop(table: "agents")
+
+            // 4. 新しいテーブルをリネーム
+            try db.rename(table: "agents_new", to: "agents")
+
+            // 5. インデックス再作成
+            try db.create(indexOn: "agents", columns: ["parent_agent_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

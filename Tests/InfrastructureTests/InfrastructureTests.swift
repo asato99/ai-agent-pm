@@ -17,7 +17,6 @@ final class InfrastructureTests: XCTestCase {
     var sessionRepo: SessionRepository!
     var contextRepo: ContextRepository!
     var handoffRepo: HandoffRepository!
-    var subtaskRepo: SubtaskRepository!
     var eventRepo: EventRepository!
 
     override func setUpWithError() throws {
@@ -32,7 +31,6 @@ final class InfrastructureTests: XCTestCase {
         sessionRepo = SessionRepository(database: db)
         contextRepo = ContextRepository(database: db)
         handoffRepo = HandoffRepository(database: db)
-        subtaskRepo = SubtaskRepository(database: db)
         eventRepo = EventRepository(database: db)
     }
 
@@ -52,7 +50,6 @@ final class InfrastructureTests: XCTestCase {
             XCTAssertTrue(try db.tableExists("sessions"))
             XCTAssertTrue(try db.tableExists("contexts"))
             XCTAssertTrue(try db.tableExists("handoffs"))
-            XCTAssertTrue(try db.tableExists("subtasks"))
             XCTAssertTrue(try db.tableExists("state_change_events"))
         }
     }
@@ -101,17 +98,17 @@ final class InfrastructureTests: XCTestCase {
     }
 
     func testProjectRepositoryUpdate() throws {
-        // PRD: プロジェクトの更新
+        // 要件: プロジェクトの更新（status: active/archived のみ）
         var project = Project(id: ProjectID.generate(), name: "Old Name")
         try projectRepo.save(project)
 
         project.name = "New Name"
-        project.status = .completed
+        project.status = .archived
         try projectRepo.save(project)
 
         let found = try projectRepo.findById(project.id)
         XCTAssertEqual(found?.name, "New Name")
-        XCTAssertEqual(found?.status, .completed)
+        XCTAssertEqual(found?.status, .archived)
     }
 
     func testProjectRepositoryDelete() throws {
@@ -128,13 +125,9 @@ final class InfrastructureTests: XCTestCase {
     // MARK: - AgentRepository Tests (PRD: AGENT_CONCEPT.md)
 
     func testAgentRepositorySaveAndFindById() throws {
-        // PRD: エージェントの作成と取得
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
+        // PRD: エージェントの作成と取得（プロジェクト非依存）
         let agent = Agent(
             id: AgentID.generate(),
-            projectId: project.id,
             name: "frontend-dev",
             role: "フロントエンド開発",
             type: .ai,
@@ -151,45 +144,54 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertEqual(found?.status, .active)
     }
 
-    func testAgentRepositoryFindByProject() throws {
-        // PRD: プロジェクト内のエージェント一覧
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
-        let agent1 = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent1", role: "Role1")
-        let agent2 = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent2", role: "Role2")
+    func testAgentRepositoryFindAll() throws {
+        // PRD: エージェント一覧取得（プロジェクト非依存）
+        let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Role1")
+        let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Role2")
         try agentRepo.save(agent1)
         try agentRepo.save(agent2)
 
-        let agents = try agentRepo.findByProject(project.id)
+        let agents = try agentRepo.findAll()
         XCTAssertEqual(agents.count, 2)
     }
 
     func testAgentRepositoryFindByType() throws {
         // PRD: エージェントタイプ別の取得（AI/Human）
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
-        let aiAgent = Agent(id: AgentID.generate(), projectId: project.id, name: "AI", role: "Role", type: .ai)
-        let humanAgent = Agent(id: AgentID.generate(), projectId: project.id, name: "Human", role: "Role", type: .human)
+        let aiAgent = Agent(id: AgentID.generate(), name: "AI", role: "Role", type: .ai)
+        let humanAgent = Agent(id: AgentID.generate(), name: "Human", role: "Role", type: .human)
         try agentRepo.save(aiAgent)
         try agentRepo.save(humanAgent)
 
-        let aiAgents = try agentRepo.findByType(.ai, projectId: project.id)
+        let aiAgents = try agentRepo.findByType(.ai)
         XCTAssertEqual(aiAgents.count, 1)
         XCTAssertEqual(aiAgents.first?.type, .ai)
 
-        let humanAgents = try agentRepo.findByType(.human, projectId: project.id)
+        let humanAgents = try agentRepo.findByType(.human)
         XCTAssertEqual(humanAgents.count, 1)
         XCTAssertEqual(humanAgents.first?.type, .human)
     }
 
+    func testAgentRepositoryFindByParent() throws {
+        // PRD: 親エージェントによる階層構造
+        let parentAgent = Agent(id: AgentID.generate(), name: "Parent", role: "Manager")
+        try agentRepo.save(parentAgent)
+
+        let child1 = Agent(id: AgentID.generate(), name: "Child1", role: "Developer", parentAgentId: parentAgent.id)
+        let child2 = Agent(id: AgentID.generate(), name: "Child2", role: "Developer", parentAgentId: parentAgent.id)
+        try agentRepo.save(child1)
+        try agentRepo.save(child2)
+
+        let children = try agentRepo.findByParent(parentAgent.id)
+        XCTAssertEqual(children.count, 2)
+
+        let rootAgents = try agentRepo.findRootAgents()
+        XCTAssertEqual(rootAgents.count, 1)
+        XCTAssertEqual(rootAgents.first?.name, "Parent")
+    }
+
     func testAgentRepositoryStatusPersistence() throws {
         // PRD: エージェントステータスの永続化（active/inactive/archived）
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
-        var agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Test", role: "Role")
+        var agent = Agent(id: AgentID.generate(), name: "Test", role: "Role")
         try agentRepo.save(agent)
 
         // ステータス変更テスト
@@ -248,7 +250,7 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         try agentRepo.save(agent)
 
         let task1 = Task(id: TaskID.generate(), projectId: project.id, title: "Task1", assigneeId: agent.id)
@@ -353,7 +355,7 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         try agentRepo.save(agent)
 
         let session = Session(
@@ -373,7 +375,7 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         try agentRepo.save(agent)
 
         let activeSession = Session(
@@ -394,7 +396,7 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         try agentRepo.save(agent)
 
         let completedSession = Session(
@@ -416,7 +418,7 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         try agentRepo.save(agent)
 
         let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task")
@@ -445,7 +447,7 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         try agentRepo.save(agent)
 
         let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task")
@@ -468,7 +470,7 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
         try agentRepo.save(agent)
 
         let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task")
@@ -507,8 +509,8 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let fromAgent = Agent(id: AgentID.generate(), projectId: project.id, name: "From", role: "Role")
-        let toAgent = Agent(id: AgentID.generate(), projectId: project.id, name: "To", role: "Role")
+        let fromAgent = Agent(id: AgentID.generate(), name: "From", role: "Role")
+        let toAgent = Agent(id: AgentID.generate(), name: "To", role: "Role")
         try agentRepo.save(fromAgent)
         try agentRepo.save(toAgent)
 
@@ -534,8 +536,8 @@ final class InfrastructureTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test Project")
         try projectRepo.save(project)
 
-        let fromAgent = Agent(id: AgentID.generate(), projectId: project.id, name: "From", role: "Role")
-        let toAgent = Agent(id: AgentID.generate(), projectId: project.id, name: "To", role: "Role")
+        let fromAgent = Agent(id: AgentID.generate(), name: "From", role: "Role")
+        let toAgent = Agent(id: AgentID.generate(), name: "To", role: "Role")
         try agentRepo.save(fromAgent)
         try agentRepo.save(toAgent)
 
@@ -566,66 +568,6 @@ final class InfrastructureTests: XCTestCase {
         let pendings = try handoffRepo.findPending(agentId: toAgent.id)
         XCTAssertEqual(pendings.count, 1)
         XCTAssertEqual(pendings.first?.summary, "Pending")
-    }
-
-    // MARK: - SubtaskRepository Tests (PRD: TASK_MANAGEMENT.md - サブタスク)
-
-    func testSubtaskRepositorySaveAndFindById() throws {
-        // PRD: サブタスクの作成と取得
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
-        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task")
-        try taskRepo.save(task)
-
-        let subtask = Subtask(
-            id: SubtaskID.generate(),
-            taskId: task.id,
-            title: "JWTトークン生成"
-        )
-        try subtaskRepo.save(subtask)
-
-        let found = try subtaskRepo.findById(subtask.id)
-        XCTAssertNotNil(found)
-        XCTAssertEqual(found?.title, "JWTトークン生成")
-        XCTAssertFalse(found?.isCompleted ?? true)
-    }
-
-    func testSubtaskRepositoryFindByTask() throws {
-        // PRD: タスク別サブタスク取得
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
-        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task")
-        try taskRepo.save(task)
-
-        let sub1 = Subtask(id: SubtaskID.generate(), taskId: task.id, title: "Sub1", order: 1)
-        let sub2 = Subtask(id: SubtaskID.generate(), taskId: task.id, title: "Sub2", order: 2)
-        try subtaskRepo.save(sub1)
-        try subtaskRepo.save(sub2)
-
-        let subtasks = try subtaskRepo.findByTask(task.id)
-        XCTAssertEqual(subtasks.count, 2)
-    }
-
-    func testSubtaskRepositoryCompletionPersistence() throws {
-        // PRD: サブタスク完了状態の永続化
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
-        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task")
-        try taskRepo.save(task)
-
-        var subtask = Subtask(id: SubtaskID.generate(), taskId: task.id, title: "Subtask")
-        try subtaskRepo.save(subtask)
-
-        // 完了に変更
-        subtask.complete()
-        try subtaskRepo.save(subtask)
-
-        let found = try subtaskRepo.findById(subtask.id)
-        XCTAssertTrue(found?.isCompleted ?? false)
-        XCTAssertNotNil(found?.completedAt)
     }
 
     // MARK: - EventRepository Tests (PRD: STATE_HISTORY.md)
@@ -729,19 +671,4 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertNil(foundTask)
     }
 
-    func testProjectDeleteCascadesToAgents() throws {
-        // PRD: プロジェクト削除時のエージェントカスケード削除
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
-        let agent = Agent(id: AgentID.generate(), projectId: project.id, name: "Agent", role: "Role")
-        try agentRepo.save(agent)
-
-        // プロジェクト削除
-        try projectRepo.delete(project.id)
-
-        // エージェントも削除されていること
-        let foundAgent = try agentRepo.findById(agent.id)
-        XCTAssertNil(foundAgent)
-    }
 }

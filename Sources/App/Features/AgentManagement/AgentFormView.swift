@@ -8,7 +8,7 @@ private typealias AsyncTask = _Concurrency.Task
 
 struct AgentFormView: View {
     enum Mode {
-        case create(projectId: ProjectID)
+        case create
         case edit(AgentID)
     }
 
@@ -22,8 +22,11 @@ struct AgentFormView: View {
     @State private var role: String = ""
     @State private var roleType: AgentRoleType = .developer
     @State private var type: AgentType = .ai
+    @State private var parentAgentId: AgentID? = nil
+    @State private var maxParallelTasks: Int = 1
     @State private var systemPrompt: String = ""
     @State private var isSaving = false
+    @State private var availableAgents: [Agent] = []
 
     var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -42,7 +45,9 @@ struct AgentFormView: View {
             Form {
                 Section("Basic Information") {
                     TextField("Name", text: $name)
+                        .accessibilityIdentifier("AgentNameField")
                     TextField("Role Description", text: $role)
+                        .accessibilityIdentifier("AgentRoleField")
                 }
 
                 Section("Type") {
@@ -56,6 +61,26 @@ struct AgentFormView: View {
                         Text("AI Agent").tag(AgentType.ai)
                         Text("Human").tag(AgentType.human)
                     }
+                }
+
+                Section("Hierarchy & Resources") {
+                    Picker("Parent Agent", selection: $parentAgentId) {
+                        Text("None (Top Level)").tag(nil as AgentID?)
+                        ForEach(availableAgents, id: \.id) { agent in
+                            Text(agent.name).tag(agent.id as AgentID?)
+                        }
+                    }
+                    .accessibilityIdentifier("ParentAgentPicker")
+
+                    Stepper(value: $maxParallelTasks, in: 1...10) {
+                        HStack {
+                            Text("Max Parallel Tasks")
+                            Spacer()
+                            Text("\(maxParallelTasks)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("MaxParallelTasksStepper")
                 }
 
                 if type == .ai {
@@ -81,12 +106,26 @@ struct AgentFormView: View {
                 }
             }
             .task {
+                await loadAvailableAgents()
                 if case .edit(let agentId) = mode {
                     await loadAgent(agentId)
                 }
             }
         }
         .frame(minWidth: 450, minHeight: 400)
+    }
+
+    private func loadAvailableAgents() async {
+        do {
+            var agents = try container.agentRepository.findAll()
+            // 編集モードの場合、自分自身を除外（自己参照防止）
+            if case .edit(let agentId) = mode {
+                agents = agents.filter { $0.id != agentId }
+            }
+            availableAgents = agents
+        } catch {
+            // エラーは無視（空リストで続行）
+        }
     }
 
     private func loadAgent(_ agentId: AgentID) async {
@@ -96,6 +135,8 @@ struct AgentFormView: View {
                 role = agent.role
                 roleType = agent.roleType
                 type = agent.type
+                parentAgentId = agent.parentAgentId
+                maxParallelTasks = agent.maxParallelTasks
                 systemPrompt = agent.systemPrompt ?? ""
             }
         } catch {
@@ -109,13 +150,14 @@ struct AgentFormView: View {
         AsyncTask {
             do {
                 switch mode {
-                case .create(let projectId):
+                case .create:
                     _ = try container.createAgentUseCase.execute(
-                        projectId: projectId,
                         name: name,
                         role: role,
                         roleType: roleType,
                         type: type,
+                        parentAgentId: parentAgentId,
+                        maxParallelTasks: maxParallelTasks,
                         systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
                     )
                 case .edit(let agentId):
@@ -124,6 +166,8 @@ struct AgentFormView: View {
                         agent.role = role
                         agent.roleType = roleType
                         agent.type = type
+                        agent.parentAgentId = parentAgentId
+                        agent.maxParallelTasks = maxParallelTasks
                         agent.systemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
                         try container.agentRepository.save(agent)
                     }

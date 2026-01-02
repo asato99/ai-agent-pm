@@ -27,6 +27,7 @@ extension PriorityBadge: Inspectable {}
 extension StatItem: Inspectable {}
 extension TaskRow: Inspectable {}
 extension SessionRow: Inspectable {}
+extension AgentRow: Inspectable {}
 extension RoleTypeBadge: Inspectable {}
 extension AgentTypeBadge: Inspectable {}
 extension AgentStatusBadge: Inspectable {}
@@ -73,15 +74,15 @@ enum MockDataFactory {
         roleType: AgentRoleType = .developer,
         type: AgentType = .ai,
         status: AgentStatus = .active,
-        projectId: String = UUID().uuidString
+        parentAgentId: String? = nil
     ) -> Agent {
         Agent(
             id: AgentID(value: id),
-            projectId: ProjectID(value: projectId),
             name: name,
             role: role,
-            roleType: roleType,
             type: type,
+            roleType: roleType,
+            parentAgentId: parentAgentId.map { AgentID(value: $0) },
             status: status,
             createdAt: Date(),
             updatedAt: Date()
@@ -112,17 +113,17 @@ enum MockDataFactory {
 
     static func createSession(
         id: String = UUID().uuidString,
-        agentId: String = UUID().uuidString,
         projectId: String = UUID().uuidString,
+        agentId: String = UUID().uuidString,
         status: SessionStatus = .active
     ) -> Session {
         Session(
             id: SessionID(value: id),
-            agentId: AgentID(value: agentId),
             projectId: ProjectID(value: projectId),
-            status: status,
+            agentId: AgentID(value: agentId),
             startedAt: Date(),
-            endedAt: nil
+            endedAt: nil,
+            status: status
         )
     }
 }

@@ -1,5 +1,6 @@
 // Sources/App/Core/DependencyContainer/DependencyContainer.swift
 // DIコンテナ - アプリケーション全体の依存関係を管理
+// 要件: サブタスク概念は削除（タスク間の関係は依存関係のみで表現）
 
 import SwiftUI
 import Domain
@@ -18,7 +19,6 @@ public final class DependencyContainer: ObservableObject {
     public let sessionRepository: SessionRepository
     public let contextRepository: ContextRepository
     public let handoffRepository: HandoffRepository
-    public let subtaskRepository: SubtaskRepository
     public let eventRepository: EventRepository
 
     // MARK: - Event Recorder
@@ -62,7 +62,6 @@ public final class DependencyContainer: ObservableObject {
     public lazy var getTaskDetailUseCase: GetTaskDetailUseCase = {
         GetTaskDetailUseCase(
             taskRepository: taskRepository,
-            subtaskRepository: subtaskRepository,
             contextRepository: contextRepository
         )
     }()
@@ -82,6 +81,7 @@ public final class DependencyContainer: ObservableObject {
     public lazy var updateTaskStatusUseCase: UpdateTaskStatusUseCase = {
         UpdateTaskStatusUseCase(
             taskRepository: taskRepository,
+            agentRepository: agentRepository,
             eventRepository: eventRepository
         )
     }()
@@ -157,23 +157,6 @@ public final class DependencyContainer: ObservableObject {
         GetPendingHandoffsUseCase(handoffRepository: handoffRepository)
     }()
 
-    // MARK: - Use Cases (Subtask)
-
-    public lazy var addSubtaskUseCase: AddSubtaskUseCase = {
-        AddSubtaskUseCase(
-            subtaskRepository: subtaskRepository,
-            taskRepository: taskRepository
-        )
-    }()
-
-    public lazy var completeSubtaskUseCase: CompleteSubtaskUseCase = {
-        CompleteSubtaskUseCase(subtaskRepository: subtaskRepository)
-    }()
-
-    public lazy var getSubtasksUseCase: GetSubtasksUseCase = {
-        GetSubtasksUseCase(subtaskRepository: subtaskRepository)
-    }()
-
     // MARK: - Initialization
 
     public init(databasePath: String) throws {
@@ -185,7 +168,6 @@ public final class DependencyContainer: ObservableObject {
         self.sessionRepository = SessionRepository(database: database)
         self.contextRepository = ContextRepository(database: database)
         self.handoffRepository = HandoffRepository(database: database)
-        self.subtaskRepository = SubtaskRepository(database: database)
         self.eventRepository = EventRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
     }

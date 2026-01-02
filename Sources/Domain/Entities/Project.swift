@@ -32,16 +32,15 @@ public struct Project: Identifiable, Equatable, Sendable {
 // MARK: - ProjectStatus
 
 /// プロジェクトのステータス
+/// 要件: active, archived のみ（completed は削除）
 public enum ProjectStatus: String, Codable, Sendable, CaseIterable {
     case active
     case archived
-    case completed
 
     public var displayName: String {
         switch self {
         case .active: return "Active"
         case .archived: return "Archived"
-        case .completed: return "Completed"
         }
     }
 }

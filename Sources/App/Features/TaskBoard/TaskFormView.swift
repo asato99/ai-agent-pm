@@ -94,9 +94,12 @@ struct TaskFormView: View {
 
     private func loadData() async {
         do {
+            // エージェントはプロジェクト非依存なので全件取得
+            agents = try container.getAgentsUseCase.execute()
+
             switch mode {
-            case .create(let projectId):
-                agents = try container.getAgentsUseCase.execute(projectId: projectId)
+            case .create:
+                break // エージェントリストは既に読み込み済み
             case .edit(let taskId):
                 if let task = try container.taskRepository.findById(taskId) {
                     title = task.title
@@ -104,7 +107,6 @@ struct TaskFormView: View {
                     priority = task.priority
                     assigneeId = task.assigneeId
                     estimatedMinutes = task.estimatedMinutes
-                    agents = try container.getAgentsUseCase.execute(projectId: task.projectId)
                 }
             }
         } catch {

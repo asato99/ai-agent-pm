@@ -406,46 +406,6 @@ final class MCPServerTests: XCTestCase {
         }
     }
 
-    /// add_subtaskツール定義
-    func testAddSubtaskToolDefinition() {
-        let tool = ToolDefinitions.addSubtask
-
-        XCTAssertEqual(tool["name"] as? String, "add_subtask")
-        XCTAssertNotNil(tool["description"])
-
-        if let schema = tool["inputSchema"] as? [String: Any] {
-            let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.contains("task_id"), "add_subtask should require task_id")
-            XCTAssertTrue(required.contains("title"), "add_subtask should require title")
-        }
-    }
-
-    /// complete_subtaskツール定義
-    func testCompleteSubtaskToolDefinition() {
-        let tool = ToolDefinitions.completeSubtask
-
-        XCTAssertEqual(tool["name"] as? String, "complete_subtask")
-        XCTAssertNotNil(tool["description"])
-
-        if let schema = tool["inputSchema"] as? [String: Any] {
-            let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.contains("subtask_id"), "complete_subtask should require subtask_id")
-        }
-    }
-
-    /// uncomplete_subtaskツール定義
-    func testUncompleteSubtaskToolDefinition() {
-        let tool = ToolDefinitions.uncompleteSubtask
-
-        XCTAssertEqual(tool["name"] as? String, "uncomplete_subtask")
-        XCTAssertNotNil(tool["description"])
-
-        if let schema = tool["inputSchema"] as? [String: Any] {
-            let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.contains("subtask_id"), "uncomplete_subtask should require subtask_id")
-        }
-    }
-
     // MARK: - Priority Enum Tests
 
     /// ToolDefinitionsのpriority enumがPRD仕様と一致することを確認
@@ -472,14 +432,13 @@ final class MCPServerTests: XCTestCase {
     func testToolCount() {
         let tools = ToolDefinitions.all()
 
-        // 現在実装されているツール: 18個
+        // 現在実装されているツール: 15個
         // Profile: 1 (get_my_profile)
         // Session: 2 (start_session, end_session)
         // Tasks: 7 (list_tasks, get_task, get_my_tasks, create_task, update_task, update_task_status, assign_task)
-        // Subtasks: 3 (add_subtask, complete_subtask, uncomplete_subtask)
         // Context: 2 (save_context, get_task_context)
         // Handoff: 3 (create_handoff, accept_handoff, get_pending_handoffs)
-        XCTAssertEqual(tools.count, 18, "Should have 18 tools defined")
+        XCTAssertEqual(tools.count, 15, "Should have 15 tools defined")
     }
 }
 

@@ -58,20 +58,20 @@ public struct Task: Identifiable, Equatable, Sendable {
         status == .done || status == .cancelled
     }
 
-    /// タスクがアクティブかどうか
+    /// タスクがアクティブかどうか（作業中）
     public var isActive: Bool {
-        status == .inProgress || status == .inReview
+        status == .inProgress
     }
 }
 
 // MARK: - TaskStatus
 
 /// タスクのステータス
+/// 要件: backlog, todo, in_progress, done, cancelled, blocked のみ（in_review は削除）
 public enum TaskStatus: String, Codable, Sendable, CaseIterable {
     case backlog
     case todo
     case inProgress = "in_progress"
-    case inReview = "in_review"
     case blocked
     case done
     case cancelled
@@ -80,18 +80,17 @@ public enum TaskStatus: String, Codable, Sendable, CaseIterable {
     public var displayName: String {
         switch self {
         case .backlog: return "Backlog"
-        case .todo: return "Todo"
+        case .todo: return "To Do"
         case .inProgress: return "In Progress"
-        case .inReview: return "In Review"
         case .blocked: return "Blocked"
         case .done: return "Done"
         case .cancelled: return "Cancelled"
         }
     }
 
-    /// アクティブなステータスかどうか
+    /// アクティブなステータスかどうか（作業中）
     public var isActive: Bool {
-        self == .inProgress || self == .inReview
+        self == .inProgress
     }
 
     /// 完了状態かどうか

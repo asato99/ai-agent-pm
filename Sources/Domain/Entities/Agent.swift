@@ -5,13 +5,15 @@
 import Foundation
 
 /// AIエージェントまたは人間を表すエンティティ
+/// 要件: エージェントはトップレベルエンティティ（プロジェクト非依存）、階層構造をサポート
 public struct Agent: Identifiable, Equatable, Sendable {
     public let id: AgentID
-    public let projectId: ProjectID
     public var name: String
     public var role: String
     public var type: AgentType
     public var roleType: AgentRoleType
+    public var parentAgentId: AgentID?      // 階層構造（親エージェント）
+    public var maxParallelTasks: Int        // 同時実行可能タスク数
     public var capabilities: [String]
     public var systemPrompt: String?
     public var status: AgentStatus
@@ -20,11 +22,12 @@ public struct Agent: Identifiable, Equatable, Sendable {
 
     public init(
         id: AgentID,
-        projectId: ProjectID,
         name: String,
         role: String,
         type: AgentType = .ai,
         roleType: AgentRoleType = .developer,
+        parentAgentId: AgentID? = nil,
+        maxParallelTasks: Int = 1,
         capabilities: [String] = [],
         systemPrompt: String? = nil,
         status: AgentStatus = .active,
@@ -32,11 +35,12 @@ public struct Agent: Identifiable, Equatable, Sendable {
         updatedAt: Date = Date()
     ) {
         self.id = id
-        self.projectId = projectId
         self.name = name
         self.role = role
         self.type = type
         self.roleType = roleType
+        self.parentAgentId = parentAgentId
+        self.maxParallelTasks = maxParallelTasks
         self.capabilities = capabilities
         self.systemPrompt = systemPrompt
         self.status = status

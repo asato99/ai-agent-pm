@@ -64,8 +64,8 @@ struct ContentView: View {
             TaskFormView(mode: .create(projectId: projectId))
         case .editTask(let taskId):
             TaskFormView(mode: .edit(taskId))
-        case .newAgent(let projectId):
-            AgentFormView(mode: .create(projectId: projectId))
+        case .newAgent:
+            AgentFormView(mode: .create)
         case .editAgent(let agentId):
             AgentFormView(mode: .edit(agentId))
         case .taskDetail(let taskId):
@@ -74,6 +74,8 @@ struct ContentView: View {
             AgentDetailView(agentId: agentId)
         case .handoff(let taskId):
             HandoffView(taskId: taskId)
+        case .addContext(let taskId):
+            ContextFormView(taskId: taskId)
         case .settings:
             SettingsView()
         }

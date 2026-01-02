@@ -7,15 +7,19 @@ import Domain
 // MARK: - UpdateTaskStatusUseCase
 
 /// タスクステータス更新ユースケース
+/// 要件: TASKS.md - 依存関係の遵守、リソース可用性の遵守（アプリで強制ブロック）
 public struct UpdateTaskStatusUseCase: Sendable {
     private let taskRepository: any TaskRepositoryProtocol
+    private let agentRepository: any AgentRepositoryProtocol
     private let eventRepository: any EventRepositoryProtocol
 
     public init(
         taskRepository: any TaskRepositoryProtocol,
+        agentRepository: any AgentRepositoryProtocol,
         eventRepository: any EventRepositoryProtocol
     ) {
         self.taskRepository = taskRepository
+        self.agentRepository = agentRepository
         self.eventRepository = eventRepository
     }
 
@@ -35,6 +39,15 @@ public struct UpdateTaskStatusUseCase: Sendable {
         // ステータス遷移の検証
         guard Self.canTransition(from: previousStatus, to: newStatus) else {
             throw UseCaseError.invalidStatusTransition(from: previousStatus, to: newStatus)
+        }
+
+        // in_progressへの遷移時は依存関係とリソース可用性をチェック
+        if newStatus == .inProgress {
+            // 依存関係チェック: 全ての依存タスクがdoneである必要がある
+            try checkDependencies(for: task)
+
+            // リソース可用性チェック: エージェントの並列上限を超えていないか
+            try checkResourceAvailability(for: task)
         }
 
         task.status = newStatus
@@ -64,7 +77,56 @@ public struct UpdateTaskStatusUseCase: Sendable {
         return task
     }
 
+    /// 依存関係チェック: 全ての依存タスクがdoneである必要がある
+    /// 要件: 先行タスクが done になるまで in_progress に移行不可
+    private func checkDependencies(for task: Task) throws {
+        guard !task.dependencies.isEmpty else { return }
+
+        var blockedByTasks: [TaskID] = []
+
+        for dependencyId in task.dependencies {
+            if let depTask = try taskRepository.findById(dependencyId) {
+                if depTask.status != .done {
+                    blockedByTasks.append(dependencyId)
+                }
+            }
+            // 存在しない依存タスクは無視（削除済みなど）
+        }
+
+        if !blockedByTasks.isEmpty {
+            throw UseCaseError.dependencyNotComplete(taskId: task.id, blockedByTasks: blockedByTasks)
+        }
+    }
+
+    /// リソース可用性チェック: エージェントの並列上限を超えていないか
+    /// 要件: アサイン先エージェントの並列実行可能数を超える場合、in_progress に移行不可
+    private func checkResourceAvailability(for task: Task) throws {
+        guard let assigneeId = task.assigneeId else {
+            // アサインされていないタスクはリソースチェック不要
+            return
+        }
+
+        guard let agent = try agentRepository.findById(assigneeId) else {
+            // エージェントが存在しない場合はエラー
+            throw UseCaseError.agentNotFound(assigneeId)
+        }
+
+        // 現在そのエージェントがin_progressで持っているタスク数をカウント
+        let currentInProgressTasks = try taskRepository.findByAssignee(assigneeId)
+            .filter { $0.status == .inProgress }
+            .count
+
+        if currentInProgressTasks >= agent.maxParallelTasks {
+            throw UseCaseError.maxParallelTasksReached(
+                agentId: assigneeId,
+                maxParallel: agent.maxParallelTasks,
+                currentCount: currentInProgressTasks
+            )
+        }
+    }
+
     /// ステータス遷移が有効かどうかを検証
+    /// 要件: inReview は削除。遷移フロー: backlog ↔ todo → in_progress ↔ blocked → done
     public static func canTransition(from: TaskStatus, to: TaskStatus) -> Bool {
         // 同じステータスへの遷移は不可
         if from == to { return false }
@@ -74,9 +136,7 @@ public struct UpdateTaskStatusUseCase: Sendable {
             return true
         case (.todo, .inProgress), (.todo, .backlog), (.todo, .cancelled):
             return true
-        case (.inProgress, .inReview), (.inProgress, .blocked), (.inProgress, .todo):
-            return true
-        case (.inReview, .done), (.inReview, .inProgress):
+        case (.inProgress, .done), (.inProgress, .blocked), (.inProgress, .todo):
             return true
         case (.blocked, .inProgress), (.blocked, .cancelled):
             return true

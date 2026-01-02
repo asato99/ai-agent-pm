@@ -1,5 +1,6 @@
 // Sources/App/Features/TaskDetail/TaskDetailView.swift
 // タスク詳細ビュー
+// 要件: サブタスク概念は削除（タスク間の関係は依存関係のみで表現）
 
 import SwiftUI
 import Domain
@@ -14,11 +15,12 @@ struct TaskDetailView: View {
     let taskId: TaskID
 
     @State private var task: Task?
-    @State private var subtasks: [Subtask] = []
     @State private var contexts: [Context] = []
+    @State private var dependentTasks: [Task] = []
+    @State private var handoffs: [Handoff] = []
+    @State private var historyEvents: [StateChangeEvent] = []
     @State private var assignee: Agent?
     @State private var isLoading = false
-    @State private var newSubtaskTitle = ""
 
     var body: some View {
         Group {
@@ -40,8 +42,18 @@ struct TaskDetailView: View {
 
                         Divider()
 
-                        // Subtasks
-                        subtasksSection
+                        // Dependencies
+                        dependenciesSection
+
+                        Divider()
+
+                        // Handoffs
+                        handoffsSection
+
+                        Divider()
+
+                        // History (StateChangeEvents)
+                        historySection
 
                         Divider()
 
@@ -137,6 +149,7 @@ struct TaskDetailView: View {
                     }
                 }
                 .labelsHidden()
+                .accessibilityIdentifier("StatusPicker")
             }
 
             if let assignee = assignee {
@@ -159,53 +172,100 @@ struct TaskDetailView: View {
         }
     }
 
-    private var subtasksSection: some View {
+    private var dependenciesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Subtasks")
+            Text("Dependencies")
                 .font(.headline)
-                .accessibilityIdentifier("SubtasksHeader")
+                .accessibilityIdentifier("DependenciesHeader")
 
-            ForEach(subtasks, id: \.id) { subtask in
-                HStack {
-                    Button {
-                        toggleSubtask(subtask)
-                    } label: {
-                        Image(systemName: subtask.isCompleted ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(subtask.isCompleted ? .green : .secondary)
+            if dependentTasks.isEmpty {
+                Text("No dependencies")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("NoDependenciesMessage")
+            } else {
+                ForEach(dependentTasks, id: \.id) { depTask in
+                    HStack {
+                        Image(systemName: depTask.status == .done ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(depTask.status == .done ? .green : .secondary)
+
+                        VStack(alignment: .leading) {
+                            Text(depTask.title)
+                                .font(.subheadline)
+                            Text(depTask.status.displayName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("SubtaskCheckbox_\(subtask.id.value)")
-
-                    Text(subtask.title)
-                        .strikethrough(subtask.isCompleted)
-                        .foregroundStyle(subtask.isCompleted ? .secondary : .primary)
-                }
-                .accessibilityIdentifier("Subtask_\(subtask.id.value)")
-            }
-
-            HStack {
-                TextField("Add subtask...", text: $newSubtaskTitle)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("NewSubtaskField")
-                    .onSubmit {
-                        addSubtask()
+                    .onTapGesture {
+                        router.selectTask(depTask.id)
                     }
-
-                Button("Add") {
-                    addSubtask()
+                    .accessibilityIdentifier("Dependency_\(depTask.id.value)")
                 }
-                .disabled(newSubtaskTitle.isEmpty)
-                .accessibilityIdentifier("AddSubtaskButton")
             }
         }
-        .accessibilityIdentifier("SubtasksSection")
+        .accessibilityIdentifier("DependenciesSection")
+    }
+
+    private var handoffsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Handoffs")
+                .font(.headline)
+                .accessibilityIdentifier("HandoffsHeader")
+
+            if handoffs.isEmpty {
+                Text("No handoffs yet")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("NoHandoffsMessage")
+            } else {
+                ForEach(handoffs, id: \.id) { handoff in
+                    HandoffCard(handoff: handoff)
+                        .accessibilityIdentifier("Handoff_\(handoff.id.value)")
+                }
+            }
+        }
+        .accessibilityIdentifier("HandoffsSection")
+    }
+
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("History")
+                .font(.headline)
+                .accessibilityIdentifier("HistoryHeader")
+
+            if historyEvents.isEmpty {
+                Text("No history events")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("NoHistoryMessage")
+            } else {
+                ForEach(historyEvents, id: \.id) { event in
+                    HistoryEventRow(event: event)
+                        .accessibilityIdentifier("HistoryEvent_\(event.id.value)")
+                }
+            }
+        }
+        .accessibilityIdentifier("HistorySection")
     }
 
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Context History")
-                .font(.headline)
-                .accessibilityIdentifier("ContextHeader")
+            HStack {
+                Text("Context History")
+                    .font(.headline)
+                    .accessibilityIdentifier("ContextHeader")
+
+                Spacer()
+
+                Button("Add Context") {
+                    if let task = task {
+                        router.showSheet(.addContext(task.id))
+                    }
+                }
+                .accessibilityIdentifier("AddContextButton")
+                .help("Add Context")
+            }
 
             if contexts.isEmpty {
                 Text("No context saved yet")
@@ -229,12 +289,21 @@ struct TaskDetailView: View {
         do {
             let detail = try container.getTaskDetailUseCase.execute(taskId: taskId)
             task = detail.task
-            subtasks = detail.subtasks
             contexts = detail.contexts
+            dependentTasks = detail.dependentTasks
 
             if let assigneeId = detail.task.assigneeId {
                 assignee = try container.agentRepository.findById(assigneeId)
             }
+
+            // Load handoffs for this task
+            handoffs = try container.handoffRepository.findByTask(taskId)
+
+            // Load history events for this task
+            historyEvents = try container.eventRepository.findByEntity(
+                type: .task,
+                id: taskId.value
+            )
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }
@@ -256,38 +325,6 @@ struct TaskDetailView: View {
             }
         }
     }
-
-    private func toggleSubtask(_ subtask: Subtask) {
-        AsyncTask {
-            do {
-                if subtask.isCompleted {
-                    _ = try container.completeSubtaskUseCase.uncomplete(subtaskId: subtask.id)
-                } else {
-                    _ = try container.completeSubtaskUseCase.execute(subtaskId: subtask.id)
-                }
-                await loadData()
-            } catch {
-                router.showAlert(.error(message: error.localizedDescription))
-            }
-        }
-    }
-
-    private func addSubtask() {
-        guard !newSubtaskTitle.isEmpty else { return }
-
-        AsyncTask {
-            do {
-                _ = try container.addSubtaskUseCase.execute(
-                    taskId: taskId,
-                    title: newSubtaskTitle
-                )
-                newSubtaskTitle = ""
-                await loadData()
-            } catch {
-                router.showAlert(.error(message: error.localizedDescription))
-            }
-        }
-    }
 }
 
 struct StatusBadge: View {
@@ -298,7 +335,6 @@ struct StatusBadge: View {
         case .backlog: return .gray
         case .todo: return .blue
         case .inProgress: return .orange
-        case .inReview: return .purple
         case .blocked: return .red
         case .done: return .green
         case .cancelled: return .gray
@@ -348,5 +384,117 @@ struct ContextCard: View {
         .padding()
         .background(.background.secondary)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct HandoffCard: View {
+    let handoff: Handoff
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(handoff.createdAt, style: .date)
+                Text(handoff.createdAt, style: .time)
+                Spacer()
+                if handoff.isAccepted {
+                    Text("Accepted")
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.15))
+                        .foregroundStyle(.green)
+                        .clipShape(Capsule())
+                } else {
+                    Text("Pending")
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundStyle(.orange)
+                        .clipShape(Capsule())
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            Text(handoff.summary)
+                .font(.subheadline)
+
+            if let context = handoff.context {
+                Text(context)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let recommendations = handoff.recommendations {
+                Label(recommendations, systemImage: "lightbulb")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(.background.secondary)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct HistoryEventRow: View {
+    let event: StateChangeEvent
+
+    var eventIcon: String {
+        switch event.eventType {
+        case .created: return "plus.circle"
+        case .updated: return "pencil.circle"
+        case .deleted: return "trash.circle"
+        case .statusChanged: return "arrow.triangle.2.circlepath"
+        case .assigned: return "person.badge.plus"
+        case .unassigned: return "person.badge.minus"
+        case .started: return "play.circle"
+        case .completed: return "checkmark.circle"
+        }
+    }
+
+    var eventColor: Color {
+        switch event.eventType {
+        case .created: return .green
+        case .deleted: return .red
+        case .completed: return .green
+        case .statusChanged: return .blue
+        case .assigned, .unassigned: return .purple
+        default: return .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: eventIcon)
+                .foregroundStyle(eventColor)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.eventType.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                if let previousState = event.previousState, let newState = event.newState {
+                    Text("\(previousState) → \(newState)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let reason = event.reason {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(event.timestamp, style: .relative)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 }

@@ -101,7 +101,6 @@ struct Serve: ParsableCommand {
         // デフォルトエージェント作成
         let agent = Agent(
             id: AgentID(value: AppConstants.defaultAgentId),
-            projectId: projectId,
             name: AppConstants.defaultAgentName,
             role: "AI Assistant",
             type: .ai
@@ -154,7 +153,6 @@ struct Setup: ParsableCommand {
         // エージェント作成
         let agent = Agent(
             id: AgentID(value: AppConstants.defaultAgentId),
-            projectId: projectId,
             name: AppConstants.defaultAgentName,
             role: "AI Assistant",
             type: .ai
@@ -330,11 +328,12 @@ struct Status: ParsableCommand {
 
             let projects = try projectRepo.findAll()
             print("  プロジェクト数: \(projects.count)")
+            let allAgents = try agentRepo.findAll()
+            print("  エージェント数: \(allAgents.count)")
 
             for project in projects {
-                let agents = try agentRepo.findAll(projectId: project.id)
                 let tasks = try taskRepo.findAll(projectId: project.id)
-                print("  - \(project.name): エージェント \(agents.count)件, タスク \(tasks.count)件")
+                print("  - \(project.name): タスク \(tasks.count)件")
             }
         } else {
             print("✗ データベース: 未作成")
