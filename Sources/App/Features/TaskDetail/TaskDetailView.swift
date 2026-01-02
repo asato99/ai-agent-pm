@@ -37,6 +37,11 @@ struct TaskDetailView: View {
                             descriptionSection(task.description)
                         }
 
+                        // Output (成果物情報)
+                        if task.outputFileName != nil || task.outputDescription != nil {
+                            outputSection(task)
+                        }
+
                         // Status & Assignment
                         statusSection(task)
 
@@ -131,6 +136,34 @@ struct TaskDetailView: View {
             Text(description)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    @ViewBuilder
+    private func outputSection(_ task: Task) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Output")
+                .font(.headline)
+
+            if let fileName = task.outputFileName {
+                LabeledContent("File Name") {
+                    Text(fileName)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("OutputFileName")
+            }
+
+            if let description = task.outputDescription {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Description")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(description)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("OutputDescription")
+            }
+        }
+        .accessibilityIdentifier("OutputSection")
     }
 
     @ViewBuilder
@@ -312,13 +345,24 @@ struct TaskDetailView: View {
     private func updateStatus(_ newStatus: TaskStatus) {
         AsyncTask {
             do {
-                _ = try container.updateTaskStatusUseCase.execute(
+                let updatedTask = try container.updateTaskStatusUseCase.execute(
                     taskId: taskId,
                     newStatus: newStatus,
                     agentId: nil,
                     sessionId: nil,
                     reason: nil
                 )
+
+                // in_progressへの遷移時はエージェントをキック
+                if newStatus == .inProgress && updatedTask.assigneeId != nil {
+                    do {
+                        _ = try await container.kickAgentUseCase.execute(taskId: taskId)
+                    } catch {
+                        // キック失敗時はエラーを表示（ステータス変更は成功している）
+                        router.showAlert(.error(message: error.localizedDescription))
+                    }
+                }
+
                 await loadData()
             } catch {
                 router.showAlert(.error(message: error.localizedDescription))
@@ -451,6 +495,7 @@ struct HistoryEventRow: View {
         case .unassigned: return "person.badge.minus"
         case .started: return "play.circle"
         case .completed: return "checkmark.circle"
+        case .kicked: return "bolt.circle"
         }
     }
 
@@ -461,6 +506,7 @@ struct HistoryEventRow: View {
         case .completed: return .green
         case .statusChanged: return .blue
         case .assigned, .unassigned: return .purple
+        case .kicked: return .orange
         default: return .secondary
         }
     }

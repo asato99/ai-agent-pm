@@ -25,6 +25,10 @@ struct AgentFormView: View {
     @State private var parentAgentId: AgentID? = nil
     @State private var maxParallelTasks: Int = 1
     @State private var systemPrompt: String = ""
+    @State private var kickMethod: KickMethod = .cli
+    @State private var kickCommand: String = ""
+    @State private var authLevel: AuthLevel = .level0
+    @State private var passkey: String = ""
     @State private var isSaving = false
     @State private var availableAgents: [Agent] = []
 
@@ -83,6 +87,30 @@ struct AgentFormView: View {
                     .accessibilityIdentifier("MaxParallelTasksStepper")
                 }
 
+                Section("Execution Settings") {
+                    Picker("Kick Method", selection: $kickMethod) {
+                        ForEach(KickMethod.allCases, id: \.self) { method in
+                            Text(method.displayName).tag(method)
+                        }
+                    }
+                    .accessibilityIdentifier("KickMethodPicker")
+
+                    TextField("Kick Command", text: $kickCommand)
+                        .accessibilityIdentifier("KickCommandField")
+                }
+
+                Section("Authentication") {
+                    Picker("Auth Level", selection: $authLevel) {
+                        ForEach(AuthLevel.allCases, id: \.self) { level in
+                            Text(level.displayName).tag(level)
+                        }
+                    }
+                    .accessibilityIdentifier("AuthLevelPicker")
+
+                    SecureField("Passkey", text: $passkey)
+                        .accessibilityIdentifier("PasskeyField")
+                }
+
                 if type == .ai {
                     Section("AI Configuration") {
                         TextField("System Prompt", text: $systemPrompt, axis: .vertical)
@@ -138,6 +166,10 @@ struct AgentFormView: View {
                 parentAgentId = agent.parentAgentId
                 maxParallelTasks = agent.maxParallelTasks
                 systemPrompt = agent.systemPrompt ?? ""
+                kickMethod = agent.kickMethod
+                kickCommand = agent.kickCommand ?? ""
+                authLevel = agent.authLevel
+                passkey = agent.passkey ?? ""
             }
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
@@ -158,7 +190,11 @@ struct AgentFormView: View {
                         type: type,
                         parentAgentId: parentAgentId,
                         maxParallelTasks: maxParallelTasks,
-                        systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
+                        systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt,
+                        kickMethod: kickMethod,
+                        kickCommand: kickCommand.isEmpty ? nil : kickCommand,
+                        authLevel: authLevel,
+                        passkey: passkey.isEmpty ? nil : passkey
                     )
                 case .edit(let agentId):
                     if var agent = try container.agentRepository.findById(agentId) {
@@ -169,6 +205,10 @@ struct AgentFormView: View {
                         agent.parentAgentId = parentAgentId
                         agent.maxParallelTasks = maxParallelTasks
                         agent.systemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
+                        agent.kickMethod = kickMethod
+                        agent.kickCommand = kickCommand.isEmpty ? nil : kickCommand
+                        agent.authLevel = authLevel
+                        agent.passkey = passkey.isEmpty ? nil : passkey
                         try container.agentRepository.save(agent)
                     }
                 }

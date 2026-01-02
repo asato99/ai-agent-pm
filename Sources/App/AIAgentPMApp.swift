@@ -54,6 +54,7 @@ struct AIAgentPMApp: App {
         case empty = "Empty"           // 空状態（プロジェクトなし）
         case basic = "Basic"           // 基本データ（プロジェクト+エージェント+タスク）
         case multiProject = "MultiProject"  // 複数プロジェクト
+        case uc001 = "UC001"           // UC001: エージェントキック用（workingDirectory設定済み）
     }
 
     init() {
@@ -175,6 +176,8 @@ struct AIAgentPMApp: App {
                 try await seeder.seedBasicData()
             case .multiProject:
                 try await seeder.seedMultipleProjects()
+            case .uc001:
+                try await seeder.seedUC001Data()
             }
             print("✅ UITest: Test data seeded successfully")
         } catch {
@@ -350,6 +353,130 @@ private final class TestDataSeeder {
     /// 空のプロジェクト状態をシード（プロジェクトなし）
     func seedEmptyState() async throws {
         // 何もしない - 空の状態
+    }
+
+    /// UC001用のテストデータを生成（エージェントキック機能用）
+    /// - workingDirectory設定済みプロジェクト
+    /// - kickMethod=cli設定済みのclaude-code-agent
+    ///
+    /// 環境変数または引数:
+    /// - UC001_WORKING_DIR / -UC001WorkingDir: 作業ディレクトリ（デフォルト: /tmp/uc001_test）
+    /// - UC001_OUTPUT_FILE / -UC001OutputFile: 出力ファイル名（デフォルト: test_output.md）
+    func seedUC001Data() async throws {
+        // 引数から設定を取得（-UC001WorkingDir:/path/to/dir 形式）
+        var workingDirArg: String?
+        var outputFileArg: String?
+
+        for arg in CommandLine.arguments {
+            if arg.hasPrefix("-UC001WorkingDir:") {
+                workingDirArg = String(arg.dropFirst("-UC001WorkingDir:".count))
+            } else if arg.hasPrefix("-UC001OutputFile:") {
+                outputFileArg = String(arg.dropFirst("-UC001OutputFile:".count))
+            }
+        }
+
+        // 引数になければ環境変数から取得、それもなければデフォルト値
+        let workingDir = workingDirArg ?? ProcessInfo.processInfo.environment["UC001_WORKING_DIR"] ?? "/tmp/uc001_test"
+        let outputFile = outputFileArg ?? ProcessInfo.processInfo.environment["UC001_OUTPUT_FILE"] ?? "test_output.md"
+
+        // デバッグ出力
+        print("=== UC001 Test Data Configuration ===")
+        print("Working Directory: \(workingDir)")
+        print("Output File: \(outputFile)")
+
+        // 作業ディレクトリを作成（存在しない場合）
+        let fileManager = FileManager.default
+        if !fileManager.fileExists(atPath: workingDir) {
+            try fileManager.createDirectory(atPath: workingDir, withIntermediateDirectories: true)
+        }
+
+        // UC001用プロジェクト（workingDirectory設定済み）
+        let uc001Project = Project(
+            id: .generate(),
+            name: "UC001テストプロジェクト",
+            description: "エージェントキック機能テスト用プロジェクト",
+            status: .active,
+            workingDirectory: workingDir,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(uc001Project)
+
+        // workingDirectory未設定のフォールバックプロジェクト（エラーテスト用）
+        let noWDProject = Project(
+            id: .generate(),
+            name: "テストプロジェクト",
+            description: "作業ディレクトリ未設定のプロジェクト（エラーテスト用）",
+            status: .active,
+            workingDirectory: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(noWDProject)
+
+        // claude-code-agent（kickMethod=cli設定済み）
+        let claudeAgent = Agent(
+            id: .generate(),
+            name: "claude-code-agent",
+            role: "Claude Code CLIエージェント",
+            type: .ai,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 3,
+            capabilities: ["TypeScript", "Python", "Swift"],
+            systemPrompt: "Claude Codeを使用して開発タスクを実行するエージェントです",
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(claudeAgent)
+
+        // 人間オーナー（kickMethod=none）
+        let ownerAgent = Agent(
+            id: .generate(),
+            name: "owner",
+            role: "プロジェクトオーナー",
+            type: .human,
+            roleType: .manager,
+            capabilities: [],
+            systemPrompt: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(ownerAgent)
+
+        // 基本タスク（エージェント未アサイン）
+        let basicTask = Task(
+            id: .generate(),
+            projectId: uc001Project.id,
+            title: "基本タスク",
+            description: "テスト用の基本タスク",
+            status: .backlog,
+            priority: .medium,
+            assigneeId: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(basicTask)
+
+        // キックテスト用タスク（claude-code-agentがアサイン済み、backlog状態）
+        let kickTestTask = Task(
+            id: TaskID(value: "uitest_kick_task"),
+            projectId: uc001Project.id,
+            title: "キックテストタスク",
+            description: "エージェントキック機能のテスト用タスク。指定されたファイルを作成してください。",
+            status: .backlog,
+            priority: .high,
+            assigneeId: claudeAgent.id,
+            createdAt: Date(),
+            updatedAt: Date(),
+            outputFileName: outputFile,
+            outputDescription: "テスト用のMarkdownファイルを作成してください。内容には'integration test content'という文字列を含めること。"
+        )
+        try await taskRepository.save(kickTestTask)
     }
 
     /// 複数プロジェクトをシード

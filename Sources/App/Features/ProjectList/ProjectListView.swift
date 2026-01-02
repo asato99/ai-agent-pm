@@ -149,6 +149,12 @@ struct ProjectListView: View {
                 await loadData()
             }
         }
+        .onChange(of: router.currentSheet) { oldValue, newValue in
+            // シートが閉じられた時にデータを再読み込み
+            if oldValue != nil && newValue == nil {
+                AsyncTask { await loadData() }
+            }
+        }
     }
 
     private func loadData() async {

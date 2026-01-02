@@ -251,6 +251,41 @@ public final class DatabaseSetup {
             try db.create(indexOn: "agents", columns: ["parent_agent_id"])
         }
 
+        // v4: エージェントキック設定追加
+        migrator.registerMigration("v4_agent_kick_settings") { db in
+            // kick_method と kick_command カラムを追加
+            try db.alter(table: "agents") { t in
+                t.add(column: "kick_method", .text).defaults(to: "cli")
+                t.add(column: "kick_command", .text)
+            }
+        }
+
+        // v5: エージェント認証設定追加
+        migrator.registerMigration("v5_agent_auth_settings") { db in
+            // auth_level と passkey カラムを追加
+            try db.alter(table: "agents") { t in
+                t.add(column: "auth_level", .text).defaults(to: "level0")
+                t.add(column: "passkey", .text)
+            }
+        }
+
+        // v6: プロジェクト作業ディレクトリ追加
+        migrator.registerMigration("v6_project_working_directory") { db in
+            // working_directory カラムを追加（Claude Codeエージェント実行用）
+            try db.alter(table: "projects") { t in
+                t.add(column: "working_directory", .text)
+            }
+        }
+
+        // v7: タスク成果物情報追加
+        migrator.registerMigration("v7_task_output_info") { db in
+            // output_file_name と output_description カラムを追加
+            try db.alter(table: "tasks") { t in
+                t.add(column: "output_file_name", .text)
+                t.add(column: "output_description", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

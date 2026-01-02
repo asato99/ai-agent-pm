@@ -20,6 +20,7 @@ struct ProjectFormView: View {
 
     @State private var name: String = ""
     @State private var description: String = ""
+    @State private var workingDirectory: String = ""
     @State private var isSaving = false
 
     var isValid: Bool {
@@ -38,8 +39,19 @@ struct ProjectFormView: View {
             Form {
                 Section {
                     TextField("Project Name", text: $name)
+                        .accessibilityIdentifier("ProjectNameField")
                     TextField("Description", text: $description, axis: .vertical)
                         .lineLimit(3...6)
+                        .accessibilityIdentifier("ProjectDescriptionField")
+                }
+
+                Section("Execution Settings") {
+                    TextField("Working Directory", text: $workingDirectory)
+                        .accessibilityIdentifier("ProjectWorkingDirectoryField")
+
+                    Text("Claude Code agent will execute tasks in this directory")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
@@ -71,6 +83,7 @@ struct ProjectFormView: View {
             if let project = try container.projectRepository.findById(projectId) {
                 name = project.name
                 description = project.description
+                workingDirectory = project.workingDirectory ?? ""
             }
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
@@ -86,12 +99,14 @@ struct ProjectFormView: View {
                 case .create:
                     _ = try container.createProjectUseCase.execute(
                         name: name,
-                        description: description.isEmpty ? nil : description
+                        description: description.isEmpty ? nil : description,
+                        workingDirectory: workingDirectory.isEmpty ? nil : workingDirectory
                     )
                 case .edit(let projectId):
                     if var project = try container.projectRepository.findById(projectId) {
                         project.name = name
                         project.description = description
+                        project.workingDirectory = workingDirectory.isEmpty ? nil : workingDirectory
                         try container.projectRepository.save(project)
                     }
                 }

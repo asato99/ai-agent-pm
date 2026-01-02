@@ -232,6 +232,8 @@ public struct CreateTaskUseCase: Sendable {
         description: String = "",
         priority: TaskPriority = .medium,
         assigneeId: AgentID? = nil,
+        outputFileName: String? = nil,
+        outputDescription: String? = nil,
         actorAgentId: AgentID?,
         sessionId: SessionID?
     ) throws -> Task {
@@ -252,7 +254,9 @@ public struct CreateTaskUseCase: Sendable {
             description: description,
             status: .backlog,
             priority: priority,
-            assigneeId: assigneeId
+            assigneeId: assigneeId,
+            outputFileName: outputFileName?.isEmpty == true ? nil : outputFileName,
+            outputDescription: outputDescription?.isEmpty == true ? nil : outputDescription
         )
 
         try taskRepository.save(task)
@@ -286,5 +290,75 @@ public struct GetMyTasksUseCase: Sendable {
 
     public func execute(agentId: AgentID) throws -> [Task] {
         try taskRepository.findByAssignee(agentId)
+    }
+}
+
+// MARK: - KickAgentUseCase
+
+/// エージェントキックユースケース
+/// タスクのアサイン先エージェントをキック（Claude Code CLI等を起動）する
+public struct KickAgentUseCase: Sendable {
+    private let taskRepository: any TaskRepositoryProtocol
+    private let agentRepository: any AgentRepositoryProtocol
+    private let projectRepository: any ProjectRepositoryProtocol
+    private let eventRepository: any EventRepositoryProtocol
+    private let kickService: any AgentKickServiceProtocol
+
+    public init(
+        taskRepository: any TaskRepositoryProtocol,
+        agentRepository: any AgentRepositoryProtocol,
+        projectRepository: any ProjectRepositoryProtocol,
+        eventRepository: any EventRepositoryProtocol,
+        kickService: any AgentKickServiceProtocol
+    ) {
+        self.taskRepository = taskRepository
+        self.agentRepository = agentRepository
+        self.projectRepository = projectRepository
+        self.eventRepository = eventRepository
+        self.kickService = kickService
+    }
+
+    /// エージェントをキックする
+    /// - Parameters:
+    ///   - taskId: キック対象のタスクID
+    /// - Returns: キック結果
+    public func execute(taskId: TaskID) async throws -> AgentKickResult {
+        // タスクを取得
+        guard let task = try taskRepository.findById(taskId) else {
+            throw UseCaseError.taskNotFound(taskId)
+        }
+
+        // アサイン先エージェントを確認
+        guard let assigneeId = task.assigneeId else {
+            throw AgentKickError.taskNotAssigned(taskId)
+        }
+
+        guard let agent = try agentRepository.findById(assigneeId) else {
+            throw UseCaseError.agentNotFound(assigneeId)
+        }
+
+        // プロジェクトを取得
+        guard let project = try projectRepository.findById(task.projectId) else {
+            throw UseCaseError.projectNotFound(task.projectId)
+        }
+
+        // キックを実行
+        let result = try await kickService.kick(agent: agent, task: task, project: project)
+
+        // キックイベントを記録
+        let event = StateChangeEvent(
+            id: EventID.generate(),
+            projectId: task.projectId,
+            entityType: .task,
+            entityId: task.id.value,
+            eventType: .kicked,
+            agentId: agent.id,
+            newState: result.success ? "success" : "failed",
+            reason: result.message,
+            metadata: result.processId.map { ["processId": String($0)] }
+        )
+        try eventRepository.save(event)
+
+        return result
     }
 }

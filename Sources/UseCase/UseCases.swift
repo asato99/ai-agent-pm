@@ -78,7 +78,7 @@ public struct CreateProjectUseCase: Sendable {
         self.projectRepository = projectRepository
     }
 
-    public func execute(name: String, description: String? = nil) throws -> Project {
+    public func execute(name: String, description: String? = nil, workingDirectory: String? = nil) throws -> Project {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw UseCaseError.validationFailed("Name cannot be empty")
         }
@@ -86,7 +86,8 @@ public struct CreateProjectUseCase: Sendable {
         let project = Project(
             id: ProjectID.generate(),
             name: name,
-            description: description ?? ""
+            description: description ?? "",
+            workingDirectory: workingDirectory?.isEmpty == true ? nil : workingDirectory
         )
 
         try projectRepository.save(project)
@@ -126,7 +127,11 @@ public struct CreateAgentUseCase: Sendable {
         type: AgentType = .ai,
         parentAgentId: AgentID? = nil,
         maxParallelTasks: Int = 1,
-        systemPrompt: String? = nil
+        systemPrompt: String? = nil,
+        kickMethod: KickMethod = .cli,
+        kickCommand: String? = nil,
+        authLevel: AuthLevel = .level0,
+        passkey: String? = nil
     ) throws -> Agent {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw UseCaseError.validationFailed("Name cannot be empty")
@@ -140,7 +145,11 @@ public struct CreateAgentUseCase: Sendable {
             roleType: roleType,
             parentAgentId: parentAgentId,
             maxParallelTasks: maxParallelTasks,
-            systemPrompt: systemPrompt
+            systemPrompt: systemPrompt,
+            kickMethod: kickMethod,
+            kickCommand: kickCommand,
+            authLevel: authLevel,
+            passkey: passkey
         )
 
         try agentRepository.save(agent)
@@ -245,7 +254,9 @@ public struct UpdateTaskUseCase: Sendable {
         description: String? = nil,
         priority: TaskPriority? = nil,
         estimatedMinutes: Int? = nil,
-        actualMinutes: Int? = nil
+        actualMinutes: Int? = nil,
+        outputFileName: String? = nil,
+        outputDescription: String? = nil
     ) throws -> Task {
         guard var task = try taskRepository.findById(taskId) else {
             throw UseCaseError.taskNotFound(taskId)
@@ -265,6 +276,12 @@ public struct UpdateTaskUseCase: Sendable {
         }
         if let actualMinutes = actualMinutes {
             task.actualMinutes = actualMinutes
+        }
+        if let outputFileName = outputFileName {
+            task.outputFileName = outputFileName.isEmpty ? nil : outputFileName
+        }
+        if let outputDescription = outputDescription {
+            task.outputDescription = outputDescription.isEmpty ? nil : outputDescription
         }
 
         task.updatedAt = Date()

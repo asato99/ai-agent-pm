@@ -25,6 +25,8 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
     var createdAt: Date
     var updatedAt: Date
     var completedAt: Date?
+    var outputFileName: String?
+    var outputDescription: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -41,6 +43,8 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
+        case outputFileName = "output_file_name"
+        case outputDescription = "output_description"
     }
 
     func toDomain() -> Task {
@@ -65,7 +69,9 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             actualMinutes: actualMinutes,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            completedAt: completedAt
+            completedAt: completedAt,
+            outputFileName: outputFileName,
+            outputDescription: outputDescription
         )
     }
 
@@ -92,7 +98,9 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             actualMinutes: task.actualMinutes,
             createdAt: task.createdAt,
             updatedAt: task.updatedAt,
-            completedAt: task.completedAt
+            completedAt: task.completedAt,
+            outputFileName: task.outputFileName,
+            outputDescription: task.outputDescription
         )
     }
 }

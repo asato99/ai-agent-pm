@@ -21,6 +21,10 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
     var maxParallelTasks: Int
     var capabilities: String?
     var systemPrompt: String?
+    var kickMethod: String
+    var kickCommand: String?
+    var authLevel: String
+    var passkey: String?
     var status: String
     var createdAt: Date
     var updatedAt: Date
@@ -35,6 +39,10 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
         case maxParallelTasks = "max_parallel_tasks"
         case capabilities
         case systemPrompt = "system_prompt"
+        case kickMethod = "kick_method"
+        case kickCommand = "kick_command"
+        case authLevel = "auth_level"
+        case passkey
         case status
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -58,6 +66,10 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             maxParallelTasks: maxParallelTasks,
             capabilities: caps,
             systemPrompt: systemPrompt,
+            kickMethod: KickMethod(rawValue: kickMethod) ?? .cli,
+            kickCommand: kickCommand,
+            authLevel: AuthLevel(rawValue: authLevel) ?? .level0,
+            passkey: passkey,
             status: AgentStatus(rawValue: status) ?? .active,
             createdAt: createdAt,
             updatedAt: updatedAt
@@ -81,6 +93,10 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             maxParallelTasks: agent.maxParallelTasks,
             capabilities: capsJson,
             systemPrompt: agent.systemPrompt,
+            kickMethod: agent.kickMethod.rawValue,
+            kickCommand: agent.kickCommand,
+            authLevel: agent.authLevel.rawValue,
+            passkey: agent.passkey,
             status: agent.status.rawValue,
             createdAt: agent.createdAt,
             updatedAt: agent.updatedAt

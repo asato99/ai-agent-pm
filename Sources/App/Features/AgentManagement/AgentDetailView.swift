@@ -87,6 +87,12 @@ struct AgentDetailView: View {
                 Text(agent.role)
                     .foregroundStyle(.secondary)
 
+                Text("ID: \(agent.id.value)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("AgentIdDisplay")
+
                 HStack {
                     RoleTypeBadge(roleType: agent.roleType)
                     AgentTypeBadge(type: agent.type)

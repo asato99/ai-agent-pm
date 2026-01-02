@@ -9,6 +9,8 @@ public struct Project: Identifiable, Equatable, Sendable {
     public var name: String
     public var description: String
     public var status: ProjectStatus
+    /// Claude Codeエージェントがタスク実行時に使用する作業ディレクトリ（絶対パス）
+    public var workingDirectory: String?
     public let createdAt: Date
     public var updatedAt: Date
 
@@ -17,6 +19,7 @@ public struct Project: Identifiable, Equatable, Sendable {
         name: String,
         description: String = "",
         status: ProjectStatus = .active,
+        workingDirectory: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -24,6 +27,7 @@ public struct Project: Identifiable, Equatable, Sendable {
         self.name = name
         self.description = description
         self.status = status
+        self.workingDirectory = workingDirectory
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

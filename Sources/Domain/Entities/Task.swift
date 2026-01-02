@@ -21,6 +21,11 @@ public struct Task: Identifiable, Equatable, Sendable {
     public var updatedAt: Date
     public var completedAt: Date?
 
+    /// タスクの成果物ファイル名（例: "document.md"）
+    public var outputFileName: String?
+    /// タスクの成果物に関する説明・指示
+    public var outputDescription: String?
+
     public init(
         id: TaskID,
         projectId: ProjectID,
@@ -35,7 +40,9 @@ public struct Task: Identifiable, Equatable, Sendable {
         actualMinutes: Int? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        completedAt: Date? = nil
+        completedAt: Date? = nil,
+        outputFileName: String? = nil,
+        outputDescription: String? = nil
     ) {
         self.id = id
         self.projectId = projectId
@@ -51,6 +58,8 @@ public struct Task: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
+        self.outputFileName = outputFileName
+        self.outputDescription = outputDescription
     }
 
     /// タスクが完了状態かどうか

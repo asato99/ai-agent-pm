@@ -14,23 +14,47 @@ struct TaskBoardView: View {
 
     @State private var tasks: [Task] = []
     @State private var agents: [Agent] = []
+    @State private var project: Project?
     @State private var isLoading = false
 
     private let columns: [TaskStatus] = [.backlog, .todo, .inProgress, .blocked, .done]
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 16) {
-                ForEach(columns, id: \.self) { status in
-                    TaskColumnView(
-                        status: status,
-                        tasks: tasks.filter { $0.status == status },
-                        agents: agents
-                    )
-                    .accessibilityIdentifier("TaskColumn_\(status.rawValue)")
+        VStack(spacing: 0) {
+            // Project Info Header
+            if let project = project {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Working Directory:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(project.workingDirectory ?? "Not set")
+                            .font(.caption)
+                            .foregroundStyle(project.workingDirectory != nil ? .primary : .tertiary)
+                            .accessibilityIdentifier("WorkingDirectoryValue")
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("ProjectWorkingDirectory")
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.background.secondary)
             }
-            .padding()
+
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(columns, id: \.self) { status in
+                        TaskColumnView(
+                            status: status,
+                            tasks: tasks.filter { $0.status == status },
+                            agents: agents
+                        )
+                        .accessibilityIdentifier("TaskColumn_\(status.rawValue)")
+                    }
+                }
+                .padding()
+            }
         }
         .accessibilityIdentifier("TaskBoard")
         .navigationTitle("Task Board")
@@ -66,6 +90,12 @@ struct TaskBoardView: View {
         .task {
             await loadData()
         }
+        .onChange(of: router.currentSheet) { oldValue, newValue in
+            // シートが閉じられた時にデータを再読み込み
+            if oldValue != nil && newValue == nil {
+                AsyncTask { await loadData() }
+            }
+        }
     }
 
     private func loadData() async {
@@ -73,6 +103,7 @@ struct TaskBoardView: View {
         defer { isLoading = false }
 
         do {
+            project = try container.projectRepository.findById(projectId)
             tasks = try container.getTasksUseCase.execute(projectId: projectId, status: nil)
             agents = try container.getAgentsUseCase.execute()
         } catch {
@@ -216,6 +247,20 @@ struct TaskCardButton: View {
 
     @FocusState private var isFocused: Bool
 
+    /// アサイニー名を取得
+    private var assigneeName: String? {
+        guard let assigneeId = task.assigneeId else { return nil }
+        return agents.first { $0.id == assigneeId }?.name
+    }
+
+    /// アクセシビリティラベル（タイトル + アサイニー名）
+    private var accessibilityLabelText: String {
+        if let name = assigneeName {
+            return "\(task.title), assigned to \(name)"
+        }
+        return task.title
+    }
+
     var body: some View {
         Button(action: action) {
             TaskCardView(task: task, agents: agents)
@@ -229,7 +274,7 @@ struct TaskCardButton: View {
         .focused($isFocused)
         // アクセシビリティ設定
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(task.title)
+        .accessibilityLabel(accessibilityLabelText)
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("TaskCard_\(task.id.value)")
     }

@@ -15,6 +15,7 @@ struct ProjectRecord: Codable, FetchableRecord, PersistableRecord {
     var name: String
     var description: String
     var status: String
+    var workingDirectory: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -23,6 +24,7 @@ struct ProjectRecord: Codable, FetchableRecord, PersistableRecord {
         case name
         case description
         case status
+        case workingDirectory = "working_directory"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -33,6 +35,7 @@ struct ProjectRecord: Codable, FetchableRecord, PersistableRecord {
             name: name,
             description: description,
             status: ProjectStatus(rawValue: status) ?? .active,
+            workingDirectory: workingDirectory,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -44,6 +47,7 @@ struct ProjectRecord: Codable, FetchableRecord, PersistableRecord {
             name: project.name,
             description: project.description,
             status: project.status.rawValue,
+            workingDirectory: project.workingDirectory,
             createdAt: project.createdAt,
             updatedAt: project.updatedAt
         )

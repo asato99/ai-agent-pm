@@ -16,6 +16,10 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var maxParallelTasks: Int        // 同時実行可能タスク数
     public var capabilities: [String]
     public var systemPrompt: String?
+    public var kickMethod: KickMethod
+    public var kickCommand: String?
+    public var authLevel: AuthLevel
+    public var passkey: String?
     public var status: AgentStatus
     public let createdAt: Date
     public var updatedAt: Date
@@ -30,6 +34,10 @@ public struct Agent: Identifiable, Equatable, Sendable {
         maxParallelTasks: Int = 1,
         capabilities: [String] = [],
         systemPrompt: String? = nil,
+        kickMethod: KickMethod = .cli,
+        kickCommand: String? = nil,
+        authLevel: AuthLevel = .level0,
+        passkey: String? = nil,
         status: AgentStatus = .active,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -43,9 +51,51 @@ public struct Agent: Identifiable, Equatable, Sendable {
         self.maxParallelTasks = maxParallelTasks
         self.capabilities = capabilities
         self.systemPrompt = systemPrompt
+        self.kickMethod = kickMethod
+        self.kickCommand = kickCommand
+        self.authLevel = authLevel
+        self.passkey = passkey
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+}
+
+// MARK: - AuthLevel
+
+/// エージェントの認証レベル
+/// 参照: docs/requirements/AGENTS.md - エージェント認証
+public enum AuthLevel: String, Codable, Sendable, CaseIterable {
+    case level0
+    case level1
+    case level2
+
+    public var displayName: String {
+        switch self {
+        case .level0: return "Level 0 (ID only)"
+        case .level1: return "Level 1 (ID + Passkey)"
+        case .level2: return "Level 2 (+ IP restriction)"
+        }
+    }
+}
+
+// MARK: - KickMethod
+
+/// エージェントの起動方式
+/// 参照: docs/requirements/AGENTS.md - 活動のキック
+public enum KickMethod: String, Codable, Sendable, CaseIterable {
+    case cli
+    case script
+    case api
+    case notification
+
+    public var displayName: String {
+        switch self {
+        case .cli: return "CLI"
+        case .script: return "Script"
+        case .api: return "API"
+        case .notification: return "Notification"
+        }
     }
 }
 

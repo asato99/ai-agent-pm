@@ -41,7 +41,7 @@ public final class Router {
     // MARK: - Sheet Destination
 
     /// シートの遷移先
-    public enum SheetDestination: Identifiable {
+    public enum SheetDestination: Identifiable, Equatable {
         case newProject
         case editProject(ProjectID)
         case newTask(ProjectID)
