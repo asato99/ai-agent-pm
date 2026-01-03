@@ -15,8 +15,10 @@ struct ContentView: View {
             // サイドバー: プロジェクトリスト
             ProjectListView()
         } content: {
-            // コンテンツ: タスクボード or エージェント管理
-            if let projectId = router.selectedProject {
+            // コンテンツ: タスクボード or Internal Audits or エージェント管理
+            if router.showingInternalAudits {
+                InternalAuditListView()
+            } else if let projectId = router.selectedProject {
                 TaskBoardView(projectId: projectId)
             } else {
                 ContentUnavailableView(
@@ -78,6 +80,24 @@ struct ContentView: View {
             ContextFormView(taskId: taskId)
         case .settings:
             SettingsView()
+        case .newTemplate:
+            TemplateFormView(mode: .create)
+        case .editTemplate(let templateId):
+            TemplateFormView(mode: .edit(templateId))
+        case .templateDetail(let templateId):
+            TemplateDetailView(templateId: templateId)
+        case .instantiateTemplate(let templateId, let projectId):
+            InstantiateTemplateView(templateId: templateId, projectId: projectId)
+        case .newInternalAudit:
+            InternalAuditFormView(mode: .create)
+        case .editInternalAudit(let auditId):
+            InternalAuditFormView(mode: .edit(auditId))
+        case .internalAuditDetail(let auditId):
+            InternalAuditDetailView(auditId: auditId)
+        case .newAuditRule(let auditId):
+            AuditRuleFormView(mode: .create(auditId))
+        case .editAuditRule(let ruleId, let auditId):
+            AuditRuleFormView(mode: .edit(ruleId, auditId))
         }
     }
 

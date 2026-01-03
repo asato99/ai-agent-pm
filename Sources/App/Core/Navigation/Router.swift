@@ -19,6 +19,15 @@ public final class Router {
     /// 選択中のエージェント
     public var selectedAgent: AgentID?
 
+    /// 選択中のテンプレート
+    public var selectedTemplate: WorkflowTemplateID?
+
+    /// 選択中のInternal Audit
+    public var selectedInternalAudit: InternalAuditID?
+
+    /// Internal Audits一覧を表示中かどうか
+    public var showingInternalAudits: Bool = false
+
     // MARK: - Navigation Path
 
     /// NavigationStack用のパス
@@ -53,6 +62,15 @@ public final class Router {
         case handoff(TaskID)
         case addContext(TaskID)
         case settings
+        case newTemplate
+        case editTemplate(WorkflowTemplateID)
+        case templateDetail(WorkflowTemplateID)
+        case instantiateTemplate(WorkflowTemplateID, ProjectID)
+        case newInternalAudit
+        case editInternalAudit(InternalAuditID)
+        case internalAuditDetail(InternalAuditID)
+        case newAuditRule(InternalAuditID)
+        case editAuditRule(AuditRuleID, InternalAuditID)
 
         public var id: String {
             switch self {
@@ -78,6 +96,24 @@ public final class Router {
                 return "addContext-\(id.value)"
             case .settings:
                 return "settings"
+            case .newTemplate:
+                return "newTemplate"
+            case .editTemplate(let id):
+                return "editTemplate-\(id.value)"
+            case .templateDetail(let id):
+                return "templateDetail-\(id.value)"
+            case .instantiateTemplate(let templateId, let projectId):
+                return "instantiateTemplate-\(templateId.value)-\(projectId.value)"
+            case .newInternalAudit:
+                return "newInternalAudit"
+            case .editInternalAudit(let id):
+                return "editInternalAudit-\(id.value)"
+            case .internalAuditDetail(let id):
+                return "internalAuditDetail-\(id.value)"
+            case .newAuditRule(let auditId):
+                return "newAuditRule-\(auditId.value)"
+            case .editAuditRule(let ruleId, let auditId):
+                return "editAuditRule-\(ruleId.value)-\(auditId.value)"
             }
         }
     }
@@ -109,6 +145,7 @@ public final class Router {
         selectedProject = projectId
         selectedTask = nil
         selectedAgent = nil
+        showingInternalAudits = false
     }
 
     /// タスクを選択
@@ -119,6 +156,29 @@ public final class Router {
     /// エージェントを選択
     public func selectAgent(_ agentId: AgentID?) {
         selectedAgent = agentId
+    }
+
+    /// テンプレートを選択
+    public func selectTemplate(_ templateId: WorkflowTemplateID?) {
+        selectedTemplate = templateId
+    }
+
+    /// Internal Auditを選択
+    public func selectInternalAudit(_ auditId: InternalAuditID?) {
+        selectedInternalAudit = auditId
+    }
+
+    /// Internal Audits一覧を表示
+    public func showInternalAudits() {
+        showingInternalAudits = true
+        selectedProject = nil
+        selectedTask = nil
+        selectedAgent = nil
+    }
+
+    /// Internal Audits表示を解除（プロジェクト選択時など）
+    public func hideInternalAudits() {
+        showingInternalAudits = false
     }
 
     /// シートを表示
@@ -178,6 +238,14 @@ public final class Router {
             }
         case "settings":
             showSheet(.settings)
+        case "template":
+            if let templateIdString = pathComponents.first {
+                showSheet(.templateDetail(WorkflowTemplateID(value: templateIdString)))
+            }
+        case "audit":
+            if let auditIdString = pathComponents.first {
+                showSheet(.internalAuditDetail(InternalAuditID(value: auditIdString)))
+            }
         default:
             break
         }

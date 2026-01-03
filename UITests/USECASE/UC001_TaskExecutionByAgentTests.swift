@@ -18,11 +18,6 @@
 
 import XCTest
 
-/// テスト失敗時にthrowするエラー
-private enum TestError: Error {
-    case failedPrecondition(String)
-}
-
 // MARK: - UC001: Task Execution by Agent Tests
 
 /// UC001: エージェントによるタスク実行テスト

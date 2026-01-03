@@ -11,6 +11,7 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var name: String
     public var role: String
     public var type: AgentType
+    public var hierarchyType: AgentHierarchyType  // 階層タイプ（Manager/Worker）
     public var roleType: AgentRoleType
     public var parentAgentId: AgentID?      // 階層構造（親エージェント）
     public var maxParallelTasks: Int        // 同時実行可能タスク数
@@ -24,11 +25,21 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public let createdAt: Date
     public var updatedAt: Date
 
+    // MARK: - Lock Fields (Internal Audit)
+    /// ロック状態（監査エージェントによる強制ロック）
+    /// 参照: docs/requirements/AUDIT.md - ロック機能
+    public var isLocked: Bool
+    /// ロックを行った Internal Audit の ID
+    public var lockedByAuditId: InternalAuditID?
+    /// ロック日時
+    public var lockedAt: Date?
+
     public init(
         id: AgentID,
         name: String,
         role: String,
         type: AgentType = .ai,
+        hierarchyType: AgentHierarchyType = .worker,
         roleType: AgentRoleType = .developer,
         parentAgentId: AgentID? = nil,
         maxParallelTasks: Int = 1,
@@ -40,12 +51,16 @@ public struct Agent: Identifiable, Equatable, Sendable {
         passkey: String? = nil,
         status: AgentStatus = .active,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        isLocked: Bool = false,
+        lockedByAuditId: InternalAuditID? = nil,
+        lockedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
         self.role = role
         self.type = type
+        self.hierarchyType = hierarchyType
         self.roleType = roleType
         self.parentAgentId = parentAgentId
         self.maxParallelTasks = maxParallelTasks
@@ -58,6 +73,14 @@ public struct Agent: Identifiable, Equatable, Sendable {
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.isLocked = isLocked
+        self.lockedByAuditId = lockedByAuditId
+        self.lockedAt = lockedAt
+    }
+
+    /// 操作が可能かどうか（ロックされていない場合のみ）
+    public var canOperate: Bool {
+        !isLocked
     }
 }
 
@@ -138,6 +161,38 @@ public enum AgentRoleType: String, Codable, Sendable, CaseIterable {
         case .designer: return "Designer"
         case .analyst: return "Analyst"
         }
+    }
+}
+
+// MARK: - AgentHierarchyType
+
+/// エージェントの階層タイプ（タスク作成・割り当て権限）
+/// 参照: docs/requirements/AGENTS.md - エージェントタイプ
+public enum AgentHierarchyType: String, Codable, Sendable, CaseIterable {
+    case manager  // タスク作成・割り当て可能、実行不可
+    case worker   // タスク実行のみ、下位エージェントなし
+
+    public var displayName: String {
+        switch self {
+        case .manager: return "Manager"
+        case .worker: return "Worker"
+        }
+    }
+
+    public var canCreateTasks: Bool {
+        self == .manager
+    }
+
+    public var canAssignToOthers: Bool {
+        self == .manager
+    }
+
+    public var canExecuteTasks: Bool {
+        self == .worker
+    }
+
+    public var canHaveSubordinates: Bool {
+        self == .manager
     }
 }
 

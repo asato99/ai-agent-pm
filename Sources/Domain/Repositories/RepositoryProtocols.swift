@@ -23,6 +23,7 @@ public protocol AgentRepositoryProtocol: Sendable {
     func findByType(_ type: AgentType) throws -> [Agent]
     func findByParent(_ parentAgentId: AgentID?) throws -> [Agent]
     func findRootAgents() throws -> [Agent]
+    func findLocked(byAuditId: InternalAuditID?) throws -> [Agent]
     func save(_ agent: Agent) throws
     func delete(_ id: AgentID) throws
 }
@@ -36,6 +37,7 @@ public protocol TaskRepositoryProtocol: Sendable {
     func findByProject(_ projectId: ProjectID, status: TaskStatus?) throws -> [Task]
     func findByAssignee(_ agentId: AgentID) throws -> [Task]
     func findByStatus(_ status: TaskStatus, projectId: ProjectID) throws -> [Task]
+    func findLocked(byAuditId: InternalAuditID?) throws -> [Task]
     func save(_ task: Task) throws
     func delete(_ id: TaskID) throws
 }
@@ -82,4 +84,53 @@ public protocol EventRepositoryProtocol: Sendable {
     func findByEntity(type: EntityType, id: String) throws -> [StateChangeEvent]
     func findRecent(projectId: ProjectID, since: Date) throws -> [StateChangeEvent]
     func save(_ event: StateChangeEvent) throws
+}
+
+// MARK: - WorkflowTemplateRepositoryProtocol
+
+/// ワークフローテンプレートリポジトリのプロトコル
+/// 参照: docs/requirements/WORKFLOW_TEMPLATES.md
+public protocol WorkflowTemplateRepositoryProtocol: Sendable {
+    func findById(_ id: WorkflowTemplateID) throws -> WorkflowTemplate?
+    func findAll(includeArchived: Bool) throws -> [WorkflowTemplate]
+    func findActive() throws -> [WorkflowTemplate]
+    func save(_ template: WorkflowTemplate) throws
+    func delete(_ id: WorkflowTemplateID) throws
+}
+
+// MARK: - TemplateTaskRepositoryProtocol
+
+/// テンプレートタスクリポジトリのプロトコル
+/// 参照: docs/requirements/WORKFLOW_TEMPLATES.md
+public protocol TemplateTaskRepositoryProtocol: Sendable {
+    func findById(_ id: TemplateTaskID) throws -> TemplateTask?
+    func findByTemplate(_ templateId: WorkflowTemplateID) throws -> [TemplateTask]
+    func save(_ task: TemplateTask) throws
+    func delete(_ id: TemplateTaskID) throws
+    func deleteByTemplate(_ templateId: WorkflowTemplateID) throws
+}
+
+// MARK: - InternalAuditRepositoryProtocol
+
+/// Internal Auditリポジトリのプロトコル
+/// 参照: docs/requirements/AUDIT.md
+public protocol InternalAuditRepositoryProtocol: Sendable {
+    func findById(_ id: InternalAuditID) throws -> InternalAudit?
+    func findAll(includeInactive: Bool) throws -> [InternalAudit]
+    func findActive() throws -> [InternalAudit]
+    func save(_ audit: InternalAudit) throws
+    func delete(_ id: InternalAuditID) throws
+}
+
+// MARK: - AuditRuleRepositoryProtocol
+
+/// Audit Ruleリポジトリのプロトコル
+/// 参照: docs/requirements/AUDIT.md
+public protocol AuditRuleRepositoryProtocol: Sendable {
+    func findById(_ id: AuditRuleID) throws -> AuditRule?
+    func findByAudit(_ auditId: InternalAuditID) throws -> [AuditRule]
+    func findEnabled(auditId: InternalAuditID) throws -> [AuditRule]
+    func findByTriggerType(_ triggerType: TriggerType) throws -> [AuditRule]
+    func save(_ rule: AuditRule) throws
+    func delete(_ id: AuditRuleID) throws
 }

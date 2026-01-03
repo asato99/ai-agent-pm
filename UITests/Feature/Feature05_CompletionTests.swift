@@ -5,11 +5,6 @@
 
 import XCTest
 
-/// テスト失敗時にthrowするエラー
-private enum TestError: Error {
-    case failedPrecondition(String)
-}
-
 /// Feature05: 完了通知テスト
 final class Feature05_CompletionTests: XCTestCase {
 

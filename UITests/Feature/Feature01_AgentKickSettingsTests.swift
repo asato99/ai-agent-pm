@@ -5,11 +5,6 @@
 
 import XCTest
 
-/// テスト失敗時にthrowするエラー
-private enum TestError: Error {
-    case failedPrecondition(String)
-}
-
 /// Feature01: エージェントキック設定テスト
 final class Feature01_AgentKickSettingsTests: XCTestCase {
 

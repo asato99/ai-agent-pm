@@ -16,6 +16,7 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
     var name: String
     var role: String
     var type: String
+    var hierarchyType: String
     var roleType: String
     var parentAgentId: String?
     var maxParallelTasks: Int
@@ -28,12 +29,17 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
     var status: String
     var createdAt: Date
     var updatedAt: Date
+    // Lock fields
+    var isLocked: Bool
+    var lockedByAuditId: String?
+    var lockedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
         case role
         case type
+        case hierarchyType = "hierarchy_type"
         case roleType = "role_type"
         case parentAgentId = "parent_agent_id"
         case maxParallelTasks = "max_parallel_tasks"
@@ -46,6 +52,9 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
         case status
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case isLocked = "is_locked"
+        case lockedByAuditId = "locked_by_audit_id"
+        case lockedAt = "locked_at"
     }
 
     func toDomain() -> Agent {
@@ -61,6 +70,7 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             name: name,
             role: role,
             type: AgentType(rawValue: type) ?? .ai,
+            hierarchyType: AgentHierarchyType(rawValue: hierarchyType) ?? .worker,
             roleType: AgentRoleType(rawValue: roleType) ?? .developer,
             parentAgentId: parentAgentId.map { AgentID(value: $0) },
             maxParallelTasks: maxParallelTasks,
@@ -72,7 +82,10 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             passkey: passkey,
             status: AgentStatus(rawValue: status) ?? .active,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            isLocked: isLocked,
+            lockedByAuditId: lockedByAuditId.map { InternalAuditID(value: $0) },
+            lockedAt: lockedAt
         )
     }
 
@@ -88,6 +101,7 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             name: agent.name,
             role: agent.role,
             type: agent.type.rawValue,
+            hierarchyType: agent.hierarchyType.rawValue,
             roleType: agent.roleType.rawValue,
             parentAgentId: agent.parentAgentId?.value,
             maxParallelTasks: agent.maxParallelTasks,
@@ -99,7 +113,10 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             passkey: agent.passkey,
             status: agent.status.rawValue,
             createdAt: agent.createdAt,
-            updatedAt: agent.updatedAt
+            updatedAt: agent.updatedAt,
+            isLocked: agent.isLocked,
+            lockedByAuditId: agent.lockedByAuditId?.value,
+            lockedAt: agent.lockedAt
         )
     }
 }
@@ -162,6 +179,19 @@ public final class AgentRepository: AgentRepositoryProtocol, Sendable {
 
     public func findRootAgents() throws -> [Agent] {
         try findByParent(nil)
+    }
+
+    public func findLocked(byAuditId auditId: InternalAuditID?) throws -> [Agent] {
+        try db.read { db in
+            var request = AgentRecord.filter(Column("is_locked") == true)
+            if let auditId = auditId {
+                request = request.filter(Column("locked_by_audit_id") == auditId.value)
+            }
+            return try request
+                .order(Column("locked_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
     }
 
     public func save(_ agent: Agent) throws {

@@ -12,6 +12,9 @@ public enum UseCaseError: Error, Sendable {
     case agentNotFound(AgentID)
     case projectNotFound(ProjectID)
     case sessionNotFound(SessionID)
+    case templateNotFound(WorkflowTemplateID)
+    case internalAuditNotFound(InternalAuditID)
+    case auditRuleNotFound(AuditRuleID)
     case invalidStatusTransition(from: TaskStatus, to: TaskStatus)
     case sessionNotActive
     case sessionAlreadyActive(SessionID)
@@ -36,6 +39,12 @@ extension UseCaseError: LocalizedError {
             return "Project not found: \(id.value)"
         case .sessionNotFound(let id):
             return "Session not found: \(id.value)"
+        case .templateNotFound(let id):
+            return "Workflow template not found: \(id.value)"
+        case .internalAuditNotFound(let id):
+            return "Internal audit not found: \(id.value)"
+        case .auditRuleNotFound(let id):
+            return "Audit rule not found: \(id.value)"
         case .invalidStatusTransition(let from, let to):
             return "Invalid status transition: \(from.rawValue) -> \(to.rawValue)"
         case .sessionNotActive:
@@ -123,6 +132,7 @@ public struct CreateAgentUseCase: Sendable {
     public func execute(
         name: String,
         role: String,
+        hierarchyType: AgentHierarchyType = .worker,
         roleType: AgentRoleType = .developer,
         type: AgentType = .ai,
         parentAgentId: AgentID? = nil,
@@ -142,6 +152,7 @@ public struct CreateAgentUseCase: Sendable {
             name: name,
             role: role,
             type: type,
+            hierarchyType: hierarchyType,
             roleType: roleType,
             parentAgentId: parentAgentId,
             maxParallelTasks: maxParallelTasks,

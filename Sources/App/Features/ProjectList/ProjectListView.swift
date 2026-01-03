@@ -12,6 +12,8 @@ struct ProjectListView: View {
 
     @State private var projects: [Project] = []
     @State private var agents: [Agent] = []
+    @State private var templates: [WorkflowTemplate] = []
+    @State private var internalAudits: [InternalAudit] = []
     @State private var isLoading = false
     @State private var searchText = ""
 
@@ -27,6 +29,20 @@ struct ProjectListView: View {
             return agents
         }
         return agents.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    var filteredTemplates: [WorkflowTemplate] {
+        if searchText.isEmpty {
+            return templates
+        }
+        return templates.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    var filteredInternalAudits: [InternalAudit] {
+        if searchText.isEmpty {
+            return internalAudits
+        }
+        return internalAudits.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
     var body: some View {
@@ -83,6 +99,66 @@ struct ProjectListView: View {
                 }
             }
             .accessibilityIdentifier("AgentsSection")
+
+            // Templates Section
+            Section {
+                ForEach(filteredTemplates, id: \.id) { template in
+                    TemplateRowView(template: template)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            router.selectTemplate(template.id)
+                            router.showSheet(.templateDetail(template.id))
+                        }
+                }
+            } header: {
+                HStack {
+                    Label("Templates", systemImage: "doc.on.doc")
+                    Spacer()
+                    Button {
+                        router.showSheet(.newTemplate)
+                    } label: {
+                        Image(systemName: "plus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("NewTemplateButton")
+                    .accessibilityLabel("New Template")
+                    .help("New Template (⇧⌘T)")
+                }
+            }
+            .accessibilityIdentifier("TemplatesSection")
+
+            // Internal Audits Section
+            Section {
+                ForEach(filteredInternalAudits, id: \.id) { audit in
+                    InternalAuditRowView(audit: audit)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            router.selectInternalAudit(audit.id)
+                            router.showSheet(.internalAuditDetail(audit.id))
+                        }
+                }
+            } header: {
+                HStack {
+                    Text("Internal Audits")
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            router.showInternalAudits()
+                        }
+                    Image(systemName: "checkmark.shield")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        router.showSheet(.newInternalAudit)
+                    } label: {
+                        Image(systemName: "plus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("SidebarNewInternalAuditButton")
+                    .accessibilityLabel("New Internal Audit")
+                    .help("New Internal Audit")
+                }
+            }
+            .accessibilityIdentifier("InternalAuditsSection")
         }
         .accessibilityIdentifier("ProjectList")
         .searchable(text: $searchText, prompt: "Search")
@@ -103,18 +179,31 @@ struct ProjectListView: View {
                         Label("New Agent", systemImage: "person.badge.plus")
                     }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
+
+                    Button {
+                        router.showSheet(.newTemplate)
+                    } label: {
+                        Label("New Template", systemImage: "doc.badge.plus")
+                    }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+
+                    Button {
+                        router.showSheet(.newInternalAudit)
+                    } label: {
+                        Label("New Internal Audit", systemImage: "checkmark.shield")
+                    }
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
                 .accessibilityIdentifier("AddButton")
-                .help("Add Project or Agent")
+                .help("Add Project, Agent, or Template")
             }
         }
         .overlay {
             if isLoading {
                 ProgressView()
                     .accessibilityIdentifier("LoadingIndicator")
-            } else if projects.isEmpty && agents.isEmpty {
+            } else if projects.isEmpty && agents.isEmpty && templates.isEmpty && internalAudits.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "folder.badge.plus")
                         .font(.system(size: 48))
@@ -164,8 +253,125 @@ struct ProjectListView: View {
         do {
             projects = try container.getProjectsUseCase.execute()
             agents = try container.getAgentsUseCase.execute()
+            templates = try container.listTemplatesUseCase.execute(includeArchived: false)
+            internalAudits = try container.listInternalAuditsUseCase.execute(includeInactive: false)
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
+        }
+    }
+}
+
+struct InternalAuditRowView: View {
+    let audit: InternalAudit
+    @Environment(Router.self) var router
+
+    private var statusIcon: String {
+        audit.status == .active ? "checkmark.shield" : "pause.circle"
+    }
+
+    private var statusColor: Color {
+        audit.status == .active ? Color.accentColor : Color.secondary
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: statusIcon)
+                .foregroundStyle(statusColor)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(audit.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .accessibilityIdentifier("InternalAuditName_\(audit.id.value)")
+
+                if let description = audit.description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if audit.status == .suspended {
+                Text("Suspended")
+                    .font(.caption2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.2))
+                    .cornerRadius(4)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("InternalAuditRow_\(audit.id.value)")
+        .contextMenu {
+            Button {
+                router.showSheet(.editInternalAudit(audit.id))
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .accessibilityIdentifier("EditAuditMenuItem")
+        }
+    }
+}
+
+struct TemplateRowView: View {
+    let template: WorkflowTemplate
+    @Environment(Router.self) var router
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc.on.doc")
+                .foregroundStyle(Color.accentColor)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(template.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .accessibilityIdentifier("TemplateName_\(template.id.value)")
+
+                if !template.description.isEmpty {
+                    Text(template.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if !template.variables.isEmpty {
+                Text("\(template.variables.count)")
+                    .font(.caption2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.2))
+                    .cornerRadius(4)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("TemplateRow_\(template.id.value)")
+        .contextMenu {
+            Button {
+                router.showSheet(.editTemplate(template.id))
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .accessibilityIdentifier("EditTemplateMenuItem")
+
+            if let projectId = router.selectedProject {
+                Button {
+                    router.showSheet(.instantiateTemplate(template.id, projectId))
+                } label: {
+                    Label("Apply to Project", systemImage: "arrow.right.doc.on.clipboard")
+                }
+                .accessibilityIdentifier("InstantiateTemplateMenuItem")
+            }
         }
     }
 }

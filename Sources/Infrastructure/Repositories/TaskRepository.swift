@@ -24,6 +24,10 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
     var createdAt: Date
     var updatedAt: Date
     var completedAt: Date?
+    // Lock fields
+    var isLocked: Bool
+    var lockedByAuditId: String?
+    var lockedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -39,6 +43,9 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
+        case isLocked = "is_locked"
+        case lockedByAuditId = "locked_by_audit_id"
+        case lockedAt = "locked_at"
     }
 
     func toDomain() -> Task {
@@ -62,7 +69,10 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             actualMinutes: actualMinutes,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            completedAt: completedAt
+            completedAt: completedAt,
+            isLocked: isLocked,
+            lockedByAuditId: lockedByAuditId.map { InternalAuditID(value: $0) },
+            lockedAt: lockedAt
         )
     }
 
@@ -88,7 +98,10 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             actualMinutes: task.actualMinutes,
             createdAt: task.createdAt,
             updatedAt: task.updatedAt,
-            completedAt: task.completedAt
+            completedAt: task.completedAt,
+            isLocked: task.isLocked,
+            lockedByAuditId: task.lockedByAuditId?.value,
+            lockedAt: task.lockedAt
         )
     }
 }
@@ -151,6 +164,19 @@ public final class TaskRepository: TaskRepositoryProtocol, Sendable {
                 .filter(Column("project_id") == projectId.value)
                 .filter(Column("status") == status.rawValue)
                 .order(Column("priority"), Column("updated_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
+    public func findLocked(byAuditId auditId: InternalAuditID?) throws -> [Task] {
+        try db.read { db in
+            var request = TaskRecord.filter(Column("is_locked") == true)
+            if let auditId = auditId {
+                request = request.filter(Column("locked_by_audit_id") == auditId.value)
+            }
+            return try request
+                .order(Column("locked_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }

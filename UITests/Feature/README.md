@@ -214,6 +214,58 @@ Phase 4: 完了フロー
 
 ---
 
+## Feature09: ワークフローテンプレート
+
+### 概要
+一連のタスクをテンプレートとして定義し、繰り返し適用できる機能。
+
+### テストケース
+
+| ID | テスト名 | 期待結果 |
+|----|----------|----------|
+| F09-01 | testTemplateListExists | テンプレート一覧画面が表示される |
+| F09-02 | testNewTemplateFormOpens | 新規テンプレート作成フォームが開く |
+| F09-03 | testTemplateNameRequired | テンプレート名が必須 |
+| F09-04 | testAddTaskToTemplate | テンプレートにタスクを追加できる |
+| F09-05 | testAddVariableToTemplate | 変数を追加できる |
+| F09-06 | testSaveTemplate | テンプレートを保存できる |
+| F09-07 | testInstantiateSheetOpens | インスタンス化シートが開く |
+| F09-08 | testVariableInputFieldsDisplayed | 変数入力フィールドが表示される |
+| F09-09 | testInstantiateCreatesTasks | タスク生成が実行される |
+| F09-10 | testEditTemplate | テンプレートを編集できる |
+| F09-11 | testArchiveTemplate | テンプレートをアーカイブできる |
+
+### 関連ドキュメント
+- `docs/requirements/WORKFLOW_TEMPLATES.md`
+
+---
+
+## Feature10: Internal Audit
+
+### 概要
+プロジェクト横断でプロセス遵守を自動監視する機能。Internal AuditはAudit Rulesを持ち、各Ruleはトリガーとワークフローとタスク別エージェント割り当てで構成される。
+
+### テストケース
+
+| ID | テスト名 | 期待結果 |
+|----|----------|----------|
+| F10-01 | testCreateInternalAudit | Internal Audit一覧からの新規作成 |
+| F10-02 | testAuditNameRequired | Internal Auditの名前が必須 |
+| F10-03 | testChangeAuditStatus | ステータスを変更できる |
+| F10-04 | testCreateAuditRule | Audit Ruleを作成できる |
+| F10-05 | testToggleAuditRuleEnabled | ルールの有効/無効を切り替えできる |
+| F10-06 | testAuditRuleNameRequired | ルール名が必須 |
+| F10-07 | testAllTasksMustHaveAgentAssigned | 全タスクにエージェント割り当てが必須 |
+| F10-08 | testStatusChangedTriggerConfiguration | status_changedトリガーの追加設定 |
+| F10-09 | testDeadlineExceededTriggerConfiguration | deadline_exceededトリガーの追加設定 |
+| F10-10 | testTemplateChangeResetsAssignments | テンプレート変更で割り当てがリセットされる |
+
+### 関連ドキュメント
+- `docs/requirements/AUDIT.md`
+- `docs/ui/07_audit_team.md`
+
+---
+
 ## テスト実行コマンド
 
 ```bash
@@ -224,11 +276,18 @@ xcodebuild test -scheme AIAgentPM -destination 'platform=macOS' \
   -only-testing:AIAgentPMUITests/Feature03_KickTriggerTests \
   -only-testing:AIAgentPMUITests/Feature05_CompletionTests \
   -only-testing:AIAgentPMUITests/Feature06_ProjectWorkingDirectoryTests \
-  -only-testing:AIAgentPMUITests/Feature08_AgentKickExecutionTests
+  -only-testing:AIAgentPMUITests/Feature08_AgentKickExecutionTests \
+  -only-testing:AIAgentPMUITests/Feature09_WorkflowTemplateTests \
+  -only-testing:AIAgentPMUITests/Feature10_InternalAuditTests
 
 # 個別Feature
 xcodebuild test -scheme AIAgentPM -destination 'platform=macOS' \
-  -only-testing:AIAgentPMUITests/Feature08_AgentKickExecutionTests
+  -only-testing:AIAgentPMUITests/Feature10_InternalAuditTests
+
+# Internal Audit テスト
+xcodebuild test -scheme AIAgentPM -destination 'platform=macOS' \
+  -only-testing:AIAgentPMUITests/InternalAuditTests \
+  -only-testing:AIAgentPMUITests/Feature10_InternalAuditTests
 
 # 統合テスト（実際のClaude CLI起動）
 ./scripts/tests/test_uc001_integration.sh

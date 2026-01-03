@@ -114,3 +114,71 @@ public struct EventID: Hashable, Codable, Sendable, CustomStringConvertible {
 
     public var description: String { value }
 }
+
+// MARK: - WorkflowTemplateID
+
+public struct WorkflowTemplateID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> WorkflowTemplateID {
+        WorkflowTemplateID(value: "wft_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}
+
+// MARK: - TemplateTaskID
+
+public struct TemplateTaskID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> TemplateTaskID {
+        TemplateTaskID(value: "ttk_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}
+
+// MARK: - InternalAuditID
+
+/// Internal Audit の一意識別子
+/// 参照: docs/requirements/AUDIT.md
+public struct InternalAuditID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> InternalAuditID {
+        InternalAuditID(value: "aud_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}
+
+// MARK: - AuditRuleID
+
+/// Audit Rule の一意識別子
+/// 参照: docs/requirements/AUDIT.md
+public struct AuditRuleID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> AuditRuleID {
+        AuditRuleID(value: "arl_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}

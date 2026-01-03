@@ -56,6 +56,7 @@ struct AIAgentPMApp: App {
         case multiProject = "MultiProject"  // 複数プロジェクト
         case uc001 = "UC001"           // UC001: エージェントキック用（workingDirectory設定済み）
         case noWD = "NoWD"             // NoWD: workingDirectory未設定エラーテスト用
+        case internalAudit = "InternalAudit" // Internal Audit機能テスト用
     }
 
     init() {
@@ -172,7 +173,11 @@ struct AIAgentPMApp: App {
         let seeder = TestDataSeeder(
             projectRepository: container.projectRepository,
             agentRepository: container.agentRepository,
-            taskRepository: container.taskRepository
+            taskRepository: container.taskRepository,
+            templateRepository: container.workflowTemplateRepository,
+            templateTaskRepository: container.templateTaskRepository,
+            internalAuditRepository: container.internalAuditRepository,
+            auditRuleRepository: container.auditRuleRepository
         )
 
         do {
@@ -187,6 +192,8 @@ struct AIAgentPMApp: App {
                 try await seeder.seedUC001Data()
             case .noWD:
                 try await seeder.seedNoWDData()
+            case .internalAudit:
+                try await seeder.seedInternalAuditData()
             }
             print("✅ UITest: Test data seeded successfully")
         } catch {
@@ -203,15 +210,27 @@ private final class TestDataSeeder {
     private let projectRepository: ProjectRepository
     private let agentRepository: AgentRepository
     private let taskRepository: TaskRepository
+    private let templateRepository: WorkflowTemplateRepository?
+    private let templateTaskRepository: TemplateTaskRepository?
+    private let internalAuditRepository: InternalAuditRepository?
+    private let auditRuleRepository: AuditRuleRepository?
 
     init(
         projectRepository: ProjectRepository,
         agentRepository: AgentRepository,
-        taskRepository: TaskRepository
+        taskRepository: TaskRepository,
+        templateRepository: WorkflowTemplateRepository? = nil,
+        templateTaskRepository: TemplateTaskRepository? = nil,
+        internalAuditRepository: InternalAuditRepository? = nil,
+        auditRuleRepository: AuditRuleRepository? = nil
     ) {
         self.projectRepository = projectRepository
         self.agentRepository = agentRepository
         self.taskRepository = taskRepository
+        self.templateRepository = templateRepository
+        self.templateTaskRepository = templateTaskRepository
+        self.internalAuditRepository = internalAuditRepository
+        self.auditRuleRepository = auditRuleRepository
     }
 
     /// 基本的なテストデータを生成（プロジェクト、エージェント、タスク）
@@ -653,6 +672,112 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await taskRepository.save(noWDKickTask)
+    }
+
+    /// Internal Audit機能テスト用のデータをシード
+    /// - Internal Audit + Audit Rule
+    /// - Workflow Template（Audit Ruleに必要）
+    /// - エージェント（タスク割り当て用）
+    func seedInternalAuditData() async throws {
+        guard let internalAuditRepository = internalAuditRepository,
+              let auditRuleRepository = auditRuleRepository,
+              let templateRepository = templateRepository,
+              let templateTaskRepository = templateTaskRepository else {
+            print("⚠️ UITest: Internal Audit repositories not available")
+            return
+        }
+
+        // エージェント作成（Audit Rule用）
+        let qaAgent = Agent(
+            id: AgentID(value: "uitest_qa_agent"),
+            name: "qa-agent",
+            role: "QA Engineer",
+            type: .ai,
+            roleType: .developer,
+            capabilities: ["Testing", "Quality Assurance"],
+            systemPrompt: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(qaAgent)
+
+        let reviewerAgent = Agent(
+            id: AgentID(value: "uitest_reviewer_agent"),
+            name: "reviewer-agent",
+            role: "Code Reviewer",
+            type: .ai,
+            roleType: .developer,
+            capabilities: ["Code Review"],
+            systemPrompt: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(reviewerAgent)
+
+        // Workflow Template作成（Audit Rule用）
+        let templateId = WorkflowTemplateID(value: "uitest_qa_template")
+        let template = WorkflowTemplate(
+            id: templateId,
+            name: "QA Workflow Template",
+            description: "Quality assurance workflow for testing",
+            variables: [],
+            status: .active
+        )
+        try templateRepository.save(template)
+
+        // Template Tasks作成
+        let templateTask1 = TemplateTask(
+            id: TemplateTaskID(value: "uitest_template_task_1"),
+            templateId: templateId,
+            title: "Run Unit Tests",
+            description: "Execute all unit tests",
+            order: 1,
+            estimatedMinutes: 30
+        )
+        try templateTaskRepository.save(templateTask1)
+
+        let templateTask2 = TemplateTask(
+            id: TemplateTaskID(value: "uitest_template_task_2"),
+            templateId: templateId,
+            title: "Code Review",
+            description: "Review code changes",
+            order: 2,
+            estimatedMinutes: 60
+        )
+        try templateTaskRepository.save(templateTask2)
+
+        // Internal Audit作成
+        let auditId = InternalAuditID(value: "uitest_internal_audit")
+        let audit = InternalAudit(
+            id: auditId,
+            name: "Test QA Audit",
+            description: "Quality assurance audit for testing purposes",
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try internalAuditRepository.save(audit)
+
+        // Audit Rule作成
+        let ruleId = AuditRuleID(value: "uitest_audit_rule")
+        let rule = AuditRule(
+            id: ruleId,
+            auditId: auditId,
+            name: "Task Completion Check",
+            triggerType: .taskCompleted,
+            triggerConfig: nil,
+            workflowTemplateId: templateId,
+            taskAssignments: [
+                TaskAssignment(templateTaskOrder: 1, agentId: qaAgent.id),
+                TaskAssignment(templateTaskOrder: 2, agentId: reviewerAgent.id)
+            ],
+            isEnabled: true
+        )
+        try auditRuleRepository.save(rule)
+
+        print("✅ UITest: Internal Audit test data seeded successfully")
     }
 }
 

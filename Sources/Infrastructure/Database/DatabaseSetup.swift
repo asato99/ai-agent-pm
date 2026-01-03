@@ -305,6 +305,102 @@ public final class DatabaseSetup {
             // TaskRecordからは削除済みのため、アプリケーションレベルでは無視される
         }
 
+        // v10: ワークフローテンプレート機能
+        // 参照: docs/requirements/WORKFLOW_TEMPLATES.md
+        migrator.registerMigration("v10_workflow_templates") { db in
+            // workflow_templates テーブル
+            try db.create(table: "workflow_templates", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("description", .text).defaults(to: "")
+                t.column("variables", .text) // JSON array
+                t.column("status", .text).notNull().defaults(to: "active")
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            try db.create(indexOn: "workflow_templates", columns: ["status"])
+
+            // template_tasks テーブル
+            try db.create(table: "template_tasks", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("template_id", .text).notNull()
+                    .references("workflow_templates", onDelete: .cascade)
+                t.column("title", .text).notNull()
+                t.column("description", .text).defaults(to: "")
+                t.column("order", .integer).notNull()
+                t.column("depends_on_orders", .text) // JSON array
+                t.column("default_assignee_role", .text)
+                t.column("default_priority", .text).notNull().defaults(to: "medium")
+                t.column("estimated_minutes", .integer)
+            }
+            try db.create(indexOn: "template_tasks", columns: ["template_id"])
+        }
+
+        // v11: エージェント階層タイプ追加
+        // 参照: docs/requirements/AGENTS.md - エージェントタイプ（Manager/Worker）
+        migrator.registerMigration("v11_agent_hierarchy_type") { db in
+            // hierarchy_type カラムを追加（デフォルト: worker）
+            try db.alter(table: "agents") { t in
+                t.add(column: "hierarchy_type", .text).defaults(to: "worker")
+            }
+        }
+
+        // v12: Internal Audit機能
+        // 参照: docs/requirements/AUDIT.md
+        migrator.registerMigration("v12_internal_audit") { db in
+            // internal_audits テーブル
+            try db.create(table: "internal_audits", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("description", .text).defaults(to: "")
+                t.column("status", .text).notNull().defaults(to: "active")
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            try db.create(indexOn: "internal_audits", columns: ["status"])
+
+            // audit_rules テーブル
+            try db.create(table: "audit_rules", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("audit_id", .text).notNull()
+                    .references("internal_audits", onDelete: .cascade)
+                t.column("name", .text).notNull()
+                t.column("trigger_type", .text).notNull()
+                t.column("trigger_config", .text) // JSON object
+                t.column("workflow_template_id", .text).notNull()
+                    .references("workflow_templates", onDelete: .restrict)
+                t.column("task_assignments", .text) // JSON array
+                t.column("is_enabled", .boolean).notNull().defaults(to: true)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            try db.create(indexOn: "audit_rules", columns: ["audit_id"])
+            try db.create(indexOn: "audit_rules", columns: ["trigger_type"])
+            try db.create(indexOn: "audit_rules", columns: ["is_enabled"])
+        }
+
+        // v13: ロック機能
+        // 参照: docs/requirements/AUDIT.md - ロック機能
+        migrator.registerMigration("v13_lock_functionality") { db in
+            // tasks テーブルにロック関連カラムを追加
+            try db.alter(table: "tasks") { t in
+                t.add(column: "is_locked", .boolean).defaults(to: false)
+                t.add(column: "locked_by_audit_id", .text)
+                t.add(column: "locked_at", .datetime)
+            }
+            try db.create(indexOn: "tasks", columns: ["is_locked"])
+            try db.create(indexOn: "tasks", columns: ["locked_by_audit_id"])
+
+            // agents テーブルにロック関連カラムを追加
+            try db.alter(table: "agents") { t in
+                t.add(column: "is_locked", .boolean).defaults(to: false)
+                t.add(column: "locked_by_audit_id", .text)
+                t.add(column: "locked_at", .datetime)
+            }
+            try db.create(indexOn: "agents", columns: ["is_locked"])
+            try db.create(indexOn: "agents", columns: ["locked_by_audit_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

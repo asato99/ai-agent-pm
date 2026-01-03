@@ -6,11 +6,6 @@
 
 import XCTest
 
-/// テスト失敗時にthrowするエラー
-private enum TestError: Error {
-    case failedPrecondition(String)
-}
-
 /// Feature06: プロジェクト作業ディレクトリ設定テスト
 final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
 

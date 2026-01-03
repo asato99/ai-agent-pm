@@ -20,6 +20,15 @@ public struct Task: Identifiable, Equatable, Sendable {
     public var updatedAt: Date
     public var completedAt: Date?
 
+    // MARK: - Lock Fields (Internal Audit)
+    /// ロック状態（監査エージェントによる強制ロック）
+    /// 参照: docs/requirements/AUDIT.md - ロック機能
+    public var isLocked: Bool
+    /// ロックを行った Internal Audit の ID
+    public var lockedByAuditId: InternalAuditID?
+    /// ロック日時
+    public var lockedAt: Date?
+
     public init(
         id: TaskID,
         projectId: ProjectID,
@@ -33,7 +42,10 @@ public struct Task: Identifiable, Equatable, Sendable {
         actualMinutes: Int? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        completedAt: Date? = nil
+        completedAt: Date? = nil,
+        isLocked: Bool = false,
+        lockedByAuditId: InternalAuditID? = nil,
+        lockedAt: Date? = nil
     ) {
         self.id = id
         self.projectId = projectId
@@ -48,6 +60,9 @@ public struct Task: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
+        self.isLocked = isLocked
+        self.lockedByAuditId = lockedByAuditId
+        self.lockedAt = lockedAt
     }
 
     /// タスクが完了状態かどうか
@@ -58,6 +73,11 @@ public struct Task: Identifiable, Equatable, Sendable {
     /// タスクがアクティブかどうか（作業中）
     public var isActive: Bool {
         status == .inProgress
+    }
+
+    /// ステータス変更が可能かどうか（ロックされていない場合のみ）
+    public var canChangeStatus: Bool {
+        !isLocked
     }
 }
 

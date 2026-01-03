@@ -20,6 +20,10 @@ public final class DependencyContainer: ObservableObject {
     public let contextRepository: ContextRepository
     public let handoffRepository: HandoffRepository
     public let eventRepository: EventRepository
+    public let workflowTemplateRepository: WorkflowTemplateRepository
+    public let templateTaskRepository: TemplateTaskRepository
+    public let internalAuditRepository: InternalAuditRepository
+    public let auditRuleRepository: AuditRuleRepository
 
     // MARK: - Event Recorder
 
@@ -171,6 +175,143 @@ public final class DependencyContainer: ObservableObject {
         GetPendingHandoffsUseCase(handoffRepository: handoffRepository)
     }()
 
+    // MARK: - Use Cases (Workflow Template)
+
+    public lazy var listTemplatesUseCase: ListTemplatesUseCase = {
+        ListTemplatesUseCase(templateRepository: workflowTemplateRepository)
+    }()
+
+    public lazy var createTemplateUseCase: CreateTemplateUseCase = {
+        CreateTemplateUseCase(
+            templateRepository: workflowTemplateRepository,
+            templateTaskRepository: templateTaskRepository
+        )
+    }()
+
+    public lazy var updateTemplateUseCase: UpdateTemplateUseCase = {
+        UpdateTemplateUseCase(templateRepository: workflowTemplateRepository)
+    }()
+
+    public lazy var archiveTemplateUseCase: ArchiveTemplateUseCase = {
+        ArchiveTemplateUseCase(templateRepository: workflowTemplateRepository)
+    }()
+
+    public lazy var getTemplateWithTasksUseCase: GetTemplateWithTasksUseCase = {
+        GetTemplateWithTasksUseCase(
+            templateRepository: workflowTemplateRepository,
+            templateTaskRepository: templateTaskRepository
+        )
+    }()
+
+    public lazy var instantiateTemplateUseCase: InstantiateTemplateUseCase = {
+        InstantiateTemplateUseCase(
+            templateRepository: workflowTemplateRepository,
+            templateTaskRepository: templateTaskRepository,
+            taskRepository: taskRepository,
+            projectRepository: projectRepository,
+            eventRepository: eventRepository
+        )
+    }()
+
+    // MARK: - Use Cases (Internal Audit)
+
+    public lazy var listInternalAuditsUseCase: ListInternalAuditsUseCase = {
+        ListInternalAuditsUseCase(internalAuditRepository: internalAuditRepository)
+    }()
+
+    public lazy var createInternalAuditUseCase: CreateInternalAuditUseCase = {
+        CreateInternalAuditUseCase(internalAuditRepository: internalAuditRepository)
+    }()
+
+    public lazy var getInternalAuditUseCase: GetInternalAuditUseCase = {
+        GetInternalAuditUseCase(internalAuditRepository: internalAuditRepository)
+    }()
+
+    public lazy var updateInternalAuditUseCase: UpdateInternalAuditUseCase = {
+        UpdateInternalAuditUseCase(internalAuditRepository: internalAuditRepository)
+    }()
+
+    public lazy var suspendInternalAuditUseCase: SuspendInternalAuditUseCase = {
+        SuspendInternalAuditUseCase(internalAuditRepository: internalAuditRepository)
+    }()
+
+    public lazy var activateInternalAuditUseCase: ActivateInternalAuditUseCase = {
+        ActivateInternalAuditUseCase(internalAuditRepository: internalAuditRepository)
+    }()
+
+    public lazy var deleteInternalAuditUseCase: DeleteInternalAuditUseCase = {
+        DeleteInternalAuditUseCase(internalAuditRepository: internalAuditRepository)
+    }()
+
+    public lazy var getAuditWithRulesUseCase: GetAuditWithRulesUseCase = {
+        GetAuditWithRulesUseCase(
+            internalAuditRepository: internalAuditRepository,
+            auditRuleRepository: auditRuleRepository
+        )
+    }()
+
+    public lazy var listAuditRulesUseCase: ListAuditRulesUseCase = {
+        ListAuditRulesUseCase(auditRuleRepository: auditRuleRepository)
+    }()
+
+    public lazy var createAuditRuleUseCase: CreateAuditRuleUseCase = {
+        CreateAuditRuleUseCase(
+            auditRuleRepository: auditRuleRepository,
+            internalAuditRepository: internalAuditRepository,
+            workflowTemplateRepository: workflowTemplateRepository
+        )
+    }()
+
+    public lazy var updateAuditRuleUseCase: UpdateAuditRuleUseCase = {
+        UpdateAuditRuleUseCase(auditRuleRepository: auditRuleRepository)
+    }()
+
+    public lazy var enableDisableAuditRuleUseCase: EnableDisableAuditRuleUseCase = {
+        EnableDisableAuditRuleUseCase(auditRuleRepository: auditRuleRepository)
+    }()
+
+    public lazy var deleteAuditRuleUseCase: DeleteAuditRuleUseCase = {
+        DeleteAuditRuleUseCase(auditRuleRepository: auditRuleRepository)
+    }()
+
+    // MARK: - Use Cases (Lock)
+
+    public lazy var lockTaskUseCase: LockTaskUseCase = {
+        LockTaskUseCase(
+            taskRepository: taskRepository,
+            internalAuditRepository: internalAuditRepository
+        )
+    }()
+
+    public lazy var unlockTaskUseCase: UnlockTaskUseCase = {
+        UnlockTaskUseCase(
+            taskRepository: taskRepository,
+            internalAuditRepository: internalAuditRepository
+        )
+    }()
+
+    public lazy var lockAgentUseCase: LockAgentUseCase = {
+        LockAgentUseCase(
+            agentRepository: agentRepository,
+            internalAuditRepository: internalAuditRepository
+        )
+    }()
+
+    public lazy var unlockAgentUseCase: UnlockAgentUseCase = {
+        UnlockAgentUseCase(
+            agentRepository: agentRepository,
+            internalAuditRepository: internalAuditRepository
+        )
+    }()
+
+    public lazy var getLockedTasksUseCase: GetLockedTasksUseCase = {
+        GetLockedTasksUseCase(taskRepository: taskRepository)
+    }()
+
+    public lazy var getLockedAgentsUseCase: GetLockedAgentsUseCase = {
+        GetLockedAgentsUseCase(agentRepository: agentRepository)
+    }()
+
     // MARK: - Initialization
 
     public init(databasePath: String) throws {
@@ -183,6 +324,10 @@ public final class DependencyContainer: ObservableObject {
         self.contextRepository = ContextRepository(database: database)
         self.handoffRepository = HandoffRepository(database: database)
         self.eventRepository = EventRepository(database: database)
+        self.workflowTemplateRepository = WorkflowTemplateRepository(database: database)
+        self.templateTaskRepository = TemplateTaskRepository(database: database)
+        self.internalAuditRepository = InternalAuditRepository(database: database)
+        self.auditRuleRepository = AuditRuleRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
         self.kickService = ClaudeCodeKickService()
     }

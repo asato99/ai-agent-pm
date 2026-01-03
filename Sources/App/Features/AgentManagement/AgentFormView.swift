@@ -20,6 +20,7 @@ struct AgentFormView: View {
 
     @State private var name: String = ""
     @State private var role: String = ""
+    @State private var hierarchyType: AgentHierarchyType = .worker
     @State private var roleType: AgentRoleType = .developer
     @State private var type: AgentType = .ai
     @State private var parentAgentId: AgentID? = nil
@@ -55,9 +56,16 @@ struct AgentFormView: View {
                 }
 
                 Section("Type") {
+                    Picker("Hierarchy Type", selection: $hierarchyType) {
+                        ForEach(AgentHierarchyType.allCases, id: \.self) { hType in
+                            Text(hType.displayName).tag(hType)
+                        }
+                    }
+                    .accessibilityIdentifier("HierarchyTypePicker")
+
                     Picker("Role Type", selection: $roleType) {
-                        ForEach(AgentRoleType.allCases, id: \.self) { type in
-                            Text(type.rawValue.capitalized).tag(type)
+                        ForEach(AgentRoleType.allCases, id: \.self) { rType in
+                            Text(rType.rawValue.capitalized).tag(rType)
                         }
                     }
 
@@ -161,6 +169,7 @@ struct AgentFormView: View {
             if let agent = try container.agentRepository.findById(agentId) {
                 name = agent.name
                 role = agent.role
+                hierarchyType = agent.hierarchyType
                 roleType = agent.roleType
                 type = agent.type
                 parentAgentId = agent.parentAgentId
@@ -186,6 +195,7 @@ struct AgentFormView: View {
                     _ = try container.createAgentUseCase.execute(
                         name: name,
                         role: role,
+                        hierarchyType: hierarchyType,
                         roleType: roleType,
                         type: type,
                         parentAgentId: parentAgentId,
@@ -200,6 +210,7 @@ struct AgentFormView: View {
                     if var agent = try container.agentRepository.findById(agentId) {
                         agent.name = name
                         agent.role = role
+                        agent.hierarchyType = hierarchyType
                         agent.roleType = roleType
                         agent.type = type
                         agent.parentAgentId = parentAgentId
