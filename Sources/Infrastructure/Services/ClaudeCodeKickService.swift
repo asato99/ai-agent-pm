@@ -95,29 +95,19 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
             promptParts.append(task.description)
         }
 
-        // 成果物情報（フルパスで指定）
-        if let outputFileName = task.outputFileName {
+        // 作業ディレクトリ情報
+        if let workingDir = project.workingDirectory {
             promptParts.append("")
-            promptParts.append("## Expected Output")
-            if let workingDir = project.workingDirectory {
-                let fullPath = workingDir.hasSuffix("/") ? "\(workingDir)\(outputFileName)" : "\(workingDir)/\(outputFileName)"
-                promptParts.append("File: \(fullPath)")
-                promptParts.append("IMPORTANT: Create the file at the EXACT path specified above, not in your current working directory.")
-            } else {
-                promptParts.append("File: \(outputFileName)")
-            }
-
-            if let outputDescription = task.outputDescription {
-                promptParts.append("Requirements: \(outputDescription)")
-            }
+            promptParts.append("## Working Directory")
+            promptParts.append("Path: \(workingDir)")
+            promptParts.append("IMPORTANT: Create any output files within this directory.")
         }
 
         // 完了指示
         promptParts.append("")
         promptParts.append("## Instructions")
         promptParts.append("1. Complete the task as described above")
-        promptParts.append("2. Create the output file if specified")
-        promptParts.append("3. When done, update the task status to 'done' using the agent-pm MCP server")
+        promptParts.append("2. When done, update the task status to 'done' using the agent-pm MCP server")
         promptParts.append("   - Use: update_task_status with task_id='\(task.id.value)' and status='done'")
 
         return promptParts.joined(separator: "\n")

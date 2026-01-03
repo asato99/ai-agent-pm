@@ -13,18 +13,12 @@ public struct Task: Identifiable, Equatable, Sendable {
     public var status: TaskStatus
     public var priority: TaskPriority
     public var assigneeId: AgentID?
-    public var parentTaskId: TaskID?
     public var dependencies: [TaskID]
     public var estimatedMinutes: Int?
     public var actualMinutes: Int?
     public let createdAt: Date
     public var updatedAt: Date
     public var completedAt: Date?
-
-    /// タスクの成果物ファイル名（例: "document.md"）
-    public var outputFileName: String?
-    /// タスクの成果物に関する説明・指示
-    public var outputDescription: String?
 
     public init(
         id: TaskID,
@@ -34,15 +28,12 @@ public struct Task: Identifiable, Equatable, Sendable {
         status: TaskStatus = .backlog,
         priority: TaskPriority = .medium,
         assigneeId: AgentID? = nil,
-        parentTaskId: TaskID? = nil,
         dependencies: [TaskID] = [],
         estimatedMinutes: Int? = nil,
         actualMinutes: Int? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        completedAt: Date? = nil,
-        outputFileName: String? = nil,
-        outputDescription: String? = nil
+        completedAt: Date? = nil
     ) {
         self.id = id
         self.projectId = projectId
@@ -51,15 +42,12 @@ public struct Task: Identifiable, Equatable, Sendable {
         self.status = status
         self.priority = priority
         self.assigneeId = assigneeId
-        self.parentTaskId = parentTaskId
         self.dependencies = dependencies
         self.estimatedMinutes = estimatedMinutes
         self.actualMinutes = actualMinutes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
-        self.outputFileName = outputFileName
-        self.outputDescription = outputDescription
     }
 
     /// タスクが完了状態かどうか

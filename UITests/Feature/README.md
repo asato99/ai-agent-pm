@@ -83,25 +83,21 @@ UC001（エージェントによるタスク実行）を完全にパスさせる
 
 ---
 
-## Feature04: 子タスク管理
+## Feature04: ~~子タスク管理~~ → 削除
 
 ### 概要
-親タスクの下に子タスクを作成・管理できる。
+~~親タスクの下に子タスクを作成・管理できる。~~
+
+**削除理由**: 要件変更により、サブタスク（`parentTaskId`）は不要となりました。
+タスク間の関係は `dependencies`（依存関係）で表現します。
+参照: `docs/requirements/TASKS.md`, `docs/usecase/UC001_TaskExecutionByAgent.md`
 
 ### テストケース
+（すべて削除 - 実装対象外）
 
-| ID | テスト名 | 期待結果 |
-|----|----------|----------|
-| F04-01 | testCreateSubtaskButton | タスク詳細に「子タスク追加」ボタンが存在 |
-| F04-02 | testSubtaskFormOpens | ボタンクリックで子タスク作成フォームが開く |
-| F04-03 | testSubtaskDisplayedUnderParent | 作成した子タスクが親タスク詳細に表示される |
-| F04-04 | testSubtaskStatusIndependent | 子タスクのステータスを個別に変更可能 |
-| F04-05 | testSubtaskCountBadge | 親タスクに子タスク数バッジが表示される |
-
-### 関連UI変更
-- `TaskDetailView`: 子タスクセクション追加
-- `TaskFormView`: 親タスクID指定モード追加
-- `Task`エンティティ: `parentTaskId`（既存）を活用
+### 関連変更
+- `parentTaskId` を Task エンティティから削除
+- 依存関係（`dependencies`）で作業タスク間の関係を表現
 
 ---
 
@@ -117,7 +113,7 @@ UC001（エージェントによるタスク実行）を完全にパスさせる
 | F05-01 | testCompletionCreatesHandoff | タスク完了時にHandoffが自動作成される |
 | F05-02 | testHandoffVisibleInTaskDetail | 作成されたHandoffがタスク詳細に表示される |
 | F05-03 | testNotificationToParent | 親エージェント/ユーザーに通知が送られる |
-| F05-04 | testAllSubtasksDoneEnablesParentComplete | 全子タスク完了時に親タスクを完了可能 |
+| F05-04 | testAllDependencyTasksDoneEnablesComplete | 全依存タスク完了時にタスクを完了可能 |
 
 ### 関連UI変更
 - `TaskDetailView`: 完了通知セクション
@@ -125,21 +121,95 @@ UC001（エージェントによるタスク実行）を完全にパスさせる
 
 ---
 
+## Feature06: プロジェクト作業ディレクトリ
+
+### 概要
+プロジェクトにworkingDirectory（作業ディレクトリ）を設定し、Claude Codeエージェントがファイルを作成する場所を指定。
+
+### テストケース
+
+| ID | テスト名 | 期待結果 |
+|----|----------|----------|
+| F06-01 | testWorkingDirectoryFieldExists | プロジェクトフォームに作業ディレクトリ入力フィールドが存在 |
+| F06-02 | testWorkingDirectorySaved | 設定した作業ディレクトリが保存される |
+| F06-03 | testWorkingDirectoryDisplayed | プロジェクト詳細に作業ディレクトリが表示される |
+
+### 関連UI変更
+- `ProjectFormView`: 作業ディレクトリ入力フィールド追加
+- `Project`エンティティ: `workingDirectory` 属性追加
+
+---
+
+## Feature07: タスク出力情報 → 削除
+
+### 概要
+~~タスクに出力ファイル名と説明を設定。~~
+
+**削除理由**: 要件変更により、ファイル名や内容はタスクの`description`（指示内容）で与えるべき。
+成果物管理はエージェントの責務であり、PMアプリの責務ではない。
+参照: `docs/usecase/UC001_TaskExecutionByAgent.md`
+
+### テストケース
+（すべて削除 - 実装対象外）
+
+---
+
+## Feature08: エージェントキック実行
+
+### 概要
+タスクステータスがin_progressに変更されたとき、アサイン先エージェントをキック（Claude Code CLI起動）する。
+
+### テストケース
+
+| ID | テスト名 | 期待結果 |
+|----|----------|----------|
+| F08-01 | testKickSuccessRecordedInHistory | in_progress変更後、Historyにキック記録が表示される |
+| F08-02 | testKickFailureShowsErrorForMissingWorkingDirectory | 作業ディレクトリ未設定時にエラーダイアログが表示される |
+| F08-03 | testKickSkippedForAgentWithoutKickMethod | kickMethod未設定エージェントでキックがスキップされる |
+
+### 関連UI変更
+- `ClaudeCodeKickService`: Claude Code CLI起動処理
+- `TaskDetailView`: 履歴表示
+- `UpdateTaskStatusUseCase`: キック処理呼び出し
+
+### 統合テスト
+
+実際のClaude CLI起動とファイル作成を確認するスクリプト:
+
+```bash
+# UITest経由の統合テスト（ファイル作成と内容を検証）
+./scripts/tests/test_uc001_integration.sh
+
+# スタンドアロンCLIテスト
+./scripts/tests/test_uc001_e2e.sh
+```
+
+検証項目:
+- ファイルが指定ディレクトリに作成されること
+- ファイル内容に期待するテキストが含まれること
+
+---
+
 ## 実装順序（TDD）
 
 ```
 Phase 1: エージェント設定の拡張
-├── Feature01: キック設定 ← 最初に実装
-└── Feature02: 認証設定
+├── Feature01: キック設定 ✅
+└── Feature02: 認証設定 ✅
 
 Phase 2: キック機構
-└── Feature03: キックトリガー
+├── Feature03: キックトリガー ✅
+└── Feature08: キック実行 ✅
 
-Phase 3: タスク階層
-└── Feature04: 子タスク管理
+Phase 3: プロジェクト設定
+└── Feature06: 作業ディレクトリ ✅
 
 Phase 4: 完了フロー
-└── Feature05: 完了通知
+└── Feature05: 完了通知 ✅
+
+削除:
+├── Feature04: 子タスク管理（dependenciesで代替）
+└── Feature07: タスク出力情報（descriptionで代替）
 ```
 
 ---
@@ -152,10 +222,14 @@ xcodebuild test -scheme AIAgentPM -destination 'platform=macOS' \
   -only-testing:AIAgentPMUITests/Feature01_AgentKickSettingsTests \
   -only-testing:AIAgentPMUITests/Feature02_AgentAuthTests \
   -only-testing:AIAgentPMUITests/Feature03_KickTriggerTests \
-  -only-testing:AIAgentPMUITests/Feature04_SubtaskTests \
-  -only-testing:AIAgentPMUITests/Feature05_CompletionTests
+  -only-testing:AIAgentPMUITests/Feature05_CompletionTests \
+  -only-testing:AIAgentPMUITests/Feature06_ProjectWorkingDirectoryTests \
+  -only-testing:AIAgentPMUITests/Feature08_AgentKickExecutionTests
 
 # 個別Feature
 xcodebuild test -scheme AIAgentPM -destination 'platform=macOS' \
-  -only-testing:AIAgentPMUITests/Feature01_AgentKickSettingsTests
+  -only-testing:AIAgentPMUITests/Feature08_AgentKickExecutionTests
+
+# 統合テスト（実際のClaude CLI起動）
+./scripts/tests/test_uc001_integration.sh
 ```

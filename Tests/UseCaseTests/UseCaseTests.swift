@@ -87,10 +87,6 @@ final class MockTaskRepository: TaskRepositoryProtocol {
         tasks.values.filter { $0.projectId == projectId && $0.status == status }
     }
 
-    func findByParent(_ parentTaskId: TaskID) throws -> [Task] {
-        tasks.values.filter { $0.parentTaskId == parentTaskId }
-    }
-
     func save(_ task: Task) throws {
         tasks[task.id] = task
     }
@@ -393,6 +389,7 @@ final class UseCaseTests: XCTestCase {
 
         let useCase = UpdateTaskStatusUseCase(
             taskRepository: taskRepo,
+            agentRepository: agentRepo,
             eventRepository: eventRepo
         )
 
@@ -420,6 +417,7 @@ final class UseCaseTests: XCTestCase {
 
         let useCase = UpdateTaskStatusUseCase(
             taskRepository: taskRepo,
+            agentRepository: agentRepo,
             eventRepository: eventRepo
         )
 
@@ -448,6 +446,7 @@ final class UseCaseTests: XCTestCase {
 
         let useCase = UpdateTaskStatusUseCase(
             taskRepository: taskRepo,
+            agentRepository: agentRepo,
             eventRepository: eventRepo
         )
 
@@ -846,6 +845,7 @@ final class UseCaseTests: XCTestCase {
 
         let useCase = UpdateTaskStatusUseCase(
             taskRepository: taskRepo,
+            agentRepository: agentRepo,
             eventRepository: eventRepo
         )
 

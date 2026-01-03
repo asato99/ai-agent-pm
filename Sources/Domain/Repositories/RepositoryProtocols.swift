@@ -36,7 +36,6 @@ public protocol TaskRepositoryProtocol: Sendable {
     func findByProject(_ projectId: ProjectID, status: TaskStatus?) throws -> [Task]
     func findByAssignee(_ agentId: AgentID) throws -> [Task]
     func findByStatus(_ status: TaskStatus, projectId: ProjectID) throws -> [Task]
-    func findByParent(_ parentTaskId: TaskID) throws -> [Task]
     func save(_ task: Task) throws
     func delete(_ id: TaskID) throws
 }

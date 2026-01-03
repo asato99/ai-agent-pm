@@ -286,6 +286,25 @@ public final class DatabaseSetup {
             }
         }
 
+        // v8: 要件変更 - サブタスク不要によりparent_task_idを廃止
+        // 参照: docs/requirements/TASKS.md - サブタスクは不要
+        // 参照: docs/usecase/UC001_TaskExecutionByAgent.md - タスク間関係はdependenciesで表現
+        migrator.registerMigration("v8_remove_parent_task_id") { db in
+            // parent_task_idインデックスを削除（インデックスが存在する場合のみ）
+            // GRDB命名規則: index_<table>_on_<column>
+            try? db.execute(sql: "DROP INDEX IF EXISTS index_tasks_on_parent_task_id")
+            // 注意: SQLiteではカラム削除が困難なため、カラム自体は残存
+            // TaskRecordからは削除済みのため、アプリケーションレベルでは無視される
+        }
+
+        // v9: 要件変更 - output_file_name/output_descriptionを廃止
+        // 理由: ファイル名や内容はタスクの指示内容(description)で与えるべき
+        // 成果物管理はエージェントの責務であり、PMアプリの責務ではない
+        migrator.registerMigration("v9_remove_task_output_fields") { _ in
+            // 注意: SQLiteではカラム削除が困難なため、カラム自体は残存
+            // TaskRecordからは削除済みのため、アプリケーションレベルでは無視される
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

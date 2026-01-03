@@ -5,6 +5,11 @@
 
 import XCTest
 
+/// テスト失敗時にthrowするエラー
+private enum TestError: Error {
+    case failedPrecondition(String)
+}
+
 /// Feature01: エージェントキック設定テスト
 final class Feature01_AgentKickSettingsTests: XCTestCase {
 
@@ -42,13 +47,15 @@ final class Feature01_AgentKickSettingsTests: XCTestCase {
         // Agentsセクションの存在確認
         let agentsSection = app.descendants(matching: .any).matching(identifier: "AgentsSection").firstMatch
         guard agentsSection.waitForExistence(timeout: 5) else {
-            throw XCTSkip("Agentsセクションが存在しません")
+            XCTFail("Agentsセクションが存在しません")
+            throw TestError.failedPrecondition("Agentsセクションが存在しません")
         }
 
         // テストデータのエージェント（backend-dev）をクリック
         let agentRow = app.staticTexts["backend-dev"]
         guard agentRow.waitForExistence(timeout: 5) else {
-            throw XCTSkip("テストエージェントが存在しません")
+            XCTFail("テストエージェントが存在しません")
+            throw TestError.failedPrecondition("テストエージェントが存在しません")
         }
         agentRow.click()
         Thread.sleep(forTimeInterval: 0.5)
@@ -202,7 +209,8 @@ final class Feature01_AgentKickSettingsTests: XCTestCase {
             }
         } else {
             // エージェントが見つからない場合はスキップ
-            throw XCTSkip("作成したエージェントが見つかりません")
+            XCTFail("作成したエージェントが見つかりません")
+            throw TestError.failedPrecondition("作成したエージェントが見つかりません")
         }
     }
 }

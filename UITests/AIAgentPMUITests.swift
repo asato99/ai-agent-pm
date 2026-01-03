@@ -11,6 +11,11 @@
 
 import XCTest
 
+/// テスト失敗時にthrowするエラー
+private enum TestError: Error {
+    case failedPrecondition(String)
+}
+
 // MARK: - Test Scenarios
 
 /// テストシナリオの種類
@@ -228,17 +233,20 @@ final class ProjectListTests: BasicDataUITestCase {
     func testContextMenuDisplay() throws {
         // 現在のUIにはコンテキストメニューが未実装のためスキップ
         // 将来的に実装後にテストを有効化
-        throw XCTSkip("コンテキストメニューは未実装")
+        XCTFail("コンテキストメニューは未実装")
+        throw TestError.failedPrecondition("コンテキストメニューは未実装")
     }
 
     /// TS-01-008: ソートオプション（未実装のため保留）
     func testSortOptions() throws {
-        throw XCTSkip("ソートオプションは未実装")
+        XCTFail("ソートオプションは未実装")
+        throw TestError.failedPrecondition("ソートオプションは未実装")
     }
 
     /// TS-01-009: フィルターオプション（未実装のため保留）
     func testFilterOptions() throws {
-        throw XCTSkip("フィルターオプションは未実装")
+        XCTFail("フィルターオプションは未実装")
+        throw TestError.failedPrecondition("フィルターオプションは未実装")
     }
 }
 
@@ -272,12 +280,13 @@ final class TaskBoardTests: BasicDataUITestCase {
         if projectRow.waitForExistence(timeout: 5) {
             projectRow.click()
         } else {
-            throw XCTSkip("テストプロジェクトが存在しません")
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
         }
     }
 
     /// TS-02-001: カンバンカラム構造確認
-    /// 期待結果: Backlog, To Do, In Progress, Blocked, Doneカラムが表示される
+    /// 期待結果: Backlog, To Do, In Progress, Blocked, Doneカラムが左から順に表示される
     /// 要件: TaskStatusは backlog, todo, in_progress, blocked, done, cancelled のみ（in_review は削除）
     func testKanbanColumnsStructure() throws {
         try selectProject()
@@ -286,49 +295,84 @@ final class TaskBoardTests: BasicDataUITestCase {
         let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
         XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
 
-        // カラムの存在確認（カラムヘッダーで確認）
-        let backlogColumn = app.staticTexts["Backlog"]
-        XCTAssertTrue(backlogColumn.waitForExistence(timeout: 5), "Backlogカラムが存在すること")
+        // 期待されるカラム順序（左から右）
+        let expectedColumns = ["Backlog", "To Do", "In Progress", "Blocked", "Done"]
 
-        let todoColumn = app.staticTexts["To Do"]
-        XCTAssertTrue(todoColumn.exists, "To Doカラムが存在すること")
+        // 全カラムの存在確認
+        var columnElements: [(name: String, element: XCUIElement)] = []
+        for columnName in expectedColumns {
+            let column = app.staticTexts[columnName]
+            XCTAssertTrue(column.waitForExistence(timeout: 5), "\(columnName)カラムが存在すること")
+            columnElements.append((name: columnName, element: column))
+        }
 
-        let progressColumn = app.staticTexts["In Progress"]
-        XCTAssertTrue(progressColumn.exists, "In Progressカラムが存在すること")
+        // カラム順序の検証（frame.xを比較）
+        // 注意: macOS SwiftUIではframe取得が可能
+        for i in 0..<(columnElements.count - 1) {
+            let currentColumn = columnElements[i]
+            let nextColumn = columnElements[i + 1]
+            let currentX = currentColumn.element.frame.origin.x
+            let nextX = nextColumn.element.frame.origin.x
 
-        let blockedColumn = app.staticTexts["Blocked"]
-        XCTAssertTrue(blockedColumn.exists, "Blockedカラムが存在すること")
-
-        let doneColumn = app.staticTexts["Done"]
-        XCTAssertTrue(doneColumn.exists, "Doneカラムが存在すること")
+            XCTAssertTrue(currentX < nextX,
+                          "カラム順序エラー: \(currentColumn.name)(x:\(currentX))は\(nextColumn.name)(x:\(nextX))より左にあるべき")
+        }
     }
 
     /// TS-02-002: カラムヘッダーにタスク件数が表示される
+    /// 注意: SwiftUI Textの件数バッジはXCUITestのアクセシビリティ階層に
+    ///       必ずしも露出しない。カラムヘッダーの存在とタスクカードの存在で
+    ///       カンバンボードが正常に動作していることを確認する。
     func testColumnHeadersShowTaskCount() throws {
         try selectProject()
 
-        // カラムヘッダーの存在確認
-        let backlogHeader = app.staticTexts["Backlog"]
-        XCTAssertTrue(backlogHeader.waitForExistence(timeout: 5), "Backlogカラムヘッダーが存在すること")
-
-        // 件数バッジの確認
-        // 実装: カラムヘッダー横に "0", "1", "2" 等の件数表示がある
-        // macOS SwiftUIでは小さなText要素のaccessibilityIdentifierが公開されない場合があるため、
-        // カラムヘッダーと合わせてタスクボード構造の存在を確認する
-
-        // TaskBoard識別子で全体構造を確認
+        // タスクボードの存在確認
         let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
-        XCTAssertTrue(taskBoard.exists, "タスクボードが存在すること")
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
 
-        // 全カラムヘッダーの存在確認（件数表示構造を持つ）
+        // 全カラムヘッダーの存在確認
         let columnHeaders = ["Backlog", "To Do", "In Progress", "Blocked", "Done"]
-        var foundColumns = 0
         for header in columnHeaders {
-            if app.staticTexts[header].exists {
-                foundColumns += 1
-            }
+            let column = app.staticTexts[header]
+            XCTAssertTrue(column.exists, "\(header)カラムヘッダーが存在すること")
         }
-        XCTAssertTrue(foundColumns >= 3, "カラムヘッダー（件数バッジ付き）が表示されること: \(foundColumns)/5")
+
+        // タスクカードが存在することを確認（件数 > 0 の間接的確認）
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        XCTAssertTrue(taskCards.count > 0, "タスクカードが存在すること（件数バッジの間接的確認）")
+
+        // 件数バッジの確認（オプショナル - 見つからなくても失敗しない）
+        // SwiftUIのText要素はアクセシビリティ階層に露出しない場合がある
+        let countBadges = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'ColumnCount_'"))
+        if countBadges.count > 0 {
+            // 件数バッジが識別子で見つかる場合は追加検証
+            XCTAssertTrue(countBadges.count >= 1, "件数バッジが存在すること: \(countBadges.count)")
+        }
+        // 件数バッジが見つからない場合でも、カラムとタスクカードが存在すれば成功とする
+    }
+
+    /// TS-02-001b: カラム識別子による構造確認
+    /// 期待結果: TaskColumn_* 識別子を持つカラムが5つ存在する
+    func testKanbanColumnIdentifiers() throws {
+        try selectProject()
+
+        // タスクボードの存在確認
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
+
+        // 各カラムの識別子確認
+        let columnIdentifiers = [
+            ("TaskColumn_backlog", "Backlog"),
+            ("TaskColumn_todo", "To Do"),
+            ("TaskColumn_in_progress", "In Progress"),
+            ("TaskColumn_blocked", "Blocked"),
+            ("TaskColumn_done", "Done")
+        ]
+
+        for (identifier, name) in columnIdentifiers {
+            let column = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+            XCTAssertTrue(column.waitForExistence(timeout: 3), "\(name)カラム(id:\(identifier))が存在すること")
+        }
     }
 
     /// TS-02-003: 新規タスク作成ボタン
@@ -347,6 +391,8 @@ final class TaskBoardTests: BasicDataUITestCase {
 
     /// TS-02-004: タスクカード構造確認
     /// 期待結果: タイトル、優先度バッジ、担当エージェント名が表示される
+    /// 注意: TaskCardButtonは.accessibilityElement(children: .combine)を使用しているため、
+    ///       子要素の個別識別子は外部からアクセス不可。カードのaccessibilityLabelで確認。
     func testTaskCardStructure() throws {
         try selectProject()
 
@@ -354,25 +400,18 @@ final class TaskBoardTests: BasicDataUITestCase {
         let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
         let firstCard = taskCards.firstMatch
 
-        if firstCard.waitForExistence(timeout: 5) {
-            // タスクタイトルの存在確認
-            let taskTitle = firstCard.staticTexts["TaskTitle"]
-            XCTAssertTrue(taskTitle.exists, "タスクタイトルが表示されること")
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクカードが存在すること")
 
-            // 優先度バッジの確認
-            let priorityBadges = firstCard.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'PriorityBadge_'"))
-            XCTAssertTrue(priorityBadges.count > 0, "優先度バッジが表示されること")
+        // タスクカードのaccessibilityLabelが設定されていることを確認
+        // （children: .combineによりタイトルがラベルに含まれる）
+        let cardLabel = firstCard.label
+        XCTAssertFalse(cardLabel.isEmpty, "タスクカードにアクセシビリティラベルが設定されていること")
 
-            // 担当エージェント名の確認（TaskAssignee識別子）
-            // 注意: アサイン済みタスクのみ表示される
-            let assigneeElements = app.descendants(matching: .any).matching(identifier: "TaskAssignee")
-            // アサインされていないタスクの場合もあるので、識別子で検索できる構造かを確認
-            // カード構造が正しければTaskAssignee識別子を持つ要素が表示可能
-            XCTAssertTrue(taskCards.count > 0, "タスクカードが表示されること（担当者表示可能な構造）")
-        } else {
-            // タスクがない場合はスキップ
-            throw XCTSkip("タスクカードが存在しません")
-        }
+        // タスクカードが複数存在することを確認（シードデータにより）
+        XCTAssertTrue(taskCards.count > 0, "タスクカードが表示されること")
+
+        // タスクカードがボタンとして認識されることを確認
+        XCTAssertTrue(firstCard.elementType == .button, "タスクカードがボタンとして認識されること")
     }
 
     /// TS-02-005: タスク選択で詳細表示
@@ -382,15 +421,12 @@ final class TaskBoardTests: BasicDataUITestCase {
         let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
         let firstCard = taskCards.firstMatch
 
-        if firstCard.waitForExistence(timeout: 5) {
-            firstCard.click()
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
 
-            // 詳細パネルにタスク情報が表示される（TaskDetailView識別子）
-            let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
-            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細パネルが表示されること")
-        } else {
-            throw XCTSkip("タスクが存在しません")
-        }
+        // 詳細パネルにタスク情報が表示される（TaskDetailView識別子）
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細パネルが表示されること")
     }
 
     /// TS-02-006: 優先度バッジ表示確認
@@ -404,20 +440,18 @@ final class TaskBoardTests: BasicDataUITestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
         let firstCard = taskCards.firstMatch
 
-        if firstCard.waitForExistence(timeout: 5) {
-            // タスクカード内の優先度バッジ識別子を確認
-            let priorityBadges = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "identifier BEGINSWITH 'PriorityBadge_'"))
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクカードが存在すること")
 
-            if priorityBadges.firstMatch.exists {
-                XCTAssertTrue(priorityBadges.count > 0, "優先度バッジが表示されること")
-            } else {
-                // macOSではaccessibility hierarchyにバッジが公開されない場合がある
-                // タスクカードが存在することで、優先度バッジも含まれていると見なす
-                XCTAssertTrue(taskCards.count > 0, "タスクカード（優先度バッジ含む）が表示されること")
-            }
+        // タスクカード内の優先度バッジ識別子を確認
+        let priorityBadges = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'PriorityBadge_'"))
+
+        if priorityBadges.firstMatch.exists {
+            XCTAssertTrue(priorityBadges.count > 0, "優先度バッジが表示されること")
         } else {
-            throw XCTSkip("タスクカードが存在しません - テストデータを確認してください")
+            // macOSではaccessibility hierarchyにバッジが公開されない場合がある
+            // タスクカードが存在することで、優先度バッジも含まれていると見なす
+            XCTAssertTrue(taskCards.count > 0, "タスクカード（優先度バッジ含む）が表示されること")
         }
     }
 
@@ -441,27 +475,32 @@ final class TaskBoardTests: BasicDataUITestCase {
 
     /// TS-02-008: ドラッグ&ドロップによるステータス変更（未実装）
     func testDragAndDropStatusChange() throws {
-        throw XCTSkip("ドラッグ&ドロップ機能は未実装")
+        XCTFail("ドラッグ&ドロップ機能は未実装")
+        throw TestError.failedPrecondition("ドラッグ&ドロップ機能は未実装")
     }
 
     /// TS-02-009: コンテキストメニュー表示（未実装）
     func testTaskContextMenu() throws {
-        throw XCTSkip("タスクカードのコンテキストメニューは未実装")
+        XCTFail("タスクカードのコンテキストメニューは未実装")
+        throw TestError.failedPrecondition("タスクカードのコンテキストメニューは未実装")
     }
 
     /// TS-02-010: 検索機能（未実装）
     func testSearchFunction() throws {
-        throw XCTSkip("タスクボード検索機能は未実装")
+        XCTFail("タスクボード検索機能は未実装")
+        throw TestError.failedPrecondition("タスクボード検索機能は未実装")
     }
 
     /// TS-02-011: フィルターバー（未実装）
     func testFilterBar() throws {
-        throw XCTSkip("フィルターバーは未実装")
+        XCTFail("フィルターバーは未実装")
+        throw TestError.failedPrecondition("フィルターバーは未実装")
     }
 
     /// TS-02-012: エージェント活動インジケーター（未実装）
     func testAgentActivityIndicator() throws {
-        throw XCTSkip("エージェント活動インジケーターは未実装")
+        XCTFail("エージェント活動インジケーターは未実装")
+        throw TestError.failedPrecondition("エージェント活動インジケーターは未実装")
     }
 }
 
@@ -493,11 +532,8 @@ final class AgentManagementTests: BasicDataUITestCase {
         let backendAgent = app.staticTexts["backend-dev"]
 
         // どちらかのエージェントが表示されることを確認（長めのタイムアウト）
-        if ownerAgent.waitForExistence(timeout: 10) || backendAgent.waitForExistence(timeout: 10) {
-            XCTAssertTrue(true, "エージェントが表示されること")
-        } else {
-            throw XCTSkip("テストデータにエージェントが存在しません")
-        }
+        let agentExists = ownerAgent.waitForExistence(timeout: 10) || backendAgent.waitForExistence(timeout: 10)
+        XCTAssertTrue(agentExists, "エージェントが表示されること")
     }
 
     /// TS-03-003: 新規エージェント作成ボタン
@@ -519,15 +555,12 @@ final class AgentManagementTests: BasicDataUITestCase {
 
         // エージェント名で検索（seedBasicDataで "owner", "backend-dev" が作成される）
         let ownerAgent = app.staticTexts["owner"]
+        XCTAssertTrue(ownerAgent.waitForExistence(timeout: 10), "エージェントが存在すること")
 
-        if ownerAgent.waitForExistence(timeout: 10) {
-            // ステータスアイコン（🟢等）の存在確認
-            let greenStatus = app.staticTexts["🟢"]
-            XCTAssertTrue(greenStatus.exists || app.staticTexts["🟡"].exists || app.staticTexts["🟠"].exists,
-                          "エージェント行にステータスアイコンが表示されること")
-        } else {
-            throw XCTSkip("テストデータにエージェントが存在しません")
-        }
+        // ステータスアイコン（🟢等）の存在確認
+        let greenStatus = app.staticTexts["🟢"]
+        XCTAssertTrue(greenStatus.exists || app.staticTexts["🟡"].exists || app.staticTexts["🟠"].exists,
+                      "エージェント行にステータスアイコンが表示されること")
     }
 
     /// TS-03-005: エージェントカード構成要素
@@ -538,20 +571,17 @@ final class AgentManagementTests: BasicDataUITestCase {
 
         // エージェント名で検索（seedBasicDataで "owner", "backend-dev" が作成される）
         let ownerAgent = app.staticTexts["owner"]
+        XCTAssertTrue(ownerAgent.waitForExistence(timeout: 10), "エージェントが存在すること")
 
-        if ownerAgent.waitForExistence(timeout: 10) {
-            // タイプアイコン（🤖 or 👤）の存在確認
-            let aiIcon = app.staticTexts["🤖"]
-            let humanIcon = app.staticTexts["👤"]
-            XCTAssertTrue(aiIcon.exists || humanIcon.exists, "エージェント行にタイプアイコンが表示されること")
+        // タイプアイコン（🤖 or 👤）の存在確認
+        let aiIcon = app.staticTexts["🤖"]
+        let humanIcon = app.staticTexts["👤"]
+        XCTAssertTrue(aiIcon.exists || humanIcon.exists, "エージェント行にタイプアイコンが表示されること")
 
-            // 役割テキストの存在確認（seedBasicDataで "プロジェクトオーナー", "バックエンド開発" が作成される）
-            let ownerRole = app.staticTexts["プロジェクトオーナー"]
-            let devRole = app.staticTexts["バックエンド開発"]
-            XCTAssertTrue(ownerRole.exists || devRole.exists, "エージェント行に役割が表示されること")
-        } else {
-            throw XCTSkip("テストデータにエージェントが存在しません")
-        }
+        // 役割テキストの存在確認（seedBasicDataで "プロジェクトオーナー", "バックエンド開発" が作成される）
+        let ownerRole = app.staticTexts["プロジェクトオーナー"]
+        let devRole = app.staticTexts["バックエンド開発"]
+        XCTAssertTrue(ownerRole.exists || devRole.exists, "エージェント行に役割が表示されること")
     }
 
     /// TS-03-006: エージェント詳細表示
@@ -562,21 +592,18 @@ final class AgentManagementTests: BasicDataUITestCase {
 
         // エージェント名で検索
         let ownerAgent = app.staticTexts["owner"]
+        XCTAssertTrue(ownerAgent.waitForExistence(timeout: 10), "エージェントが存在すること")
 
-        if ownerAgent.waitForExistence(timeout: 10) {
-            // エージェント名をクリック
-            ownerAgent.click()
+        // エージェント名をクリック
+        ownerAgent.click()
 
-            // AgentDetailView識別子で詳細パネルを確認
-            let detailView = app.descendants(matching: .any).matching(identifier: "AgentDetailView").firstMatch
-            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "AgentDetailViewが表示されること")
+        // AgentDetailView識別子で詳細パネルを確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "AgentDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "AgentDetailViewが表示されること")
 
-            // 統計セクション（Statistics）が表示されることも確認
-            let statsHeader = app.staticTexts["Statistics"]
-            XCTAssertTrue(statsHeader.waitForExistence(timeout: 3), "統計セクションが表示されること")
-        } else {
-            throw XCTSkip("テストデータにエージェントが存在しません")
-        }
+        // 統計セクション（Statistics）が表示されることも確認
+        let statsHeader = app.staticTexts["Statistics"]
+        XCTAssertTrue(statsHeader.waitForExistence(timeout: 3), "統計セクションが表示されること")
     }
 
     /// TS-03-007: エージェント作成フォーム - 基本情報
@@ -629,7 +656,8 @@ final class AgentManagementTests: BasicDataUITestCase {
     /// TS-03-009: エージェント作成ウィザード - ステップ3（未実装）
     /// 注: 現在はシンプルなフォーム形式のため、ウィザードは未実装
     func testAgentCreationWizardStep3() throws {
-        throw XCTSkip("3ステップウィザード形式は未実装 - 現在はシンプルなフォーム形式")
+        XCTFail("3ステップウィザード形式は未実装 - 現在はシンプルなフォーム形式")
+        throw TestError.failedPrecondition("3ステップウィザード形式は未実装 - 現在はシンプルなフォーム形式")
     }
 
     /// TS-03-010: 統計タブ
@@ -640,29 +668,28 @@ final class AgentManagementTests: BasicDataUITestCase {
 
         // エージェント名で検索
         let ownerAgent = app.staticTexts["owner"]
+        XCTAssertTrue(ownerAgent.waitForExistence(timeout: 10), "エージェントが存在すること")
 
-        if ownerAgent.waitForExistence(timeout: 10) {
-            ownerAgent.click()
+        ownerAgent.click()
 
-            // 詳細パネルが表示される（エージェント名のテキストが表示される）
-            Thread.sleep(forTimeInterval: 1.0)
+        // 詳細パネルが表示される（エージェント名のテキストが表示される）
+        Thread.sleep(forTimeInterval: 1.0)
 
-            // 統計セクション（Statistics）が表示される
-            let statsHeader = app.staticTexts["Statistics"]
-            XCTAssertTrue(statsHeader.waitForExistence(timeout: 5), "統計セクションが表示されること")
-        } else {
-            throw XCTSkip("テストデータにエージェントが存在しません")
-        }
+        // 統計セクション（Statistics）が表示される
+        let statsHeader = app.staticTexts["Statistics"]
+        XCTAssertTrue(statsHeader.waitForExistence(timeout: 5), "統計セクションが表示されること")
     }
 
     /// TS-03-011: 活動履歴タブ（未実装）
     func testAgentActivityHistoryTab() throws {
-        throw XCTSkip("エージェント活動履歴タブは未実装")
+        XCTFail("エージェント活動履歴タブは未実装")
+        throw TestError.failedPrecondition("エージェント活動履歴タブは未実装")
     }
 
     /// TS-03-012: コンテキストメニュー（未実装）
     func testAgentContextMenu() throws {
-        throw XCTSkip("エージェントコンテキストメニューは未実装")
+        XCTFail("エージェントコンテキストメニューは未実装")
+        throw TestError.failedPrecondition("エージェントコンテキストメニューは未実装")
     }
 
     /// TS-03-013: エージェント編集ボタン
@@ -675,24 +702,21 @@ final class AgentManagementTests: BasicDataUITestCase {
 
         // エージェント名で検索
         let ownerAgent = app.staticTexts["owner"]
+        XCTAssertTrue(ownerAgent.waitForExistence(timeout: 10), "エージェントが存在すること")
 
-        if ownerAgent.waitForExistence(timeout: 10) {
-            ownerAgent.click()
+        ownerAgent.click()
 
-            // 詳細パネルが表示される
-            let detailView = app.descendants(matching: .any).matching(identifier: "AgentDetailView").firstMatch
-            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "AgentDetailViewが表示されること")
+        // 詳細パネルが表示される
+        let detailView = app.descendants(matching: .any).matching(identifier: "AgentDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "AgentDetailViewが表示されること")
 
-            // ⌘Eで編集シートを開く（EditAgentButtonと同等の機能）
-            // 注意: エージェント編集用のショートカットがない場合、ツールバーボタンの存在確認で代替
-            // 実装にはEditAgentButton識別子があるが、ツールバーボタンはXCUITestに公開されない
+        // ⌘Eで編集シートを開く（EditAgentButtonと同等の機能）
+        // 注意: エージェント編集用のショートカットがない場合、ツールバーボタンの存在確認で代替
+        // 実装にはEditAgentButton識別子があるが、ツールバーボタンはXCUITestに公開されない
 
-            // エージェント詳細が正しく表示されていることを確認（編集可能な状態）
-            let statsHeader = app.staticTexts["Statistics"]
-            XCTAssertTrue(statsHeader.waitForExistence(timeout: 3), "エージェント詳細が編集可能な状態で表示されること")
-        } else {
-            throw XCTSkip("テストデータにエージェントが存在しません")
-        }
+        // エージェント詳細が正しく表示されていることを確認（編集可能な状態）
+        let statsHeader = app.staticTexts["Statistics"]
+        XCTAssertTrue(statsHeader.waitForExistence(timeout: 3), "エージェント詳細が編集可能な状態で表示されること")
     }
 
     /// TS-03-014: 親エージェント選択（階層構造）
@@ -748,21 +772,14 @@ final class TaskDetailTests: BasicDataUITestCase {
     private func openTaskDetail() throws {
         // プロジェクト選択
         let projectRow = app.staticTexts["テストプロジェクト"]
-        if projectRow.waitForExistence(timeout: 5) {
-            projectRow.click()
-        } else {
-            throw XCTSkip("テストプロジェクトが存在しません")
-        }
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
         // タスクカード選択
         let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
         let firstCard = taskCards.firstMatch
-
-        if firstCard.waitForExistence(timeout: 5) {
-            firstCard.click()
-        } else {
-            throw XCTSkip("タスクが存在しません")
-        }
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
     }
 
     /// TS-04-001: タスク詳細画面構成確認
@@ -792,13 +809,15 @@ final class TaskDetailTests: BasicDataUITestCase {
 
     /// TS-04-002: タブ存在確認（未実装 - 現在はスクロールビュー形式）
     func testTaskDetailTabs() throws {
-        throw XCTSkip("タブ形式UIは未実装 - 現在はスクロールビュー形式")
+        XCTFail("タブ形式UIは未実装 - 現在はスクロールビュー形式")
+        throw TestError.failedPrecondition("タブ形式UIは未実装 - 現在はスクロールビュー形式")
     }
 
     /// TS-04-003: サブタスクセクション表示
     /// 要件: TASKS.md - サブタスクは初期実装では不要
     func testSubtaskSection() throws {
-        throw XCTSkip("サブタスクは要件で「初期実装では不要」と定義されているためスキップ")
+        XCTFail("サブタスクは要件で「初期実装では不要」と定義されているためスキップ")
+        throw TestError.failedPrecondition("サブタスクは要件で「初期実装では不要」と定義されているためスキップ")
     }
 
     /// TS-04-004: コンテキスト追加機能
@@ -911,7 +930,8 @@ final class TaskDetailTests: BasicDataUITestCase {
 
     /// TS-04-010: 履歴フィルター（未実装）
     func testHistoryFilter() throws {
-        throw XCTSkip("履歴フィルターは未実装")
+        XCTFail("履歴フィルターは未実装")
+        throw TestError.failedPrecondition("履歴フィルターは未実装")
     }
 
     /// TS-04-011: コンテキスト一覧表示
@@ -981,31 +1001,25 @@ final class CommonNavigationTests: BasicDataUITestCase {
         XCTAssertTrue(noProjectText.exists, "プロジェクト未選択時のプレースホルダーが表示されること")
     }
 
-    /// キーボードショートカット（未実装の可能性）
+    /// キーボードショートカット
     func testKeyboardShortcuts() throws {
-        // Cmd+N で新規プロジェクト（実装されていれば）
+        // Cmd+N で新規プロジェクト
         app.typeKey("n", modifierFlags: .command)
 
         let newProjectSheet = app.sheets.firstMatch
-        if !newProjectSheet.waitForExistence(timeout: 3) {
-            // ショートカットが未実装の場合はスキップ
-            throw XCTSkip("Cmd+Nショートカットは未実装の可能性があります")
-        }
-        XCTAssertTrue(newProjectSheet.exists, "Cmd+Nで新規プロジェクトシートが開くこと")
+        XCTAssertTrue(newProjectSheet.waitForExistence(timeout: 3), "Cmd+Nで新規プロジェクトシートが開くこと")
     }
 
     /// プロジェクト選択でコンテンツエリアが更新される
     func testProjectSelectionUpdatesContent() throws {
         let projectRow = app.staticTexts["テストプロジェクト"]
-        if projectRow.waitForExistence(timeout: 5) {
-            projectRow.click()
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
 
-            // コンテンツエリアにタスクボードが表示される
-            let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
-            XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが表示されること")
-        } else {
-            throw XCTSkip("テストプロジェクトが存在しません")
-        }
+        projectRow.click()
+
+        // コンテンツエリアにタスクボードが表示される
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが表示されること")
     }
 }
 
@@ -1069,7 +1083,8 @@ final class DependencyBlockingTests: BasicDataUITestCase {
         if projectRow.waitForExistence(timeout: 5) {
             projectRow.click()
         } else {
-            throw XCTSkip("テストプロジェクトが存在しません")
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
         }
     }
 
@@ -1090,22 +1105,15 @@ final class DependencyBlockingTests: BasicDataUITestCase {
             // Cmd+Shift+D で依存タスクを選択
             app.typeKey("d", modifierFlags: [.command, .shift])
             Thread.sleep(forTimeInterval: 0.5)
-
-            if detailView.waitForExistence(timeout: 5) {
-                return
-            }
-            throw XCTSkip("依存タスクの選択に失敗しました")
+            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "依存タスクの詳細が表示されること")
         } else if title.contains("追加開発タスク") {
             // Cmd+Shift+G でリソーステストタスクを選択
             app.typeKey("g", modifierFlags: [.command, .shift])
             Thread.sleep(forTimeInterval: 0.5)
-
-            if detailView.waitForExistence(timeout: 5) {
-                return
-            }
-            throw XCTSkip("リソーステストタスクの選択に失敗しました")
+            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "リソーステストタスクの詳細が表示されること")
         } else {
-            throw XCTSkip("タスク「\(title)」用のショートカットが定義されていません")
+            XCTFail("タスク「\(title)」用のショートカットが定義されていません")
+            throw TestError.failedPrecondition("タスク「\(title)」用のショートカットが定義されていません")
         }
     }
 
@@ -1117,26 +1125,15 @@ final class DependencyBlockingTests: BasicDataUITestCase {
 
         // TaskDetailView内のステータスPickerを探す（識別子で検索）
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")
-        let statusPicker = app.popUpButtons.matching(statusPickerPredicate).firstMatch
+        var statusPicker = app.popUpButtons.matching(statusPickerPredicate).firstMatch
 
         // Pickerが見つからない場合はdescendantsで検索
         if !statusPicker.waitForExistence(timeout: 3) {
             // macOS SwiftUIではPickerがpopUpButtonsとして認識されないことがある
             // 全要素から検索
-            let allPickers = app.descendants(matching: .popUpButton).matching(statusPickerPredicate).firstMatch
-            if !allPickers.waitForExistence(timeout: 3) {
-                // popUpButtonが見つからない場合、デバッグ出力
-                print("=== DEBUG: Searching for StatusPicker ===")
-                let allElements = app.descendants(matching: .any)
-                for i in 0..<min(allElements.count, 50) {
-                    let el = allElements.element(boundBy: i)
-                    if el.identifier.contains("Status") || el.label.contains("Status") {
-                        print("  Found: type=\(el.elementType.rawValue), id=\(el.identifier), label=\(el.label)")
-                    }
-                }
-                throw XCTSkip("ステータスPickerが見つかりません")
-            }
+            statusPicker = app.descendants(matching: .popUpButton).matching(statusPickerPredicate).firstMatch
         }
+        XCTAssertTrue(statusPicker.waitForExistence(timeout: 3), "ステータスPickerが存在すること")
 
         // In Progressに変更しようとする
         statusPicker.click()
@@ -1144,12 +1141,8 @@ final class DependencyBlockingTests: BasicDataUITestCase {
 
         // メニュー項目を検索
         let inProgressOption = app.menuItems["In Progress"]
-        if inProgressOption.waitForExistence(timeout: 3) {
-            inProgressOption.click()
-        } else {
-            // メニューアイテムが見つからない場合はスキップ
-            throw XCTSkip("In Progressメニュー項目が見つかりません")
-        }
+        XCTAssertTrue(inProgressOption.waitForExistence(timeout: 3), "In Progressメニュー項目が存在すること")
+        inProgressOption.click()
 
         // エラーアラートが表示されることを確認
         Thread.sleep(forTimeInterval: 1.0)  // アラート表示待ち
@@ -1174,7 +1167,8 @@ final class DependencyBlockingTests: BasicDataUITestCase {
     func testAllowedWhenAllDependenciesComplete() throws {
         // このテストには先行タスクをdoneにする操作が必要
         // テストデータでは先行タスクがtodoなので、手動で完了させる必要がある
-        throw XCTSkip("依存タスク完了後の遷移テストはデータ操作が必要 - 将来実装")
+        XCTFail("依存タスク完了後の遷移テストはデータ操作が必要 - 将来実装")
+        throw TestError.failedPrecondition("依存タスク完了後の遷移テストはデータ操作が必要 - 将来実装")
     }
 
     /// TS-DEP-003: Blockedカラムに依存待ちタスクが表示される
@@ -1205,18 +1199,14 @@ final class DependencyBlockingTests: BasicDataUITestCase {
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")
         let statusPicker = app.popUpButtons.matching(statusPickerPredicate).firstMatch
 
-        guard statusPicker.waitForExistence(timeout: 5) else {
-            throw XCTSkip("ステータスPickerが見つかりません")
-        }
+        XCTAssertTrue(statusPicker.waitForExistence(timeout: 5), "ステータスPickerが見つかること")
 
         // In Progressに変更しようとする
         statusPicker.click()
         Thread.sleep(forTimeInterval: 0.5)
 
         let inProgressOption = app.menuItems["In Progress"]
-        guard inProgressOption.waitForExistence(timeout: 3) else {
-            throw XCTSkip("In Progressメニュー項目が見つかりません")
-        }
+        XCTAssertTrue(inProgressOption.waitForExistence(timeout: 3), "In Progressメニュー項目が見つかること")
         inProgressOption.click()
 
         // エラーアラートが表示されることを確認
@@ -1244,7 +1234,8 @@ final class ResourceBlockingTests: BasicDataUITestCase {
         if projectRow.waitForExistence(timeout: 5) {
             projectRow.click()
         } else {
-            throw XCTSkip("テストプロジェクトが存在しません")
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
         }
     }
 
@@ -1261,13 +1252,10 @@ final class ResourceBlockingTests: BasicDataUITestCase {
             // Cmd+Shift+G でリソーステストタスクを選択
             app.typeKey("g", modifierFlags: [.command, .shift])
             Thread.sleep(forTimeInterval: 0.5)
-
-            if detailView.waitForExistence(timeout: 5) {
-                return
-            }
-            throw XCTSkip("リソーステストタスクの選択に失敗しました")
+            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "リソーステストタスクの詳細が表示されること")
         } else {
-            throw XCTSkip("タスク「\(title)」用のショートカットが定義されていません")
+            XCTFail("タスク「\(title)」用のショートカットが定義されていません")
+            throw TestError.failedPrecondition("タスク「\(title)」用のショートカットが定義されていません")
         }
     }
 
@@ -1280,19 +1268,14 @@ final class ResourceBlockingTests: BasicDataUITestCase {
         // TaskDetailView内のステータスPickerを探す
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")
         let statusPicker = app.popUpButtons.matching(statusPickerPredicate).firstMatch
-
-        guard statusPicker.waitForExistence(timeout: 5) else {
-            throw XCTSkip("ステータスPickerが見つかりません")
-        }
+        XCTAssertTrue(statusPicker.waitForExistence(timeout: 5), "ステータスPickerが存在すること")
 
         // In Progressに変更しようとする
         statusPicker.click()
         Thread.sleep(forTimeInterval: 0.5)
 
         let inProgressOption = app.menuItems["In Progress"]
-        guard inProgressOption.waitForExistence(timeout: 3) else {
-            throw XCTSkip("In Progressメニュー項目が見つかりません")
-        }
+        XCTAssertTrue(inProgressOption.waitForExistence(timeout: 3), "In Progressメニュー項目が存在すること")
         inProgressOption.click()
 
         // エラーアラートが表示されることを確認
@@ -1312,8 +1295,9 @@ final class ResourceBlockingTests: BasicDataUITestCase {
     func testAllowedWhenBelowMaxParallel() throws {
         // ownerエージェントは現在in_progressタスクがないので、
         // ownerにアサインされたタスクをin_progressにできるはず
-        // テストデータにはownerにアサインされたtodoタスクがないのでスキップ
-        throw XCTSkip("ownerにアサインされたtodoタスクがテストデータにないため - 将来追加")
+        // テストデータにはownerにアサインされたtodoタスクがないため失敗
+        XCTFail("ownerにアサインされたtodoタスクがテストデータにないため - 将来追加")
+        throw TestError.failedPrecondition("ownerにアサインされたtodoタスクがテストデータにないため - 将来追加")
     }
 
     /// TS-RES-003: エージェント詳細に現在の並列数が表示される
@@ -1324,20 +1308,18 @@ final class ResourceBlockingTests: BasicDataUITestCase {
 
         // エージェント名で検索
         let devAgent = app.staticTexts["backend-dev"]
+        XCTAssertTrue(devAgent.waitForExistence(timeout: 10), "エージェントが存在すること")
 
-        if devAgent.waitForExistence(timeout: 10) {
-            devAgent.click()
+        devAgent.click()
 
-            // AgentDetailView識別子で詳細パネルを確認
-            let detailView = app.descendants(matching: .any).matching(identifier: "AgentDetailView").firstMatch
-            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "AgentDetailViewが表示されること")
+        // AgentDetailView識別子で詳細パネルを確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "AgentDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "AgentDetailViewが表示されること")
 
-            // 現在の並列数表示は未実装
-            // 実装後: "In Progress: 1 / 1" のような表示を確認
-            throw XCTSkip("エージェント詳細の現在並列数表示は未実装 - UI追加が必要")
-        } else {
-            throw XCTSkip("テストデータにエージェントが存在しません")
-        }
+        // 現在の並列数表示は未実装
+        // 実装後: "In Progress: 1 / 1" のような表示を確認
+        XCTFail("エージェント詳細の現在並列数表示は未実装 - UI追加が必要")
+        throw TestError.failedPrecondition("エージェント詳細の現在並列数表示は未実装 - UI追加が必要")
     }
 
     /// TS-RES-004: ステータス変更時にリソースエラーが表示される
@@ -1350,19 +1332,14 @@ final class ResourceBlockingTests: BasicDataUITestCase {
         // TaskDetailView内のステータスPickerを探す
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")
         let statusPicker = app.popUpButtons.matching(statusPickerPredicate).firstMatch
-
-        guard statusPicker.waitForExistence(timeout: 5) else {
-            throw XCTSkip("ステータスPickerが見つかりません")
-        }
+        XCTAssertTrue(statusPicker.waitForExistence(timeout: 5), "ステータスPickerが存在すること")
 
         // In Progressに変更しようとする
         statusPicker.click()
         Thread.sleep(forTimeInterval: 0.5)
 
         let inProgressOption = app.menuItems["In Progress"]
-        guard inProgressOption.waitForExistence(timeout: 3) else {
-            throw XCTSkip("In Progressメニュー項目が見つかりません")
-        }
+        XCTAssertTrue(inProgressOption.waitForExistence(timeout: 3), "In Progressメニュー項目が存在すること")
         inProgressOption.click()
 
         // エラーアラートが表示されることを確認
@@ -1389,7 +1366,8 @@ final class AuditTeamTests: BasicDataUITestCase {
     func testAuditTeamSectionExists() throws {
         // 監査チーム機能は未実装
         // 実装後: サイドバーに「Audit Team」セクションが存在することを確認
-        throw XCTSkip("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
+        XCTFail("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
+        throw TestError.failedPrecondition("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
     }
 
     /// TS-AUD-002: 監査チーム一覧が表示される
@@ -1397,7 +1375,8 @@ final class AuditTeamTests: BasicDataUITestCase {
     func testAuditTeamListDisplay() throws {
         // 監査チーム機能は未実装
         // 実装後: 監査エージェントが一覧表示されることを確認
-        throw XCTSkip("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
+        XCTFail("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
+        throw TestError.failedPrecondition("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
     }
 
     /// TS-AUD-003: 監査チーム作成フォームが開く
@@ -1405,7 +1384,8 @@ final class AuditTeamTests: BasicDataUITestCase {
     func testAuditTeamCreationForm() throws {
         // 監査チーム機能は未実装
         // 実装後: 監査エージェント作成フォームが開くことを確認
-        throw XCTSkip("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
+        XCTFail("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
+        throw TestError.failedPrecondition("監査チーム機能は未実装 - AUDIT.md要件の実装が必要")
     }
 
     /// TS-AUD-004: タスクロック機能が動作する
@@ -1413,7 +1393,8 @@ final class AuditTeamTests: BasicDataUITestCase {
     func testTaskLockFunction() throws {
         // タスクロック機能は未実装
         // 実装後: 監査エージェントがタスクをロックできることを確認
-        throw XCTSkip("タスクロック機能は未実装 - AUDIT.md要件の実装が必要")
+        XCTFail("タスクロック機能は未実装 - AUDIT.md要件の実装が必要")
+        throw TestError.failedPrecondition("タスクロック機能は未実装 - AUDIT.md要件の実装が必要")
     }
 
     /// TS-AUD-005: エージェントロック機能が動作する
@@ -1421,7 +1402,8 @@ final class AuditTeamTests: BasicDataUITestCase {
     func testAgentLockFunction() throws {
         // エージェントロック機能は未実装
         // 実装後: 監査エージェントがエージェントをロックできることを確認
-        throw XCTSkip("エージェントロック機能は未実装 - AUDIT.md要件の実装が必要")
+        XCTFail("エージェントロック機能は未実装 - AUDIT.md要件の実装が必要")
+        throw TestError.failedPrecondition("エージェントロック機能は未実装 - AUDIT.md要件の実装が必要")
     }
 
     /// TS-AUD-006: ロック解除が監査エージェントのみ可能
@@ -1429,7 +1411,8 @@ final class AuditTeamTests: BasicDataUITestCase {
     func testOnlyAuditAgentCanUnlock() throws {
         // ロック解除権限制御は未実装
         // 実装後: 監査エージェント以外がロック解除できないことを確認
-        throw XCTSkip("ロック解除権限制御は未実装 - AUDIT.md要件の実装が必要")
+        XCTFail("ロック解除権限制御は未実装 - AUDIT.md要件の実装が必要")
+        throw TestError.failedPrecondition("ロック解除権限制御は未実装 - AUDIT.md要件の実装が必要")
     }
 }
 
@@ -1443,21 +1426,14 @@ final class HistoryTests: BasicDataUITestCase {
     private func openTaskDetail() throws {
         // プロジェクト選択
         let projectRow = app.staticTexts["テストプロジェクト"]
-        if projectRow.waitForExistence(timeout: 5) {
-            projectRow.click()
-        } else {
-            throw XCTSkip("テストプロジェクトが存在しません")
-        }
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
         // タスクカード選択
         let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
         let firstCard = taskCards.firstMatch
-
-        if firstCard.waitForExistence(timeout: 5) {
-            firstCard.click()
-        } else {
-            throw XCTSkip("タスクが存在しません")
-        }
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
     }
 
     /// TS-HIST-001: 履歴画面が表示される
@@ -1479,7 +1455,8 @@ final class HistoryTests: BasicDataUITestCase {
     func testHistoryAgentFilter() throws {
         // 履歴フィルター機能は未実装
         // 実装後: エージェント別フィルターUIが存在し、フィルタリングが機能することを確認
-        throw XCTSkip("履歴のエージェント別フィルターは未実装")
+        XCTFail("履歴のエージェント別フィルターは未実装")
+        throw TestError.failedPrecondition("履歴のエージェント別フィルターは未実装")
     }
 
     /// TS-HIST-003: タスク別フィルターが機能する
@@ -1487,7 +1464,8 @@ final class HistoryTests: BasicDataUITestCase {
     func testHistoryTaskFilter() throws {
         // 履歴フィルター機能は未実装
         // 実装後: タスク別フィルターUIが存在し、フィルタリングが機能することを確認
-        throw XCTSkip("履歴のタスク別フィルターは未実装")
+        XCTFail("履歴のタスク別フィルターは未実装")
+        throw TestError.failedPrecondition("履歴のタスク別フィルターは未実装")
     }
 
     /// TS-HIST-004: 操作種別フィルターが機能する
@@ -1495,7 +1473,8 @@ final class HistoryTests: BasicDataUITestCase {
     func testHistoryOperationTypeFilter() throws {
         // 履歴フィルター機能は未実装
         // 実装後: 操作種別フィルターUIが存在し、フィルタリングが機能することを確認
-        throw XCTSkip("履歴の操作種別フィルターは未実装")
+        XCTFail("履歴の操作種別フィルターは未実装")
+        throw TestError.failedPrecondition("履歴の操作種別フィルターは未実装")
     }
 }
 
@@ -1529,6 +1508,7 @@ final class ProjectListExtendedTests: BasicDataUITestCase {
     func testProjectAgentAssignmentUI() throws {
         // プロジェクトへのエージェント割り当てUIは未実装
         // 実装後: プロジェクト詳細にエージェント割り当てセクションが存在することを確認
-        throw XCTSkip("プロジェクトへのエージェント割り当てUIは未実装")
+        XCTFail("プロジェクトへのエージェント割り当てUIは未実装")
+        throw TestError.failedPrecondition("プロジェクトへのエージェント割り当てUIは未実装")
     }
 }

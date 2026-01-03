@@ -14,12 +14,13 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # プロジェクトルート
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # テスト設定（UIテストコードと同じ固定パスを使用）
 # Feature08_AgentKickExecutionTests.swift と同期
 TEST_DIR="/tmp/uc001_integration_test"
 OUTPUT_FILE="integration_test_output.md"
+EXPECTED_CONTENT="integration test content"
 TIMEOUT_SECONDS=180
 
 echo "=========================================="
@@ -99,7 +100,16 @@ if [ -f "$TEST_DIR/$OUTPUT_FILE" ]; then
     echo "---"
     cat "$TEST_DIR/$OUTPUT_FILE"
     echo "---"
-    TEST_RESULT="PASSED"
+
+    # 内容の検証（必須）
+    FILE_CONTENT=$(cat "$TEST_DIR/$OUTPUT_FILE")
+    if echo "$FILE_CONTENT" | grep -q "$EXPECTED_CONTENT"; then
+        echo -e "${GREEN}✓ Content verified: contains '$EXPECTED_CONTENT'${NC}"
+        TEST_RESULT="PASSED"
+    else
+        echo -e "${YELLOW}⚠ Content does not contain expected text '$EXPECTED_CONTENT'${NC}"
+        TEST_RESULT="PARTIAL"
+    fi
 else
     echo -e "${RED}✗ File not created: $OUTPUT_FILE${NC}"
     echo ""
@@ -135,7 +145,15 @@ if [ "$TEST_RESULT" == "PASSED" ]; then
     echo "  - Task status changed to in_progress"
     echo "  - Claude Code CLI was kicked"
     echo "  - File was created by agent"
+    echo "  - File content contains expected text"
     exit 0
+elif [ "$TEST_RESULT" == "PARTIAL" ]; then
+    echo -e "${YELLOW}UC001 Integration Test: PARTIAL${NC}"
+    echo ""
+    echo "File was created but content verification failed:"
+    echo "  - Expected content: '$EXPECTED_CONTENT'"
+    echo "  - Check agent instructions in task description"
+    exit 1
 else
     echo -e "${RED}UC001 Integration Test: FAILED${NC}"
     echo ""

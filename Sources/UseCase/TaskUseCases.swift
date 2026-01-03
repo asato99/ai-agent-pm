@@ -232,8 +232,6 @@ public struct CreateTaskUseCase: Sendable {
         description: String = "",
         priority: TaskPriority = .medium,
         assigneeId: AgentID? = nil,
-        outputFileName: String? = nil,
-        outputDescription: String? = nil,
         actorAgentId: AgentID?,
         sessionId: SessionID?
     ) throws -> Task {
@@ -254,9 +252,7 @@ public struct CreateTaskUseCase: Sendable {
             description: description,
             status: .backlog,
             priority: priority,
-            assigneeId: assigneeId,
-            outputFileName: outputFileName?.isEmpty == true ? nil : outputFileName,
-            outputDescription: outputDescription?.isEmpty == true ? nil : outputDescription
+            assigneeId: assigneeId
         )
 
         try taskRepository.save(task)

@@ -23,8 +23,6 @@ struct TaskFormView: View {
     @State private var priority: TaskPriority = .medium
     @State private var assigneeId: AgentID?
     @State private var estimatedMinutes: Int?
-    @State private var outputFileName: String = ""
-    @State private var outputDescription: String = ""
     @State private var agents: [Agent] = []
     @State private var isSaving = false
 
@@ -77,18 +75,6 @@ struct TaskFormView: View {
                         .accessibilityIdentifier("TaskEstimatedMinutesField")
                 }
 
-                Section("Output") {
-                    TextField("Output File Name", text: $outputFileName)
-                        .accessibilityIdentifier("TaskOutputFileNameField")
-
-                    TextField("Output Description", text: $outputDescription, axis: .vertical)
-                        .lineLimit(3...6)
-                        .accessibilityIdentifier("TaskOutputDescriptionField")
-
-                    Text("Specify the expected output file and its description for this task")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
             .accessibilityIdentifier("TaskForm")
             .formStyle(.grouped)
@@ -130,8 +116,6 @@ struct TaskFormView: View {
                     priority = task.priority
                     assigneeId = task.assigneeId
                     estimatedMinutes = task.estimatedMinutes
-                    outputFileName = task.outputFileName ?? ""
-                    outputDescription = task.outputDescription ?? ""
                 }
             }
         } catch {
@@ -152,8 +136,6 @@ struct TaskFormView: View {
                         description: description,
                         priority: priority,
                         assigneeId: assigneeId,
-                        outputFileName: outputFileName.isEmpty ? nil : outputFileName,
-                        outputDescription: outputDescription.isEmpty ? nil : outputDescription,
                         actorAgentId: nil,
                         sessionId: nil
                     )
@@ -163,9 +145,7 @@ struct TaskFormView: View {
                         title: title,
                         description: description.isEmpty ? nil : description,
                         priority: priority,
-                        estimatedMinutes: estimatedMinutes,
-                        outputFileName: outputFileName.isEmpty ? nil : outputFileName,
-                        outputDescription: outputDescription.isEmpty ? nil : outputDescription
+                        estimatedMinutes: estimatedMinutes
                     )
                 }
                 dismiss()

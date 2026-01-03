@@ -5,6 +5,11 @@
 
 import XCTest
 
+/// テスト失敗時にthrowするエラー
+private enum TestError: Error {
+    case failedPrecondition(String)
+}
+
 /// Feature03: キックトリガーテスト
 final class Feature03_KickTriggerTests: XCTestCase {
 
@@ -41,7 +46,8 @@ final class Feature03_KickTriggerTests: XCTestCase {
     private func selectProject() throws {
         let projectRow = app.staticTexts["テストプロジェクト"]
         guard projectRow.waitForExistence(timeout: 5) else {
-            throw XCTSkip("テストプロジェクトが存在しません")
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
         }
         projectRow.click()
         Thread.sleep(forTimeInterval: 0.5)
@@ -55,7 +61,8 @@ final class Feature03_KickTriggerTests: XCTestCase {
 
         let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
         guard detailView.waitForExistence(timeout: 5) else {
-            throw XCTSkip("タスク詳細が開けません")
+            XCTFail("タスク詳細が開けません")
+            throw TestError.failedPrecondition("タスク詳細が開けません")
         }
     }
 
@@ -71,7 +78,8 @@ final class Feature03_KickTriggerTests: XCTestCase {
         let statusPicker = app.popUpButtons.matching(statusPickerPredicate).firstMatch
 
         guard statusPicker.waitForExistence(timeout: 3) else {
-            throw XCTSkip("StatusPickerが見つかりません")
+            XCTFail("StatusPickerが見つかりません")
+            throw TestError.failedPrecondition("StatusPickerが見つかりません")
         }
 
         statusPicker.click()
@@ -79,7 +87,8 @@ final class Feature03_KickTriggerTests: XCTestCase {
 
         let inProgressOption = app.menuItems["In Progress"]
         guard inProgressOption.waitForExistence(timeout: 2) else {
-            throw XCTSkip("In Progressオプションが見つかりません")
+            XCTFail("In Progressオプションが見つかりません")
+            throw TestError.failedPrecondition("In Progressオプションが見つかりません")
         }
         inProgressOption.click()
         Thread.sleep(forTimeInterval: 0.5)
@@ -115,21 +124,25 @@ final class Feature03_KickTriggerTests: XCTestCase {
         // キック状態セクションの存在確認
         let kickStatusSection = app.descendants(matching: .any).matching(identifier: "KickStatusSection").firstMatch
 
-        if kickStatusSection.waitForExistence(timeout: 3) {
-            // 状態ラベルの確認
-            let pendingStatus = app.staticTexts["Pending"]
-            let runningStatus = app.staticTexts["Running"]
-            let successStatus = app.staticTexts["Success"]
-            let failedStatus = app.staticTexts["Failed"]
-
-            let hasStatus = pendingStatus.exists || runningStatus.exists ||
-                           successStatus.exists || failedStatus.exists
-
-            XCTAssertTrue(hasStatus, "キック状態ラベルが表示されること")
-        } else {
-            // セクション自体が未実装の場合はスキップ
-            throw XCTSkip("KickStatusSectionが未実装")
+        guard kickStatusSection.waitForExistence(timeout: 3) else {
+            XCTFail("KickStatusSectionが見つかりません")
+            return
         }
+
+        // セクションが存在すれば成功（KickStatusIndicatorはSwiftUIの構造上、内部要素として認識されない場合がある）
+        XCTAssertTrue(kickStatusSection.exists, "KickStatusSectionが存在すること")
+
+        // 状態ラベルの確認（いずれかが表示されていればOK）
+        let validStatuses = ["Pending", "Running", "Success", "Failed", "N/A", "No Assignee"]
+        var foundStatus = false
+        for status in validStatuses {
+            if app.staticTexts[status].exists {
+                foundStatus = true
+                break
+            }
+        }
+
+        XCTAssertTrue(foundStatus, "キック状態ラベル（\(validStatuses.joined(separator: "/"))のいずれか）が表示されること")
     }
 
     /// F03-03: キックのログ/履歴が確認可能
@@ -141,7 +154,8 @@ final class Feature03_KickTriggerTests: XCTestCase {
         let historySection = app.descendants(matching: .any).matching(identifier: "HistorySection").firstMatch
 
         guard historySection.waitForExistence(timeout: 3) else {
-            throw XCTSkip("Historyセクションが見つかりません")
+            XCTFail("Historyセクションが見つかりません")
+            throw TestError.failedPrecondition("Historyセクションが見つかりません")
         }
 
         // キック関連の履歴エントリを検索

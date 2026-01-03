@@ -85,6 +85,7 @@ public enum EventType: String, Codable, Sendable {
     case started
     case completed
     case kicked = "agent_kicked"
+    case notified = "parent_notified"
 
     public var displayName: String {
         switch self {
@@ -97,6 +98,7 @@ public enum EventType: String, Codable, Sendable {
         case .started: return "Started"
         case .completed: return "Completed"
         case .kicked: return "Agent Kicked"
+        case .notified: return "Parent Notified"
         }
     }
 }

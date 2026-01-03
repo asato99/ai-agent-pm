@@ -37,13 +37,14 @@ struct TaskDetailView: View {
                             descriptionSection(task.description)
                         }
 
-                        // Output (成果物情報)
-                        if task.outputFileName != nil || task.outputDescription != nil {
-                            outputSection(task)
-                        }
-
                         // Status & Assignment
                         statusSection(task)
+
+                        // Kick Status
+                        kickStatusSection(task)
+
+                        // Notification Status
+                        notificationSection(task)
 
                         Divider()
 
@@ -139,34 +140,6 @@ struct TaskDetailView: View {
     }
 
     @ViewBuilder
-    private func outputSection(_ task: Task) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Output")
-                .font(.headline)
-
-            if let fileName = task.outputFileName {
-                LabeledContent("File Name") {
-                    Text(fileName)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier("OutputFileName")
-            }
-
-            if let description = task.outputDescription {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Description")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(description)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier("OutputDescription")
-            }
-        }
-        .accessibilityIdentifier("OutputSection")
-    }
-
-    @ViewBuilder
     private func statusSection(_ task: Task) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Details")
@@ -203,6 +176,125 @@ struct TaskDetailView: View {
                 }
             }
         }
+    }
+
+    /// キック状態を履歴イベントとタスク状態から取得
+    private func getKickStatus(for task: Task) -> String {
+        // in_progressでない場合
+        guard task.status == .inProgress else {
+            return "N/A"
+        }
+
+        // アサインされていない場合
+        guard task.assigneeId != nil else {
+            return "No Assignee"
+        }
+
+        // 最新のkickedイベントを探す
+        if let kickedEvent = historyEvents.first(where: { $0.eventType == .kicked }) {
+            // newStateにキック結果が記録されている想定
+            if let newState = kickedEvent.newState {
+                return newState.capitalized
+            }
+            return "Success"
+        }
+
+        // in_progressだがキックイベントがない場合
+        return "Pending"
+    }
+
+    @ViewBuilder
+    private func kickStatusSection(_ task: Task) -> some View {
+        let status = getKickStatus(for: task)
+
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Kick Status")
+                .font(.headline)
+                .accessibilityIdentifier("KickStatusHeader")
+
+            HStack {
+                Image(systemName: kickStatusIcon(status))
+                    .foregroundStyle(kickStatusColor(status))
+                    .font(.title2)
+
+                Text(status)
+                    .font(.subheadline)
+                    .foregroundStyle(kickStatusColor(status))
+            }
+            .accessibilityIdentifier("KickStatusIndicator")
+        }
+        .accessibilityIdentifier("KickStatusSection")
+    }
+
+    private func kickStatusIcon(_ status: String) -> String {
+        switch status.lowercased() {
+        case "success": return "checkmark.circle.fill"
+        case "failed": return "xmark.circle.fill"
+        case "running": return "arrow.triangle.2.circlepath.circle.fill"
+        case "pending": return "clock.circle.fill"
+        default: return "minus.circle"
+        }
+    }
+
+    private func kickStatusColor(_ status: String) -> Color {
+        switch status.lowercased() {
+        case "success": return .green
+        case "failed": return .red
+        case "running": return .orange
+        case "pending": return .blue
+        default: return .secondary
+        }
+    }
+
+    // MARK: - Notification Section
+
+    /// 親（上位エージェント/ユーザー）への通知状態を表示
+    @ViewBuilder
+    private func notificationSection(_ task: Task) -> some View {
+        let notificationEvent = historyEvents.first { $0.eventType == .notified }
+        let wasNotified = notificationEvent != nil
+
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Parent Notification")
+                .font(.headline)
+                .accessibilityIdentifier("NotificationHeader")
+
+            HStack {
+                if task.status == .done {
+                    if wasNotified {
+                        Image(systemName: "bell.badge.fill")
+                            .foregroundStyle(.green)
+                            .font(.title2)
+                        VStack(alignment: .leading) {
+                            Text("Parent notified")
+                                .font(.subheadline)
+                                .foregroundStyle(.green)
+                            if let event = notificationEvent {
+                                Text(event.timestamp.formatted())
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        Image(systemName: "bell.slash")
+                            .foregroundStyle(.orange)
+                            .font(.title2)
+                        Text("Notification pending")
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Image(systemName: "bell")
+                        .foregroundStyle(.secondary)
+                        .font(.title2)
+                    Text("Will notify on completion")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("NotificationIndicator")
+        }
+        .accessibilityIdentifier("NotificationSection")
     }
 
     private var dependenciesSection: some View {
@@ -363,11 +455,33 @@ struct TaskDetailView: View {
                     }
                 }
 
+                // done への遷移時は親に完了通知イベントを記録
+                if newStatus == .done {
+                    try await notifyParent(task: updatedTask)
+                }
+
                 await loadData()
             } catch {
                 router.showAlert(.error(message: error.localizedDescription))
             }
         }
+    }
+
+    /// 親（上位エージェント/ユーザー）に完了通知を送る
+    private func notifyParent(task: Task) async throws {
+        let event = StateChangeEvent(
+            id: .generate(),
+            projectId: task.projectId,
+            entityType: .task,
+            entityId: task.id.value,
+            eventType: .notified,
+            agentId: task.assigneeId,
+            previousState: nil,
+            newState: "Parent notified of completion",
+            reason: "Task completed",
+            timestamp: Date()
+        )
+        try container.eventRepository.save(event)
     }
 }
 
@@ -496,6 +610,7 @@ struct HistoryEventRow: View {
         case .started: return "play.circle"
         case .completed: return "checkmark.circle"
         case .kicked: return "bolt.circle"
+        case .notified: return "bell.badge"
         }
     }
 
@@ -507,6 +622,7 @@ struct HistoryEventRow: View {
         case .statusChanged: return .blue
         case .assigned, .unassigned: return .purple
         case .kicked: return .orange
+        case .notified: return .green
         default: return .secondary
         }
     }

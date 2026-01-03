@@ -218,6 +218,7 @@ struct AgentRow: View {
 
 struct ProjectRow: View {
     let project: Project
+    @Environment(Router.self) var router
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -232,5 +233,13 @@ struct ProjectRow: View {
             }
         }
         .padding(.vertical, 4)
+        .contextMenu {
+            Button {
+                router.showSheet(.editProject(project.id))
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .accessibilityIdentifier("EditProjectMenuItem")
+        }
     }
 }

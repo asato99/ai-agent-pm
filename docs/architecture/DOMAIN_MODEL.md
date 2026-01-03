@@ -161,8 +161,7 @@ struct Task: Identifiable, Equatable {
     var status: TaskStatus
     var priority: TaskPriority
     var assigneeId: AgentID?
-    var parentTaskId: TaskID?
-    var dependencies: [TaskID]
+    var dependencies: [TaskID]  // タスク間関係は依存関係で表現（サブタスクは不要）
     var estimatedMinutes: Int?
     var actualMinutes: Int?
     let createdAt: Date

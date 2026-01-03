@@ -254,9 +254,7 @@ public struct UpdateTaskUseCase: Sendable {
         description: String? = nil,
         priority: TaskPriority? = nil,
         estimatedMinutes: Int? = nil,
-        actualMinutes: Int? = nil,
-        outputFileName: String? = nil,
-        outputDescription: String? = nil
+        actualMinutes: Int? = nil
     ) throws -> Task {
         guard var task = try taskRepository.findById(taskId) else {
             throw UseCaseError.taskNotFound(taskId)
@@ -276,12 +274,6 @@ public struct UpdateTaskUseCase: Sendable {
         }
         if let actualMinutes = actualMinutes {
             task.actualMinutes = actualMinutes
-        }
-        if let outputFileName = outputFileName {
-            task.outputFileName = outputFileName.isEmpty ? nil : outputFileName
-        }
-        if let outputDescription = outputDescription {
-            task.outputDescription = outputDescription.isEmpty ? nil : outputDescription
         }
 
         task.updatedAt = Date()

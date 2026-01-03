@@ -5,6 +5,11 @@
 
 import XCTest
 
+/// テスト失敗時にthrowするエラー
+private enum TestError: Error {
+    case failedPrecondition(String)
+}
+
 /// Feature02: エージェント認証テスト
 final class Feature02_AgentAuthTests: XCTestCase {
 
@@ -80,7 +85,8 @@ final class Feature02_AgentAuthTests: XCTestCase {
 
         let passkeyField = app.secureTextFields["PasskeyField"]
         guard passkeyField.waitForExistence(timeout: 3) else {
-            throw XCTSkip("パスキーフィールドが見つかりません")
+            XCTFail("パスキーフィールドが見つかりません")
+            throw TestError.failedPrecondition("パスキーフィールドが見つかりません")
         }
 
         // パスキーを入力
@@ -189,7 +195,8 @@ final class Feature02_AgentAuthTests: XCTestCase {
                 XCTAssertTrue(savedPasskey.exists, "パスキーフィールドが存在すること")
             }
         } else {
-            throw XCTSkip("作成したエージェントが見つかりません")
+            XCTFail("作成したエージェントが見つかりません")
+            throw TestError.failedPrecondition("作成したエージェントが見つかりません")
         }
     }
 
@@ -198,12 +205,14 @@ final class Feature02_AgentAuthTests: XCTestCase {
         // 既存エージェントの詳細を開く
         let agentsSection = app.descendants(matching: .any).matching(identifier: "AgentsSection").firstMatch
         guard agentsSection.waitForExistence(timeout: 5) else {
-            throw XCTSkip("Agentsセクションが存在しません")
+            XCTFail("Agentsセクションが存在しません")
+            throw TestError.failedPrecondition("Agentsセクションが存在しません")
         }
 
         let agentRow = app.staticTexts["backend-dev"]
         guard agentRow.waitForExistence(timeout: 5) else {
-            throw XCTSkip("テストエージェントが存在しません")
+            XCTFail("テストエージェントが存在しません")
+            throw TestError.failedPrecondition("テストエージェントが存在しません")
         }
         agentRow.click()
         Thread.sleep(forTimeInterval: 0.5)

@@ -55,6 +55,7 @@ struct AIAgentPMApp: App {
         case basic = "Basic"           // 基本データ（プロジェクト+エージェント+タスク）
         case multiProject = "MultiProject"  // 複数プロジェクト
         case uc001 = "UC001"           // UC001: エージェントキック用（workingDirectory設定済み）
+        case noWD = "NoWD"             // NoWD: workingDirectory未設定エラーテスト用
     }
 
     init() {
@@ -148,6 +149,12 @@ struct AIAgentPMApp: App {
                         router.selectTask(TaskID(value: "uitest_resource_task"))
                     }
                     .keyboardShortcut("g", modifiers: [.command, .shift])
+
+                    // 作業ディレクトリなしプロジェクトを選択（Cmd+Shift+W）
+                    Button("Select No-WorkingDir Project (UITest)") {
+                        router.selectProject(ProjectID(value: "uitest_no_wd_project"))
+                    }
+                    .keyboardShortcut("w", modifiers: [.command, .shift])
                 }
             }
         }
@@ -178,6 +185,8 @@ struct AIAgentPMApp: App {
                 try await seeder.seedMultipleProjects()
             case .uc001:
                 try await seeder.seedUC001Data()
+            case .noWD:
+                try await seeder.seedNoWDData()
             }
             print("✅ UITest: Test data seeded successfully")
         } catch {
@@ -264,7 +273,6 @@ private final class TestDataSeeder {
             status: .backlog,  // backlogで未完了（doneではないので依存タスクはブロックされる）
             priority: .high,
             assigneeId: nil,
-            parentTaskId: nil,
             dependencies: [],
             estimatedMinutes: nil,
             actualMinutes: nil,
@@ -285,7 +293,6 @@ private final class TestDataSeeder {
             status: .todo,
             priority: .medium,
             assigneeId: devAgent.id,
-            parentTaskId: nil,
             dependencies: [prerequisiteTaskId],  // 先行タスクに依存
             estimatedMinutes: nil,
             actualMinutes: nil,
@@ -316,7 +323,6 @@ private final class TestDataSeeder {
                 status: status,
                 priority: priority,
                 assigneeId: status == .inProgress ? devAgent.id : nil,
-                parentTaskId: nil,
                 dependencies: [],
                 estimatedMinutes: nil,
                 actualMinutes: nil,
@@ -339,7 +345,6 @@ private final class TestDataSeeder {
             status: .todo,  // todoから直接in_progressに遷移を試みる
             priority: .medium,
             assigneeId: devAgent.id,  // devAgentにアサイン
-            parentTaskId: nil,
             dependencies: [],
             estimatedMinutes: nil,
             actualMinutes: nil,
@@ -403,9 +408,10 @@ private final class TestDataSeeder {
         try await projectRepository.save(uc001Project)
 
         // workingDirectory未設定のフォールバックプロジェクト（エラーテスト用）
+        // 固定IDを使用してUIテストから選択可能にする
         let noWDProject = Project(
-            id: .generate(),
-            name: "テストプロジェクト",
+            id: ProjectID(value: "uitest_no_wd_project"),
+            name: "作業ディレクトリなしPJ",
             description: "作業ディレクトリ未設定のプロジェクト（エラーテスト用）",
             status: .active,
             workingDirectory: nil,
@@ -467,16 +473,92 @@ private final class TestDataSeeder {
             id: TaskID(value: "uitest_kick_task"),
             projectId: uc001Project.id,
             title: "キックテストタスク",
-            description: "エージェントキック機能のテスト用タスク。指定されたファイルを作成してください。",
+            description: """
+                エージェントキック機能のテスト用タスク。
+
+                【指示】
+                ファイル名: \(outputFile)
+                内容: テスト用のMarkdownファイルを作成してください。内容には'integration test content'という文字列を含めること。
+                """,
             status: .backlog,
             priority: .high,
             assigneeId: claudeAgent.id,
             createdAt: Date(),
-            updatedAt: Date(),
-            outputFileName: outputFile,
-            outputDescription: "テスト用のMarkdownファイルを作成してください。内容には'integration test content'という文字列を含めること。"
+            updatedAt: Date()
         )
         try await taskRepository.save(kickTestTask)
+
+        // 作業ディレクトリ未設定エラーテスト用タスク（noWDProjectに作成）
+        // claude-code-agentにアサインされているが、プロジェクトに作業ディレクトリがないためキック時にエラーになる
+        // backlogステータスでUIテストのスクロール問題を回避
+        let noWDKickTask = Task(
+            id: TaskID(value: "uitest_no_wd_kick_task"),
+            projectId: noWDProject.id,
+            title: "作業ディレクトリなしキックタスク",
+            description: "作業ディレクトリ未設定エラーのテスト用",
+            status: .backlog,
+            priority: .high,
+            assigneeId: claudeAgent.id,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(noWDKickTask)
+
+        // kickMethod未設定エージェントテスト用タスク（ownerAgentにアサイン）
+        // ownerAgentはhuman型でkickMethodが設定されていないため、キックはスキップされる
+        // backlogステータスでUIテストのスクロール問題を回避
+        let noKickMethodTask = Task(
+            id: TaskID(value: "uitest_no_kick_method_task"),
+            projectId: uc001Project.id,
+            title: "キックメソッドなしタスク",
+            description: "kickMethod未設定エージェントのテスト用（キックがスキップされることを確認）",
+            status: .backlog,
+            priority: .medium,
+            assigneeId: ownerAgent.id,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(noKickMethodTask)
+
+        // 依存関係テスト用: 先行タスク（未完了）
+        // UIテスト用に固定IDを使用
+        let prerequisiteTaskId = TaskID(value: "uitest_prerequisite_task")
+        let prerequisiteTask = Task(
+            id: prerequisiteTaskId,
+            projectId: uc001Project.id,
+            title: "先行タスク",
+            description: "この先行タスクが完了しないと次のタスクを開始できません",
+            status: .backlog,  // backlogで未完了（doneではないので依存タスクはブロックされる）
+            priority: .high,
+            assigneeId: nil,
+            dependencies: [],
+            estimatedMinutes: nil,
+            actualMinutes: nil,
+            createdAt: Date(),
+            updatedAt: Date(),
+            completedAt: nil
+        )
+        try await taskRepository.save(prerequisiteTask)
+
+        // 依存関係テスト用: 先行タスクに依存するタスク
+        // UIテスト用に固定IDを使用
+        let dependentTaskId = TaskID(value: "uitest_dependent_task")
+        let dependentTask = Task(
+            id: dependentTaskId,
+            projectId: uc001Project.id,
+            title: "依存タスク",
+            description: "先行タスク完了後に開始可能（依存関係テスト用）",
+            status: .todo,
+            priority: .medium,
+            assigneeId: claudeAgent.id,
+            dependencies: [prerequisiteTaskId],  // 先行タスクに依存
+            estimatedMinutes: nil,
+            actualMinutes: nil,
+            createdAt: Date(),
+            updatedAt: Date(),
+            completedAt: nil
+        )
+        try await taskRepository.save(dependentTask)
     }
 
     /// 複数プロジェクトをシード
@@ -521,6 +603,56 @@ private final class TestDataSeeder {
             )
             try await taskRepository.save(task)
         }
+    }
+
+    /// NoWDシナリオ: workingDirectory未設定プロジェクトのみをシード
+    /// キック時にエラーになることをテストするための専用シナリオ
+    func seedNoWDData() async throws {
+        // workingDirectory未設定のプロジェクト（唯一のプロジェクト）
+        let noWDProject = Project(
+            id: ProjectID(value: "uitest_no_wd_project"),
+            name: "作業ディレクトリなしPJ",
+            description: "作業ディレクトリ未設定のプロジェクト（エラーテスト用）",
+            status: .active,
+            workingDirectory: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(noWDProject)
+
+        // claude-code-agent（kickMethod=cli設定済み）
+        let claudeAgent = Agent(
+            id: .generate(),
+            name: "claude-code-agent",
+            role: "Claude Code CLIエージェント",
+            type: .ai,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 3,
+            capabilities: ["TypeScript", "Python", "Swift"],
+            systemPrompt: "Claude Codeを使用して開発タスクを実行するエージェントです",
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(claudeAgent)
+
+        // workingDirectory未設定エラーテスト用タスク
+        // claude-code-agentにアサインされているが、プロジェクトに作業ディレクトリがないためキック時にエラーになる
+        let noWDKickTask = Task(
+            id: TaskID(value: "uitest_no_wd_kick_task"),
+            projectId: noWDProject.id,
+            title: "作業ディレクトリなしキックタスク",
+            description: "作業ディレクトリ未設定エラーのテスト用",
+            status: .backlog,
+            priority: .high,
+            assigneeId: claudeAgent.id,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(noWDKickTask)
     }
 }
 

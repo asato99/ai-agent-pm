@@ -18,15 +18,12 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
     var status: String
     var priority: String
     var assigneeId: String?
-    var parentTaskId: String?
     var dependencies: String?
     var estimatedMinutes: Int?
     var actualMinutes: Int?
     var createdAt: Date
     var updatedAt: Date
     var completedAt: Date?
-    var outputFileName: String?
-    var outputDescription: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -36,15 +33,12 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
         case status
         case priority
         case assigneeId = "assignee_id"
-        case parentTaskId = "parent_task_id"
         case dependencies
         case estimatedMinutes = "estimated_minutes"
         case actualMinutes = "actual_minutes"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
-        case outputFileName = "output_file_name"
-        case outputDescription = "output_description"
     }
 
     func toDomain() -> Task {
@@ -63,15 +57,12 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             status: TaskStatus(rawValue: status) ?? .backlog,
             priority: TaskPriority(rawValue: priority) ?? .medium,
             assigneeId: assigneeId.map { AgentID(value: $0) },
-            parentTaskId: parentTaskId.map { TaskID(value: $0) },
             dependencies: deps,
             estimatedMinutes: estimatedMinutes,
             actualMinutes: actualMinutes,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            completedAt: completedAt,
-            outputFileName: outputFileName,
-            outputDescription: outputDescription
+            completedAt: completedAt
         )
     }
 
@@ -92,15 +83,12 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             status: task.status.rawValue,
             priority: task.priority.rawValue,
             assigneeId: task.assigneeId?.value,
-            parentTaskId: task.parentTaskId?.value,
             dependencies: depsJson,
             estimatedMinutes: task.estimatedMinutes,
             actualMinutes: task.actualMinutes,
             createdAt: task.createdAt,
             updatedAt: task.updatedAt,
-            completedAt: task.completedAt,
-            outputFileName: task.outputFileName,
-            outputDescription: task.outputDescription
+            completedAt: task.completedAt
         )
     }
 }
@@ -163,16 +151,6 @@ public final class TaskRepository: TaskRepositoryProtocol, Sendable {
                 .filter(Column("project_id") == projectId.value)
                 .filter(Column("status") == status.rawValue)
                 .order(Column("priority"), Column("updated_at").desc)
-                .fetchAll(db)
-                .map { $0.toDomain() }
-        }
-    }
-
-    public func findByParent(_ parentTaskId: TaskID) throws -> [Task] {
-        try db.read { db in
-            try TaskRecord
-                .filter(Column("parent_task_id") == parentTaskId.value)
-                .order(Column("created_at"))
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }

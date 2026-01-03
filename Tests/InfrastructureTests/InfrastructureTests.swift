@@ -264,22 +264,9 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertEqual(myTasks.count, 2)
     }
 
-    func testTaskRepositoryFindByParent() throws {
-        // PRD: 親タスクによるサブタスク取得（タスクの階層）
-        let project = Project(id: ProjectID.generate(), name: "Test Project")
-        try projectRepo.save(project)
-
-        let parentTask = Task(id: TaskID.generate(), projectId: project.id, title: "Parent Task")
-        try taskRepo.save(parentTask)
-
-        let childTask1 = Task(id: TaskID.generate(), projectId: project.id, title: "Child1", parentTaskId: parentTask.id)
-        let childTask2 = Task(id: TaskID.generate(), projectId: project.id, title: "Child2", parentTaskId: parentTask.id)
-        try taskRepo.save(childTask1)
-        try taskRepo.save(childTask2)
-
-        let children = try taskRepo.findByParent(parentTask.id)
-        XCTAssertEqual(children.count, 2)
-    }
+    // 注意: testTaskRepositoryFindByParent() は削除
+    // 要件変更によりサブタスク（parentTaskId）は不要になり、
+    // タスク間関係はdependenciesで表現（docs/requirements/TASKS.md参照）
 
     func testTaskRepositoryStatusTransition() throws {
         // PRD: タスクステータスの遷移（backlog → todo → inProgress → done）

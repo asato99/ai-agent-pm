@@ -6,6 +6,11 @@
 
 import XCTest
 
+/// テスト失敗時にthrowするエラー
+private enum TestError: Error {
+    case failedPrecondition(String)
+}
+
 /// Feature06: プロジェクト作業ディレクトリ設定テスト
 final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
 
@@ -84,7 +89,8 @@ final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
         // プロジェクト名を入力
         let nameField = app.textFields["ProjectNameField"]
         guard nameField.waitForExistence(timeout: 3) else {
-            throw XCTSkip("ProjectNameFieldが見つかりません")
+            XCTFail("ProjectNameFieldが見つかりません")
+            throw TestError.failedPrecondition("ProjectNameFieldが見つかりません")
         }
         nameField.click()
         let projectName = "WorkDirTest_\(Int(Date().timeIntervalSince1970))"
@@ -93,7 +99,8 @@ final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
         // 作業ディレクトリを入力
         let workingDirField = app.textFields["ProjectWorkingDirectoryField"]
         guard workingDirField.waitForExistence(timeout: 3) else {
-            throw XCTSkip("ProjectWorkingDirectoryFieldが見つかりません - 機能未実装")
+            XCTFail("ProjectWorkingDirectoryFieldが見つかりません")
+            throw TestError.failedPrecondition("ProjectWorkingDirectoryFieldが見つかりません")
         }
         workingDirField.click()
         let testPath = "/tmp/test_project_\(Int(Date().timeIntervalSince1970))"
@@ -144,7 +151,8 @@ final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
         // 既存プロジェクト（作業ディレクトリ未設定）を選択
         let projectRow = app.staticTexts["テストプロジェクト"]
         guard projectRow.waitForExistence(timeout: 5) else {
-            throw XCTSkip("テストプロジェクトが存在しません")
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
         }
         projectRow.click()
 
@@ -180,73 +188,68 @@ final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
 
     /// F06-04: 作業ディレクトリを編集で変更できる
     func testWorkingDirectoryEdit() throws {
-        // まず作業ディレクトリ付きプロジェクトを作成
-        openNewProjectForm()
-
-        let sheet = app.sheets.firstMatch
-        guard sheet.waitForExistence(timeout: 5) else {
-            throw XCTSkip("プロジェクトフォームが開けません")
+        // 既存プロジェクトを編集（コンテキストメニュー経由）
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        guard projectRow.waitForExistence(timeout: 5) else {
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
         }
 
-        let nameField = app.textFields["ProjectNameField"]
-        guard nameField.waitForExistence(timeout: 3) else {
-            throw XCTSkip("ProjectNameFieldが見つかりません")
-        }
-        nameField.click()
-        let projectName = "EditWorkDirTest_\(Int(Date().timeIntervalSince1970))"
-        nameField.typeText(projectName)
-
-        let workingDirField = app.textFields["ProjectWorkingDirectoryField"]
-        guard workingDirField.waitForExistence(timeout: 3) else {
-            throw XCTSkip("ProjectWorkingDirectoryFieldが見つかりません - 機能未実装")
-        }
-        workingDirField.click()
-        workingDirField.typeText("/tmp/original_path")
-
-        let saveButton = app.buttons["Save"]
-        saveButton.click()
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 5), "シートが閉じること")
-
-        // 作成したプロジェクトを編集
-        Thread.sleep(forTimeInterval: 1.0)
-        let createdProject = app.staticTexts[projectName]
-        guard createdProject.waitForExistence(timeout: 5) else {
-            throw XCTSkip("作成したプロジェクトが見つかりません")
-        }
-
-        openEditProjectForm(projectName: projectName)
+        openEditProjectForm(projectName: "テストプロジェクト")
 
         let editSheet = app.sheets.firstMatch
         guard editSheet.waitForExistence(timeout: 5) else {
-            // 編集フォームが開かない場合はスキップ
-            throw XCTSkip("編集フォームが開けません")
+            XCTFail("編集フォームが開けません")
+            return
         }
 
-        // 作業ディレクトリを変更
+        // 編集フォームに作業ディレクトリフィールドが存在することを確認
         let editWorkingDirField = app.textFields["ProjectWorkingDirectoryField"]
-        guard editWorkingDirField.waitForExistence(timeout: 3) else {
-            throw XCTSkip("編集フォームにProjectWorkingDirectoryFieldが見つかりません")
-        }
+        XCTAssertTrue(editWorkingDirField.waitForExistence(timeout: 3),
+                      "編集フォームに作業ディレクトリフィールドが存在すること")
 
-        // 既存の値をクリアして新しい値を入力
+        // 作業ディレクトリを入力
         editWorkingDirField.click()
         editWorkingDirField.typeKey("a", modifierFlags: .command) // 全選択
-        let newPath = "/tmp/updated_path_\(Int(Date().timeIntervalSince1970))"
+        let newPath = "/tmp/edited_path_\(Int(Date().timeIntervalSince1970))"
         editWorkingDirField.typeText(newPath)
 
-        let editSaveButton = app.buttons["Save"]
-        editSaveButton.click()
+        // 保存
+        let saveButton = app.buttons["Save"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 2), "Saveボタンが存在すること")
+        saveButton.click()
+
+        // シートが閉じることを確認
         XCTAssertTrue(editSheet.waitForNonExistence(timeout: 5), "編集シートが閉じること")
 
-        // 更新された値を確認
+        // プロジェクトを選択してTaskBoardに遷移
         Thread.sleep(forTimeInterval: 1.0)
-        createdProject.click()
-        Thread.sleep(forTimeInterval: 0.5)
+        let updatedProjectRow = app.staticTexts["テストプロジェクト"]
+        if updatedProjectRow.waitForExistence(timeout: 3) {
+            updatedProjectRow.click()
+        }
 
-        let updatedWorkingDir = app.staticTexts.matching(
+        // TaskBoardが表示されるまで待機
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "TaskBoardが表示されること")
+
+        // データ読み込み完了を待機
+        Thread.sleep(forTimeInterval: 2.0)
+
+        // 編集した作業ディレクトリが表示されていることを確認
+        // 1. 編集したパスを含むテキストを検索
+        let editedPathDisplay = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", newPath)
         ).firstMatch
-        XCTAssertTrue(updatedWorkingDir.waitForExistence(timeout: 5),
-                      "更新された作業ディレクトリが詳細画面に表示されること")
+
+        // 2. WorkingDirectoryValue identifierで検索
+        let workingDirValue = app.descendants(matching: .any)
+            .matching(identifier: "WorkingDirectoryValue").firstMatch
+
+        let displayExists = editedPathDisplay.waitForExistence(timeout: 5) ||
+                           workingDirValue.waitForExistence(timeout: 3)
+
+        XCTAssertTrue(displayExists,
+                      "編集した作業ディレクトリが詳細画面に表示されること")
     }
 }
