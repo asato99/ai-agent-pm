@@ -8,7 +8,11 @@ import Domain
 import Infrastructure
 import UseCase
 
-/// MCPサーバーのメイン実装
+/// MCPサーバーのメイン実装（ステートレス設計）
+/// 参照: docs/architecture/MCP_SERVER.md - ステートレス設計
+///
+/// IDはサーバー起動時ではなく、各ツール呼び出し時に引数として受け取る。
+/// キック時にプロンプトでID情報を提供し、LLM（Claude Code）が橋渡しする。
 final class MCPServer {
     private let transport: StdioTransport
 
@@ -21,16 +25,10 @@ final class MCPServer {
     private let handoffRepository: HandoffRepository
     private let eventRepository: EventRepository
 
-    // IDs
-    private let agentId: AgentID
-    private let projectId: ProjectID
-
-    // Current session (in-memory state)
-    private var currentSessionId: SessionID?
-
     private let debugMode: Bool
 
-    init(database: DatabaseQueue, agentId: String, projectId: String) {
+    /// ステートレス設計: DBパスのみで初期化
+    init(database: DatabaseQueue) {
         self.transport = StdioTransport()
         self.agentRepository = AgentRepository(database: database)
         self.taskRepository = TaskRepository(database: database)
@@ -39,14 +37,7 @@ final class MCPServer {
         self.contextRepository = ContextRepository(database: database)
         self.handoffRepository = HandoffRepository(database: database)
         self.eventRepository = EventRepository(database: database)
-        self.agentId = AgentID(value: agentId)
-        self.projectId = ProjectID(value: projectId)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
-
-        // Restore active session if exists
-        if let activeSession = try? sessionRepository.findActive(agentId: self.agentId) {
-            self.currentSessionId = activeSession.id
-        }
     }
 
     /// デバッグモード時のみログ出力
@@ -58,7 +49,7 @@ final class MCPServer {
 
     /// サーバーを起動してリクエストをループ処理
     func run() throws {
-        logDebug("MCP Server started (agent: \(agentId.value), project: \(projectId.value))")
+        logDebug("MCP Server started (stateless mode)")
 
         while true {
             do {
@@ -170,43 +161,51 @@ final class MCPServer {
     }
 
     /// Toolを実行
+    /// ステートレス設計: 必要なIDは全て引数として受け取る
     private func executeTool(name: String, arguments: [String: Any]) throws -> Any {
         switch name {
-        // Profile
+        // Agent
         case "get_my_profile":
-            return try getMyProfile()
+            // 後方互換性のため維持（非推奨）
+            // 新しいコードは get_agent_profile を使用すべき
+            guard let agentId = arguments["agent_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id"])
+            }
+            return try getAgentProfile(agentId: agentId)
+        case "get_agent_profile":
+            guard let agentId = arguments["agent_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id"])
+            }
+            return try getAgentProfile(agentId: agentId)
+        case "list_agents":
+            return try listAgents()
 
-        // Session
-        case "start_session":
-            return try startSession()
-        case "end_session":
-            let status = arguments["status"] as? String
-            return try endSession(status: status)
+        // Project
+        case "list_projects":
+            return try listProjects()
+        case "get_project":
+            guard let projectId = arguments["project_id"] as? String else {
+                throw MCPError.missingArguments(["project_id"])
+            }
+            return try getProject(projectId: projectId)
 
         // Tasks
         case "list_tasks":
             let status = arguments["status"] as? String
-            return try listTasks(status: status)
+            let assigneeId = arguments["assignee_id"] as? String
+            return try listTasks(status: status, assigneeId: assigneeId)
+        case "get_my_tasks":
+            // 後方互換性のため維持（非推奨）
+            // 新しいコードは list_tasks(assignee_id=...) を使用すべき
+            guard let agentId = arguments["agent_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id"])
+            }
+            return try listTasks(status: nil, assigneeId: agentId)
         case "get_task":
             guard let taskId = arguments["task_id"] as? String else {
                 throw MCPError.missingArguments(["task_id"])
             }
             return try getTask(taskId: taskId)
-        case "get_my_tasks":
-            return try getMyTasks()
-        case "create_task":
-            guard let title = arguments["title"] as? String else {
-                throw MCPError.missingArguments(["title"])
-            }
-            let description = arguments["description"] as? String
-            let priority = arguments["priority"] as? String
-            let assigneeId = arguments["assignee_id"] as? String
-            return try createTask(title: title, description: description, priority: priority, assigneeId: assigneeId)
-        case "update_task":
-            guard let taskId = arguments["task_id"] as? String else {
-                throw MCPError.missingArguments(["task_id"])
-            }
-            return try updateTask(taskId: taskId, arguments: arguments)
         case "update_task_status":
             guard let taskId = arguments["task_id"] as? String,
                   let status = arguments["status"] as? String else {
@@ -237,17 +236,20 @@ final class MCPServer {
         // Handoff
         case "create_handoff":
             guard let taskId = arguments["task_id"] as? String,
+                  let fromAgentId = arguments["from_agent_id"] as? String,
                   let summary = arguments["summary"] as? String else {
-                throw MCPError.missingArguments(["task_id", "summary"])
+                throw MCPError.missingArguments(["task_id", "from_agent_id", "summary"])
             }
-            return try createHandoff(taskId: taskId, summary: summary, arguments: arguments)
+            return try createHandoff(taskId: taskId, fromAgentId: fromAgentId, summary: summary, arguments: arguments)
         case "accept_handoff":
-            guard let handoffId = arguments["handoff_id"] as? String else {
-                throw MCPError.missingArguments(["handoff_id"])
+            guard let handoffId = arguments["handoff_id"] as? String,
+                  let agentId = arguments["agent_id"] as? String else {
+                throw MCPError.missingArguments(["handoff_id", "agent_id"])
             }
-            return try acceptHandoff(handoffId: handoffId)
+            return try acceptHandoff(handoffId: handoffId, agentId: agentId)
         case "get_pending_handoffs":
-            return try getPendingHandoffs()
+            let agentId = arguments["agent_id"] as? String
+            return try getPendingHandoffs(agentId: agentId)
 
         default:
             throw MCPError.unknownTool(name)
@@ -268,42 +270,50 @@ final class MCPServer {
 
     // MARK: - Resources List
 
+    /// ステートレス設計: リソースURIにはIDを動的に指定
+    /// 例: project://{project_id}/overview, agent://{agent_id}/profile
     private func handleResourcesList(_ request: JSONRPCRequest) -> JSONRPCResponse {
         let resources: [[String: Any]] = [
             [
-                "uri": "project://\(projectId.value)/overview",
+                "uri": "project://{project_id}/overview",
                 "name": "Project Overview",
-                "description": "現在のプロジェクトの概要情報",
+                "description": "指定プロジェクトの概要情報。{project_id}を実際のIDに置換して使用",
                 "mimeType": "application/json"
             ],
             [
-                "uri": "project://\(projectId.value)/tasks",
+                "uri": "project://{project_id}/tasks",
                 "name": "Project Tasks",
-                "description": "プロジェクト内の全タスク一覧",
+                "description": "指定プロジェクト内の全タスク一覧。{project_id}を実際のIDに置換して使用",
                 "mimeType": "application/json"
             ],
             [
-                "uri": "project://\(projectId.value)/agents",
+                "uri": "project://{project_id}/agents",
                 "name": "Project Agents",
-                "description": "プロジェクト内の全エージェント一覧",
+                "description": "全エージェント一覧",
                 "mimeType": "application/json"
             ],
             [
-                "uri": "agent://\(agentId.value)/profile",
-                "name": "My Profile",
-                "description": "自分のエージェントプロファイル",
+                "uri": "agent://{agent_id}/profile",
+                "name": "Agent Profile",
+                "description": "指定エージェントのプロファイル。{agent_id}を実際のIDに置換して使用",
                 "mimeType": "application/json"
             ],
             [
-                "uri": "agent://\(agentId.value)/tasks",
-                "name": "My Tasks",
-                "description": "自分に割り当てられたタスク",
+                "uri": "agent://{agent_id}/tasks",
+                "name": "Agent Tasks",
+                "description": "指定エージェントに割り当てられたタスク。{agent_id}を実際のIDに置換して使用",
                 "mimeType": "application/json"
             ],
             [
-                "uri": "agent://\(agentId.value)/sessions",
-                "name": "My Sessions",
-                "description": "自分のセッション履歴",
+                "uri": "task://{task_id}/detail",
+                "name": "Task Detail",
+                "description": "指定タスクの詳細情報。{task_id}を実際のIDに置換して使用",
+                "mimeType": "application/json"
+            ],
+            [
+                "uri": "task://{task_id}/context",
+                "name": "Task Context",
+                "description": "指定タスクのコンテキスト情報。{task_id}を実際のIDに置換して使用",
                 "mimeType": "application/json"
             ]
         ]
@@ -500,7 +510,13 @@ final class MCPServer {
             [
                 "name": "status-report",
                 "description": "プロジェクトの状況報告を生成するプロンプト。",
-                "arguments": [] as [[String: Any]]
+                "arguments": [
+                    [
+                        "name": "project_id",
+                        "description": "状況報告するプロジェクトのID",
+                        "required": true
+                    ]
+                ]
             ]
         ]
 
@@ -545,7 +561,10 @@ final class MCPServer {
             }
             return try generateTaskBreakdownPrompt(taskId: taskId)
         case "status-report":
-            return try generateStatusReportPrompt()
+            guard let projectId = arguments["project_id"] as? String else {
+                throw MCPError.missingArguments(["project_id"])
+            }
+            return try generateStatusReportPrompt(projectId: projectId)
         default:
             throw MCPError.unknownPrompt(name)
         }
@@ -646,12 +665,13 @@ final class MCPServer {
         ]
     }
 
-    private func generateStatusReportPrompt() throws -> [[String: Any]] {
-        guard let project = try projectRepository.findById(projectId) else {
-            throw MCPError.projectNotFound(projectId.value)
+    private func generateStatusReportPrompt(projectId: String) throws -> [[String: Any]] {
+        let pid = ProjectID(value: projectId)
+        guard let project = try projectRepository.findById(pid) else {
+            throw MCPError.projectNotFound(projectId)
         }
 
-        let tasks = try taskRepository.findAll(projectId: projectId)
+        let tasks = try taskRepository.findAll(projectId: pid)
         let agents = try agentRepository.findAll()
 
         let tasksByStatus = Dictionary(grouping: tasks) { $0.status }
@@ -691,108 +711,64 @@ final class MCPServer {
         ]
     }
 
-    // MARK: - Tool Implementations
+    // MARK: - Tool Implementations (Stateless Design)
+    // 参照: docs/prd/MCP_DESIGN.md
+    // 全てのツールは必要なIDを引数として受け取る
 
-    /// get_my_profile
-    private func getMyProfile() throws -> [String: Any] {
-        guard let agent = try agentRepository.findById(agentId) else {
-            throw MCPError.agentNotFound(agentId.value)
+    /// get_agent_profile - エージェント情報を取得
+    private func getAgentProfile(agentId: String) throws -> [String: Any] {
+        let id = AgentID(value: agentId)
+        guard let agent = try agentRepository.findById(id) else {
+            throw MCPError.agentNotFound(agentId)
         }
         return agentToDict(agent)
     }
 
-    /// start_session
-    private func startSession() throws -> [String: Any] {
-        // Check for existing active session
-        if let existingSession = try sessionRepository.findActive(agentId: agentId) {
-            throw MCPError.sessionAlreadyActive(existingSession.id.value)
-        }
-
-        let session = Session(
-            id: SessionID.generate(),
-            projectId: projectId,
-            agentId: agentId,
-            startedAt: Date(),
-            status: .active
-        )
-
-        try sessionRepository.save(session)
-        currentSessionId = session.id
-
-        // Record event
-        let event = StateChangeEvent(
-            id: EventID.generate(),
-            projectId: projectId,
-            entityType: .session,
-            entityId: session.id.value,
-            eventType: .started,
-            agentId: agentId,
-            sessionId: session.id,
-            newState: session.status.rawValue
-        )
-        try eventRepository.save(event)
-
-        logDebug("Session started: \(session.id.value)")
-
-        return [
-            "success": true,
-            "session": sessionToDict(session)
-        ]
+    /// list_agents - 全エージェント一覧を取得
+    private func listAgents() throws -> [[String: Any]] {
+        let agents = try agentRepository.findAll()
+        return agents.map { agentToDict($0) }
     }
 
-    /// end_session
-    private func endSession(status: String?) throws -> [String: Any] {
-        guard let sessionId = currentSessionId else {
-            throw MCPError.noActiveSession
-        }
-
-        guard var session = try sessionRepository.findById(sessionId) else {
-            throw MCPError.sessionNotFound(sessionId.value)
-        }
-
-        let previousStatus = session.status
-        session.status = status == "abandoned" ? .abandoned : .completed
-        session.endedAt = Date()
-
-        try sessionRepository.save(session)
-        currentSessionId = nil
-
-        // Record event
-        let event = StateChangeEvent(
-            id: EventID.generate(),
-            projectId: projectId,
-            entityType: .session,
-            entityId: session.id.value,
-            eventType: .completed,
-            agentId: agentId,
-            sessionId: session.id,
-            previousState: previousStatus.rawValue,
-            newState: session.status.rawValue
-        )
-        try eventRepository.save(event)
-
-        logDebug("Session ended: \(session.id.value)")
-
-        return [
-            "success": true,
-            "session": sessionToDict(session)
-        ]
+    /// list_projects - 全プロジェクト一覧を取得
+    private func listProjects() throws -> [[String: Any]] {
+        let projects = try projectRepository.findAll()
+        return projects.map { projectToDict($0) }
     }
 
-    /// list_tasks
-    private func listTasks(status: String?) throws -> [[String: Any]] {
-        let tasks: [Task]
+    /// get_project - プロジェクト詳細を取得
+    private func getProject(projectId: String) throws -> [String: Any] {
+        let id = ProjectID(value: projectId)
+        guard let project = try projectRepository.findById(id) else {
+            throw MCPError.projectNotFound(projectId)
+        }
+        return projectToDict(project)
+    }
+
+    /// list_tasks - タスク一覧を取得（フィルタ可能）
+    /// ステートレス設計: project_idは不要、全プロジェクトのタスクを返す
+    private func listTasks(status: String?, assigneeId: String?) throws -> [[String: Any]] {
+        var tasks: [Task]
+
+        // まず全タスクを取得（全プロジェクト）
+        tasks = try taskRepository.findAllTasks()
+
+        // ステータスでフィルタ
         if let statusString = status,
            let taskStatus = TaskStatus(rawValue: statusString) {
-            tasks = try taskRepository.findByStatus(taskStatus, projectId: projectId)
-        } else {
-            tasks = try taskRepository.findAll(projectId: projectId)
+            tasks = tasks.filter { $0.status == taskStatus }
+        }
+
+        // アサイニーでフィルタ
+        if let assigneeIdString = assigneeId {
+            let targetAgentId = AgentID(value: assigneeIdString)
+            tasks = tasks.filter { $0.assigneeId == targetAgentId }
         }
 
         return tasks.map { taskToDict($0) }
     }
 
-    /// get_task
+    /// get_task - タスク詳細を取得
     private func getTask(taskId: String) throws -> [String: Any] {
         let id = TaskID(value: taskId)
         guard let task = try taskRepository.findById(id) else {
@@ -809,99 +785,7 @@ final class MCPServer {
         return result
     }
 
-    /// get_my_tasks
-    private func getMyTasks() throws -> [[String: Any]] {
-        let tasks = try taskRepository.findByAssignee(agentId)
-        return tasks.map { taskToDict($0) }
-    }
-
-    /// create_task
-    private func createTask(title: String, description: String?, priority: String?, assigneeId: String?) throws -> [String: Any] {
-        let taskPriority: TaskPriority
-        if let p = priority, let parsed = TaskPriority(rawValue: p) {
-            taskPriority = parsed
-        } else {
-            taskPriority = .medium
-        }
-
-        let task = Task(
-            id: TaskID.generate(),
-            projectId: projectId,
-            title: title,
-            description: description ?? "",
-            status: .backlog,
-            priority: taskPriority,
-            assigneeId: assigneeId.map { AgentID(value: $0) }
-        )
-
-        try taskRepository.save(task)
-
-        // Record event
-        let event = StateChangeEvent(
-            id: EventID.generate(),
-            projectId: projectId,
-            entityType: .task,
-            entityId: task.id.value,
-            eventType: .created,
-            agentId: agentId,
-            sessionId: currentSessionId,
-            newState: task.status.rawValue
-        )
-        try eventRepository.save(event)
-
-        logDebug("Task created: \(task.id.value)")
-
-        return [
-            "success": true,
-            "task": taskToDict(task)
-        ]
-    }
-
-    /// update_task
-    private func updateTask(taskId: String, arguments: [String: Any]) throws -> [String: Any] {
-        guard var task = try taskRepository.findById(TaskID(value: taskId)) else {
-            throw MCPError.taskNotFound(taskId)
-        }
-
-        if let title = arguments["title"] as? String {
-            task.title = title
-        }
-        if let description = arguments["description"] as? String {
-            task.description = description
-        }
-        if let priority = arguments["priority"] as? String,
-           let parsed = TaskPriority(rawValue: priority) {
-            task.priority = parsed
-        }
-        if let estimatedMinutes = arguments["estimated_minutes"] as? Int {
-            task.estimatedMinutes = estimatedMinutes
-        }
-        if let actualMinutes = arguments["actual_minutes"] as? Int {
-            task.actualMinutes = actualMinutes
-        }
-
-        task.updatedAt = Date()
-        try taskRepository.save(task)
-
-        // Record event
-        let event = StateChangeEvent(
-            id: EventID.generate(),
-            projectId: projectId,
-            entityType: .task,
-            entityId: task.id.value,
-            eventType: .updated,
-            agentId: agentId,
-            sessionId: currentSessionId
-        )
-        try eventRepository.save(event)
-
-        return [
-            "success": true,
-            "task": taskToDict(task)
-        ]
-    }
-
-    /// update_task_status
+    /// update_task_status - タスクのステータスを更新
     private func updateTaskStatus(taskId: String, status: String, reason: String?) throws -> [String: Any] {
         guard var task = try taskRepository.findById(TaskID(value: taskId)) else {
             throw MCPError.taskNotFound(taskId)
@@ -926,15 +810,15 @@ final class MCPServer {
 
         try taskRepository.save(task)
 
-        // Record event
+        // Record event (agentId is not available in stateless design, use nil)
         let event = StateChangeEvent(
             id: EventID.generate(),
             projectId: task.projectId,
             entityType: .task,
             entityId: task.id.value,
             eventType: .statusChanged,
-            agentId: agentId,
-            sessionId: currentSessionId,
+            agentId: nil,
+            sessionId: nil,
             previousState: previousStatus.rawValue,
             newState: newStatus.rawValue,
             reason: reason
@@ -954,7 +838,7 @@ final class MCPServer {
         ]
     }
 
-    /// assign_task
+    /// assign_task - タスクをエージェントに割り当て
     private func assignTask(taskId: String, assigneeId: String?) throws -> [String: Any] {
         guard var task = try taskRepository.findById(TaskID(value: taskId)) else {
             throw MCPError.taskNotFound(taskId)
@@ -982,8 +866,8 @@ final class MCPServer {
             entityType: .task,
             entityId: task.id.value,
             eventType: eventType,
-            agentId: agentId,
-            sessionId: currentSessionId,
+            agentId: nil,
+            sessionId: nil,
             previousState: previousAssignee?.value,
             newState: assigneeId
         )
@@ -995,22 +879,23 @@ final class MCPServer {
         ]
     }
 
-    /// save_context
+    /// save_context - タスクのコンテキストを保存
+    /// ステートレス設計: セッションは不要
     private func saveContext(taskId: String, arguments: [String: Any]) throws -> [String: Any] {
-        guard let sessionId = currentSessionId else {
-            throw MCPError.noActiveSession
-        }
-
         let id = TaskID(value: taskId)
         guard let task = try taskRepository.findById(id) else {
             throw MCPError.taskNotFound(taskId)
         }
 
+        // ステートレス設計: セッションIDとエージェントIDは引数から取得（オプション）
+        let sessionIdStr = arguments["session_id"] as? String
+        let agentIdStr = arguments["agent_id"] as? String
+
         let context = Context(
             id: ContextID.generate(),
             taskId: id,
-            sessionId: sessionId,
-            agentId: agentId,
+            sessionId: sessionIdStr.map { SessionID(value: $0) } ?? SessionID.generate(),
+            agentId: agentIdStr.map { AgentID(value: $0) } ?? AgentID(value: "unknown"),
             progress: arguments["progress"] as? String,
             findings: arguments["findings"] as? String,
             blockers: arguments["blockers"] as? String,
@@ -1026,8 +911,8 @@ final class MCPServer {
             entityType: .context,
             entityId: context.id.value,
             eventType: .created,
-            agentId: agentId,
-            sessionId: sessionId
+            agentId: agentIdStr.map { AgentID(value: $0) },
+            sessionId: sessionIdStr.map { SessionID(value: $0) }
         )
         try eventRepository.save(event)
 
@@ -1037,7 +922,7 @@ final class MCPServer {
         ]
     }
 
-    /// get_task_context
+    /// get_task_context - タスクのコンテキストを取得
     private func getTaskContext(taskId: String, includeHistory: Bool) throws -> [String: Any] {
         let id = TaskID(value: taskId)
         guard try taskRepository.findById(id) != nil else {
@@ -1065,14 +950,21 @@ final class MCPServer {
         }
     }
 
-    /// create_handoff
-    private func createHandoff(taskId: String, summary: String, arguments: [String: Any]) throws -> [String: Any] {
+    /// create_handoff - ハンドオフを作成
+    /// ステートレス設計: from_agent_idは必須引数
+    private func createHandoff(taskId: String, fromAgentId: String, summary: String, arguments: [String: Any]) throws -> [String: Any] {
         let id = TaskID(value: taskId)
         guard let task = try taskRepository.findById(id) else {
             throw MCPError.taskNotFound(taskId)
         }
 
+        let fromAgent = AgentID(value: fromAgentId)
         let toAgentId = (arguments["to_agent_id"] as? String).map { AgentID(value: $0) }
+
+        // Validate from agent exists
+        guard try agentRepository.findById(fromAgent) != nil else {
+            throw MCPError.agentNotFound(fromAgentId)
+        }
 
         // Validate target agent if specified
         if let targetId = toAgentId {
@@ -1084,7 +976,7 @@ final class MCPServer {
         let handoff = Handoff(
             id: HandoffID.generate(),
             taskId: id,
-            fromAgentId: agentId,
+            fromAgentId: fromAgent,
             toAgentId: toAgentId,
             summary: summary,
             context: arguments["context"] as? String,
@@ -1105,8 +997,8 @@ final class MCPServer {
             entityType: .handoff,
             entityId: handoff.id.value,
             eventType: .created,
-            agentId: agentId,
-            sessionId: currentSessionId,
+            agentId: fromAgent,
+            sessionId: nil,
             metadata: metadata.isEmpty ? nil : metadata
         )
         try eventRepository.save(event)
@@ -1117,11 +1009,14 @@ final class MCPServer {
         ]
     }
 
-    /// accept_handoff
-    private func acceptHandoff(handoffId: String) throws -> [String: Any] {
+    /// accept_handoff - ハンドオフを受領
+    /// ステートレス設計: agent_idは必須引数
+    private func acceptHandoff(handoffId: String, agentId: String) throws -> [String: Any] {
         guard var handoff = try handoffRepository.findById(HandoffID(value: handoffId)) else {
             throw MCPError.handoffNotFound(handoffId)
         }
+
+        let acceptingAgent = AgentID(value: agentId)
 
         // Check if already accepted
         guard handoff.acceptedAt == nil else {
@@ -1130,7 +1025,7 @@ final class MCPServer {
 
         // Check if targeted to specific agent
         if let targetAgentId = handoff.toAgentId {
-            guard targetAgentId == agentId else {
+            guard targetAgentId == acceptingAgent else {
                 throw MCPError.handoffNotForYou(handoffId)
             }
         }
@@ -1150,8 +1045,8 @@ final class MCPServer {
             entityType: .handoff,
             entityId: handoff.id.value,
             eventType: .completed,
-            agentId: agentId,
-            sessionId: currentSessionId,
+            agentId: acceptingAgent,
+            sessionId: nil,
             previousState: "pending",
             newState: "accepted"
         )
@@ -1163,9 +1058,16 @@ final class MCPServer {
         ]
     }
 
-    /// get_pending_handoffs
-    private func getPendingHandoffs() throws -> [[String: Any]] {
-        let handoffs = try handoffRepository.findPending(agentId: agentId)
+    /// get_pending_handoffs - 未処理のハンドオフ一覧を取得
+    /// ステートレス設計: agent_idがあればそのエージェント向けのみ、なければ全て
+    private func getPendingHandoffs(agentId: String?) throws -> [[String: Any]] {
+        let handoffs: [Handoff]
+        if let agentIdStr = agentId {
+            let targetAgentId = AgentID(value: agentIdStr)
+            handoffs = try handoffRepository.findPending(agentId: targetAgentId)
+        } else {
+            handoffs = try handoffRepository.findAllPending()
+        }
         return handoffs.map { handoffToDict($0) }
     }
 
@@ -1182,6 +1084,23 @@ final class MCPServer {
             "status": agent.status.rawValue,
             "created_at": ISO8601DateFormatter().string(from: agent.createdAt)
         ]
+    }
+
+    private func projectToDict(_ project: Project) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": project.id.value,
+            "name": project.name,
+            "description": project.description,
+            "status": project.status.rawValue,
+            "created_at": ISO8601DateFormatter().string(from: project.createdAt),
+            "updated_at": ISO8601DateFormatter().string(from: project.updatedAt)
+        ]
+
+        if let workingDirectory = project.workingDirectory {
+            dict["working_directory"] = workingDirectory
+        }
+
+        return dict
     }
 
     private func taskToDict(_ task: Task) -> [String: Any] {

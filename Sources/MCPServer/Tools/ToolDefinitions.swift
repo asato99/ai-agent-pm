@@ -1,28 +1,29 @@
 // Sources/MCPServer/Tools/ToolDefinitions.swift
-// 参照: docs/prd/MCP_DESIGN.md - Tool定義
+// 参照: docs/prd/MCP_DESIGN.md - Tool定義（ステートレス設計）
 // 参照: docs/architecture/MCP_SERVER.md - MCPサーバー設計
 
 import Foundation
 
 /// MCP Tool定義を提供
+/// ステートレス設計: 必要なIDは全て引数として受け取る
 enum ToolDefinitions {
 
     /// 全Tool一覧
     static func all() -> [[String: Any]] {
         [
-            // Profile
-            getMyProfile,
+            // Agent
+            getAgentProfile,
+            getMyProfile,  // 後方互換性のため維持（非推奨）
+            listAgents,
 
-            // Session
-            startSession,
-            endSession,
+            // Project
+            listProjects,
+            getProject,
 
             // Tasks
             listTasks,
+            getMyTasks,  // 後方互換性のため維持（非推奨）
             getTask,
-            getMyTasks,
-            createTask,
-            updateTask,
             updateTaskStatus,
             assignTask,
 
@@ -37,155 +38,131 @@ enum ToolDefinitions {
         ]
     }
 
-    // MARK: - Profile Tools
+    // MARK: - Agent Tools
 
-    /// get_my_profile - 自分のエージェント情報を取得
-    static let getMyProfile: [String: Any] = [
-        "name": "get_my_profile",
-        "description": "自分のエージェント情報を取得します。エージェントID、名前、役割、タイプ、ステータスが含まれます。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [:] as [String: Any],
-            "required": [] as [String]
-        ]
-    ]
-
-    // MARK: - Session Tools
-
-    /// start_session - セッション開始
-    static let startSession: [String: Any] = [
-        "name": "start_session",
-        "description": "作業セッションを開始します。セッション中はコンテキスト保存やハンドオフが可能になります。既にアクティブなセッションがある場合はエラーを返します。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [:] as [String: Any],
-            "required": [] as [String]
-        ]
-    ]
-
-    /// end_session - セッション終了
-    static let endSession: [String: Any] = [
-        "name": "end_session",
-        "description": "現在の作業セッションを終了します。セッションがない場合はエラーを返します。",
+    /// get_agent_profile - 指定エージェントの情報を取得
+    static let getAgentProfile: [String: Any] = [
+        "name": "get_agent_profile",
+        "description": "指定したエージェントの情報を取得します。エージェントID、名前、役割、タイプが含まれます。",
         "inputSchema": [
             "type": "object",
             "properties": [
-                "status": [
+                "agent_id": [
                     "type": "string",
-                    "description": "終了時のステータス: completed（完了）, abandoned（中断）",
-                    "enum": ["completed", "abandoned"]
+                    "description": "エージェントID"
                 ]
             ] as [String: Any],
+            "required": ["agent_id"]
+        ]
+    ]
+
+    /// get_my_profile - 後方互換性のため維持（非推奨）
+    /// 新しいコードは get_agent_profile を使用すべき
+    static let getMyProfile: [String: Any] = [
+        "name": "get_my_profile",
+        "description": "自分のエージェント情報を取得します。エージェントID、名前、役割、タイプが含まれます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID（キック時のプロンプトから取得）"
+                ]
+            ] as [String: Any],
+            "required": ["agent_id"]
+        ]
+    ]
+
+    /// list_agents - 全エージェント一覧を取得
+    static let listAgents: [String: Any] = [
+        "name": "list_agents",
+        "description": "全エージェント一覧を取得します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [:] as [String: Any],
             "required": [] as [String]
+        ]
+    ]
+
+    // MARK: - Project Tools
+
+    /// list_projects - 全プロジェクト一覧を取得
+    static let listProjects: [String: Any] = [
+        "name": "list_projects",
+        "description": "全プロジェクト一覧を取得します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [:] as [String: Any],
+            "required": [] as [String]
+        ]
+    ]
+
+    /// get_project - プロジェクト詳細を取得
+    static let getProject: [String: Any] = [
+        "name": "get_project",
+        "description": "指定したプロジェクトの詳細情報を取得します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "project_id": [
+                    "type": "string",
+                    "description": "プロジェクトID"
+                ]
+            ] as [String: Any],
+            "required": ["project_id"]
         ]
     ]
 
     // MARK: - Task Tools
 
-    /// list_tasks - プロジェクト内の全タスクを取得
+    /// list_tasks - 全タスク一覧を取得
     static let listTasks: [String: Any] = [
         "name": "list_tasks",
-        "description": "プロジェクト内の全タスク一覧を取得します。ステータスでフィルタ可能。",
+        "description": "タスク一覧を取得します。ステータスとアサイニーでフィルタ可能。",
         "inputSchema": [
             "type": "object",
             "properties": [
                 "status": [
                     "type": "string",
                     "description": "フィルタするステータス（任意）",
-                    "enum": ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"]
+                    "enum": ["backlog", "todo", "in_progress", "blocked", "done", "cancelled"]
+                ],
+                "assignee_id": [
+                    "type": "string",
+                    "description": "フィルタするアサイニーのエージェントID（任意）"
                 ]
             ] as [String: Any],
             "required": [] as [String]
+        ]
+    ]
+
+    /// get_my_tasks - 後方互換性のため維持（非推奨）
+    /// 新しいコードは list_tasks(assignee_id=...) を使用すべき
+    static let getMyTasks: [String: Any] = [
+        "name": "get_my_tasks",
+        "description": "自分に割り当てられているタスク一覧を取得します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID（キック時のプロンプトから取得）"
+                ]
+            ] as [String: Any],
+            "required": ["agent_id"]
         ]
     ]
 
     /// get_task - タスク詳細を取得
     static let getTask: [String: Any] = [
         "name": "get_task",
-        "description": "指定したタスクの詳細情報を取得します。サブタスク、コンテキスト履歴も含まれます。",
+        "description": "指定したタスクの詳細情報を取得します。最新のコンテキストも含まれます。",
         "inputSchema": [
             "type": "object",
             "properties": [
                 "task_id": [
                     "type": "string",
                     "description": "タスクID"
-                ]
-            ] as [String: Any],
-            "required": ["task_id"]
-        ]
-    ]
-
-    /// get_my_tasks - 自分に割り当てられたタスクを取得
-    static let getMyTasks: [String: Any] = [
-        "name": "get_my_tasks",
-        "description": "自分に割り当てられているタスク一覧を取得します。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [:] as [String: Any],
-            "required": [] as [String]
-        ]
-    ]
-
-    /// create_task - タスク作成
-    static let createTask: [String: Any] = [
-        "name": "create_task",
-        "description": "新しいタスクを作成します。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [
-                "title": [
-                    "type": "string",
-                    "description": "タスクのタイトル"
-                ],
-                "description": [
-                    "type": "string",
-                    "description": "タスクの詳細説明（任意）"
-                ],
-                "priority": [
-                    "type": "string",
-                    "description": "優先度（任意、デフォルト: medium）",
-                    "enum": ["urgent", "high", "medium", "low"]
-                ],
-                "assignee_id": [
-                    "type": "string",
-                    "description": "担当者のエージェントID（任意）"
-                ]
-            ] as [String: Any],
-            "required": ["title"]
-        ]
-    ]
-
-    /// update_task - タスク更新
-    static let updateTask: [String: Any] = [
-        "name": "update_task",
-        "description": "タスクの情報を更新します。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [
-                "task_id": [
-                    "type": "string",
-                    "description": "タスクID"
-                ],
-                "title": [
-                    "type": "string",
-                    "description": "新しいタイトル（任意）"
-                ],
-                "description": [
-                    "type": "string",
-                    "description": "新しい説明（任意）"
-                ],
-                "priority": [
-                    "type": "string",
-                    "description": "新しい優先度（任意）",
-                    "enum": ["urgent", "high", "medium", "low"]
-                ],
-                "estimated_minutes": [
-                    "type": "integer",
-                    "description": "見積もり時間（分）（任意）"
-                ],
-                "actual_minutes": [
-                    "type": "integer",
-                    "description": "実績時間（分）（任意）"
                 ]
             ] as [String: Any],
             "required": ["task_id"]
@@ -206,7 +183,7 @@ enum ToolDefinitions {
                 "status": [
                     "type": "string",
                     "description": "新しいステータス",
-                    "enum": ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"]
+                    "enum": ["backlog", "todo", "in_progress", "blocked", "done", "cancelled"]
                 ],
                 "reason": [
                     "type": "string",
@@ -242,7 +219,7 @@ enum ToolDefinitions {
     /// save_context - コンテキスト保存
     static let saveContext: [String: Any] = [
         "name": "save_context",
-        "description": "タスクの作業コンテキストを保存します。進捗、発見事項、ブロッカー、次のステップを記録できます。アクティブなセッションが必要です。",
+        "description": "タスクの作業コンテキストを保存します。進捗、発見事項、ブロッカー、次のステップを記録できます。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -265,6 +242,14 @@ enum ToolDefinitions {
                 "next_steps": [
                     "type": "string",
                     "description": "次のステップ"
+                ],
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID（任意、キック時のプロンプトから取得）"
+                ],
+                "session_id": [
+                    "type": "string",
+                    "description": "セッションID（任意）"
                 ]
             ] as [String: Any],
             "required": ["task_id"]
@@ -294,6 +279,7 @@ enum ToolDefinitions {
     // MARK: - Handoff Tools
 
     /// create_handoff - ハンドオフ作成
+    /// ステートレス設計: from_agent_idは必須引数
     static let createHandoff: [String: Any] = [
         "name": "create_handoff",
         "description": "タスクを別のエージェントに引き継ぐためのハンドオフを作成します。サマリー、コンテキスト、推奨事項を記録できます。",
@@ -303,6 +289,10 @@ enum ToolDefinitions {
                 "task_id": [
                     "type": "string",
                     "description": "タスクID"
+                ],
+                "from_agent_id": [
+                    "type": "string",
+                    "description": "引き継ぎ元のエージェントID（キック時のプロンプトから取得）"
                 ],
                 "to_agent_id": [
                     "type": "string",
@@ -321,11 +311,12 @@ enum ToolDefinitions {
                     "description": "次のエージェントへの推奨事項"
                 ]
             ] as [String: Any],
-            "required": ["task_id", "summary"]
+            "required": ["task_id", "from_agent_id", "summary"]
         ]
     ]
 
     /// accept_handoff - ハンドオフ承認
+    /// ステートレス設計: agent_idは必須引数
     static let acceptHandoff: [String: Any] = [
         "name": "accept_handoff",
         "description": "ハンドオフを受け入れて、タスクの作業を引き継ぎます。",
@@ -335,19 +326,28 @@ enum ToolDefinitions {
                 "handoff_id": [
                     "type": "string",
                     "description": "ハンドオフID"
+                ],
+                "agent_id": [
+                    "type": "string",
+                    "description": "受け入れるエージェントID（キック時のプロンプトから取得）"
                 ]
             ] as [String: Any],
-            "required": ["handoff_id"]
+            "required": ["handoff_id", "agent_id"]
         ]
     ]
 
     /// get_pending_handoffs - 未処理ハンドオフ取得
     static let getPendingHandoffs: [String: Any] = [
         "name": "get_pending_handoffs",
-        "description": "自分宛ての未処理ハンドオフを取得します。誰でも受け取れるハンドオフも含まれます。",
+        "description": "未処理のハンドオフ一覧を取得します。agent_idを指定すると、そのエージェント宛てと誰でも受け取れるハンドオフのみ返します。",
         "inputSchema": [
             "type": "object",
-            "properties": [:] as [String: Any],
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID（任意、キック時のプロンプトから取得）"
+                ]
+            ] as [String: Any],
             "required": [] as [String]
         ]
     ]

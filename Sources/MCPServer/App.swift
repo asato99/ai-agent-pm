@@ -56,16 +56,12 @@ struct Serve: ParsableCommand {
     @Option(name: .long, help: "データベースパス（省略時: デフォルト位置）")
     var db: String?
 
-    @Option(name: .long, help: "エージェントID（省略時: agt_claude）")
-    var agentId: String?
-
-    @Option(name: .long, help: "プロジェクトID（省略時: prj_default）")
-    var projectId: String?
+    // ステートレス設計: agent-id と project-id は起動引数で指定しない
+    // IDはキック時のプロンプトで提供され、各ツール呼び出し時に引数として渡される
+    // 参照: docs/prd/MCP_DESIGN.md
 
     func run() throws {
         let dbPath = db ?? AppConstants.defaultDatabasePath
-        let agent = agentId ?? AppConstants.defaultAgentId
-        let project = projectId ?? AppConstants.defaultProjectId
 
         // 初回起動時は自動セットアップ
         if !FileManager.default.fileExists(atPath: dbPath) {
@@ -73,11 +69,7 @@ struct Serve: ParsableCommand {
         }
 
         let database = try DatabaseSetup.createDatabase(at: dbPath)
-        let server = MCPServer(
-            database: database,
-            agentId: agent,
-            projectId: project
-        )
+        let server = MCPServer(database: database)
         try server.run()
     }
 

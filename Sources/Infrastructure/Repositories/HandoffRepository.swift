@@ -108,6 +108,18 @@ public final class HandoffRepository: HandoffRepositoryProtocol, Sendable {
         }
     }
 
+    /// 全ての未処理ハンドオフを取得
+    /// ステートレスMCPサーバー用
+    public func findAllPending() throws -> [Handoff] {
+        try db.read { db in
+            try HandoffRecord
+                .filter(Column("accepted_at") == nil)
+                .order(Column("created_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
     public func findByFromAgent(_ agentId: AgentID) throws -> [Handoff] {
         try db.read { db in
             try HandoffRecord

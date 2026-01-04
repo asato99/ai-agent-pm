@@ -64,7 +64,8 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
                 workingDirectory: workingDirectory,
                 prompt: prompt,
                 agent: agent,
-                task: task
+                task: task,
+                project: project
             )
 
             return AgentKickResult(
@@ -80,14 +81,21 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
     }
 
     /// タスク実行用のプロンプトを構築
+    /// ステートレス設計: 必要なID情報をプロンプトに含め、LLMがMCPツール呼び出し時に引数として渡す
+    /// 参照: docs/requirements/AGENTS.md - キック時のプロンプト例
     private func buildPrompt(task: Task, agent: Agent, project: Project) -> String {
         var promptParts: [String] = []
 
         // タスク情報
         promptParts.append("# Task: \(task.title)")
         promptParts.append("")
-        promptParts.append("Task ID: \(task.id.value)")
-        promptParts.append("Project: \(project.name)")
+
+        // ステートレス設計: ID情報セクション
+        promptParts.append("## Identification")
+        promptParts.append("- Task ID: \(task.id.value)")
+        promptParts.append("- Project ID: \(project.id.value)")
+        promptParts.append("- Agent ID: \(agent.id.value)")
+        promptParts.append("- Agent Name: \(agent.name)")
 
         if !task.description.isEmpty {
             promptParts.append("")
@@ -103,12 +111,14 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
             promptParts.append("IMPORTANT: Create any output files within this directory.")
         }
 
-        // 完了指示
+        // 完了指示（ステートレス設計に対応したMCPツール呼び出し例）
         promptParts.append("")
         promptParts.append("## Instructions")
         promptParts.append("1. Complete the task as described above")
-        promptParts.append("2. When done, update the task status to 'done' using the agent-pm MCP server")
-        promptParts.append("   - Use: update_task_status with task_id='\(task.id.value)' and status='done'")
+        promptParts.append("2. When done, update the task status using:")
+        promptParts.append("   update_task_status(task_id=\"\(task.id.value)\", status=\"done\")")
+        promptParts.append("3. If handing off to another agent, use:")
+        promptParts.append("   create_handoff(task_id=\"\(task.id.value)\", from_agent_id=\"\(agent.id.value)\", ...)")
 
         return promptParts.joined(separator: "\n")
     }
@@ -161,7 +171,8 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
         workingDirectory: String,
         prompt: String,
         agent: Agent,
-        task: Task
+        task: Task,
+        project: Project
     ) async throws -> Int {
         let process = Process()
 
@@ -196,10 +207,13 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
             process.arguments = ["-c", shellCommand]
         }
 
-        // 環境変数を設定
+        // 環境変数を設定（ステートレス設計: スクリプトからもID参照可能に）
         var environment = ProcessInfo.processInfo.environment
         environment["TASK_ID"] = task.id.value
         environment["TASK_TITLE"] = task.title
+        environment["PROJECT_ID"] = project.id.value
+        environment["AGENT_ID"] = agent.id.value
+        environment["AGENT_NAME"] = agent.name
         process.environment = environment
 
         // 実行

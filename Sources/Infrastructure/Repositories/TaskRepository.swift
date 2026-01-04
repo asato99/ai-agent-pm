@@ -158,6 +158,17 @@ public final class TaskRepository: TaskRepositoryProtocol, Sendable {
         }
     }
 
+    /// 全タスクを取得（プロジェクト横断）
+    /// ステートレスMCPサーバー用
+    public func findAllTasks() throws -> [Task] {
+        try db.read { db in
+            try TaskRecord
+                .order(Column("updated_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
     public func findByStatus(_ status: TaskStatus, projectId: ProjectID) throws -> [Task] {
         try db.read { db in
             try TaskRecord
