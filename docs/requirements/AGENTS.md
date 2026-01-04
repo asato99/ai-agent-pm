@@ -116,17 +116,67 @@ AI（Claude Code, Gemini等）や人間を区別なく扱う抽象概念。
   ↓
 assigneeId が設定されている
   ↓
-エージェントのキックスクリプトを実行
+エージェントのキック（プロンプトにID情報を含める）
 ```
+
+### キック時の情報共有
+
+**重要**: キック時のプロンプトに必要なID情報を含め、LLM（Claude Code）がMCPツール呼び出し時に引数として渡す。
+
+```
+┌─────────────┐                    ┌──────────────┐                    ┌─────────────┐
+│  PMアプリ   │ ─プロンプトに─────▶│ Claude Code  │ ─引数として────────▶│ MCPサーバー │
+│             │  ID情報を含める    │   (LLM)      │  IDを渡す          │ (ステートレス)│
+└─────────────┘                    └──────────────┘                    └─────────────┘
+```
+
+### キック時のプロンプト例
+
+```markdown
+# Task: 機能実装
+
+## Identification
+- Task ID: task_abc123
+- Project ID: proj_xyz789
+- Agent ID: agt_dev001
+- Agent Name: frontend-dev
+
+## Description
+ログイン画面のUIを実装する
+
+## Working Directory
+Path: /Users/xxx/projects/myproject
+IMPORTANT: Create any output files within this directory.
+
+## Instructions
+1. Complete the task as described above
+2. When done, update the task status using:
+   update_task_status(task_id="task_abc123", status="done")
+3. If handing off to another agent, use:
+   create_handoff(task_id="task_abc123", from_agent_id="agt_dev001", ...)
+```
+
+### プロンプトに含める情報
+
+| 情報 | 必須 | 用途 |
+|------|------|------|
+| Task ID | ○ | ステータス更新、コンテキスト保存で使用 |
+| Project ID | ○ | プロジェクト関連操作で使用 |
+| Agent ID | ○ | ハンドオフ作成、自己識別で使用 |
+| Agent Name | ○ | ログ、表示で使用 |
+| タスク詳細 | ○ | 作業内容の理解 |
+| Working Directory | △ | ファイル作成先の指示 |
 
 ### 実装方式
 
 | 方式 | 対象 | 実行コマンド例 |
 |------|------|---------------|
-| CLIヘッドレス起動 | Claude Code | `claude --headless --agent-id={id}` |
+| CLIヘッドレス起動 | Claude Code | `claude --headless` + プロンプト |
 | スクリプト実行 | カスタム | エージェント設定で定義したスクリプト |
 | API呼び出し | Gemini等 | 各AIのAPI経由 |
 | 通知 | 人間 | メール/Slack/Webhook |
+
+**注意**: `--agent-id` のようなコマンドライン引数ではなく、プロンプト内にID情報を含める。
 
 ### エージェント管理画面での設定
 
@@ -136,7 +186,7 @@ assigneeId が設定されている
 ├── 実行設定
 │   ├── 起動方式: CLI / Script / API / Notification
 │   ├── 起動コマンド/スクリプトパス
-│   └── 環境変数（オプション）
+│   └── プロンプトテンプレート（オプション）
 └── 認証設定
     ├── エージェントID（自動生成）
     └── パスキー（オプション）
@@ -151,63 +201,77 @@ assigneeId が設定されている
 ## エージェント認証
 
 ### 目的
-エージェントがMCP経由でシステムに接続する際、
-正しいエージェントとして紐付けられることを保証する。
+エージェントがMCPツールを呼び出す際、正しいエージェントとして識別されることを保証する。
 
-### 認証フロー
+### ステートレス設計における認証
+
+MCPサーバーはステートレスに設計されているため、認証は**ツール呼び出し時の引数**で行う。
 
 ```
-[エージェント起動]
+[キック時]
+  PMアプリがプロンプトにID情報を含める
   ↓
-MCP接続時に認証情報を送信
-  - agent_id: 必須
-  - passkey: オプション（設定時は必須）
+[LLM（Claude Code）]
+  プロンプトからID情報を読み取る
   ↓
-[システム側で検証]
+[MCPツール呼び出し時]
+  引数としてagent_idを渡す
+  - 例: create_handoff(task_id=..., from_agent_id="agt_dev001", ...)
+  ↓
+[MCPサーバー側で検証]
   - agent_id の存在確認
-  - passkey の一致確認（設定されている場合）
+  - passkey の一致確認（将来、必要に応じて）
   ↓
-認証成功 → セッション開始
-認証失敗 → 接続拒否
+認証成功 → ツール実行
+認証失敗 → エラー返却
 ```
 
 ### 認証レベル
 
 | レベル | 認証方式 | 用途 |
 |--------|----------|------|
-| Level 0 | agent_id のみ | 開発/テスト環境 |
-| Level 1 | agent_id + passkey | 本番環境（推奨） |
+| Level 0 | agent_id のみ | 開発/テスト環境（初期実装） |
+| Level 1 | agent_id + passkey | 本番環境（将来） |
 | Level 2 | agent_id + passkey + IP制限 | セキュア環境（将来） |
 
-### エージェント属性（追加）
+### エージェント属性（認証関連）
 
 | 属性 | 説明 |
 |------|------|
-| passkey | 認証用の秘密鍵（ハッシュ保存） |
+| passkey | 認証用の秘密鍵（ハッシュ保存、将来） |
 | auth_level | 認証レベル (0/1/2) |
 | allowed_ips | 許可IPリスト（Level 2用、将来） |
 
 ### 初期実装
 
 1. **Phase 1**: agent_id のみで認証（開発優先）
+   - ツール呼び出し時にagent_idの存在確認のみ
+   - LLMがプロンプトから読み取ったIDを信頼
 2. **Phase 2**: passkey 対応追加
+   - 特定のツールでpasskey検証を追加
 3. **Phase 3**: IP制限等のセキュリティ強化
 
-### MCP接続時の認証例
+### ツール呼び出し時の認証例
 
-```json
-{
-  "method": "authenticate",
-  "params": {
-    "agent_id": "agent_abc123",
-    "passkey": "secret_key_here"
-  }
-}
+```
+# ハンドオフ作成時（from_agent_idを検証）
+create_handoff(
+  task_id="task_abc123",
+  from_agent_id="agt_dev001",  ← 検証対象
+  to_agent_id="agt_reviewer",
+  summary="認証機能実装完了"
+)
+
+# ステータス更新時（task_idの権限を検証）
+update_task_status(
+  task_id="task_abc123",  ← 操作権限を検証
+  status="done"
+)
 ```
 
 ### 認証失敗時の動作
+- エラーをMCPレスポンスとして返却
 - エラーログに記録
-- 接続を即座に切断
 - 上位エージェント/管理者に通知（オプション）
 
 ---

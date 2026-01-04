@@ -315,11 +315,19 @@ echo "Created: ${DMG_NAME}"
 
 ## 6. Claude Codeとの連携設定
 
+### 設計原則
+
+MCPサーバーは**ステートレス**に設計されています:
+- 起動時は`--db`（データベースパス）のみ必要
+- `--agent-id` や `--project-id` は**不要**
+- 必要なIDはキック時のプロンプトで提供され、ツール呼び出し時に引数として渡される
+
 ### 自動設定 (アプリ内から)
 
 1. AIAgentPMアプリを起動
 2. **Settings** → **MCP Configuration** を開く
-3. **Install to Claude Code** ボタンをクリック
+3. **Copy MCP Config** ボタンをクリック
+4. Claude Code設定ファイルに貼り付け
 
 ### 手動設定
 
@@ -342,6 +350,8 @@ echo "Created: ${DMG_NAME}"
    }
    ```
 
+   **注意**: `--agent-id` や `--project-id` は不要です。これらはキック時にプロンプトで提供されます。
+
 3. Claude Codeを再起動
 
 ### 設定の確認
@@ -352,7 +362,8 @@ claude --mcp-list
 
 # テスト
 # Claude Code内で以下のツールを呼び出し:
-# mcp__agent-pm__get_my_profile
+# mcp__agent-pm__list_agents
+# mcp__agent-pm__list_projects
 ```
 
 ---
@@ -409,7 +420,7 @@ swift package clean
 codesign --verify --deep --strict AIAgentPM.app
 
 # MCPサーバー直接実行 (デバッグ)
-.build/release/mcp-server-pm --db ./test.db --project-id prj_test --agent-id agt_test
+.build/release/mcp-server-pm --db ./test.db
 ```
 
 ### ファイル配置
