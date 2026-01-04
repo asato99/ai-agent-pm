@@ -8,10 +8,16 @@ import Domain
 
 /// タスクステータス更新ユースケース
 /// 要件: TASKS.md - 依存関係の遵守、リソース可用性の遵守（アプリで強制ブロック）
+/// 要件: AUDIT.md - タスク完了時のAudit Ruleトリガー発動
 public struct UpdateTaskStatusUseCase: Sendable {
     private let taskRepository: any TaskRepositoryProtocol
     private let agentRepository: any AgentRepositoryProtocol
     private let eventRepository: any EventRepositoryProtocol
+    // Audit Trigger用（オプション）
+    private let internalAuditRepository: (any InternalAuditRepositoryProtocol)?
+    private let auditRuleRepository: (any AuditRuleRepositoryProtocol)?
+    private let workflowTemplateRepository: (any WorkflowTemplateRepositoryProtocol)?
+    private let templateTaskRepository: (any TemplateTaskRepositoryProtocol)?
 
     public init(
         taskRepository: any TaskRepositoryProtocol,
@@ -21,6 +27,41 @@ public struct UpdateTaskStatusUseCase: Sendable {
         self.taskRepository = taskRepository
         self.agentRepository = agentRepository
         self.eventRepository = eventRepository
+        self.internalAuditRepository = nil
+        self.auditRuleRepository = nil
+        self.workflowTemplateRepository = nil
+        self.templateTaskRepository = nil
+    }
+
+    /// Audit Trigger機能付きの初期化
+    public init(
+        taskRepository: any TaskRepositoryProtocol,
+        agentRepository: any AgentRepositoryProtocol,
+        eventRepository: any EventRepositoryProtocol,
+        internalAuditRepository: any InternalAuditRepositoryProtocol,
+        auditRuleRepository: any AuditRuleRepositoryProtocol,
+        workflowTemplateRepository: any WorkflowTemplateRepositoryProtocol,
+        templateTaskRepository: any TemplateTaskRepositoryProtocol
+    ) {
+        self.taskRepository = taskRepository
+        self.agentRepository = agentRepository
+        self.eventRepository = eventRepository
+        self.internalAuditRepository = internalAuditRepository
+        self.auditRuleRepository = auditRuleRepository
+        self.workflowTemplateRepository = workflowTemplateRepository
+        self.templateTaskRepository = templateTaskRepository
+    }
+
+    /// ステータス更新結果
+    public struct Result: Sendable {
+        public let task: Task
+        public let previousStatus: TaskStatus
+        public let firedAuditRules: [FiredAuditRule]
+
+        public struct FiredAuditRule: Sendable {
+            public let ruleName: String
+            public let createdTaskCount: Int
+        }
     }
 
     public func execute(
@@ -30,11 +71,35 @@ public struct UpdateTaskStatusUseCase: Sendable {
         sessionId: SessionID?,
         reason: String?
     ) throws -> Task {
+        let result = try executeWithResult(
+            taskId: taskId,
+            newStatus: newStatus,
+            agentId: agentId,
+            sessionId: sessionId,
+            reason: reason
+        )
+        return result.task
+    }
+
+    /// 詳細な結果を返すバージョン
+    public func executeWithResult(
+        taskId: TaskID,
+        newStatus: TaskStatus,
+        agentId: AgentID?,
+        sessionId: SessionID?,
+        reason: String?
+    ) throws -> Result {
         guard var task = try taskRepository.findById(taskId) else {
             throw UseCaseError.taskNotFound(taskId)
         }
 
         let previousStatus = task.status
+
+        // ロック中のタスクはステータス変更不可
+        // 参照: AUDIT.md - タスクロック: 状態変更を禁止
+        guard !task.isLocked else {
+            throw UseCaseError.validationFailed("Task is locked and cannot change status")
+        }
 
         // ステータス遷移の検証
         guard Self.canTransition(from: previousStatus, to: newStatus) else {
@@ -74,7 +139,124 @@ public struct UpdateTaskStatusUseCase: Sendable {
         )
         try eventRepository.save(event)
 
-        return task
+        // タスク完了時のAudit Ruleトリガーチェック
+        // 参照: AUDIT.md - 自動トリガー機能
+        var firedRules: [Result.FiredAuditRule] = []
+        if newStatus == .done {
+            firedRules = try checkAndFireAuditTriggers(for: task)
+        }
+
+        return Result(task: task, previousStatus: previousStatus, firedAuditRules: firedRules)
+    }
+
+    /// Audit Ruleトリガーをチェックし、マッチするルールを発火
+    private func checkAndFireAuditTriggers(for task: Task) throws -> [Result.FiredAuditRule] {
+        // Audit機能が設定されていない場合はスキップ
+        guard let internalAuditRepo = internalAuditRepository,
+              let auditRuleRepo = auditRuleRepository,
+              let templateRepo = workflowTemplateRepository,
+              let templateTaskRepo = templateTaskRepository else {
+            return []
+        }
+
+        var firedRules: [Result.FiredAuditRule] = []
+
+        // 全てのアクティブなInternal Auditを取得
+        let activeAudits = try internalAuditRepo.findAll(includeInactive: false)
+            .filter { $0.status == .active }
+
+        // 各Auditのルールをチェック
+        for audit in activeAudits {
+            // 有効なルールのみ取得
+            let enabledRules = try auditRuleRepo.findEnabled(auditId: audit.id)
+
+            // タスク完了トリガーにマッチするルールを発火
+            for rule in enabledRules where rule.triggerType == .taskCompleted {
+                let createdTasks = try fireAuditRule(rule: rule, sourceTask: task, templateRepo: templateRepo, templateTaskRepo: templateTaskRepo)
+                firedRules.append(Result.FiredAuditRule(ruleName: rule.name, createdTaskCount: createdTasks.count))
+            }
+        }
+
+        return firedRules
+    }
+
+    /// Audit Ruleを発火してワークフローをインスタンス化
+    private func fireAuditRule(
+        rule: AuditRule,
+        sourceTask: Task,
+        templateRepo: any WorkflowTemplateRepositoryProtocol,
+        templateTaskRepo: any TemplateTaskRepositoryProtocol
+    ) throws -> [Task] {
+        // テンプレート取得
+        guard let template = try templateRepo.findById(rule.workflowTemplateId) else {
+            // テンプレートが見つからない場合はスキップ（エラーにしない）
+            return []
+        }
+
+        // アクティブなテンプレートのみ使用
+        guard template.isActive else {
+            return []
+        }
+
+        // テンプレートタスクを取得
+        let templateTasks = try templateTaskRepo.findByTemplate(rule.workflowTemplateId)
+
+        // タスク割り当てマップを構築
+        let assignmentMap = Dictionary(
+            uniqueKeysWithValues: rule.taskAssignments.map { ($0.templateTaskOrder, $0.agentId) }
+        )
+
+        // タスクを生成
+        var createdTasks: [Task] = []
+        var orderToTaskIdMap: [Int: TaskID] = [:]
+
+        for templateTask in templateTasks {
+            let taskId = TaskID.generate()
+            orderToTaskIdMap[templateTask.order] = taskId
+
+            // 依存関係をTaskIDに変換
+            let dependencies = templateTask.dependsOnOrders.compactMap { orderToTaskIdMap[$0] }
+
+            // ルールの割り当てからエージェントを取得
+            let assigneeId = assignmentMap[templateTask.order]
+
+            // タイトルにソースタスク情報を含める
+            let titleWithContext = "\(templateTask.title) [Audit: \(sourceTask.title)]"
+
+            let newTask = Task(
+                id: taskId,
+                projectId: sourceTask.projectId,
+                title: titleWithContext,
+                description: templateTask.description,
+                status: .backlog,
+                priority: templateTask.defaultPriority,
+                assigneeId: assigneeId,
+                dependencies: dependencies,
+                estimatedMinutes: templateTask.estimatedMinutes
+            )
+            try taskRepository.save(newTask)
+            createdTasks.append(newTask)
+
+            // イベント記録
+            let event = StateChangeEvent(
+                id: EventID.generate(),
+                projectId: sourceTask.projectId,
+                entityType: .task,
+                entityId: newTask.id.value,
+                eventType: .created,
+                newState: newTask.status.rawValue,
+                metadata: [
+                    "auditRuleId": rule.id.value,
+                    "auditId": rule.auditId.value,
+                    "sourceTaskId": sourceTask.id.value,
+                    "templateId": template.id.value,
+                    "triggerType": TriggerType.taskCompleted.rawValue
+                ]
+            )
+            try eventRepository.save(event)
+        }
+
+        return createdTasks
     }
 
     /// 依存関係チェック: 全ての依存タスクがdoneである必要がある

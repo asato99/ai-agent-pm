@@ -156,6 +156,18 @@ struct AIAgentPMApp: App {
                         router.selectProject(ProjectID(value: "uitest_no_wd_project"))
                     }
                     .keyboardShortcut("w", modifiers: [.command, .shift])
+
+                    // トリガーテストタスクを選択（Cmd+Shift+Y）
+                    Button("Select Trigger Test Task (UITest)") {
+                        router.selectTask(TaskID(value: "uitest_trigger_task"))
+                    }
+                    .keyboardShortcut("y", modifiers: [.command, .shift])
+
+                    // ロック済みタスクを選択（Cmd+Shift+L）
+                    Button("Select Locked Task (UITest)") {
+                        router.selectTask(TaskID(value: "uitest_locked_task"))
+                    }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
                 }
             }
         }
@@ -776,6 +788,66 @@ private final class TestDataSeeder {
             isEnabled: true
         )
         try auditRuleRepository.save(rule)
+
+        // トリガーテスト用プロジェクト作成
+        let triggerTestProject = Project(
+            id: ProjectID(value: "uitest_trigger_project"),
+            name: "トリガーテストPJ",
+            description: "Audit Ruleトリガーのテスト用プロジェクト",
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(triggerTestProject)
+
+        // トリガーテスト用タスク（inProgress状態 → doneに変更でトリガー発火）
+        let triggerTestTask = Task(
+            id: TaskID(value: "uitest_trigger_task"),
+            projectId: triggerTestProject.id,
+            title: "トリガーテストタスク",
+            description: "このタスクを完了するとAudit Ruleがトリガーされ、QA Workflowタスクが自動生成されます",
+            status: .inProgress,  // 完了可能な状態
+            priority: .high,
+            assigneeId: qaAgent.id,
+            dependencies: [],
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(triggerTestTask)
+
+        // 追加：完了済みタスク（トリガー発火後の確認用比較対象）
+        let completedTask = Task(
+            id: TaskID(value: "uitest_completed_task"),
+            projectId: triggerTestProject.id,
+            title: "完了済みタスク",
+            description: "既に完了したタスク",
+            status: .done,
+            priority: .medium,
+            assigneeId: nil,
+            dependencies: [],
+            createdAt: Date(),
+            updatedAt: Date(),
+            completedAt: Date()
+        )
+        try await taskRepository.save(completedTask)
+
+        // ロックテスト用タスク（既にロック済み）
+        let lockedTask = Task(
+            id: TaskID(value: "uitest_locked_task"),
+            projectId: triggerTestProject.id,
+            title: "ロック済みタスク",
+            description: "監査によりロックされたタスク - ステータス変更不可",
+            status: .inProgress,
+            priority: .high,
+            assigneeId: qaAgent.id,
+            dependencies: [],
+            createdAt: Date(),
+            updatedAt: Date(),
+            isLocked: true,
+            lockedByAuditId: auditId,
+            lockedAt: Date()
+        )
+        try await taskRepository.save(lockedTask)
 
         print("✅ UITest: Internal Audit test data seeded successfully")
     }

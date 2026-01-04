@@ -568,3 +568,175 @@ public struct GetLockedAgentsUseCase: Sendable {
         try agentRepository.findLocked(byAuditId: auditId)
     }
 }
+
+// MARK: - Audit Trigger System
+
+// MARK: - FireAuditRuleUseCase
+
+/// Audit Rule発火ユースケース
+/// 参照: docs/requirements/AUDIT.md - ワークフロー実行フロー
+/// トリガー条件にマッチしたルールのワークフローをインスタンス化する
+public struct FireAuditRuleUseCase: Sendable {
+    private let auditRuleRepository: any AuditRuleRepositoryProtocol
+    private let templateRepository: any WorkflowTemplateRepositoryProtocol
+    private let templateTaskRepository: any TemplateTaskRepositoryProtocol
+    private let taskRepository: any TaskRepositoryProtocol
+    private let eventRepository: any EventRepositoryProtocol
+
+    public init(
+        auditRuleRepository: any AuditRuleRepositoryProtocol,
+        templateRepository: any WorkflowTemplateRepositoryProtocol,
+        templateTaskRepository: any TemplateTaskRepositoryProtocol,
+        taskRepository: any TaskRepositoryProtocol,
+        eventRepository: any EventRepositoryProtocol
+    ) {
+        self.auditRuleRepository = auditRuleRepository
+        self.templateRepository = templateRepository
+        self.templateTaskRepository = templateTaskRepository
+        self.taskRepository = taskRepository
+        self.eventRepository = eventRepository
+    }
+
+    /// ルール発火結果
+    public struct Result: Sendable {
+        public let rule: AuditRule
+        public let sourceTask: Task
+        public let createdTasks: [Task]
+    }
+
+    /// Audit Ruleを発火し、ワークフローをインスタンス化する
+    /// - Parameters:
+    ///   - ruleId: 発火するルールのID
+    ///   - sourceTask: トリガーとなったタスク
+    /// - Returns: 生成されたタスク群
+    public func execute(ruleId: AuditRuleID, sourceTask: Task) throws -> Result {
+        // ルール取得
+        guard let rule = try auditRuleRepository.findById(ruleId) else {
+            throw UseCaseError.auditRuleNotFound(ruleId)
+        }
+
+        // テンプレート取得
+        guard let template = try templateRepository.findById(rule.workflowTemplateId) else {
+            throw UseCaseError.templateNotFound(rule.workflowTemplateId)
+        }
+
+        // アクティブなテンプレートのみ使用可能
+        guard template.isActive else {
+            throw UseCaseError.validationFailed("Cannot use archived template for audit rule")
+        }
+
+        // テンプレートタスクを取得（order順）
+        let templateTasks = try templateTaskRepository.findByTemplate(rule.workflowTemplateId)
+
+        // タスク割り当てマップを構築（templateTaskOrder -> agentId）
+        let assignmentMap = Dictionary(
+            uniqueKeysWithValues: rule.taskAssignments.map { ($0.templateTaskOrder, $0.agentId) }
+        )
+
+        // タスクを生成
+        var createdTasks: [Task] = []
+        var orderToTaskIdMap: [Int: TaskID] = [:]
+
+        for templateTask in templateTasks {
+            let taskId = TaskID.generate()
+            orderToTaskIdMap[templateTask.order] = taskId
+
+            // 依存関係をTaskIDに変換
+            let dependencies = templateTask.dependsOnOrders.compactMap { orderToTaskIdMap[$0] }
+
+            // ルールの割り当てからエージェントを取得
+            let assigneeId = assignmentMap[templateTask.order]
+
+            // タイトルにソースタスク情報を含める
+            let titleWithContext = "\(templateTask.title) [Audit: \(sourceTask.title)]"
+
+            let task = Task(
+                id: taskId,
+                projectId: sourceTask.projectId,
+                title: titleWithContext,
+                description: templateTask.description,
+                status: .backlog,
+                priority: templateTask.defaultPriority,
+                assigneeId: assigneeId,
+                dependencies: dependencies,
+                estimatedMinutes: templateTask.estimatedMinutes
+            )
+            try taskRepository.save(task)
+            createdTasks.append(task)
+
+            // イベント記録
+            let event = StateChangeEvent(
+                id: EventID.generate(),
+                projectId: sourceTask.projectId,
+                entityType: .task,
+                entityId: task.id.value,
+                eventType: .created,
+                newState: task.status.rawValue,
+                metadata: [
+                    "auditRuleId": rule.id.value,
+                    "auditId": rule.auditId.value,
+                    "sourceTaskId": sourceTask.id.value,
+                    "templateId": template.id.value
+                ]
+            )
+            try eventRepository.save(event)
+        }
+
+        return Result(rule: rule, sourceTask: sourceTask, createdTasks: createdTasks)
+    }
+}
+
+// MARK: - CheckAuditTriggersUseCase
+
+/// Audit Triggerチェックユースケース
+/// 参照: docs/requirements/AUDIT.md - 自動トリガー機能
+/// イベント発生時にマッチするAudit Ruleを検索し、発火する
+public struct CheckAuditTriggersUseCase: Sendable {
+    private let internalAuditRepository: any InternalAuditRepositoryProtocol
+    private let auditRuleRepository: any AuditRuleRepositoryProtocol
+    private let fireAuditRuleUseCase: FireAuditRuleUseCase
+
+    public init(
+        internalAuditRepository: any InternalAuditRepositoryProtocol,
+        auditRuleRepository: any AuditRuleRepositoryProtocol,
+        fireAuditRuleUseCase: FireAuditRuleUseCase
+    ) {
+        self.internalAuditRepository = internalAuditRepository
+        self.auditRuleRepository = auditRuleRepository
+        self.fireAuditRuleUseCase = fireAuditRuleUseCase
+    }
+
+    /// トリガーチェック結果
+    public struct Result: Sendable {
+        public let triggerType: TriggerType
+        public let sourceTask: Task
+        public let firedRules: [FireAuditRuleUseCase.Result]
+    }
+
+    /// トリガーイベントを処理し、マッチするルールを発火する
+    /// - Parameters:
+    ///   - triggerType: トリガー種別
+    ///   - sourceTask: トリガーとなったタスク
+    /// - Returns: 発火結果一覧
+    public func execute(triggerType: TriggerType, sourceTask: Task) throws -> Result {
+        var firedRules: [FireAuditRuleUseCase.Result] = []
+
+        // 全てのアクティブなInternal Auditを取得
+        let activeAudits = try internalAuditRepository.findAll(includeInactive: false)
+            .filter { $0.status == .active }
+
+        // 各Auditのルールをチェック
+        for audit in activeAudits {
+            // 有効なルールのみ取得
+            let enabledRules = try auditRuleRepository.findEnabled(auditId: audit.id)
+
+            // トリガータイプがマッチするルールを発火
+            for rule in enabledRules where rule.triggerType == triggerType {
+                let result = try fireAuditRuleUseCase.execute(ruleId: rule.id, sourceTask: sourceTask)
+                firedRules.append(result)
+            }
+        }
+
+        return Result(triggerType: triggerType, sourceTask: sourceTask, firedRules: firedRules)
+    }
+}

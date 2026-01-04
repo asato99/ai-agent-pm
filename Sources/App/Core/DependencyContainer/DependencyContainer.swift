@@ -90,7 +90,11 @@ public final class DependencyContainer: ObservableObject {
         UpdateTaskStatusUseCase(
             taskRepository: taskRepository,
             agentRepository: agentRepository,
-            eventRepository: eventRepository
+            eventRepository: eventRepository,
+            internalAuditRepository: internalAuditRepository,
+            auditRuleRepository: auditRuleRepository,
+            workflowTemplateRepository: workflowTemplateRepository,
+            templateTaskRepository: templateTaskRepository
         )
     }()
 
@@ -310,6 +314,26 @@ public final class DependencyContainer: ObservableObject {
 
     public lazy var getLockedAgentsUseCase: GetLockedAgentsUseCase = {
         GetLockedAgentsUseCase(agentRepository: agentRepository)
+    }()
+
+    // MARK: - Use Cases (Audit Triggers)
+
+    public lazy var fireAuditRuleUseCase: FireAuditRuleUseCase = {
+        FireAuditRuleUseCase(
+            auditRuleRepository: auditRuleRepository,
+            templateRepository: workflowTemplateRepository,
+            templateTaskRepository: templateTaskRepository,
+            taskRepository: taskRepository,
+            eventRepository: eventRepository
+        )
+    }()
+
+    public lazy var checkAuditTriggersUseCase: CheckAuditTriggersUseCase = {
+        CheckAuditTriggersUseCase(
+            internalAuditRepository: internalAuditRepository,
+            auditRuleRepository: auditRuleRepository,
+            fireAuditRuleUseCase: fireAuditRuleUseCase
+        )
     }()
 
     // MARK: - Initialization

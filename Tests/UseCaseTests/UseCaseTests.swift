@@ -51,6 +51,13 @@ final class MockAgentRepository: AgentRepositoryProtocol {
         agents.values.filter { $0.parentAgentId == nil }
     }
 
+    func findLocked(byAuditId auditId: InternalAuditID?) throws -> [Agent] {
+        if let auditId = auditId {
+            return agents.values.filter { $0.isLocked && $0.lockedByAuditId == auditId }
+        }
+        return agents.values.filter { $0.isLocked }
+    }
+
     func save(_ agent: Agent) throws {
         agents[agent.id] = agent
     }
@@ -85,6 +92,13 @@ final class MockTaskRepository: TaskRepositoryProtocol {
 
     func findByStatus(_ status: TaskStatus, projectId: ProjectID) throws -> [Task] {
         tasks.values.filter { $0.projectId == projectId && $0.status == status }
+    }
+
+    func findLocked(byAuditId auditId: InternalAuditID?) throws -> [Task] {
+        if let auditId = auditId {
+            return tasks.values.filter { $0.isLocked && $0.lockedByAuditId == auditId }
+        }
+        return tasks.values.filter { $0.isLocked }
     }
 
     func save(_ task: Task) throws {
@@ -1519,5 +1533,657 @@ final class UseCaseTests: XCTestCase {
         XCTAssertEqual(rule.taskAssignments.count, 2)
         XCTAssertEqual(rule.taskAssignments[0].templateTaskOrder, 1)
         XCTAssertEqual(rule.taskAssignments[0].agentId, agent1.id)
+    }
+
+    // MARK: - Task Lock Tests (参照: AUDIT.md - タスクロック)
+
+    func testLockedTaskCannotChangeStatus() throws {
+        // ロック中のタスクはステータス変更不可
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // ロックされたタスクを作成
+        var task = Task(id: TaskID.generate(), projectId: project.id, title: "Locked Task", status: .inProgress)
+        task.isLocked = true
+        task.lockedByAuditId = InternalAuditID.generate()
+        task.lockedAt = Date()
+        taskRepo.tasks[task.id] = task
+
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo
+        )
+
+        XCTAssertThrowsError(try useCase.execute(
+            taskId: task.id,
+            newStatus: .done,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )) { error in
+            if case UseCaseError.validationFailed(let message) = error {
+                XCTAssertTrue(message.contains("locked"))
+            } else {
+                XCTFail("Expected validationFailed error with 'locked' message")
+            }
+        }
+    }
+
+    func testUnlockedTaskCanChangeStatus() throws {
+        // ロックされていないタスクはステータス変更可能
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Unlocked Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo
+        )
+
+        let updatedTask = try useCase.execute(
+            taskId: task.id,
+            newStatus: .done,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )
+
+        XCTAssertEqual(updatedTask.status, .done)
+    }
+
+    // MARK: - Audit Trigger Tests (参照: AUDIT.md - 自動トリガー機能)
+
+    func testAuditTriggerFiresOnTaskCompletion() throws {
+        // タスク完了時にAudit Ruleトリガーが発火する
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // アクティブなInternal Audit
+        let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
+        internalAuditRepo.audits[audit.id] = audit
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
+        templateRepo.templates[template.id] = template
+
+        // テンプレートタスク
+        let templateTask = TemplateTask(
+            id: TemplateTaskID.generate(),
+            templateId: template.id,
+            title: "チェック項目",
+            order: 1
+        )
+        templateTaskRepo.tasks[templateTask.id] = templateTask
+
+        // Audit Rule（タスク完了トリガー）
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "タスク完了時チェック",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template.id,
+            taskAssignments: [],
+            isEnabled: true
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        // 対象タスク（inProgress状態）
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "API実装", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        // Audit機能付きユースケース
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo,
+            internalAuditRepository: internalAuditRepo,
+            auditRuleRepository: auditRuleRepo,
+            workflowTemplateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo
+        )
+
+        // タスク完了
+        let result = try useCase.executeWithResult(
+            taskId: task.id,
+            newStatus: .done,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )
+
+        // 結果検証
+        XCTAssertEqual(result.task.status, .done)
+        XCTAssertEqual(result.firedAuditRules.count, 1)
+        XCTAssertEqual(result.firedAuditRules[0].ruleName, "タスク完了時チェック")
+        XCTAssertEqual(result.firedAuditRules[0].createdTaskCount, 1)
+
+        // 新規タスクが作成されたことを確認
+        let allTasks = try taskRepo.findAll(projectId: project.id)
+        XCTAssertEqual(allTasks.count, 2) // 元タスク + 生成タスク
+    }
+
+    func testAuditTriggerDoesNotFireForInactiveAudit() throws {
+        // 非アクティブなAuditではトリガーが発火しない
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // 非アクティブなInternal Audit
+        var audit = InternalAudit(id: InternalAuditID.generate(), name: "Inactive Audit")
+        audit.status = .inactive
+        internalAuditRepo.audits[audit.id] = audit
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
+        templateRepo.templates[template.id] = template
+
+        // Audit Rule
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "Rule",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template.id,
+            taskAssignments: [],
+            isEnabled: true
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        // 対象タスク
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo,
+            internalAuditRepository: internalAuditRepo,
+            auditRuleRepository: auditRuleRepo,
+            workflowTemplateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo
+        )
+
+        let result = try useCase.executeWithResult(
+            taskId: task.id,
+            newStatus: .done,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )
+
+        // トリガーが発火していないことを確認
+        XCTAssertTrue(result.firedAuditRules.isEmpty)
+    }
+
+    func testAuditTriggerDoesNotFireForDisabledRule() throws {
+        // 無効化されたルールではトリガーが発火しない
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // アクティブなInternal Audit
+        let audit = InternalAudit(id: InternalAuditID.generate(), name: "Active Audit")
+        internalAuditRepo.audits[audit.id] = audit
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
+        templateRepo.templates[template.id] = template
+
+        // 無効化されたAudit Rule
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "Disabled Rule",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template.id,
+            taskAssignments: [],
+            isEnabled: false
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        // 対象タスク
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo,
+            internalAuditRepository: internalAuditRepo,
+            auditRuleRepository: auditRuleRepo,
+            workflowTemplateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo
+        )
+
+        let result = try useCase.executeWithResult(
+            taskId: task.id,
+            newStatus: .done,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )
+
+        // トリガーが発火していないことを確認
+        XCTAssertTrue(result.firedAuditRules.isEmpty)
+    }
+
+    func testAuditTriggerDoesNotFireForSuspendedAudit() throws {
+        // サスペンド中のAuditではトリガーが発火しない
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // サスペンド中のInternal Audit
+        var audit = InternalAudit(id: InternalAuditID.generate(), name: "Suspended Audit")
+        audit.status = .suspended
+        internalAuditRepo.audits[audit.id] = audit
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
+        templateRepo.templates[template.id] = template
+
+        // Audit Rule
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "Rule",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template.id,
+            taskAssignments: [],
+            isEnabled: true
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        // 対象タスク
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo,
+            internalAuditRepository: internalAuditRepo,
+            auditRuleRepository: auditRuleRepo,
+            workflowTemplateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo
+        )
+
+        let result = try useCase.executeWithResult(
+            taskId: task.id,
+            newStatus: .done,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )
+
+        // トリガーが発火していないことを確認
+        XCTAssertTrue(result.firedAuditRules.isEmpty)
+    }
+
+    func testAuditTriggerDoesNotFireForNonCompletionStatus() throws {
+        // タスク完了以外のステータス変更ではトリガーが発火しない
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // アクティブなInternal Audit
+        let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
+        internalAuditRepo.audits[audit.id] = audit
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
+        templateRepo.templates[template.id] = template
+
+        // Audit Rule（タスク完了トリガー）
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "タスク完了時チェック",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template.id,
+            taskAssignments: [],
+            isEnabled: true
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        // 対象タスク（backlog状態）
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .backlog)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo,
+            internalAuditRepository: internalAuditRepo,
+            auditRuleRepository: auditRuleRepo,
+            workflowTemplateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo
+        )
+
+        // backlog → todo（完了ではない）
+        let result = try useCase.executeWithResult(
+            taskId: task.id,
+            newStatus: .todo,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )
+
+        // トリガーが発火していないことを確認
+        XCTAssertTrue(result.firedAuditRules.isEmpty)
+    }
+
+    func testAuditTriggerWithoutAuditRepositoriesSkipsTrigger() throws {
+        // Audit機能なしのユースケースではトリガー処理がスキップされる
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        // Audit機能なしのユースケース（後方互換性）
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo
+        )
+
+        let result = try useCase.executeWithResult(
+            taskId: task.id,
+            newStatus: .done,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )
+
+        // 正常に完了し、トリガーは空
+        XCTAssertEqual(result.task.status, .done)
+        XCTAssertTrue(result.firedAuditRules.isEmpty)
+    }
+
+    func testAuditTriggerWithMultipleRules() throws {
+        // 複数のルールがマッチする場合、全て発火する
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // アクティブなInternal Audit
+        let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
+        internalAuditRepo.audits[audit.id] = audit
+
+        // ワークフローテンプレート1
+        let template1 = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow 1")
+        templateRepo.templates[template1.id] = template1
+        let templateTask1 = TemplateTask(id: TemplateTaskID.generate(), templateId: template1.id, title: "Task1", order: 1)
+        templateTaskRepo.tasks[templateTask1.id] = templateTask1
+
+        // ワークフローテンプレート2
+        let template2 = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow 2")
+        templateRepo.templates[template2.id] = template2
+        let templateTask2 = TemplateTask(id: TemplateTaskID.generate(), templateId: template2.id, title: "Task2", order: 1)
+        templateTaskRepo.tasks[templateTask2.id] = templateTask2
+
+        // Audit Rule 1
+        let rule1 = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "Rule 1",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template1.id,
+            taskAssignments: [],
+            isEnabled: true
+        )
+        auditRuleRepo.rules[rule1.id] = rule1
+
+        // Audit Rule 2
+        let rule2 = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "Rule 2",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template2.id,
+            taskAssignments: [],
+            isEnabled: true
+        )
+        auditRuleRepo.rules[rule2.id] = rule2
+
+        // 対象タスク
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "API実装", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo,
+            internalAuditRepository: internalAuditRepo,
+            auditRuleRepository: auditRuleRepo,
+            workflowTemplateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo
+        )
+
+        let result = try useCase.executeWithResult(
+            taskId: task.id,
+            newStatus: .done,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )
+
+        // 2つのルールが発火
+        XCTAssertEqual(result.firedAuditRules.count, 2)
+
+        // 3つのタスクが存在（元タスク + 2つの生成タスク）
+        let allTasks = try taskRepo.findAll(projectId: project.id)
+        XCTAssertEqual(allTasks.count, 3)
+    }
+
+    // MARK: - FireAuditRuleUseCase Tests
+
+    func testFireAuditRuleUseCaseSuccess() throws {
+        // Audit Rule発火ユースケース
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // ソースタスク
+        let sourceTask = Task(id: TaskID.generate(), projectId: project.id, title: "API実装", status: .done)
+        taskRepo.tasks[sourceTask.id] = sourceTask
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Code Review")
+        templateRepo.templates[template.id] = template
+
+        // テンプレートタスク
+        let templateTask1 = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "レビュー", order: 1)
+        let templateTask2 = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "修正確認", order: 2, dependsOnOrders: [1])
+        templateTaskRepo.tasks[templateTask1.id] = templateTask1
+        templateTaskRepo.tasks[templateTask2.id] = templateTask2
+
+        // Audit
+        let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
+        internalAuditRepo.audits[audit.id] = audit
+
+        // Audit Rule
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "コードレビュー",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template.id,
+            taskAssignments: []
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        let useCase = FireAuditRuleUseCase(
+            auditRuleRepository: auditRuleRepo,
+            templateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo,
+            taskRepository: taskRepo,
+            eventRepository: eventRepo
+        )
+
+        let result = try useCase.execute(ruleId: rule.id, sourceTask: sourceTask)
+
+        // 結果検証
+        XCTAssertEqual(result.rule.id, rule.id)
+        XCTAssertEqual(result.sourceTask.id, sourceTask.id)
+        XCTAssertEqual(result.createdTasks.count, 2)
+
+        // タスクタイトルにソースタスク情報が含まれる
+        XCTAssertTrue(result.createdTasks[0].title.contains("[Audit:"))
+        XCTAssertTrue(result.createdTasks[0].title.contains("API実装"))
+    }
+
+    func testFireAuditRuleUseCaseWithTaskAssignments() throws {
+        // タスク割り当て付きでルール発火
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // エージェント
+        let agent = Agent(id: AgentID.generate(), name: "Reviewer", role: "レビュアー")
+        agentRepo.agents[agent.id] = agent
+
+        // ソースタスク
+        let sourceTask = Task(id: TaskID.generate(), projectId: project.id, title: "実装完了", status: .done)
+        taskRepo.tasks[sourceTask.id] = sourceTask
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Review")
+        templateRepo.templates[template.id] = template
+
+        // テンプレートタスク
+        let templateTask = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "レビュー", order: 1)
+        templateTaskRepo.tasks[templateTask.id] = templateTask
+
+        // Audit
+        let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA")
+        internalAuditRepo.audits[audit.id] = audit
+
+        // タスク割り当て付きルール
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "レビュールール",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template.id,
+            taskAssignments: [TaskAssignment(templateTaskOrder: 1, agentId: agent.id)]
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        let useCase = FireAuditRuleUseCase(
+            auditRuleRepository: auditRuleRepo,
+            templateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo,
+            taskRepository: taskRepo,
+            eventRepository: eventRepo
+        )
+
+        let result = try useCase.execute(ruleId: rule.id, sourceTask: sourceTask)
+
+        // エージェントが割り当てられていることを確認
+        XCTAssertEqual(result.createdTasks.count, 1)
+        XCTAssertEqual(result.createdTasks[0].assigneeId, agent.id)
+    }
+
+    // MARK: - CheckAuditTriggersUseCase Tests
+
+    func testCheckAuditTriggersUseCaseSuccess() throws {
+        // トリガーチェックユースケース
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // アクティブなInternal Audit
+        let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
+        internalAuditRepo.audits[audit.id] = audit
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check")
+        templateRepo.templates[template.id] = template
+
+        let templateTask = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "確認", order: 1)
+        templateTaskRepo.tasks[templateTask.id] = templateTask
+
+        // Audit Rule
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "完了時チェック",
+            triggerType: .taskCompleted,
+            workflowTemplateId: template.id,
+            taskAssignments: []
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        // ソースタスク
+        let sourceTask = Task(id: TaskID.generate(), projectId: project.id, title: "実装", status: .done)
+        taskRepo.tasks[sourceTask.id] = sourceTask
+
+        let fireUseCase = FireAuditRuleUseCase(
+            auditRuleRepository: auditRuleRepo,
+            templateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo,
+            taskRepository: taskRepo,
+            eventRepository: eventRepo
+        )
+
+        let checkUseCase = CheckAuditTriggersUseCase(
+            internalAuditRepository: internalAuditRepo,
+            auditRuleRepository: auditRuleRepo,
+            fireAuditRuleUseCase: fireUseCase
+        )
+
+        let result = try checkUseCase.execute(triggerType: .taskCompleted, sourceTask: sourceTask)
+
+        XCTAssertEqual(result.triggerType, .taskCompleted)
+        XCTAssertEqual(result.sourceTask.id, sourceTask.id)
+        XCTAssertEqual(result.firedRules.count, 1)
+        XCTAssertEqual(result.firedRules[0].rule.name, "完了時チェック")
+    }
+
+    func testCheckAuditTriggersUseCaseNoMatchingRules() throws {
+        // マッチするルールがない場合
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        // アクティブなInternal Audit
+        let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
+        internalAuditRepo.audits[audit.id] = audit
+
+        // ワークフローテンプレート
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check")
+        templateRepo.templates[template.id] = template
+
+        // statusChangedトリガーのルール（taskCompletedではマッチしない）
+        let rule = AuditRule(
+            id: AuditRuleID.generate(),
+            auditId: audit.id,
+            name: "ステータス変更時",
+            triggerType: .statusChanged,
+            workflowTemplateId: template.id,
+            taskAssignments: []
+        )
+        auditRuleRepo.rules[rule.id] = rule
+
+        // ソースタスク
+        let sourceTask = Task(id: TaskID.generate(), projectId: project.id, title: "実装", status: .done)
+        taskRepo.tasks[sourceTask.id] = sourceTask
+
+        let fireUseCase = FireAuditRuleUseCase(
+            auditRuleRepository: auditRuleRepo,
+            templateRepository: templateRepo,
+            templateTaskRepository: templateTaskRepo,
+            taskRepository: taskRepo,
+            eventRepository: eventRepo
+        )
+
+        let checkUseCase = CheckAuditTriggersUseCase(
+            internalAuditRepository: internalAuditRepo,
+            auditRuleRepository: auditRuleRepo,
+            fireAuditRuleUseCase: fireUseCase
+        )
+
+        // taskCompletedトリガーで実行
+        let result = try checkUseCase.execute(triggerType: .taskCompleted, sourceTask: sourceTask)
+
+        // マッチするルールがないので空
+        XCTAssertTrue(result.firedRules.isEmpty)
     }
 }
