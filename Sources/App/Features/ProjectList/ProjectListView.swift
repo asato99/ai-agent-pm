@@ -27,7 +27,6 @@ struct ProjectListView: View {
 
     @State private var projects: [Project] = []
     @State private var agents: [Agent] = []
-    @State private var templates: [WorkflowTemplate] = []
     @State private var internalAudits: [InternalAudit] = []
     @State private var isLoading = false
     @State private var searchText = ""
@@ -44,13 +43,6 @@ struct ProjectListView: View {
             return agents
         }
         return agents.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-    }
-
-    var filteredTemplates: [WorkflowTemplate] {
-        if searchText.isEmpty {
-            return templates
-        }
-        return templates.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
     var filteredInternalAudits: [InternalAudit] {
@@ -119,33 +111,6 @@ struct ProjectListView: View {
             }
             .accessibilityIdentifier("AgentsSection")
 
-            // Templates Section
-            Section {
-                ForEach(filteredTemplates, id: \.id) { template in
-                    TemplateRowView(template: template)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            router.selectTemplate(template.id)
-                            router.showSheet(.templateDetail(template.id))
-                        }
-                }
-            } header: {
-                HStack {
-                    Label("Templates", systemImage: "doc.on.doc")
-                    Spacer()
-                    Button {
-                        router.showSheet(.newTemplate)
-                    } label: {
-                        Image(systemName: "plus.circle")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("NewTemplateButton")
-                    .accessibilityLabel("New Template")
-                    .help("New Template (⇧⌘M)")
-                }
-            }
-            .accessibilityIdentifier("TemplatesSection")
-
             // Internal Audits Section
             Section {
                 ForEach(filteredInternalAudits, id: \.id) { audit in
@@ -200,13 +165,6 @@ struct ProjectListView: View {
                     .keyboardShortcut("a", modifiers: [.command, .shift])
 
                     Button {
-                        router.showSheet(.newTemplate)
-                    } label: {
-                        Label("New Template", systemImage: "doc.badge.plus")
-                    }
-                    .keyboardShortcut("m", modifiers: [.command, .shift])
-
-                    Button {
                         router.showSheet(.newInternalAudit)
                     } label: {
                         Label("New Internal Audit", systemImage: "checkmark.shield")
@@ -215,14 +173,14 @@ struct ProjectListView: View {
                     Label("Add", systemImage: "plus")
                 }
                 .accessibilityIdentifier("AddButton")
-                .help("Add Project, Agent, or Template")
+                .help("Add Project, Agent, or Internal Audit")
             }
         }
         .overlay {
             if isLoading {
                 ProgressView()
                     .accessibilityIdentifier("LoadingIndicator")
-            } else if projects.isEmpty && agents.isEmpty && templates.isEmpty && internalAudits.isEmpty {
+            } else if projects.isEmpty && agents.isEmpty && internalAudits.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "folder.badge.plus")
                         .font(.system(size: 48))
@@ -265,23 +223,6 @@ struct ProjectListView: View {
                 AsyncTask { await loadData() }
             }
         }
-        .onChange(of: router.selectedProject) { _, newValue in
-            // プロジェクト選択が変更されたらテンプレートを再読み込み
-            AsyncTask {
-                if let projectId = newValue {
-                    do {
-                        templates = try container.listTemplatesUseCase.execute(
-                            projectId: projectId,
-                            includeArchived: false
-                        )
-                    } catch {
-                        router.showAlert(.error(message: error.localizedDescription))
-                    }
-                } else {
-                    templates = []
-                }
-            }
-        }
     }
 
     private func loadData() async {
@@ -291,15 +232,6 @@ struct ProjectListView: View {
         do {
             projects = try container.getProjectsUseCase.execute()
             agents = try container.getAgentsUseCase.execute()
-            // Templates are project-scoped, load for selected project if available
-            if let projectId = router.selectedProject {
-                templates = try container.listTemplatesUseCase.execute(
-                    projectId: projectId,
-                    includeArchived: false
-                )
-            } else {
-                templates = []
-            }
             internalAudits = try container.listInternalAuditsUseCase.execute(includeInactive: false)
         } catch {
             router.showAlert(.error(message: error.localizedDescription))

@@ -14,10 +14,40 @@ struct TaskBoardView: View {
 
     @State private var tasks: [Task] = []
     @State private var agents: [Agent] = []
+    @State private var templates: [WorkflowTemplate] = []
     @State private var project: Project?
     @State private var isLoading = false
+    @State private var showingTemplates = false
 
     private let columns: [TaskStatus] = [.backlog, .todo, .inProgress, .blocked, .done]
+
+    @ViewBuilder
+    private var templatesButton: some View {
+        Button {
+            showingTemplates.toggle()
+        } label: {
+            Label("Templates", systemImage: "doc.on.doc")
+        }
+        .help("Templates (⇧⌘M)")
+        .popover(isPresented: $showingTemplates) {
+            TemplatesPopoverView(
+                projectId: projectId,
+                templates: templates,
+                onTemplateSelected: { templateId in
+                    showingTemplates = false
+                    router.showSheet(.templateDetail(templateId))
+                },
+                onNewTemplate: {
+                    showingTemplates = false
+                    router.showSheet(.newTemplate)
+                },
+                onRefresh: {
+                    AsyncTask { await loadTemplates() }
+                }
+            )
+            .accessibilityIdentifier("TemplatesPopover")
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,6 +101,14 @@ struct TaskBoardView: View {
             }
 
             ToolbarItem {
+                templatesButton
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Templates")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("TemplatesButton")
+            }
+
+            ToolbarItem {
                 Button {
                     AsyncTask { await loadData() }
                 } label: {
@@ -106,9 +144,120 @@ struct TaskBoardView: View {
             project = try container.projectRepository.findById(projectId)
             tasks = try container.getTasksUseCase.execute(projectId: projectId, status: nil)
             agents = try container.getAgentsUseCase.execute()
+            templates = try container.listTemplatesUseCase.execute(
+                projectId: projectId,
+                includeArchived: false
+            )
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }
+    }
+
+    private func loadTemplates() async {
+        do {
+            templates = try container.listTemplatesUseCase.execute(
+                projectId: projectId,
+                includeArchived: false
+            )
+        } catch {
+            router.showAlert(.error(message: error.localizedDescription))
+        }
+    }
+}
+
+// MARK: - Templates Popover View
+
+/// テンプレート一覧ポップオーバー
+struct TemplatesPopoverView: View {
+    let projectId: ProjectID
+    let templates: [WorkflowTemplate]
+    let onTemplateSelected: (WorkflowTemplateID) -> Void
+    let onNewTemplate: () -> Void
+    let onRefresh: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Text("Templates")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    onNewTemplate()
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("NewTemplateButton")
+            }
+            .padding()
+
+            Divider()
+
+            // Template List
+            if templates.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.title)
+                        .foregroundStyle(.secondary)
+                    Text("No templates")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Button("Create Template") {
+                        onNewTemplate()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(templates, id: \.id) { template in
+                            Button {
+                                onTemplateSelected(template.id)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(template.name)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        if !template.description.isEmpty {
+                                            Text(template.description)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer()
+                                    if !template.variables.isEmpty {
+                                        Text("\(template.variables.count)")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 2)
+                                            .background(Color.secondary.opacity(0.2))
+                                            .cornerRadius(4)
+                                    }
+                                }
+                                .padding(.horizontal)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("TemplateRow_\(template.id.value)")
+
+                            if template.id != templates.last?.id {
+                                Divider()
+                                    .padding(.leading)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            }
+        }
+        .frame(width: 280)
     }
 }
 

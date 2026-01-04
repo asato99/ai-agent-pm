@@ -852,7 +852,7 @@ private final class TestDataSeeder {
 
     /// WorkflowTemplate機能テスト用のデータをシード
     /// 設計変更: WorkflowTemplateはプロジェクトスコープ（projectIdを持つ）
-    /// テンプレートはサイドバーのTemplatesセクションに表示（プロジェクト選択時のみ）
+    /// テンプレートはTaskBoardViewのTemplatesボタン+ポップオーバーからアクセス
     func seedWorkflowTemplateData() async throws {
         NSLog("🔧 UITest: seedWorkflowTemplateData() - START")
 

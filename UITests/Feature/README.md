@@ -223,13 +223,13 @@ Phase 4: 完了フロー
 
 | ID | テスト名 | 期待結果 |
 |----|----------|----------|
-| F09-01 | testTemplateListExists | テンプレート一覧画面が表示される |
+| F09-01 | testTemplatesButtonExistsInTaskBoard | TaskBoardのTemplatesボタンからポップオーバーが表示される |
 | F09-02 | testNewTemplateFormOpens | 新規テンプレート作成フォームが開く |
 | F09-03 | testTemplateNameRequired | テンプレート名が必須 |
 | F09-04 | testAddTaskToTemplate | テンプレートにタスクを追加できる |
 | F09-05 | testAddVariableToTemplate | 変数を追加できる |
 | F09-06 | testSaveTemplate | テンプレートを保存できる |
-| F09-07 | testInstantiateSheetOpens | インスタンス化シートが開く |
+| F09-07 | testInstantiateFromTemplateDetail | テンプレート詳細からインスタンス化できる |
 | F09-08 | testVariableInputFieldsDisplayed | 変数入力フィールドが表示される |
 | F09-09 | testInstantiateCreatesTasks | タスク生成が実行される |
 | F09-10 | testEditTemplate | テンプレートを編集できる |
