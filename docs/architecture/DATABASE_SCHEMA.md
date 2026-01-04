@@ -33,6 +33,13 @@ SQLiteデータベースのテーブル設計とマイグレーション戦略�
 │  │                  (イベントソーシングテーブル)                      │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │                  Workflow Template System                          │ │
+│  │                                                                     │ │
+│  │  projects ──1:N── workflow_templates ──1:N── template_tasks       │ │
+│  │                                                                     │ │
+│  └───────────────────────────────────────────────────────────────────┘ │
+│                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -249,6 +256,49 @@ CREATE INDEX idx_events_audit ON state_change_events(project_id, timestamp DESC)
 CREATE INDEX idx_events_entity_history ON state_change_events(entity_type, entity_id, timestamp DESC);
 ```
 
+### workflow_templates
+
+```sql
+CREATE TABLE workflow_templates (
+    id              TEXT PRIMARY KEY,           -- wft_xxx
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    variables       TEXT NOT NULL DEFAULT '[]', -- JSON array: ["var1", "var2"]
+    status          TEXT NOT NULL DEFAULT 'active',  -- active, archived
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+
+    CHECK (status IN ('active', 'archived')),
+    UNIQUE (project_id, name)
+);
+
+CREATE INDEX idx_workflow_templates_project_id ON workflow_templates(project_id);
+CREATE INDEX idx_workflow_templates_status ON workflow_templates(status);
+```
+
+### template_tasks
+
+```sql
+CREATE TABLE template_tasks (
+    id                      TEXT PRIMARY KEY,       -- tpt_xxx
+    template_id             TEXT NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE,
+    title                   TEXT NOT NULL,
+    description             TEXT NOT NULL DEFAULT '',
+    sort_order              INTEGER NOT NULL,       -- テンプレート内での順序
+    depends_on_orders       TEXT NOT NULL DEFAULT '[]',  -- JSON array: [1, 2]
+    default_assignee_role   TEXT,                   -- owner, manager, worker, viewer
+    default_priority        TEXT NOT NULL DEFAULT 'medium',
+    estimated_minutes       INTEGER,
+
+    CHECK (default_priority IN ('critical', 'high', 'medium', 'low')),
+    CHECK (default_assignee_role IS NULL OR default_assignee_role IN ('owner', 'manager', 'worker', 'viewer'))
+);
+
+CREATE INDEX idx_template_tasks_template_id ON template_tasks(template_id);
+CREATE INDEX idx_template_tasks_sort_order ON template_tasks(template_id, sort_order);
+```
+
 ---
 
 ## マイグレーション戦略
@@ -408,3 +458,4 @@ try dbQueue.write { db in
 | 日付 | バージョン | 変更内容 |
 |------|-----------|----------|
 | 2024-12-30 | 1.0.0 | 初版作成 |
+| 2025-01-04 | 1.1.0 | workflow_templates, template_tasks テーブル追加 |

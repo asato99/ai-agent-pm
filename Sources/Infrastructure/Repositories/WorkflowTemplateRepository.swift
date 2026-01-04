@@ -12,6 +12,7 @@ struct WorkflowTemplateRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "workflow_templates"
 
     var id: String
+    var projectId: String
     var name: String
     var description: String
     var variables: String? // JSON array
@@ -21,6 +22,7 @@ struct WorkflowTemplateRecord: Codable, FetchableRecord, PersistableRecord {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case projectId = "project_id"
         case name
         case description
         case variables
@@ -39,6 +41,7 @@ struct WorkflowTemplateRecord: Codable, FetchableRecord, PersistableRecord {
 
         return WorkflowTemplate(
             id: WorkflowTemplateID(value: id),
+            projectId: ProjectID(value: projectId),
             name: name,
             description: description,
             variables: variablesList,
@@ -57,6 +60,7 @@ struct WorkflowTemplateRecord: Codable, FetchableRecord, PersistableRecord {
 
         return WorkflowTemplateRecord(
             id: template.id.value,
+            projectId: template.projectId.value,
             name: template.name,
             description: template.description,
             variables: variablesJson,
@@ -86,9 +90,9 @@ public final class WorkflowTemplateRepository: WorkflowTemplateRepositoryProtoco
         }
     }
 
-    public func findAll(includeArchived: Bool) throws -> [WorkflowTemplate] {
+    public func findByProject(_ projectId: ProjectID, includeArchived: Bool) throws -> [WorkflowTemplate] {
         try db.read { db in
-            var query = WorkflowTemplateRecord.all()
+            var query = WorkflowTemplateRecord.filter(Column("project_id") == projectId.value)
             if !includeArchived {
                 query = query.filter(Column("status") == TemplateStatus.active.rawValue)
             }
@@ -99,8 +103,8 @@ public final class WorkflowTemplateRepository: WorkflowTemplateRepositoryProtoco
         }
     }
 
-    public func findActive() throws -> [WorkflowTemplate] {
-        try findAll(includeArchived: false)
+    public func findActiveByProject(_ projectId: ProjectID) throws -> [WorkflowTemplate] {
+        try findByProject(projectId, includeArchived: false)
     }
 
     public func save(_ template: WorkflowTemplate) throws {

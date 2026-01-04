@@ -154,19 +154,17 @@ public struct ActivateInternalAuditUseCase: Sendable {
 // MARK: - CreateAuditRuleUseCase
 
 /// Audit Rule作成ユースケース
+/// 設計変更: AuditRuleはauditTasksをインラインで保持（WorkflowTemplateはプロジェクトスコープのため）
 public struct CreateAuditRuleUseCase: Sendable {
     private let auditRuleRepository: any AuditRuleRepositoryProtocol
     private let internalAuditRepository: any InternalAuditRepositoryProtocol
-    private let workflowTemplateRepository: any WorkflowTemplateRepositoryProtocol
 
     public init(
         auditRuleRepository: any AuditRuleRepositoryProtocol,
-        internalAuditRepository: any InternalAuditRepositoryProtocol,
-        workflowTemplateRepository: any WorkflowTemplateRepositoryProtocol
+        internalAuditRepository: any InternalAuditRepositoryProtocol
     ) {
         self.auditRuleRepository = auditRuleRepository
         self.internalAuditRepository = internalAuditRepository
-        self.workflowTemplateRepository = workflowTemplateRepository
     }
 
     public func execute(
@@ -174,17 +172,11 @@ public struct CreateAuditRuleUseCase: Sendable {
         name: String,
         triggerType: TriggerType,
         triggerConfig: [String: Any]? = nil,
-        workflowTemplateId: WorkflowTemplateID,
-        taskAssignments: [TaskAssignment]
+        auditTasks: [AuditTask]
     ) throws -> AuditRule {
         // Audit存在確認
         guard try internalAuditRepository.findById(auditId) != nil else {
             throw UseCaseError.internalAuditNotFound(auditId)
-        }
-
-        // テンプレート存在確認
-        guard try workflowTemplateRepository.findById(workflowTemplateId) != nil else {
-            throw UseCaseError.templateNotFound(workflowTemplateId)
         }
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -198,8 +190,7 @@ public struct CreateAuditRuleUseCase: Sendable {
             name: trimmedName,
             triggerType: triggerType,
             triggerConfig: triggerConfig,
-            workflowTemplateId: workflowTemplateId,
-            taskAssignments: taskAssignments
+            auditTasks: auditTasks
         )
         try auditRuleRepository.save(rule)
         return rule
@@ -309,7 +300,7 @@ public struct UpdateAuditRuleUseCase: Sendable {
         ruleId: AuditRuleID,
         name: String? = nil,
         triggerConfig: [String: Any]? = nil,
-        taskAssignments: [TaskAssignment]? = nil
+        auditTasks: [AuditTask]? = nil
     ) throws -> AuditRule {
         guard var rule = try auditRuleRepository.findById(ruleId) else {
             throw UseCaseError.auditRuleNotFound(ruleId)
@@ -327,8 +318,8 @@ public struct UpdateAuditRuleUseCase: Sendable {
             rule.triggerConfig = triggerConfig
         }
 
-        if let taskAssignments = taskAssignments {
-            rule.taskAssignments = taskAssignments
+        if let auditTasks = auditTasks {
+            rule.auditTasks = auditTasks
         }
 
         rule.updatedAt = Date()
@@ -575,24 +566,18 @@ public struct GetLockedAgentsUseCase: Sendable {
 
 /// Audit Rule発火ユースケース
 /// 参照: docs/requirements/AUDIT.md - ワークフロー実行フロー
-/// トリガー条件にマッチしたルールのワークフローをインスタンス化する
+/// 設計変更: AuditRuleはインラインでauditTasksを保持（WorkflowTemplateはプロジェクトスコープのため）
 public struct FireAuditRuleUseCase: Sendable {
     private let auditRuleRepository: any AuditRuleRepositoryProtocol
-    private let templateRepository: any WorkflowTemplateRepositoryProtocol
-    private let templateTaskRepository: any TemplateTaskRepositoryProtocol
     private let taskRepository: any TaskRepositoryProtocol
     private let eventRepository: any EventRepositoryProtocol
 
     public init(
         auditRuleRepository: any AuditRuleRepositoryProtocol,
-        templateRepository: any WorkflowTemplateRepositoryProtocol,
-        templateTaskRepository: any TemplateTaskRepositoryProtocol,
         taskRepository: any TaskRepositoryProtocol,
         eventRepository: any EventRepositoryProtocol
     ) {
         self.auditRuleRepository = auditRuleRepository
-        self.templateRepository = templateRepository
-        self.templateTaskRepository = templateTaskRepository
         self.taskRepository = taskRepository
         self.eventRepository = eventRepository
     }
@@ -604,7 +589,7 @@ public struct FireAuditRuleUseCase: Sendable {
         public let createdTasks: [Task]
     }
 
-    /// Audit Ruleを発火し、ワークフローをインスタンス化する
+    /// Audit Ruleを発火し、auditTasksからタスクを生成する
     /// - Parameters:
     ///   - ruleId: 発火するルールのID
     ///   - sourceTask: トリガーとなったタスク
@@ -615,51 +600,34 @@ public struct FireAuditRuleUseCase: Sendable {
             throw UseCaseError.auditRuleNotFound(ruleId)
         }
 
-        // テンプレート取得
-        guard let template = try templateRepository.findById(rule.workflowTemplateId) else {
-            throw UseCaseError.templateNotFound(rule.workflowTemplateId)
+        // auditTasksが空の場合はエラー
+        guard rule.hasTasks else {
+            throw UseCaseError.validationFailed("Audit rule has no tasks defined")
         }
-
-        // アクティブなテンプレートのみ使用可能
-        guard template.isActive else {
-            throw UseCaseError.validationFailed("Cannot use archived template for audit rule")
-        }
-
-        // テンプレートタスクを取得（order順）
-        let templateTasks = try templateTaskRepository.findByTemplate(rule.workflowTemplateId)
-
-        // タスク割り当てマップを構築（templateTaskOrder -> agentId）
-        let assignmentMap = Dictionary(
-            uniqueKeysWithValues: rule.taskAssignments.map { ($0.templateTaskOrder, $0.agentId) }
-        )
 
         // タスクを生成
         var createdTasks: [Task] = []
         var orderToTaskIdMap: [Int: TaskID] = [:]
 
-        for templateTask in templateTasks {
+        for auditTask in rule.auditTasks {
             let taskId = TaskID.generate()
-            orderToTaskIdMap[templateTask.order] = taskId
+            orderToTaskIdMap[auditTask.order] = taskId
 
             // 依存関係をTaskIDに変換
-            let dependencies = templateTask.dependsOnOrders.compactMap { orderToTaskIdMap[$0] }
-
-            // ルールの割り当てからエージェントを取得
-            let assigneeId = assignmentMap[templateTask.order]
+            let dependencies = auditTask.dependsOnOrders.compactMap { orderToTaskIdMap[$0] }
 
             // タイトルにソースタスク情報を含める
-            let titleWithContext = "\(templateTask.title) [Audit: \(sourceTask.title)]"
+            let titleWithContext = "\(auditTask.title) [Audit: \(sourceTask.title)]"
 
             let task = Task(
                 id: taskId,
                 projectId: sourceTask.projectId,
                 title: titleWithContext,
-                description: templateTask.description,
+                description: auditTask.description,
                 status: .backlog,
-                priority: templateTask.defaultPriority,
-                assigneeId: assigneeId,
-                dependencies: dependencies,
-                estimatedMinutes: templateTask.estimatedMinutes
+                priority: auditTask.priority,
+                assigneeId: auditTask.assigneeId,
+                dependencies: dependencies
             )
             try taskRepository.save(task)
             createdTasks.append(task)
@@ -675,8 +643,7 @@ public struct FireAuditRuleUseCase: Sendable {
                 metadata: [
                     "auditRuleId": rule.id.value,
                     "auditId": rule.auditId.value,
-                    "sourceTaskId": sourceTask.id.value,
-                    "templateId": template.id.value
+                    "sourceTaskId": sourceTask.id.value
                 ]
             )
             try eventRepository.save(event)

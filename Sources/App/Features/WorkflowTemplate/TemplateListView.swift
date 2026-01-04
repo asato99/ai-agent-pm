@@ -83,7 +83,7 @@ struct TemplateListView: View {
             Label("New Template", systemImage: "plus")
         }
         .accessibilityIdentifier("NewTemplateButton")
-        .help("New Template (⇧⌘T)")
+        .help("New Template (⇧⌘M)")
     }
 
     private var archivedToggle: some View {
@@ -92,11 +92,19 @@ struct TemplateListView: View {
     }
 
     private func loadTemplates() async {
+        guard let projectId = router.selectedProject else {
+            templates = []
+            return
+        }
+
         isLoading = true
         defer { isLoading = false }
 
         do {
-            templates = try container.listTemplatesUseCase.execute(includeArchived: includeArchived)
+            templates = try container.listTemplatesUseCase.execute(
+                projectId: projectId,
+                includeArchived: includeArchived
+            )
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }

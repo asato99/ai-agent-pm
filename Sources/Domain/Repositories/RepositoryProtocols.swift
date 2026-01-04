@@ -90,10 +90,11 @@ public protocol EventRepositoryProtocol: Sendable {
 
 /// ワークフローテンプレートリポジトリのプロトコル
 /// 参照: docs/requirements/WORKFLOW_TEMPLATES.md
+/// 設計方針: テンプレートはプロジェクトに紐づく
 public protocol WorkflowTemplateRepositoryProtocol: Sendable {
     func findById(_ id: WorkflowTemplateID) throws -> WorkflowTemplate?
-    func findAll(includeArchived: Bool) throws -> [WorkflowTemplate]
-    func findActive() throws -> [WorkflowTemplate]
+    func findByProject(_ projectId: ProjectID, includeArchived: Bool) throws -> [WorkflowTemplate]
+    func findActiveByProject(_ projectId: ProjectID) throws -> [WorkflowTemplate]
     func save(_ template: WorkflowTemplate) throws
     func delete(_ id: WorkflowTemplateID) throws
 }

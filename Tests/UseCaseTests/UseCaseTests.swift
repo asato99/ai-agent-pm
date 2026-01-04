@@ -196,16 +196,16 @@ final class MockWorkflowTemplateRepository: WorkflowTemplateRepositoryProtocol {
         templates[id]
     }
 
-    func findAll(includeArchived: Bool) throws -> [WorkflowTemplate] {
-        var result = Array(templates.values)
+    func findByProject(_ projectId: ProjectID, includeArchived: Bool) throws -> [WorkflowTemplate] {
+        var result = templates.values.filter { $0.projectId == projectId }
         if !includeArchived {
             result = result.filter { $0.status == .active }
         }
         return result.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    func findActive() throws -> [WorkflowTemplate] {
-        try findAll(includeArchived: false)
+    func findActiveByProject(_ projectId: ProjectID) throws -> [WorkflowTemplate] {
+        try findByProject(projectId, includeArchived: false)
     }
 
     func save(_ template: WorkflowTemplate) throws {
@@ -1009,12 +1009,17 @@ final class UseCaseTests: XCTestCase {
 
     func testCreateTemplateUseCase() throws {
         // テンプレート作成ユースケース
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        projectRepo.projects[project.id] = project
+
         let useCase = CreateTemplateUseCase(
             templateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            templateTaskRepository: templateTaskRepo,
+            projectRepository: projectRepo
         )
 
         let input = CreateTemplateUseCase.Input(
+            projectId: project.id,
             name: "Feature Development",
             description: "機能開発のワークフロー",
             variables: ["feature_name", "module"],
@@ -1043,12 +1048,16 @@ final class UseCaseTests: XCTestCase {
 
     func testCreateTemplateUseCaseValidatesEmptyName() throws {
         // 空の名前でエラー
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        projectRepo.projects[project.id] = project
+
         let useCase = CreateTemplateUseCase(
             templateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            templateTaskRepository: templateTaskRepo,
+            projectRepository: projectRepo
         )
 
-        let input = CreateTemplateUseCase.Input(name: "   ")
+        let input = CreateTemplateUseCase.Input(projectId: project.id, name: "   ")
 
         XCTAssertThrowsError(try useCase.execute(input: input)) { error in
             XCTAssertTrue(error is UseCaseError)
@@ -1057,12 +1066,17 @@ final class UseCaseTests: XCTestCase {
 
     func testCreateTemplateUseCaseValidatesInvalidVariableName() throws {
         // 無効な変数名でエラー
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        projectRepo.projects[project.id] = project
+
         let useCase = CreateTemplateUseCase(
             templateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            templateTaskRepository: templateTaskRepo,
+            projectRepository: projectRepo
         )
 
         let input = CreateTemplateUseCase.Input(
+            projectId: project.id,
             name: "Test",
             variables: ["123invalid"]
         )
@@ -1079,6 +1093,7 @@ final class UseCaseTests: XCTestCase {
 
         let template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: project.id,
             name: "Feature Development",
             variables: ["feature_name"]
         )
@@ -1131,6 +1146,7 @@ final class UseCaseTests: XCTestCase {
 
         var template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: project.id,
             name: "Archived Template"
         )
         template.status = .archived
@@ -1154,8 +1170,10 @@ final class UseCaseTests: XCTestCase {
 
     func testUpdateTemplateUseCase() throws {
         // テンプレート更新ユースケース
+        let projectId = ProjectID.generate()
         let template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: projectId,
             name: "Original"
         )
         templateRepo.templates[template.id] = template
@@ -1174,8 +1192,10 @@ final class UseCaseTests: XCTestCase {
 
     func testArchiveTemplateUseCase() throws {
         // テンプレートアーカイブユースケース
+        let projectId = ProjectID.generate()
         let template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: projectId,
             name: "To Archive"
         )
         templateRepo.templates[template.id] = template
@@ -1189,8 +1209,9 @@ final class UseCaseTests: XCTestCase {
 
     func testListTemplatesUseCase() throws {
         // テンプレート一覧取得ユースケース
-        let template1 = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Template1")
-        var template2 = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Template2")
+        let projectId = ProjectID.generate()
+        let template1 = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Template1")
+        var template2 = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Template2")
         template2.status = .archived
 
         templateRepo.templates[template1.id] = template1
@@ -1198,17 +1219,19 @@ final class UseCaseTests: XCTestCase {
 
         let useCase = ListTemplatesUseCase(templateRepository: templateRepo)
 
-        let activeOnly = try useCase.execute(includeArchived: false)
+        let activeOnly = try useCase.execute(projectId: projectId, includeArchived: false)
         XCTAssertEqual(activeOnly.count, 1)
 
-        let all = try useCase.execute(includeArchived: true)
+        let all = try useCase.execute(projectId: projectId, includeArchived: true)
         XCTAssertEqual(all.count, 2)
     }
 
     func testGetTemplateWithTasksUseCase() throws {
         // テンプレートとタスク取得ユースケース
+        let projectId = ProjectID.generate()
         let template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: projectId,
             name: "Feature Development"
         )
         templateRepo.templates[template.id] = template
@@ -1328,27 +1351,24 @@ final class UseCaseTests: XCTestCase {
     }
 
     // MARK: - Audit Rule UseCase Tests (参照: AUDIT.md)
+    // 設計変更: AuditRuleはauditTasksをインラインで保持（WorkflowTemplateはプロジェクトスコープのため）
 
     func testCreateAuditRuleUseCaseSuccess() throws {
         // Audit Rule作成ユースケース
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        templateRepo.templates[template.id] = template
-
         let useCase = CreateAuditRuleUseCase(
             auditRuleRepository: auditRuleRepo,
-            internalAuditRepository: internalAuditRepo,
-            workflowTemplateRepository: templateRepo
+            internalAuditRepository: internalAuditRepo
         )
 
         let rule = try useCase.execute(
             auditId: audit.id,
             name: "タスク完了時チェック",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: []
+            triggerConfig: nil,
+            auditTasks: []
         )
 
         XCTAssertEqual(rule.name, "タスク完了時チェック")
@@ -1359,21 +1379,17 @@ final class UseCaseTests: XCTestCase {
 
     func testCreateAuditRuleUseCaseAuditNotFoundFails() throws {
         // 存在しないAuditへのルール作成はエラー
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        templateRepo.templates[template.id] = template
-
         let useCase = CreateAuditRuleUseCase(
             auditRuleRepository: auditRuleRepo,
-            internalAuditRepository: internalAuditRepo,
-            workflowTemplateRepository: templateRepo
+            internalAuditRepository: internalAuditRepo
         )
 
         XCTAssertThrowsError(try useCase.execute(
             auditId: InternalAuditID.generate(),
             name: "Rule",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: []
+            triggerConfig: nil,
+            auditTasks: []
         )) { error in
             if case UseCaseError.internalAuditNotFound = error {
                 // Expected
@@ -1383,30 +1399,34 @@ final class UseCaseTests: XCTestCase {
         }
     }
 
-    func testCreateAuditRuleUseCaseTemplateNotFoundFails() throws {
-        // 存在しないテンプレートへの参照はエラー
+    func testCreateAuditRuleUseCaseWithAuditTasks() throws {
+        // auditTasksを含むAudit Rule作成
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         internalAuditRepo.audits[audit.id] = audit
 
+        let agent = Agent(id: AgentID.generate(), name: "QA Agent", role: "QA", type: .ai, roleType: .developer)
+        agentRepo.agents[agent.id] = agent
+
         let useCase = CreateAuditRuleUseCase(
             auditRuleRepository: auditRuleRepo,
-            internalAuditRepository: internalAuditRepo,
-            workflowTemplateRepository: templateRepo
+            internalAuditRepository: internalAuditRepo
         )
 
-        XCTAssertThrowsError(try useCase.execute(
+        let auditTasks = [
+            AuditTask(order: 1, title: "Run Tests", description: "Execute all tests", assigneeId: agent.id, priority: .high, dependsOnOrders: [])
+        ]
+
+        let rule = try useCase.execute(
             auditId: audit.id,
-            name: "Rule",
+            name: "QA Check",
             triggerType: .taskCompleted,
-            workflowTemplateId: WorkflowTemplateID.generate(),
-            taskAssignments: []
-        )) { error in
-            if case UseCaseError.templateNotFound = error {
-                // Expected
-            } else {
-                XCTFail("Expected templateNotFound error")
-            }
-        }
+            triggerConfig: nil,
+            auditTasks: auditTasks
+        )
+
+        XCTAssertEqual(rule.auditTasks.count, 1)
+        XCTAssertEqual(rule.auditTasks.first?.title, "Run Tests")
+        XCTAssertEqual(rule.auditTasks.first?.assigneeId, agent.id)
     }
 
     func testListAuditRulesUseCase() throws {
@@ -1414,11 +1434,8 @@ final class UseCaseTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        templateRepo.templates[template.id] = template
-
-        let rule1 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule1", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
-        var rule2 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule2", triggerType: .statusChanged, workflowTemplateId: template.id, taskAssignments: [], isEnabled: false)
+        let rule1 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule1", triggerType: .taskCompleted, auditTasks: [])
+        var rule2 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule2", triggerType: .statusChanged, auditTasks: [], isEnabled: false)
 
         auditRuleRepo.rules[rule1.id] = rule1
         auditRuleRepo.rules[rule2.id] = rule2
@@ -1437,10 +1454,7 @@ final class UseCaseTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        templateRepo.templates[template.id] = template
-
-        let rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [], isEnabled: true)
+        let rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule", triggerType: .taskCompleted, auditTasks: [], isEnabled: true)
         auditRuleRepo.rules[rule.id] = rule
 
         let useCase = EnableDisableAuditRuleUseCase(auditRuleRepository: auditRuleRepo)
@@ -1459,11 +1473,8 @@ final class UseCaseTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        templateRepo.templates[template.id] = template
-
-        let rule1 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule1", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
-        let rule2 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule2", triggerType: .statusChanged, workflowTemplateId: template.id, taskAssignments: [])
+        let rule1 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule1", triggerType: .taskCompleted, auditTasks: [])
+        let rule2 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule2", triggerType: .statusChanged, auditTasks: [])
 
         auditRuleRepo.rules[rule1.id] = rule1
         auditRuleRepo.rules[rule2.id] = rule2
@@ -1485,10 +1496,7 @@ final class UseCaseTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        templateRepo.templates[template.id] = template
-
-        let rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "ToDelete", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
+        let rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "ToDelete", triggerType: .taskCompleted, auditTasks: [])
         auditRuleRepo.rules[rule.id] = rule
 
         let useCase = DeleteAuditRuleUseCase(auditRuleRepository: auditRuleRepo)
@@ -1498,42 +1506,7 @@ final class UseCaseTests: XCTestCase {
         XCTAssertNil(auditRuleRepo.rules[rule.id])
     }
 
-    func testCreateAuditRuleWithTaskAssignments() throws {
-        // タスク割り当て付きルール作成
-        let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
-        internalAuditRepo.audits[audit.id] = audit
-
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        templateRepo.templates[template.id] = template
-
-        let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Role1")
-        let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Role2")
-        agentRepo.agents[agent1.id] = agent1
-        agentRepo.agents[agent2.id] = agent2
-
-        let assignments = [
-            TaskAssignment(templateTaskOrder: 1, agentId: agent1.id),
-            TaskAssignment(templateTaskOrder: 2, agentId: agent2.id)
-        ]
-
-        let useCase = CreateAuditRuleUseCase(
-            auditRuleRepository: auditRuleRepo,
-            internalAuditRepository: internalAuditRepo,
-            workflowTemplateRepository: templateRepo
-        )
-
-        let rule = try useCase.execute(
-            auditId: audit.id,
-            name: "Rule with assignments",
-            triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: assignments
-        )
-
-        XCTAssertEqual(rule.taskAssignments.count, 2)
-        XCTAssertEqual(rule.taskAssignments[0].templateTaskOrder, 1)
-        XCTAssertEqual(rule.taskAssignments[0].agentId, agent1.id)
-    }
+    // 注: testCreateAuditRuleWithTaskAssignments は testCreateAuditRuleUseCaseWithAuditTasks に置き換え済み
 
     // MARK: - Task Lock Tests (参照: AUDIT.md - タスクロック)
 
@@ -1602,31 +1575,23 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
+        // エージェント（auditTasks用）
+        let qaAgent = Agent(id: AgentID.generate(), name: "QA Agent", role: "QA", type: .ai, roleType: .developer)
+        agentRepo.agents[qaAgent.id] = qaAgent
+
         // アクティブなInternal Audit
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
-        templateRepo.templates[template.id] = template
-
-        // テンプレートタスク
-        let templateTask = TemplateTask(
-            id: TemplateTaskID.generate(),
-            templateId: template.id,
-            title: "チェック項目",
-            order: 1
-        )
-        templateTaskRepo.tasks[templateTask.id] = templateTask
-
-        // Audit Rule（タスク完了トリガー）
+        // Audit Rule（タスク完了トリガー）- auditTasksをインラインで定義
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "タスク完了時チェック",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: [],
+            auditTasks: [
+                AuditTask(order: 1, title: "チェック項目", description: "", assigneeId: qaAgent.id, priority: .medium, dependsOnOrders: [])
+            ],
             isEnabled: true
         )
         auditRuleRepo.rules[rule.id] = rule
@@ -1641,9 +1606,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo,
             eventRepository: eventRepo,
             internalAuditRepository: internalAuditRepo,
-            auditRuleRepository: auditRuleRepo,
-            workflowTemplateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            auditRuleRepository: auditRuleRepo
         )
 
         // タスク完了
@@ -1676,18 +1639,13 @@ final class UseCaseTests: XCTestCase {
         audit.status = .inactive
         internalAuditRepo.audits[audit.id] = audit
 
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
-        templateRepo.templates[template.id] = template
-
         // Audit Rule
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "Rule",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: [],
+            auditTasks: [],
             isEnabled: true
         )
         auditRuleRepo.rules[rule.id] = rule
@@ -1701,9 +1659,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo,
             eventRepository: eventRepo,
             internalAuditRepository: internalAuditRepo,
-            auditRuleRepository: auditRuleRepo,
-            workflowTemplateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            auditRuleRepository: auditRuleRepo
         )
 
         let result = try useCase.executeWithResult(
@@ -1727,18 +1683,13 @@ final class UseCaseTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Active Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
-        templateRepo.templates[template.id] = template
-
         // 無効化されたAudit Rule
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "Disabled Rule",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: [],
+            auditTasks: [],
             isEnabled: false
         )
         auditRuleRepo.rules[rule.id] = rule
@@ -1752,9 +1703,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo,
             eventRepository: eventRepo,
             internalAuditRepository: internalAuditRepo,
-            auditRuleRepository: auditRuleRepo,
-            workflowTemplateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            auditRuleRepository: auditRuleRepo
         )
 
         let result = try useCase.executeWithResult(
@@ -1779,18 +1728,13 @@ final class UseCaseTests: XCTestCase {
         audit.status = .suspended
         internalAuditRepo.audits[audit.id] = audit
 
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
-        templateRepo.templates[template.id] = template
-
         // Audit Rule
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "Rule",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: [],
+            auditTasks: [],
             isEnabled: true
         )
         auditRuleRepo.rules[rule.id] = rule
@@ -1804,9 +1748,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo,
             eventRepository: eventRepo,
             internalAuditRepository: internalAuditRepo,
-            auditRuleRepository: auditRuleRepo,
-            workflowTemplateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            auditRuleRepository: auditRuleRepo
         )
 
         let result = try useCase.executeWithResult(
@@ -1830,18 +1772,13 @@ final class UseCaseTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow")
-        templateRepo.templates[template.id] = template
-
         // Audit Rule（タスク完了トリガー）
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "タスク完了時チェック",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: [],
+            auditTasks: [],
             isEnabled: true
         )
         auditRuleRepo.rules[rule.id] = rule
@@ -1855,9 +1792,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo,
             eventRepository: eventRepo,
             internalAuditRepository: internalAuditRepo,
-            auditRuleRepository: auditRuleRepo,
-            workflowTemplateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            auditRuleRepository: auditRuleRepo
         )
 
         // backlog → todo（完了ではない）
@@ -1906,42 +1841,32 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
+        // QAエージェント
+        let qaAgent = Agent(id: AgentID.generate(), name: "QA Agent", role: "QA", type: .ai, roleType: .developer)
+        agentRepo.agents[qaAgent.id] = qaAgent
+
         // アクティブなInternal Audit
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        // ワークフローテンプレート1
-        let template1 = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow 1")
-        templateRepo.templates[template1.id] = template1
-        let templateTask1 = TemplateTask(id: TemplateTaskID.generate(), templateId: template1.id, title: "Task1", order: 1)
-        templateTaskRepo.tasks[templateTask1.id] = templateTask1
-
-        // ワークフローテンプレート2
-        let template2 = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check Workflow 2")
-        templateRepo.templates[template2.id] = template2
-        let templateTask2 = TemplateTask(id: TemplateTaskID.generate(), templateId: template2.id, title: "Task2", order: 1)
-        templateTaskRepo.tasks[templateTask2.id] = templateTask2
-
-        // Audit Rule 1
+        // Audit Rule 1（auditTasksをインラインで定義）
         let rule1 = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "Rule 1",
             triggerType: .taskCompleted,
-            workflowTemplateId: template1.id,
-            taskAssignments: [],
+            auditTasks: [AuditTask(order: 1, title: "Task1", assigneeId: qaAgent.id)],
             isEnabled: true
         )
         auditRuleRepo.rules[rule1.id] = rule1
 
-        // Audit Rule 2
+        // Audit Rule 2（auditTasksをインラインで定義）
         let rule2 = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "Rule 2",
             triggerType: .taskCompleted,
-            workflowTemplateId: template2.id,
-            taskAssignments: [],
+            auditTasks: [AuditTask(order: 1, title: "Task2", assigneeId: qaAgent.id)],
             isEnabled: true
         )
         auditRuleRepo.rules[rule2.id] = rule2
@@ -1955,9 +1880,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo,
             eventRepository: eventRepo,
             internalAuditRepository: internalAuditRepo,
-            auditRuleRepository: auditRuleRepo,
-            workflowTemplateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo
+            auditRuleRepository: auditRuleRepo
         )
 
         let result = try useCase.executeWithResult(
@@ -1983,39 +1906,33 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
+        // QAエージェント
+        let qaAgent = Agent(id: AgentID.generate(), name: "QA Agent", role: "QA", type: .ai, roleType: .developer)
+        agentRepo.agents[qaAgent.id] = qaAgent
+
         // ソースタスク
         let sourceTask = Task(id: TaskID.generate(), projectId: project.id, title: "API実装", status: .done)
         taskRepo.tasks[sourceTask.id] = sourceTask
-
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Code Review")
-        templateRepo.templates[template.id] = template
-
-        // テンプレートタスク
-        let templateTask1 = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "レビュー", order: 1)
-        let templateTask2 = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "修正確認", order: 2, dependsOnOrders: [1])
-        templateTaskRepo.tasks[templateTask1.id] = templateTask1
-        templateTaskRepo.tasks[templateTask2.id] = templateTask2
 
         // Audit
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        // Audit Rule
+        // Audit Rule（auditTasksをインラインで定義）
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "コードレビュー",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: []
+            auditTasks: [
+                AuditTask(order: 1, title: "レビュー", assigneeId: qaAgent.id),
+                AuditTask(order: 2, title: "修正確認", assigneeId: qaAgent.id, dependsOnOrders: [1])
+            ]
         )
         auditRuleRepo.rules[rule.id] = rule
 
         let useCase = FireAuditRuleUseCase(
             auditRuleRepository: auditRuleRepo,
-            templateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo,
             taskRepository: taskRepo,
             eventRepository: eventRepo
         )
@@ -2032,8 +1949,8 @@ final class UseCaseTests: XCTestCase {
         XCTAssertTrue(result.createdTasks[0].title.contains("API実装"))
     }
 
-    func testFireAuditRuleUseCaseWithTaskAssignments() throws {
-        // タスク割り当て付きでルール発火
+    func testFireAuditRuleUseCaseWithAgentAssignment() throws {
+        // エージェント割り当て付きでルール発火
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
@@ -2045,33 +1962,24 @@ final class UseCaseTests: XCTestCase {
         let sourceTask = Task(id: TaskID.generate(), projectId: project.id, title: "実装完了", status: .done)
         taskRepo.tasks[sourceTask.id] = sourceTask
 
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Review")
-        templateRepo.templates[template.id] = template
-
-        // テンプレートタスク
-        let templateTask = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "レビュー", order: 1)
-        templateTaskRepo.tasks[templateTask.id] = templateTask
-
         // Audit
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA")
         internalAuditRepo.audits[audit.id] = audit
 
-        // タスク割り当て付きルール
+        // エージェント割り当て付きルール（auditTasksをインラインで定義）
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "レビュールール",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: [TaskAssignment(templateTaskOrder: 1, agentId: agent.id)]
+            auditTasks: [
+                AuditTask(order: 1, title: "レビュー", assigneeId: agent.id)
+            ]
         )
         auditRuleRepo.rules[rule.id] = rule
 
         let useCase = FireAuditRuleUseCase(
             auditRuleRepository: auditRuleRepo,
-            templateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo,
             taskRepository: taskRepo,
             eventRepository: eventRepo
         )
@@ -2094,21 +2002,15 @@ final class UseCaseTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check")
-        templateRepo.templates[template.id] = template
-
-        let templateTask = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "確認", order: 1)
-        templateTaskRepo.tasks[templateTask.id] = templateTask
-
-        // Audit Rule
+        // Audit Rule with inline auditTasks
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "完了時チェック",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: []
+            auditTasks: [
+                AuditTask(order: 1, title: "確認")
+            ]
         )
         auditRuleRepo.rules[rule.id] = rule
 
@@ -2118,8 +2020,6 @@ final class UseCaseTests: XCTestCase {
 
         let fireUseCase = FireAuditRuleUseCase(
             auditRuleRepository: auditRuleRepo,
-            templateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo,
             taskRepository: taskRepo,
             eventRepository: eventRepo
         )
@@ -2147,18 +2047,13 @@ final class UseCaseTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "QA Audit")
         internalAuditRepo.audits[audit.id] = audit
 
-        // ワークフローテンプレート
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Check")
-        templateRepo.templates[template.id] = template
-
         // statusChangedトリガーのルール（taskCompletedではマッチしない）
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "ステータス変更時",
             triggerType: .statusChanged,
-            workflowTemplateId: template.id,
-            taskAssignments: []
+            auditTasks: []
         )
         auditRuleRepo.rules[rule.id] = rule
 
@@ -2168,8 +2063,6 @@ final class UseCaseTests: XCTestCase {
 
         let fireUseCase = FireAuditRuleUseCase(
             auditRuleRepository: auditRuleRepo,
-            templateRepository: templateRepo,
-            templateTaskRepository: templateTaskRepo,
             taskRepository: taskRepo,
             eventRepository: eventRepo
         )

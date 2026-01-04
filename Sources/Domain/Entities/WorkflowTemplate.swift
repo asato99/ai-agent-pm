@@ -15,8 +15,10 @@ public enum TemplateStatus: String, Codable, Sendable, CaseIterable {
 
 /// ワークフローテンプレートを表すエンティティ
 /// 一連のタスクをテンプレートとして定義し、繰り返し適用できる
+/// 設計方針: テンプレートはプロジェクトに紐づく
 public struct WorkflowTemplate: Identifiable, Equatable, Sendable {
     public let id: WorkflowTemplateID
+    public let projectId: ProjectID  // 所属プロジェクト
     public var name: String
     public var description: String
     public var variables: [String]
@@ -26,6 +28,7 @@ public struct WorkflowTemplate: Identifiable, Equatable, Sendable {
 
     public init(
         id: WorkflowTemplateID,
+        projectId: ProjectID,
         name: String,
         description: String = "",
         variables: [String] = [],
@@ -34,6 +37,7 @@ public struct WorkflowTemplate: Identifiable, Equatable, Sendable {
         updatedAt: Date = Date()
     ) {
         self.id = id
+        self.projectId = projectId
         self.name = name
         self.description = description
         self.variables = variables

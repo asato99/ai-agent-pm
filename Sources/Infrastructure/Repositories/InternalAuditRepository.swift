@@ -102,6 +102,7 @@ public final class InternalAuditRepository: InternalAuditRepositoryProtocol, Sen
 // MARK: - AuditRuleRecord
 
 /// GRDB用のAuditRuleレコード
+/// 設計変更: AuditRuleはauditTasksをインラインで保持（WorkflowTemplateはプロジェクトスコープのため）
 struct AuditRuleRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "audit_rules"
 
@@ -110,8 +111,7 @@ struct AuditRuleRecord: Codable, FetchableRecord, PersistableRecord {
     var name: String
     var triggerType: String
     var triggerConfig: String?
-    var workflowTemplateId: String
-    var taskAssignments: String?
+    var auditTasks: String?  // JSON配列
     var isEnabled: Bool
     var createdAt: Date
     var updatedAt: Date
@@ -122,23 +122,26 @@ struct AuditRuleRecord: Codable, FetchableRecord, PersistableRecord {
         case name
         case triggerType = "trigger_type"
         case triggerConfig = "trigger_config"
-        case workflowTemplateId = "workflow_template_id"
-        case taskAssignments = "task_assignments"
+        case auditTasks = "audit_tasks"
         case isEnabled = "is_enabled"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
 
     func toDomain() -> AuditRule {
-        // Parse task assignments from JSON
-        var assignments: [TaskAssignment] = []
-        if let assignmentsJson = taskAssignments,
-           let data = assignmentsJson.data(using: .utf8),
-           let decoded = try? JSONDecoder().decode([TaskAssignmentDTO].self, from: data) {
-            assignments = decoded.map { dto in
-                TaskAssignment(
-                    templateTaskOrder: dto.templateTaskOrder,
-                    agentId: AgentID(value: dto.agentId)
+        // Parse audit tasks from JSON
+        var tasks: [AuditTask] = []
+        if let tasksJson = auditTasks,
+           let data = tasksJson.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([AuditTaskDTO].self, from: data) {
+            tasks = decoded.map { dto in
+                AuditTask(
+                    order: dto.order,
+                    title: dto.title,
+                    description: dto.description,
+                    assigneeId: dto.assigneeId.map { AgentID(value: $0) },
+                    priority: TaskPriority(rawValue: dto.priority) ?? .medium,
+                    dependsOnOrders: dto.dependsOnOrders
                 )
             }
         }
@@ -157,8 +160,7 @@ struct AuditRuleRecord: Codable, FetchableRecord, PersistableRecord {
             name: name,
             triggerType: TriggerType(rawValue: triggerType) ?? .taskCompleted,
             triggerConfig: config,
-            workflowTemplateId: WorkflowTemplateID(value: workflowTemplateId),
-            taskAssignments: assignments,
+            auditTasks: tasks,
             isEnabled: isEnabled,
             createdAt: createdAt,
             updatedAt: updatedAt
@@ -166,17 +168,21 @@ struct AuditRuleRecord: Codable, FetchableRecord, PersistableRecord {
     }
 
     static func fromDomain(_ rule: AuditRule) -> AuditRuleRecord {
-        // Encode task assignments to JSON
-        var assignmentsJson: String?
-        if !rule.taskAssignments.isEmpty {
-            let dtos = rule.taskAssignments.map { assignment in
-                TaskAssignmentDTO(
-                    templateTaskOrder: assignment.templateTaskOrder,
-                    agentId: assignment.agentId.value
+        // Encode audit tasks to JSON
+        var tasksJson: String?
+        if !rule.auditTasks.isEmpty {
+            let dtos = rule.auditTasks.map { task in
+                AuditTaskDTO(
+                    order: task.order,
+                    title: task.title,
+                    description: task.description,
+                    assigneeId: task.assigneeId?.value,
+                    priority: task.priority.rawValue,
+                    dependsOnOrders: task.dependsOnOrders
                 )
             }
             if let data = try? JSONEncoder().encode(dtos) {
-                assignmentsJson = String(data: data, encoding: .utf8)
+                tasksJson = String(data: data, encoding: .utf8)
             }
         }
 
@@ -193,8 +199,7 @@ struct AuditRuleRecord: Codable, FetchableRecord, PersistableRecord {
             name: rule.name,
             triggerType: rule.triggerType.rawValue,
             triggerConfig: configJson,
-            workflowTemplateId: rule.workflowTemplateId.value,
-            taskAssignments: assignmentsJson,
+            auditTasks: tasksJson,
             isEnabled: rule.isEnabled,
             createdAt: rule.createdAt,
             updatedAt: rule.updatedAt
@@ -202,10 +207,14 @@ struct AuditRuleRecord: Codable, FetchableRecord, PersistableRecord {
     }
 }
 
-/// TaskAssignment用のDTO（JSON エンコード/デコード用）
-private struct TaskAssignmentDTO: Codable {
-    let templateTaskOrder: Int
-    let agentId: String
+/// AuditTask用のDTO（JSON エンコード/デコード用）
+private struct AuditTaskDTO: Codable {
+    let order: Int
+    let title: String
+    let description: String
+    let assigneeId: String?
+    let priority: String
+    let dependsOnOrders: [Int]
 }
 
 // MARK: - AuditRuleRepository

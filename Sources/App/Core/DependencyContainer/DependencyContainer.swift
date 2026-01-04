@@ -92,9 +92,7 @@ public final class DependencyContainer: ObservableObject {
             agentRepository: agentRepository,
             eventRepository: eventRepository,
             internalAuditRepository: internalAuditRepository,
-            auditRuleRepository: auditRuleRepository,
-            workflowTemplateRepository: workflowTemplateRepository,
-            templateTaskRepository: templateTaskRepository
+            auditRuleRepository: auditRuleRepository
         )
     }()
 
@@ -188,7 +186,8 @@ public final class DependencyContainer: ObservableObject {
     public lazy var createTemplateUseCase: CreateTemplateUseCase = {
         CreateTemplateUseCase(
             templateRepository: workflowTemplateRepository,
-            templateTaskRepository: templateTaskRepository
+            templateTaskRepository: templateTaskRepository,
+            projectRepository: projectRepository
         )
     }()
 
@@ -261,8 +260,7 @@ public final class DependencyContainer: ObservableObject {
     public lazy var createAuditRuleUseCase: CreateAuditRuleUseCase = {
         CreateAuditRuleUseCase(
             auditRuleRepository: auditRuleRepository,
-            internalAuditRepository: internalAuditRepository,
-            workflowTemplateRepository: workflowTemplateRepository
+            internalAuditRepository: internalAuditRepository
         )
     }()
 
@@ -321,8 +319,6 @@ public final class DependencyContainer: ObservableObject {
     public lazy var fireAuditRuleUseCase: FireAuditRuleUseCase = {
         FireAuditRuleUseCase(
             auditRuleRepository: auditRuleRepository,
-            templateRepository: workflowTemplateRepository,
-            templateTaskRepository: templateTaskRepository,
             taskRepository: taskRepository,
             eventRepository: eventRepository
         )

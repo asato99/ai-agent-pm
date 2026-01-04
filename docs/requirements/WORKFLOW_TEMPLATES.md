@@ -3,7 +3,10 @@
 ## 概要
 
 一連のタスクをテンプレートとして定義し、繰り返し適用できる機能。
-プロジェクト横断で再利用可能なワークフローを管理する。
+**プロジェクトごと**にワークフローテンプレートを管理する。
+
+> **設計方針**: ワークフローテンプレートはプロジェクトに紐づく。
+> 同一プロジェクト内で繰り返し使用するワークフローを定義・再利用する。
 
 ---
 
@@ -25,6 +28,7 @@
 | 属性 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | id | WorkflowTemplateID | ○ | 一意識別子 |
+| projectId | ProjectID | ○ | 所属プロジェクト |
 | name | String | ○ | テンプレート名 |
 | description | String | | テンプレートの説明 |
 | variables | [String] | | 変数名のリスト（例: ["feature_name", "module"]） |
@@ -109,16 +113,17 @@ description: "認証モジュールのログイン機能について要件を確
 
 **アクター**: ユーザー
 
+**前提条件**: プロジェクト内のテンプレート一覧画面にいること
+
 **フロー**:
 1. ユーザーがテンプレート一覧から適用するテンプレートを選択
-2. 適用先プロジェクトを選択
-3. 変数の値を入力
-4. エージェントのアサイン（オプション）
-5. 「タスク生成」を実行
-6. システムがタスク群を生成（依存関係も設定）
+2. 変数の値を入力
+3. エージェントのアサイン（オプション）
+4. 「タスク生成」を実行
+5. システムがタスク群を生成（依存関係も設定）
 
 **事後条件**:
-- プロジェクトにタスク群が追加される
+- 同一プロジェクトにタスク群が追加される
 - タスク間の依存関係が設定される
 - 全タスクが `backlog` ステータスで作成される
 
@@ -168,11 +173,12 @@ description: "認証モジュールのログイン機能について要件を確
 
 ### インスタンス化画面（シート）
 
-- 適用先プロジェクト選択
 - 変数入力フォーム（テンプレートの変数ごと）
 - プレビュー（生成されるタスク一覧）
 - エージェントアサイン（オプション）
 - 生成ボタン
+
+> **注**: テンプレートはプロジェクトに紐づくため、プロジェクト選択は不要
 
 ---
 
@@ -189,7 +195,6 @@ description: "認証モジュールのログイン機能について要件を確
 | タスクリスト | TemplateTasksList |
 | タスク追加ボタン | AddTemplateTaskButton |
 | インスタンス化シート | InstantiateSheet |
-| プロジェクト選択 | InstantiateProjectPicker |
 | 変数入力フィールド | VariableField_{name} |
 | 生成ボタン | InstantiateButton |
 
@@ -202,6 +207,7 @@ description: "認証モジュールのログイン機能について要件を確
 ```sql
 CREATE TABLE workflow_templates (
     id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     variables TEXT,  -- JSON array: ["var1", "var2"]
@@ -209,6 +215,8 @@ CREATE TABLE workflow_templates (
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
+
+CREATE INDEX idx_workflow_templates_project_id ON workflow_templates(project_id);
 ```
 
 ### template_tasks テーブル

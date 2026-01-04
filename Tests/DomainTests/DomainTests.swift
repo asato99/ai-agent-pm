@@ -448,8 +448,11 @@ final class DomainTests: XCTestCase {
     // MARK: - WorkflowTemplate Tests (要件: WORKFLOW_TEMPLATES.md)
 
     func testWorkflowTemplateCreation() {
+        // 要件: WorkflowTemplate はプロジェクトに紐づく
+        let projectId = ProjectID.generate()
         let template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: projectId,
             name: "機能開発フロー",
             description: "標準的な機能開発のワークフロー",
             variables: ["feature_name", "module"]
@@ -457,6 +460,7 @@ final class DomainTests: XCTestCase {
 
         XCTAssertEqual(template.name, "機能開発フロー")
         XCTAssertEqual(template.description, "標準的な機能開発のワークフロー")
+        XCTAssertEqual(template.projectId, projectId)
         XCTAssertEqual(template.variables.count, 2)
         XCTAssertEqual(template.status, .active, "New template should be active by default")
         XCTAssertTrue(template.isActive)
@@ -471,6 +475,7 @@ final class DomainTests: XCTestCase {
     func testTemplateIsActive() {
         var template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: ProjectID.generate(),
             name: "Test"
         )
 
@@ -498,6 +503,7 @@ final class DomainTests: XCTestCase {
     func testTemplateHasValidVariables() {
         let validTemplate = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: ProjectID.generate(),
             name: "Test",
             variables: ["feature_name", "module_name"]
         )
@@ -505,6 +511,7 @@ final class DomainTests: XCTestCase {
 
         let invalidTemplate = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: ProjectID.generate(),
             name: "Test",
             variables: ["feature-name", "123invalid"]
         )
@@ -512,6 +519,7 @@ final class DomainTests: XCTestCase {
 
         let emptyVariablesTemplate = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: ProjectID.generate(),
             name: "Test",
             variables: []
         )
@@ -699,36 +707,35 @@ final class DomainTests: XCTestCase {
     // MARK: - Audit Rule Tests (要件: AUDIT.md)
 
     func testAuditRuleCreation() {
-        // 要件: AuditRule { id, auditId, name, triggerType, triggerConfig, workflowTemplateId, taskAssignments, isEnabled }
+        // 要件: AuditRule { id, auditId, name, triggerType, triggerConfig, auditTasks, isEnabled }
+        // 設計方針: WorkflowTemplateはプロジェクトスコープのため、
+        // プロジェクト横断で動作するInternal Auditはタスク定義をインラインで保持
         let auditId = InternalAuditID.generate()
-        let templateId = WorkflowTemplateID.generate()
 
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: auditId,
             name: "タスク完了時チェック",
             triggerType: .taskCompleted,
-            workflowTemplateId: templateId,
-            taskAssignments: []
+            auditTasks: []
         )
 
         XCTAssertEqual(rule.name, "タスク完了時チェック")
         XCTAssertEqual(rule.triggerType, .taskCompleted)
         XCTAssertEqual(rule.auditId, auditId)
-        XCTAssertEqual(rule.workflowTemplateId, templateId)
         XCTAssertTrue(rule.isEnabled, "New Audit Rule should be enabled by default")
-        XCTAssertTrue(rule.taskAssignments.isEmpty)
+        XCTAssertTrue(rule.auditTasks.isEmpty)
     }
 
-    func testAuditRuleWithTaskAssignments() {
+    func testAuditRuleWithAuditTasks() {
+        // 要件: AuditRule内で監査タスクをインライン定義
         let auditId = InternalAuditID.generate()
-        let templateId = WorkflowTemplateID.generate()
         let agentId1 = AgentID.generate()
         let agentId2 = AgentID.generate()
 
-        let assignments = [
-            TaskAssignment(templateTaskOrder: 1, agentId: agentId1),
-            TaskAssignment(templateTaskOrder: 2, agentId: agentId2)
+        let auditTasks = [
+            AuditTask(order: 1, title: "要件確認", description: "要件を確認する", assigneeId: agentId1, priority: .high),
+            AuditTask(order: 2, title: "実装レビュー", description: "実装をレビューする", assigneeId: agentId2, priority: .medium, dependsOnOrders: [1])
         ]
 
         let rule = AuditRule(
@@ -736,15 +743,17 @@ final class DomainTests: XCTestCase {
             auditId: auditId,
             name: "レビューフロー",
             triggerType: .statusChanged,
-            workflowTemplateId: templateId,
-            taskAssignments: assignments
+            auditTasks: auditTasks
         )
 
-        XCTAssertEqual(rule.taskAssignments.count, 2)
-        XCTAssertEqual(rule.taskAssignments[0].templateTaskOrder, 1)
-        XCTAssertEqual(rule.taskAssignments[0].agentId, agentId1)
-        XCTAssertEqual(rule.taskAssignments[1].templateTaskOrder, 2)
-        XCTAssertEqual(rule.taskAssignments[1].agentId, agentId2)
+        XCTAssertEqual(rule.auditTasks.count, 2)
+        XCTAssertEqual(rule.auditTasks[0].order, 1)
+        XCTAssertEqual(rule.auditTasks[0].title, "要件確認")
+        XCTAssertEqual(rule.auditTasks[0].assigneeId, agentId1)
+        XCTAssertEqual(rule.auditTasks[1].order, 2)
+        XCTAssertEqual(rule.auditTasks[1].title, "実装レビュー")
+        XCTAssertEqual(rule.auditTasks[1].assigneeId, agentId2)
+        XCTAssertEqual(rule.auditTasks[1].dependsOnOrders, [1])
     }
 
     func testAuditRuleToggleEnabled() {
@@ -753,8 +762,7 @@ final class DomainTests: XCTestCase {
             auditId: InternalAuditID.generate(),
             name: "Test Rule",
             triggerType: .taskCompleted,
-            workflowTemplateId: WorkflowTemplateID.generate(),
-            taskAssignments: []
+            auditTasks: []
         )
 
         XCTAssertTrue(rule.isEnabled)
@@ -771,8 +779,7 @@ final class DomainTests: XCTestCase {
             name: "ステータス変更チェック",
             triggerType: .statusChanged,
             triggerConfig: ["fromStatus": "todo", "toStatus": "in_progress"],
-            workflowTemplateId: WorkflowTemplateID.generate(),
-            taskAssignments: []
+            auditTasks: []
         )
 
         XCTAssertNotNil(rule.triggerConfig)
@@ -780,53 +787,80 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(rule.triggerConfig?["toStatus"] as? String, "in_progress")
     }
 
-    // MARK: - TaskAssignment Tests (要件: AUDIT.md)
+    // MARK: - AuditTask Tests (要件: AUDIT.md)
 
-    func testTaskAssignmentCreation() {
-        // 要件: TaskAssignment { templateTaskOrder, agentId }
+    func testAuditTaskCreation() {
+        // 要件: AuditTask { order, title, description, assigneeId, priority, dependsOnOrders }
         let agentId = AgentID.generate()
-        let assignment = TaskAssignment(
-            templateTaskOrder: 1,
-            agentId: agentId
+        let task = AuditTask(
+            order: 1,
+            title: "品質チェック",
+            description: "品質基準を満たしているか確認",
+            assigneeId: agentId,
+            priority: .high
         )
 
-        XCTAssertEqual(assignment.templateTaskOrder, 1)
-        XCTAssertEqual(assignment.agentId, agentId)
+        XCTAssertEqual(task.order, 1)
+        XCTAssertEqual(task.title, "品質チェック")
+        XCTAssertEqual(task.description, "品質基準を満たしているか確認")
+        XCTAssertEqual(task.assigneeId, agentId)
+        XCTAssertEqual(task.priority, .high)
+        XCTAssertTrue(task.dependsOnOrders.isEmpty)
     }
 
-    func testTaskAssignmentEquality() {
+    func testAuditTaskEquality() {
         let agentId = AgentID.generate()
-        let assignment1 = TaskAssignment(templateTaskOrder: 1, agentId: agentId)
-        let assignment2 = TaskAssignment(templateTaskOrder: 1, agentId: agentId)
+        let task1 = AuditTask(order: 1, title: "Test", assigneeId: agentId)
+        let task2 = AuditTask(order: 1, title: "Test", assigneeId: agentId)
 
-        XCTAssertEqual(assignment1, assignment2)
+        XCTAssertEqual(task1, task2)
     }
 
-    func testAuditRuleHasAllAssignments() {
-        // 要件: 全タスクにエージェント割り当てが必須かチェック
-        let templateId = WorkflowTemplateID.generate()
+    func testAuditTaskValidDependencies() {
+        // 要件: 自己参照は無効
         let agentId = AgentID.generate()
 
-        // 割り当てあり
-        let ruleWithAssignments = AuditRule(
+        // 正常な依存関係
+        let validTask = AuditTask(
+            order: 2,
+            title: "後続タスク",
+            assigneeId: agentId,
+            dependsOnOrders: [1]
+        )
+        XCTAssertTrue(validTask.hasValidDependencies)
+
+        // 自己参照は無効
+        let selfReferenceTask = AuditTask(
+            order: 2,
+            title: "自己参照タスク",
+            assigneeId: agentId,
+            dependsOnOrders: [2]
+        )
+        XCTAssertFalse(selfReferenceTask.hasValidDependencies)
+    }
+
+    func testAuditRuleHasTasks() {
+        // 要件: 監査タスクがあるかどうかチェック
+        let agentId = AgentID.generate()
+
+        // タスクあり
+        let ruleWithTasks = AuditRule(
             id: AuditRuleID.generate(),
             auditId: InternalAuditID.generate(),
             name: "Test",
             triggerType: .taskCompleted,
-            workflowTemplateId: templateId,
-            taskAssignments: [TaskAssignment(templateTaskOrder: 1, agentId: agentId)]
+            auditTasks: [AuditTask(order: 1, title: "確認", assigneeId: agentId)]
         )
-        XCTAssertTrue(ruleWithAssignments.hasAssignments)
+        XCTAssertTrue(ruleWithTasks.hasTasks)
 
-        // 割り当てなし
-        let ruleWithoutAssignments = AuditRule(
+        // タスクなし
+        let ruleWithoutTasks = AuditRule(
             id: AuditRuleID.generate(),
             auditId: InternalAuditID.generate(),
             name: "Test",
             triggerType: .taskCompleted,
-            workflowTemplateId: templateId,
-            taskAssignments: []
+            auditTasks: []
         )
-        XCTAssertFalse(ruleWithoutAssignments.hasAssignments)
+        XCTAssertFalse(ruleWithoutTasks.hasTasks)
     }
 }

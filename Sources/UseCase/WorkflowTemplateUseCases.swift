@@ -8,19 +8,24 @@ import Domain
 // MARK: - CreateTemplateUseCase
 
 /// テンプレート作成ユースケース (UC-WT-01)
+/// 設計: テンプレートはプロジェクトに紐づく
 public struct CreateTemplateUseCase: Sendable {
     private let templateRepository: any WorkflowTemplateRepositoryProtocol
     private let templateTaskRepository: any TemplateTaskRepositoryProtocol
+    private let projectRepository: any ProjectRepositoryProtocol
 
     public init(
         templateRepository: any WorkflowTemplateRepositoryProtocol,
-        templateTaskRepository: any TemplateTaskRepositoryProtocol
+        templateTaskRepository: any TemplateTaskRepositoryProtocol,
+        projectRepository: any ProjectRepositoryProtocol
     ) {
         self.templateRepository = templateRepository
         self.templateTaskRepository = templateTaskRepository
+        self.projectRepository = projectRepository
     }
 
     public struct Input {
+        public let projectId: ProjectID
         public let name: String
         public let description: String
         public let variables: [String]
@@ -55,11 +60,13 @@ public struct CreateTemplateUseCase: Sendable {
         }
 
         public init(
+            projectId: ProjectID,
             name: String,
             description: String = "",
             variables: [String] = [],
             tasks: [TaskInput] = []
         ) {
+            self.projectId = projectId
             self.name = name
             self.description = description
             self.variables = variables
@@ -68,6 +75,11 @@ public struct CreateTemplateUseCase: Sendable {
     }
 
     public func execute(input: Input) throws -> WorkflowTemplate {
+        // プロジェクト存在確認
+        guard try projectRepository.findById(input.projectId) != nil else {
+            throw UseCaseError.projectNotFound(input.projectId)
+        }
+
         // バリデーション
         let trimmedName = input.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
@@ -87,6 +99,7 @@ public struct CreateTemplateUseCase: Sendable {
         // テンプレート作成
         let template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: input.projectId,
             name: trimmedName,
             description: input.description,
             variables: input.variables
@@ -298,6 +311,7 @@ public struct ArchiveTemplateUseCase: Sendable {
 // MARK: - ListTemplatesUseCase
 
 /// テンプレート一覧取得ユースケース
+/// 設計: テンプレートはプロジェクトに紐づくため、プロジェクトIDで絞り込む
 public struct ListTemplatesUseCase: Sendable {
     private let templateRepository: any WorkflowTemplateRepositoryProtocol
 
@@ -305,8 +319,8 @@ public struct ListTemplatesUseCase: Sendable {
         self.templateRepository = templateRepository
     }
 
-    public func execute(includeArchived: Bool = false) throws -> [WorkflowTemplate] {
-        try templateRepository.findAll(includeArchived: includeArchived)
+    public func execute(projectId: ProjectID, includeArchived: Bool = false) throws -> [WorkflowTemplate] {
+        try templateRepository.findByProject(projectId, includeArchived: includeArchived)
     }
 }
 

@@ -112,6 +112,7 @@ struct TemplateFormView: View {
                 }
             }
             .formStyle(.grouped)
+            .accessibilityElement(children: .contain)
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -170,6 +171,11 @@ struct TemplateFormView: View {
     }
 
     private func save() {
+        guard let projectId = router.selectedProject else {
+            router.showAlert(.error(message: "No project selected"))
+            return
+        }
+
         isSaving = true
 
         AsyncTask {
@@ -177,6 +183,7 @@ struct TemplateFormView: View {
                 switch mode {
                 case .create:
                     let input = CreateTemplateUseCase.Input(
+                        projectId: projectId,
                         name: name,
                         description: description,
                         variables: parsedVariables,

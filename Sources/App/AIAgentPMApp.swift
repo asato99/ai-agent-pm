@@ -57,6 +57,7 @@ struct AIAgentPMApp: App {
         case uc001 = "UC001"           // UC001: エージェントキック用（workingDirectory設定済み）
         case noWD = "NoWD"             // NoWD: workingDirectory未設定エラーテスト用
         case internalAudit = "InternalAudit" // Internal Audit機能テスト用
+        case workflowTemplate = "WorkflowTemplate" // ワークフローテンプレート機能テスト用
     }
 
     init() {
@@ -96,7 +97,9 @@ struct AIAgentPMApp: App {
                         await seedTestData()
                         isSeeded = true
                         // シード完了後、ProjectListViewの再読み込みをトリガー
+                        try? "Posting testDataSeeded notification at \(Date())".appendToFile("/tmp/uitest_workflow_debug.txt")
                         NotificationCenter.default.post(name: .testDataSeeded, object: nil)
+                        try? "Notification posted at \(Date())".appendToFile("/tmp/uitest_workflow_debug.txt")
                     }
                 }
         }
@@ -121,7 +124,12 @@ struct AIAgentPMApp: App {
                     Button("New Task") {
                         router.showSheet(.newTask(projectId))
                     }
-                    .keyboardShortcut("t", modifiers: [.command])
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+
+                    Button("New Template") {
+                        router.showSheet(.newTemplate)
+                    }
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
                 }
             }
 
@@ -182,6 +190,12 @@ struct AIAgentPMApp: App {
 
     @MainActor
     private func seedTestData() async {
+        NSLog("🔧 UITest: seedTestData() called with scenario: \(Self.testScenario.rawValue)")
+
+        // Debug: Write scenario to temp file
+        let debugPath = "/tmp/uitest_scenario_debug.txt"
+        try? "seedTestData() called at \(Date())\nscenario: \(Self.testScenario.rawValue)\narguments: \(CommandLine.arguments)\n".write(toFile: debugPath, atomically: true, encoding: .utf8)
+
         let seeder = TestDataSeeder(
             projectRepository: container.projectRepository,
             agentRepository: container.agentRepository,
@@ -206,10 +220,15 @@ struct AIAgentPMApp: App {
                 try await seeder.seedNoWDData()
             case .internalAudit:
                 try await seeder.seedInternalAuditData()
+            case .workflowTemplate:
+                NSLog("🔧 UITest: Executing seedWorkflowTemplateData()")
+                try await seeder.seedWorkflowTemplateData()
             }
-            print("✅ UITest: Test data seeded successfully")
+            NSLog("✅ UITest: Test data seeded successfully for scenario: \(Self.testScenario.rawValue)")
+            try? "Seeding complete at \(Date()), about to post notification".appendToFile("/tmp/uitest_workflow_debug.txt")
         } catch {
-            print("⚠️ UITest: Failed to seed test data: \(error)")
+            NSLog("⚠️ UITest: Failed to seed test data: \(error)")
+            try? "Seeding FAILED: \(error)".appendToFile("/tmp/uitest_workflow_debug.txt")
         }
     }
 }
@@ -688,13 +707,11 @@ private final class TestDataSeeder {
 
     /// Internal Audit機能テスト用のデータをシード
     /// - Internal Audit + Audit Rule
-    /// - Workflow Template（Audit Ruleに必要）
     /// - エージェント（タスク割り当て用）
+    /// 設計変更: AuditRuleはauditTasksをインラインで保持（WorkflowTemplateはプロジェクトスコープのため）
     func seedInternalAuditData() async throws {
         guard let internalAuditRepository = internalAuditRepository,
-              let auditRuleRepository = auditRuleRepository,
-              let templateRepository = templateRepository,
-              let templateTaskRepository = templateTaskRepository else {
+              let auditRuleRepository = auditRuleRepository else {
             print("⚠️ UITest: Internal Audit repositories not available")
             return
         }
@@ -728,38 +745,6 @@ private final class TestDataSeeder {
         )
         try await agentRepository.save(reviewerAgent)
 
-        // Workflow Template作成（Audit Rule用）
-        let templateId = WorkflowTemplateID(value: "uitest_qa_template")
-        let template = WorkflowTemplate(
-            id: templateId,
-            name: "QA Workflow Template",
-            description: "Quality assurance workflow for testing",
-            variables: [],
-            status: .active
-        )
-        try templateRepository.save(template)
-
-        // Template Tasks作成
-        let templateTask1 = TemplateTask(
-            id: TemplateTaskID(value: "uitest_template_task_1"),
-            templateId: templateId,
-            title: "Run Unit Tests",
-            description: "Execute all unit tests",
-            order: 1,
-            estimatedMinutes: 30
-        )
-        try templateTaskRepository.save(templateTask1)
-
-        let templateTask2 = TemplateTask(
-            id: TemplateTaskID(value: "uitest_template_task_2"),
-            templateId: templateId,
-            title: "Code Review",
-            description: "Review code changes",
-            order: 2,
-            estimatedMinutes: 60
-        )
-        try templateTaskRepository.save(templateTask2)
-
         // Internal Audit作成
         let auditId = InternalAuditID(value: "uitest_internal_audit")
         let audit = InternalAudit(
@@ -772,7 +757,7 @@ private final class TestDataSeeder {
         )
         try internalAuditRepository.save(audit)
 
-        // Audit Rule作成
+        // Audit Rule作成（auditTasksをインラインで定義）
         let ruleId = AuditRuleID(value: "uitest_audit_rule")
         let rule = AuditRule(
             id: ruleId,
@@ -780,10 +765,23 @@ private final class TestDataSeeder {
             name: "Task Completion Check",
             triggerType: .taskCompleted,
             triggerConfig: nil,
-            workflowTemplateId: templateId,
-            taskAssignments: [
-                TaskAssignment(templateTaskOrder: 1, agentId: qaAgent.id),
-                TaskAssignment(templateTaskOrder: 2, agentId: reviewerAgent.id)
+            auditTasks: [
+                AuditTask(
+                    order: 1,
+                    title: "Run Unit Tests",
+                    description: "Execute all unit tests",
+                    assigneeId: qaAgent.id,
+                    priority: .high,
+                    dependsOnOrders: []
+                ),
+                AuditTask(
+                    order: 2,
+                    title: "Code Review",
+                    description: "Review code changes",
+                    assigneeId: reviewerAgent.id,
+                    priority: .medium,
+                    dependsOnOrders: [1]
+                )
             ],
             isEnabled: true
         )
@@ -851,6 +849,156 @@ private final class TestDataSeeder {
 
         print("✅ UITest: Internal Audit test data seeded successfully")
     }
+
+    /// WorkflowTemplate機能テスト用のデータをシード
+    /// 設計変更: WorkflowTemplateはプロジェクトスコープ（projectIdを持つ）
+    /// テンプレートはサイドバーのTemplatesセクションに表示（プロジェクト選択時のみ）
+    func seedWorkflowTemplateData() async throws {
+        NSLog("🔧 UITest: seedWorkflowTemplateData() - START")
+
+        // Debug: Write to temp file to confirm seeder runs
+        let debugPath = "/tmp/uitest_workflow_debug.txt"
+        try? "seedWorkflowTemplateData() started at \(Date())\n".write(toFile: debugPath, atomically: true, encoding: .utf8)
+
+        // プロジェクト作成（テンプレートが所属するプロジェクト）
+        // NOTE: プロジェクトは必須なので、テンプレートリポジトリに関わらず作成
+        NSLog("🔧 UITest: Creating project...")
+        let project = Project(
+            id: ProjectID(value: "uitest_template_project"),
+            name: "テンプレートテストPJ",
+            description: "ワークフローテンプレート機能のテスト用プロジェクト",
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try projectRepository.save(project)
+        NSLog("🔧 UITest: Project saved successfully - id=\(project.id.value)")
+
+        // Debug: verify project was saved
+        let savedProjects = try projectRepository.findAll()
+        let debugContent = """
+        Project saved at \(Date())
+        id: \(project.id.value)
+        Projects in DB: \(savedProjects.count)
+        Project names: \(savedProjects.map { $0.name })
+        """
+        try? debugContent.appendToFile("/tmp/uitest_workflow_debug.txt")
+
+        NSLog("🔧 UITest: templateRepository=\(String(describing: templateRepository != nil)), templateTaskRepository=\(String(describing: templateTaskRepository != nil))")
+        try? "templateRepository=\(templateRepository != nil), templateTaskRepository=\(templateTaskRepository != nil)".appendToFile("/tmp/uitest_workflow_debug.txt")
+
+        guard let templateRepository = templateRepository,
+              let templateTaskRepository = templateTaskRepository else {
+            NSLog("⚠️ UITest: Workflow Template repositories not available - but project created")
+            try? "⚠️ GUARD FAILED: repositories are nil - returning early".appendToFile("/tmp/uitest_workflow_debug.txt")
+            return
+        }
+
+        try? "✅ Repositories available, creating template...".appendToFile("/tmp/uitest_workflow_debug.txt")
+
+        // エージェント作成（テンプレートタスクのデフォルト担当用）
+        NSLog("🔧 UITest: Creating agents...")
+        let devAgent = Agent(
+            id: AgentID(value: "uitest_template_dev_agent"),
+            name: "template-dev",
+            role: "開発者",
+            type: .ai,
+            roleType: .developer,
+            capabilities: ["Development"],
+            systemPrompt: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try agentRepository.save(devAgent)
+
+        let qaAgent = Agent(
+            id: AgentID(value: "uitest_template_qa_agent"),
+            name: "template-qa",
+            role: "QA担当",
+            type: .ai,
+            roleType: .developer,
+            capabilities: ["Testing", "QA"],
+            systemPrompt: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try agentRepository.save(qaAgent)
+        NSLog("🔧 UITest: Agents created")
+
+        // ワークフローテンプレート作成（変数付き）
+        let templateId = WorkflowTemplateID(value: "uitest_workflow_template")
+        let template = WorkflowTemplate(
+            id: templateId,
+            projectId: project.id,
+            name: "Feature Development",
+            description: "機能開発用のワークフローテンプレート",
+            variables: ["feature_name", "sprint_number"],
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try templateRepository.save(template)
+        try? "✅ Template 'Feature Development' saved with id=\(templateId.value)".appendToFile("/tmp/uitest_workflow_debug.txt")
+        NSLog("🔧 UITest: Template saved - id=\(templateId.value)")
+
+        // テンプレートタスク作成
+        let task1 = TemplateTask(
+            id: TemplateTaskID(value: "uitest_template_task_1"),
+            templateId: templateId,
+            title: "{{feature_name}} 設計",
+            description: "Sprint {{sprint_number}}: 機能の設計を行う",
+            order: 1,
+            dependsOnOrders: [],
+            defaultAssigneeRole: .developer,
+            defaultPriority: .high,
+            estimatedMinutes: 120
+        )
+        try templateTaskRepository.save(task1)
+
+        let task2 = TemplateTask(
+            id: TemplateTaskID(value: "uitest_template_task_2"),
+            templateId: templateId,
+            title: "{{feature_name}} 実装",
+            description: "Sprint {{sprint_number}}: 機能の実装を行う",
+            order: 2,
+            dependsOnOrders: [1],  // 設計に依存
+            defaultAssigneeRole: .developer,
+            defaultPriority: .high,
+            estimatedMinutes: 240
+        )
+        try templateTaskRepository.save(task2)
+
+        let task3 = TemplateTask(
+            id: TemplateTaskID(value: "uitest_template_task_3"),
+            templateId: templateId,
+            title: "{{feature_name}} テスト",
+            description: "Sprint {{sprint_number}}: 機能のテストを行う",
+            order: 3,
+            dependsOnOrders: [2],  // 実装に依存
+            defaultAssigneeRole: .developer,
+            defaultPriority: .medium,
+            estimatedMinutes: 180
+        )
+        try templateTaskRepository.save(task3)
+
+        // アーカイブ済みテンプレート（表示確認用）
+        let archivedTemplateId = WorkflowTemplateID(value: "uitest_archived_template")
+        let archivedTemplate = WorkflowTemplate(
+            id: archivedTemplateId,
+            projectId: project.id,
+            name: "Archived Template",
+            description: "アーカイブ済みのテンプレート",
+            variables: [],
+            status: .archived,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try templateRepository.save(archivedTemplate)
+
+        NSLog("✅ UITest: Workflow Template test data seeded successfully")
+    }
 }
 
 // MARK: - Notification Names
@@ -858,4 +1006,20 @@ private final class TestDataSeeder {
 extension Notification.Name {
     /// UIテストデータのシードが完了したときに投稿される通知
     static let testDataSeeded = Notification.Name("testDataSeeded")
+}
+
+// MARK: - Debug Extensions
+
+private extension String {
+    func appendToFile(_ path: String) throws {
+        if let handle = FileHandle(forWritingAtPath: path) {
+            defer { handle.closeFile() }
+            handle.seekToEndOfFile()
+            if let data = (self + "\n").data(using: .utf8) {
+                handle.write(data)
+            }
+        } else {
+            try self.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+    }
 }

@@ -1,6 +1,7 @@
 // Sources/App/Features/InternalAudit/AuditRuleFormView.swift
 // Audit Rule作成・編集フォーム
 // 参照: docs/requirements/AUDIT.md
+// 設計変更: AuditRuleはauditTasksをインラインで保持（WorkflowTemplateはプロジェクトスコープのため）
 
 import SwiftUI
 import Domain
@@ -21,19 +22,24 @@ struct AuditRuleFormView: View {
 
     @State private var name: String = ""
     @State private var triggerType: TriggerType = .taskCompleted
-    @State private var selectedTemplateId: WorkflowTemplateID?
-    @State private var templates: [WorkflowTemplate] = []
-    @State private var templateTasks: [TemplateTask] = []
+    @State private var auditTaskInputs: [AuditTaskInput] = []
     @State private var agents: [Agent] = []
-    @State private var taskAssignments: [TaskAssignmentInput] = []
     @State private var isSaving = false
     @State private var isLoading = false
 
-    struct TaskAssignmentInput: Identifiable {
+    // Trigger configuration state
+    @State private var targetStatus: TaskStatus = .done
+    @State private var graceMinutes: Int = 30
+
+    /// Audit Task入力用の構造体
+    struct AuditTaskInput: Identifiable {
         let id = UUID()
-        var templateTaskOrder: Int
-        var templateTaskTitle: String
+        var order: Int = 1
+        var title: String = ""
+        var description: String = ""
         var agentId: AgentID?
+        var priority: TaskPriority = .medium
+        var dependsOnOrders: [Int] = []
     }
 
     var auditId: InternalAuditID {
@@ -44,8 +50,7 @@ struct AuditRuleFormView: View {
     }
 
     var isValid: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        selectedTemplateId != nil
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var title: String {
@@ -75,35 +80,51 @@ struct AuditRuleFormView: View {
                             .accessibilityIdentifier("TriggerTypePicker")
                         }
 
-                        Section("Workflow Template") {
-                            Picker("Template", selection: $selectedTemplateId) {
-                                Text("Select Template").tag(nil as WorkflowTemplateID?)
-                                ForEach(templates, id: \.id) { template in
-                                    Text(template.name).tag(template.id as WorkflowTemplateID?)
+                        // Trigger-specific configuration
+                        if triggerType == .statusChanged {
+                            Section("Trigger Configuration") {
+                                Picker("Target Status", selection: $targetStatus) {
+                                    ForEach(TaskStatus.allCases, id: \.self) { status in
+                                        Text(status.displayName).tag(status)
+                                    }
                                 }
+                                .accessibilityIdentifier("TriggerStatusPicker")
                             }
-                            .accessibilityIdentifier("WorkflowTemplatePicker")
-                            .onChange(of: selectedTemplateId) { _, newValue in
-                                if let templateId = newValue {
-                                    loadTemplateTasks(templateId)
-                                } else {
-                                    templateTasks = []
-                                    taskAssignments = []
+                        }
+
+                        if triggerType == .deadlineExceeded {
+                            Section("Trigger Configuration") {
+                                HStack {
+                                    Text("Grace Period (minutes)")
+                                    TextField("Minutes", value: $graceMinutes, format: .number)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 80)
+                                        .accessibilityIdentifier("TriggerGraceMinutesField")
                                 }
                             }
                         }
 
-                        if !taskAssignments.isEmpty {
-                            // Note: Section-level accessibilityIdentifier interferes with child Picker identifiers on macOS
-                            // Using header text "Task Assignments" for section identification instead
-                            Section("Task Assignments") {
-                                ForEach($taskAssignments) { $assignment in
-                                    TaskAgentAssignmentRow(
-                                        assignment: $assignment,
-                                        agents: agents
-                                    )
-                                }
+                        Section {
+                            ForEach($auditTaskInputs) { $taskInput in
+                                AuditTaskInputRow(
+                                    taskInput: $taskInput,
+                                    allTasks: auditTaskInputs,
+                                    agents: agents,
+                                    onDelete: { deleteTask(taskInput) }
+                                )
                             }
+
+                            Button {
+                                addTask()
+                            } label: {
+                                Label("Add Audit Task", systemImage: "plus.circle")
+                            }
+                            .accessibilityIdentifier("AddAuditTaskButton")
+                        } header: {
+                            Text("Audit Tasks")
+                        } footer: {
+                            Text("Define tasks that will be created when this rule is triggered")
+                                .font(.caption)
                         }
                     }
                     .formStyle(.grouped)
@@ -134,12 +155,20 @@ struct AuditRuleFormView: View {
         .frame(minWidth: 500, minHeight: 400)
     }
 
+    private func addTask() {
+        let newOrder = (auditTaskInputs.map { $0.order }.max() ?? 0) + 1
+        auditTaskInputs.append(AuditTaskInput(order: newOrder))
+    }
+
+    private func deleteTask(_ task: AuditTaskInput) {
+        auditTaskInputs.removeAll { $0.id == task.id }
+    }
+
     private func loadData() async {
         isLoading = true
         defer { isLoading = false }
 
         do {
-            templates = try container.listTemplatesUseCase.execute(includeArchived: false)
             agents = try container.getAgentsUseCase.execute()
 
             if case .edit(let ruleId, _) = mode {
@@ -148,19 +177,17 @@ struct AuditRuleFormView: View {
                 if let rule = rules.first(where: { $0.id == ruleId }) {
                     name = rule.name
                     triggerType = rule.triggerType
-                    selectedTemplateId = rule.workflowTemplateId
 
-                    // Load template tasks for assignments
-                    if let result = try container.getTemplateWithTasksUseCase.execute(templateId: rule.workflowTemplateId) {
-                        templateTasks = result.tasks
-                        taskAssignments = result.tasks.map { task in
-                            let existingAssignment = rule.taskAssignments.first { $0.templateTaskOrder == task.order }
-                            return TaskAssignmentInput(
-                                templateTaskOrder: task.order,
-                                templateTaskTitle: task.title,
-                                agentId: existingAssignment?.agentId
-                            )
-                        }
+                    // Convert AuditTask to AuditTaskInput
+                    auditTaskInputs = rule.auditTasks.map { task in
+                        AuditTaskInput(
+                            order: task.order,
+                            title: task.title,
+                            description: task.description,
+                            agentId: task.assigneeId,
+                            priority: task.priority,
+                            dependsOnOrders: task.dependsOnOrders
+                        )
                     }
                 }
             }
@@ -169,32 +196,21 @@ struct AuditRuleFormView: View {
         }
     }
 
-    private func loadTemplateTasks(_ templateId: WorkflowTemplateID) {
-        AsyncTask {
-            do {
-                if let result = try container.getTemplateWithTasksUseCase.execute(templateId: templateId) {
-                    templateTasks = result.tasks
-                    taskAssignments = result.tasks.map { task in
-                        TaskAssignmentInput(
-                            templateTaskOrder: task.order,
-                            templateTaskTitle: task.title,
-                            agentId: nil
-                        )
-                    }
-                }
-            } catch {
-                router.showAlert(.error(message: error.localizedDescription))
-            }
-        }
-    }
-
     private func save() {
-        guard let templateId = selectedTemplateId else { return }
         isSaving = true
 
-        let assignments = taskAssignments.compactMap { input -> TaskAssignment? in
-            guard let agentId = input.agentId else { return nil }
-            return TaskAssignment(templateTaskOrder: input.templateTaskOrder, agentId: agentId)
+        // Convert inputs to AuditTask
+        // Note: assigneeId is optional, only title is required
+        let auditTasks = auditTaskInputs.compactMap { input -> AuditTask? in
+            guard !input.title.isEmpty else { return nil }
+            return AuditTask(
+                order: input.order,
+                title: input.title,
+                description: input.description,
+                assigneeId: input.agentId,
+                priority: input.priority,
+                dependsOnOrders: input.dependsOnOrders
+            )
         }
 
         AsyncTask {
@@ -206,15 +222,14 @@ struct AuditRuleFormView: View {
                         name: name,
                         triggerType: triggerType,
                         triggerConfig: nil,
-                        workflowTemplateId: templateId,
-                        taskAssignments: assignments
+                        auditTasks: auditTasks
                     )
                 case .edit(let ruleId, _):
                     _ = try container.updateAuditRuleUseCase.execute(
                         ruleId: ruleId,
                         name: name,
                         triggerConfig: nil,
-                        taskAssignments: assignments
+                        auditTasks: auditTasks
                     )
                 }
                 dismiss()
@@ -226,38 +241,61 @@ struct AuditRuleFormView: View {
     }
 }
 
-// MARK: - Task Agent Assignment Row
+// MARK: - Audit Task Input Row
 
-/// タスク別エージェント割り当て行（アクセシビリティ対応）
-/// Sectionの accessibilityIdentifier が子Pickerに干渉する問題を回避するため分離
-private struct TaskAgentAssignmentRow: View {
-    @Binding var assignment: AuditRuleFormView.TaskAssignmentInput
+/// Audit Task入力行
+private struct AuditTaskInputRow: View {
+    @Binding var taskInput: AuditRuleFormView.AuditTaskInput
+    let allTasks: [AuditRuleFormView.AuditTaskInput]
     let agents: [Agent]
+    let onDelete: () -> Void
 
     var body: some View {
-        HStack {
-            Text("#\(assignment.templateTaskOrder)")
-                .font(.caption)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.accentColor.opacity(0.2))
-                .cornerRadius(4)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Task #\(taskInput.order)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            Text(assignment.templateTaskTitle)
-                .lineLimit(1)
+                Spacer()
 
-            Spacer()
-
-            Picker("Agent", selection: $assignment.agentId) {
-                Text("Unassigned").tag(nil as AgentID?)
-                ForEach(agents, id: \.id) { agent in
-                    Text(agent.name).tag(agent.id as AgentID?)
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
                 }
+                .buttonStyle(.plain)
             }
-            .labelsHidden()
-            .frame(width: 150)
-            .accessibilityIdentifier("TaskAgentPicker_\(assignment.templateTaskOrder)")
+
+            TextField("Task Title", text: $taskInput.title)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("AuditTaskTitle_\(taskInput.order)")
+
+            TextField("Description", text: $taskInput.description, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...3)
+
+            HStack {
+                Picker("Agent", selection: $taskInput.agentId) {
+                    Text("Select Agent").tag(nil as AgentID?)
+                    ForEach(agents, id: \.id) { agent in
+                        Text(agent.name).tag(agent.id as AgentID?)
+                    }
+                }
+                .frame(width: 150)
+                .accessibilityIdentifier("TaskAgentPicker_\(taskInput.order)")
+
+                Picker("Priority", selection: $taskInput.priority) {
+                    Text("Low").tag(TaskPriority.low)
+                    Text("Medium").tag(TaskPriority.medium)
+                    Text("High").tag(TaskPriority.high)
+                    Text("Urgent").tag(TaskPriority.urgent)
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("TaskPriorityPicker_\(taskInput.order)")
+            }
         }
+        .padding(.vertical, 8)
     }
 }
-

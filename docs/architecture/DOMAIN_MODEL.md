@@ -38,6 +38,14 @@
 │  │         (すべてのEntity変更を記録するイベントストア)              │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │                  Workflow Template System                          │ │
+│  │                                                                     │ │
+│  │  Project ──1:N── WorkflowTemplate ──1:N── TemplateTask            │ │
+│  │                                                                     │ │
+│  │  ※ テンプレートはプロジェクトに紐づく                              │ │
+│  └───────────────────────────────────────────────────────────────────┘ │
+│                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -342,6 +350,58 @@ enum EventType: String, Codable {
 }
 ```
 
+### WorkflowTemplate（ワークフローテンプレート）
+
+```swift
+struct WorkflowTemplate: Identifiable, Equatable {
+    let id: WorkflowTemplateID
+    let projectId: ProjectID           // プロジェクトに紐づく
+    var name: String
+    var description: String
+    var variables: [String]             // 変数名リスト（例: ["feature_name", "module"]）
+    var status: TemplateStatus
+    let createdAt: Date
+    var updatedAt: Date
+}
+
+struct WorkflowTemplateID: Hashable, Codable {
+    let value: String  // "wft_" + UUID
+
+    static func generate() -> WorkflowTemplateID {
+        WorkflowTemplateID(value: "wft_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+}
+
+enum TemplateStatus: String, Codable {
+    case active     // 使用可能
+    case archived   // アーカイブ済み
+}
+```
+
+### TemplateTask（テンプレートタスク）
+
+```swift
+struct TemplateTask: Identifiable, Equatable {
+    let id: TemplateTaskID
+    let templateId: WorkflowTemplateID
+    var title: String                           // 変数使用可: "{{feature_name}} - 設計"
+    var description: String                     // 変数使用可
+    var order: Int                              // テンプレート内での順序
+    var dependsOnOrders: [Int]                  // 依存する他タスクのorder
+    var defaultAssigneeRole: AgentRoleType?     // デフォルトのアサイン先ロール
+    var defaultPriority: TaskPriority
+    var estimatedMinutes: Int?
+}
+
+struct TemplateTaskID: Hashable, Codable {
+    let value: String  // "tpt_" + UUID
+
+    static func generate() -> TemplateTaskID {
+        TemplateTaskID(value: "tpt_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+}
+```
+
 ---
 
 ## Value Object
@@ -377,6 +437,8 @@ extension EntityID {
 | Context | `ctx_` | `ctx_a1b2c3d4e5f6` |
 | Handoff | `hnd_` | `hnd_a1b2c3d4e5f6` |
 | Event | `evt_` | `evt_a1b2c3d4e5f6` |
+| WorkflowTemplate | `wft_` | `wft_a1b2c3d4e5f6` |
+| TemplateTask | `tpt_` | `tpt_a1b2c3d4e5f6` |
 
 ---
 
@@ -513,3 +575,4 @@ struct AgentAggregate {
 | 日付 | バージョン | 変更内容 |
 |------|-----------|----------|
 | 2024-12-30 | 1.0.0 | 初版作成 |
+| 2025-01-04 | 1.1.0 | WorkflowTemplate, TemplateTask エンティティ追加（プロジェクトスコープ） |

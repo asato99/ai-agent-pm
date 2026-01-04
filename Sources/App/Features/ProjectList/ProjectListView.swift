@@ -6,6 +6,21 @@ import Domain
 
 private typealias AsyncTask = _Concurrency.Task
 
+// Debug helper for UITesting
+private extension String {
+    func appendToFile(_ path: String) throws {
+        if let handle = FileHandle(forWritingAtPath: path) {
+            defer { handle.closeFile() }
+            handle.seekToEndOfFile()
+            if let data = (self + "\n").data(using: .utf8) {
+                handle.write(data)
+            }
+        } else {
+            try self.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+    }
+}
+
 struct ProjectListView: View {
     @EnvironmentObject var container: DependencyContainer
     @Environment(Router.self) var router
@@ -55,6 +70,10 @@ struct ProjectListView: View {
                 ForEach(filteredProjects, id: \.id) { project in
                     ProjectRow(project: project)
                         .tag(project.id)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            router.selectProject(project.id)
+                        }
                         .accessibilityIdentifier("ProjectRow_\(project.id.value)")
                 }
             } header: {
@@ -122,7 +141,7 @@ struct ProjectListView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("NewTemplateButton")
                     .accessibilityLabel("New Template")
-                    .help("New Template (⇧⌘T)")
+                    .help("New Template (⇧⌘M)")
                 }
             }
             .accessibilityIdentifier("TemplatesSection")
@@ -185,7 +204,7 @@ struct ProjectListView: View {
                     } label: {
                         Label("New Template", systemImage: "doc.badge.plus")
                     }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
 
                     Button {
                         router.showSheet(.newInternalAudit)
@@ -234,14 +253,33 @@ struct ProjectListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .testDataSeeded)) { _ in
             // UIテストデータシード完了後に再読み込み
+            try? "ProjectListView received testDataSeeded at \(Date())".appendToFile("/tmp/uitest_workflow_debug.txt")
             _Concurrency.Task {
                 await loadData()
+                try? "ProjectListView loadData completed, projects count: \(projects.count)".appendToFile("/tmp/uitest_workflow_debug.txt")
             }
         }
         .onChange(of: router.currentSheet) { oldValue, newValue in
             // シートが閉じられた時にデータを再読み込み
             if oldValue != nil && newValue == nil {
                 AsyncTask { await loadData() }
+            }
+        }
+        .onChange(of: router.selectedProject) { _, newValue in
+            // プロジェクト選択が変更されたらテンプレートを再読み込み
+            AsyncTask {
+                if let projectId = newValue {
+                    do {
+                        templates = try container.listTemplatesUseCase.execute(
+                            projectId: projectId,
+                            includeArchived: false
+                        )
+                    } catch {
+                        router.showAlert(.error(message: error.localizedDescription))
+                    }
+                } else {
+                    templates = []
+                }
             }
         }
     }
@@ -253,7 +291,15 @@ struct ProjectListView: View {
         do {
             projects = try container.getProjectsUseCase.execute()
             agents = try container.getAgentsUseCase.execute()
-            templates = try container.listTemplatesUseCase.execute(includeArchived: false)
+            // Templates are project-scoped, load for selected project if available
+            if let projectId = router.selectedProject {
+                templates = try container.listTemplatesUseCase.execute(
+                    projectId: projectId,
+                    includeArchived: false
+                )
+            } else {
+                templates = []
+            }
             internalAudits = try container.listInternalAuditsUseCase.execute(includeInactive: false)
         } catch {
             router.showAlert(.error(message: error.localizedDescription))

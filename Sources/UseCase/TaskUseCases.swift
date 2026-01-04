@@ -16,8 +16,6 @@ public struct UpdateTaskStatusUseCase: Sendable {
     // Audit Trigger用（オプション）
     private let internalAuditRepository: (any InternalAuditRepositoryProtocol)?
     private let auditRuleRepository: (any AuditRuleRepositoryProtocol)?
-    private let workflowTemplateRepository: (any WorkflowTemplateRepositoryProtocol)?
-    private let templateTaskRepository: (any TemplateTaskRepositoryProtocol)?
 
     public init(
         taskRepository: any TaskRepositoryProtocol,
@@ -29,27 +27,22 @@ public struct UpdateTaskStatusUseCase: Sendable {
         self.eventRepository = eventRepository
         self.internalAuditRepository = nil
         self.auditRuleRepository = nil
-        self.workflowTemplateRepository = nil
-        self.templateTaskRepository = nil
     }
 
     /// Audit Trigger機能付きの初期化
+    /// 設計: AuditRuleはインラインでauditTasksを保持（WorkflowTemplateはプロジェクトスコープのため参照不要）
     public init(
         taskRepository: any TaskRepositoryProtocol,
         agentRepository: any AgentRepositoryProtocol,
         eventRepository: any EventRepositoryProtocol,
         internalAuditRepository: any InternalAuditRepositoryProtocol,
-        auditRuleRepository: any AuditRuleRepositoryProtocol,
-        workflowTemplateRepository: any WorkflowTemplateRepositoryProtocol,
-        templateTaskRepository: any TemplateTaskRepositoryProtocol
+        auditRuleRepository: any AuditRuleRepositoryProtocol
     ) {
         self.taskRepository = taskRepository
         self.agentRepository = agentRepository
         self.eventRepository = eventRepository
         self.internalAuditRepository = internalAuditRepository
         self.auditRuleRepository = auditRuleRepository
-        self.workflowTemplateRepository = workflowTemplateRepository
-        self.templateTaskRepository = templateTaskRepository
     }
 
     /// ステータス更新結果
@@ -153,9 +146,7 @@ public struct UpdateTaskStatusUseCase: Sendable {
     private func checkAndFireAuditTriggers(for task: Task) throws -> [Result.FiredAuditRule] {
         // Audit機能が設定されていない場合はスキップ
         guard let internalAuditRepo = internalAuditRepository,
-              let auditRuleRepo = auditRuleRepository,
-              let templateRepo = workflowTemplateRepository,
-              let templateTaskRepo = templateTaskRepository else {
+              let auditRuleRepo = auditRuleRepository else {
             return []
         }
 
@@ -172,7 +163,7 @@ public struct UpdateTaskStatusUseCase: Sendable {
 
             // タスク完了トリガーにマッチするルールを発火
             for rule in enabledRules where rule.triggerType == .taskCompleted {
-                let createdTasks = try fireAuditRule(rule: rule, sourceTask: task, templateRepo: templateRepo, templateTaskRepo: templateTaskRepo)
+                let createdTasks = try fireAuditRule(rule: rule, sourceTask: task)
                 firedRules.append(Result.FiredAuditRule(ruleName: rule.name, createdTaskCount: createdTasks.count))
             }
         }
@@ -180,59 +171,40 @@ public struct UpdateTaskStatusUseCase: Sendable {
         return firedRules
     }
 
-    /// Audit Ruleを発火してワークフローをインスタンス化
+    /// Audit Ruleを発火してタスクを生成
+    /// 設計: AuditRuleはインラインでauditTasksを保持（WorkflowTemplateはプロジェクトスコープのため参照不要）
     private func fireAuditRule(
         rule: AuditRule,
-        sourceTask: Task,
-        templateRepo: any WorkflowTemplateRepositoryProtocol,
-        templateTaskRepo: any TemplateTaskRepositoryProtocol
+        sourceTask: Task
     ) throws -> [Task] {
-        // テンプレート取得
-        guard let template = try templateRepo.findById(rule.workflowTemplateId) else {
-            // テンプレートが見つからない場合はスキップ（エラーにしない）
+        // auditTasksが空の場合はスキップ
+        guard rule.hasTasks else {
             return []
         }
-
-        // アクティブなテンプレートのみ使用
-        guard template.isActive else {
-            return []
-        }
-
-        // テンプレートタスクを取得
-        let templateTasks = try templateTaskRepo.findByTemplate(rule.workflowTemplateId)
-
-        // タスク割り当てマップを構築
-        let assignmentMap = Dictionary(
-            uniqueKeysWithValues: rule.taskAssignments.map { ($0.templateTaskOrder, $0.agentId) }
-        )
 
         // タスクを生成
         var createdTasks: [Task] = []
         var orderToTaskIdMap: [Int: TaskID] = [:]
 
-        for templateTask in templateTasks {
+        for auditTask in rule.auditTasks {
             let taskId = TaskID.generate()
-            orderToTaskIdMap[templateTask.order] = taskId
+            orderToTaskIdMap[auditTask.order] = taskId
 
             // 依存関係をTaskIDに変換
-            let dependencies = templateTask.dependsOnOrders.compactMap { orderToTaskIdMap[$0] }
-
-            // ルールの割り当てからエージェントを取得
-            let assigneeId = assignmentMap[templateTask.order]
+            let dependencies = auditTask.dependsOnOrders.compactMap { orderToTaskIdMap[$0] }
 
             // タイトルにソースタスク情報を含める
-            let titleWithContext = "\(templateTask.title) [Audit: \(sourceTask.title)]"
+            let titleWithContext = "\(auditTask.title) [Audit: \(sourceTask.title)]"
 
             let newTask = Task(
                 id: taskId,
                 projectId: sourceTask.projectId,
                 title: titleWithContext,
-                description: templateTask.description,
+                description: auditTask.description,
                 status: .backlog,
-                priority: templateTask.defaultPriority,
-                assigneeId: assigneeId,
-                dependencies: dependencies,
-                estimatedMinutes: templateTask.estimatedMinutes
+                priority: auditTask.priority,
+                assigneeId: auditTask.assigneeId,
+                dependencies: dependencies
             )
             try taskRepository.save(newTask)
             createdTasks.append(newTask)
@@ -249,7 +221,6 @@ public struct UpdateTaskStatusUseCase: Sendable {
                     "auditRuleId": rule.id.value,
                     "auditId": rule.auditId.value,
                     "sourceTaskId": sourceTask.id.value,
-                    "templateId": template.id.value,
                     "triggerType": TriggerType.taskCompleted.rawValue
                 ]
             )

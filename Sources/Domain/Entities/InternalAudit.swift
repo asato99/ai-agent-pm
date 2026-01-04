@@ -60,15 +60,15 @@ public enum AuditStatus: String, Codable, Sendable, CaseIterable {
 
 /// Audit Rule エンティティ
 /// Internal Audit のメインエンティティ - トリガー付きワークフロー
-/// 要件: トリガー条件 + ワークフローテンプレート + タスク別エージェント割り当て
+/// 設計方針: WorkflowTemplateはプロジェクトスコープのため、
+/// プロジェクト横断で動作するInternal Auditはタスク定義をインラインで保持
 public struct AuditRule: Identifiable, Equatable, Sendable {
     public let id: AuditRuleID
     public var auditId: InternalAuditID
     public var name: String
     public var triggerType: TriggerType
     public var triggerConfig: [String: Any]?
-    public var workflowTemplateId: WorkflowTemplateID
-    public var taskAssignments: [TaskAssignment]
+    public var auditTasks: [AuditTask]  // インラインタスク定義
     public var isEnabled: Bool
     public let createdAt: Date
     public var updatedAt: Date
@@ -79,8 +79,7 @@ public struct AuditRule: Identifiable, Equatable, Sendable {
         name: String,
         triggerType: TriggerType,
         triggerConfig: [String: Any]? = nil,
-        workflowTemplateId: WorkflowTemplateID,
-        taskAssignments: [TaskAssignment],
+        auditTasks: [AuditTask] = [],
         isEnabled: Bool = true,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -90,16 +89,15 @@ public struct AuditRule: Identifiable, Equatable, Sendable {
         self.name = name
         self.triggerType = triggerType
         self.triggerConfig = triggerConfig
-        self.workflowTemplateId = workflowTemplateId
-        self.taskAssignments = taskAssignments
+        self.auditTasks = auditTasks
         self.isEnabled = isEnabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
-    /// タスク割り当てがあるかどうか
-    public var hasAssignments: Bool {
-        !taskAssignments.isEmpty
+    /// 監査タスクがあるかどうか
+    public var hasTasks: Bool {
+        !auditTasks.isEmpty
     }
 
     // MARK: - Equatable (triggerConfigを除外)
@@ -109,8 +107,7 @@ public struct AuditRule: Identifiable, Equatable, Sendable {
         lhs.auditId == rhs.auditId &&
         lhs.name == rhs.name &&
         lhs.triggerType == rhs.triggerType &&
-        lhs.workflowTemplateId == rhs.workflowTemplateId &&
-        lhs.taskAssignments == rhs.taskAssignments &&
+        lhs.auditTasks == rhs.auditTasks &&
         lhs.isEnabled == rhs.isEnabled &&
         lhs.createdAt == rhs.createdAt &&
         lhs.updatedAt == rhs.updatedAt
@@ -137,16 +134,37 @@ public enum TriggerType: String, Codable, Sendable, CaseIterable {
     }
 }
 
-// MARK: - TaskAssignment
+// MARK: - AuditTask
 
-/// Audit Rule 内のタスク別エージェント割り当て
-/// 参照: docs/requirements/AUDIT.md - TaskAssignment
-public struct TaskAssignment: Equatable, Codable, Sendable {
-    public let templateTaskOrder: Int   // テンプレートタスクのorder
-    public let agentId: AgentID         // 割り当てるエージェント
+/// Audit Rule 内の監査タスク定義
+/// 参照: docs/requirements/AUDIT.md - AuditTask
+/// 設計方針: テンプレート参照ではなくインラインでタスクを定義
+public struct AuditTask: Equatable, Codable, Sendable {
+    public let order: Int               // タスクの順序
+    public var title: String            // タスクタイトル
+    public var description: String      // タスク説明
+    public let assigneeId: AgentID?     // 割り当てるエージェント（オプション）
+    public var priority: TaskPriority   // 優先度
+    public var dependsOnOrders: [Int]   // 依存する他タスクのorder
 
-    public init(templateTaskOrder: Int, agentId: AgentID) {
-        self.templateTaskOrder = templateTaskOrder
-        self.agentId = agentId
+    public init(
+        order: Int,
+        title: String,
+        description: String = "",
+        assigneeId: AgentID? = nil,
+        priority: TaskPriority = .medium,
+        dependsOnOrders: [Int] = []
+    ) {
+        self.order = order
+        self.title = title
+        self.description = description
+        self.assigneeId = assigneeId
+        self.priority = priority
+        self.dependsOnOrders = dependsOnOrders
+    }
+
+    /// 依存関係が有効かどうか（自己参照なし）
+    public var hasValidDependencies: Bool {
+        !dependsOnOrders.contains(order)
     }
 }

@@ -388,8 +388,8 @@ struct AuditRuleRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if !rule.taskAssignments.isEmpty {
-                        Text("\(rule.taskAssignments.count) assignments")
+                    if !rule.auditTasks.isEmpty {
+                        Text("\(rule.auditTasks.count) tasks")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

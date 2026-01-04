@@ -401,6 +401,51 @@ public final class DatabaseSetup {
             try db.create(indexOn: "agents", columns: ["locked_by_audit_id"])
         }
 
+        // v14: 仕様変更 - WorkflowTemplateはプロジェクトスコープ、AuditRuleはインラインauditTasks
+        // 参照: docs/requirements/WORKFLOW_TEMPLATES.md - テンプレートはプロジェクトに紐づく
+        // 参照: docs/requirements/AUDIT.md - AuditRuleはインラインでタスクを定義
+        migrator.registerMigration("v14_template_project_scope_and_audit_inline_tasks") { db in
+            // workflow_templates テーブルに project_id を追加
+            try db.alter(table: "workflow_templates") { t in
+                t.add(column: "project_id", .text)
+            }
+            try db.create(indexOn: "workflow_templates", columns: ["project_id"])
+
+            // audit_rules テーブルを再構築 (workflow_template_idとtask_assignmentsを削除、audit_tasksを追加)
+            // SQLiteはALTER TABLE DROP COLUMNをサポートしないため、テーブル再構築が必要
+            // 1. 一時テーブルを作成
+            try db.execute(sql: """
+                CREATE TABLE audit_rules_new (
+                    id TEXT PRIMARY KEY,
+                    audit_id TEXT NOT NULL REFERENCES internal_audits(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    trigger_type TEXT NOT NULL,
+                    trigger_config TEXT,
+                    audit_tasks TEXT,
+                    is_enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+            """)
+
+            // 2. データを移行 (workflow_template_id, task_assignmentsは破棄)
+            try db.execute(sql: """
+                INSERT INTO audit_rules_new (id, audit_id, name, trigger_type, trigger_config, is_enabled, created_at, updated_at)
+                SELECT id, audit_id, name, trigger_type, trigger_config, is_enabled, created_at, updated_at FROM audit_rules
+            """)
+
+            // 3. 古いテーブルを削除
+            try db.drop(table: "audit_rules")
+
+            // 4. 新しいテーブルをリネーム
+            try db.rename(table: "audit_rules_new", to: "audit_rules")
+
+            // 5. インデックス再作成
+            try db.create(indexOn: "audit_rules", columns: ["audit_id"])
+            try db.create(indexOn: "audit_rules", columns: ["trigger_type"])
+            try db.create(indexOn: "audit_rules", columns: ["is_enabled"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -667,11 +667,14 @@ final class InfrastructureTests: XCTestCase {
     }
 
     // MARK: - WorkflowTemplateRepository Tests (参照: WORKFLOW_TEMPLATES.md)
+    // 設計方針: テンプレートはプロジェクトに紐づく
 
     func testWorkflowTemplateRepositorySaveAndFindById() throws {
         // ワークフローテンプレートの作成と取得
+        let projectId = ProjectID.generate()
         let template = WorkflowTemplate(
             id: WorkflowTemplateID.generate(),
+            projectId: projectId,
             name: "Feature Development",
             description: "機能開発のワークフロー",
             variables: ["feature_name", "module"]
@@ -685,13 +688,15 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertEqual(found?.description, "機能開発のワークフロー")
         XCTAssertEqual(found?.variables, ["feature_name", "module"])
         XCTAssertEqual(found?.status, .active)
+        XCTAssertEqual(found?.projectId, projectId)
     }
 
-    func testWorkflowTemplateRepositoryFindAll() throws {
-        // テンプレート一覧取得
-        let template1 = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Template1")
-        let template2 = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Template2")
-        var archivedTemplate = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Archived")
+    func testWorkflowTemplateRepositoryFindByProject() throws {
+        // プロジェクト別テンプレート取得
+        let projectId = ProjectID.generate()
+        let template1 = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Template1")
+        let template2 = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Template2")
+        var archivedTemplate = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Archived")
         archivedTemplate.status = .archived
 
         try templateRepo.save(template1)
@@ -699,31 +704,33 @@ final class InfrastructureTests: XCTestCase {
         try templateRepo.save(archivedTemplate)
 
         // アクティブのみ
-        let activeTemplates = try templateRepo.findAll(includeArchived: false)
+        let activeTemplates = try templateRepo.findByProject(projectId, includeArchived: false)
         XCTAssertEqual(activeTemplates.count, 2)
 
         // 全て含む
-        let allTemplates = try templateRepo.findAll(includeArchived: true)
+        let allTemplates = try templateRepo.findByProject(projectId, includeArchived: true)
         XCTAssertEqual(allTemplates.count, 3)
     }
 
-    func testWorkflowTemplateRepositoryFindActive() throws {
-        // アクティブテンプレートのみ取得
-        let activeTemplate = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Active")
-        var archivedTemplate = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Archived")
+    func testWorkflowTemplateRepositoryFindActiveByProject() throws {
+        // プロジェクト別アクティブテンプレートのみ取得
+        let projectId = ProjectID.generate()
+        let activeTemplate = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Active")
+        var archivedTemplate = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Archived")
         archivedTemplate.status = .archived
 
         try templateRepo.save(activeTemplate)
         try templateRepo.save(archivedTemplate)
 
-        let found = try templateRepo.findActive()
+        let found = try templateRepo.findActiveByProject(projectId)
         XCTAssertEqual(found.count, 1)
         XCTAssertEqual(found.first?.name, "Active")
     }
 
     func testWorkflowTemplateRepositoryUpdate() throws {
         // テンプレートの更新
-        var template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Original")
+        let projectId = ProjectID.generate()
+        var template = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Original")
         try templateRepo.save(template)
 
         template.name = "Updated"
@@ -737,7 +744,8 @@ final class InfrastructureTests: XCTestCase {
 
     func testWorkflowTemplateRepositoryDelete() throws {
         // テンプレートの削除
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "ToDelete")
+        let projectId = ProjectID.generate()
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "ToDelete")
         try templateRepo.save(template)
 
         try templateRepo.delete(template.id)
@@ -750,7 +758,8 @@ final class InfrastructureTests: XCTestCase {
 
     func testTemplateTaskRepositorySaveAndFindById() throws {
         // テンプレートタスクの作成と取得
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test")
+        let projectId = ProjectID.generate()
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Test")
         try templateRepo.save(template)
 
         let task = TemplateTask(
@@ -772,7 +781,8 @@ final class InfrastructureTests: XCTestCase {
 
     func testTemplateTaskRepositoryFindByTemplate() throws {
         // テンプレート別タスク取得（order順）
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test")
+        let projectId = ProjectID.generate()
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Test")
         try templateRepo.save(template)
 
         let task1 = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "Task1", order: 2)
@@ -791,7 +801,8 @@ final class InfrastructureTests: XCTestCase {
 
     func testTemplateTaskRepositoryDependencies() throws {
         // 依存関係の永続化
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test")
+        let projectId = ProjectID.generate()
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Test")
         try templateRepo.save(template)
 
         let task = TemplateTask(
@@ -809,7 +820,8 @@ final class InfrastructureTests: XCTestCase {
 
     func testTemplateTaskRepositoryDelete() throws {
         // テンプレートタスクの削除
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test")
+        let projectId = ProjectID.generate()
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Test")
         try templateRepo.save(template)
 
         let task = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "ToDelete", order: 1)
@@ -823,7 +835,8 @@ final class InfrastructureTests: XCTestCase {
 
     func testTemplateTaskRepositoryDeleteByTemplate() throws {
         // テンプレートに属する全タスクの削除
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test")
+        let projectId = ProjectID.generate()
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Test")
         try templateRepo.save(template)
 
         let task1 = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "Task1", order: 1)
@@ -839,7 +852,8 @@ final class InfrastructureTests: XCTestCase {
 
     func testTemplateDeleteCascadesToTemplateTasks() throws {
         // テンプレート削除時のカスケード削除
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test")
+        let projectId = ProjectID.generate()
+        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), projectId: projectId, name: "Test")
         try templateRepo.save(template)
 
         let task = TemplateTask(id: TemplateTaskID.generate(), templateId: template.id, title: "Task", order: 1)
@@ -946,16 +960,12 @@ final class InfrastructureTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
-
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "タスク完了時チェック",
             triggerType: .taskCompleted,
-            workflowTemplateId: template.id,
-            taskAssignments: []
+            auditTasks: []
         )
 
         try auditRuleRepo.save(rule)
@@ -972,11 +982,8 @@ final class InfrastructureTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
-
-        let rule1 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule1", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
-        let rule2 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule2", triggerType: .statusChanged, workflowTemplateId: template.id, taskAssignments: [])
+        let rule1 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule1", triggerType: .taskCompleted, auditTasks: [])
+        let rule2 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule2", triggerType: .statusChanged, auditTasks: [])
         try auditRuleRepo.save(rule1)
         try auditRuleRepo.save(rule2)
 
@@ -989,11 +996,8 @@ final class InfrastructureTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
-
-        let enabledRule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Enabled", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [], isEnabled: true)
-        var disabledRule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Disabled", triggerType: .statusChanged, workflowTemplateId: template.id, taskAssignments: [], isEnabled: false)
+        let enabledRule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Enabled", triggerType: .taskCompleted, auditTasks: [], isEnabled: true)
+        let disabledRule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Disabled", triggerType: .statusChanged, auditTasks: [], isEnabled: false)
         try auditRuleRepo.save(enabledRule)
         try auditRuleRepo.save(disabledRule)
 
@@ -1002,40 +1006,39 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertEqual(enabledRules.first?.name, "Enabled")
     }
 
-    func testAuditRuleRepositoryWithTaskAssignments() throws {
-        // タスク割り当て付きルールの永続化
+    func testAuditRuleRepositoryWithAuditTasks() throws {
+        // 監査タスク付きルールの永続化
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
-
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
 
         let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Role1")
         let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Role2")
         try agentRepo.save(agent1)
         try agentRepo.save(agent2)
 
-        let assignments = [
-            TaskAssignment(templateTaskOrder: 1, agentId: agent1.id),
-            TaskAssignment(templateTaskOrder: 2, agentId: agent2.id)
+        let auditTasks = [
+            AuditTask(order: 1, title: "Task1", assigneeId: agent1.id),
+            AuditTask(order: 2, title: "Task2", assigneeId: agent2.id, dependsOnOrders: [1])
         ]
 
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
-            name: "Rule with assignments",
+            name: "Rule with audit tasks",
             triggerType: .statusChanged,
-            workflowTemplateId: template.id,
-            taskAssignments: assignments
+            auditTasks: auditTasks
         )
         try auditRuleRepo.save(rule)
 
         let found = try auditRuleRepo.findById(rule.id)
-        XCTAssertEqual(found?.taskAssignments.count, 2)
-        XCTAssertEqual(found?.taskAssignments[0].templateTaskOrder, 1)
-        XCTAssertEqual(found?.taskAssignments[0].agentId, agent1.id)
-        XCTAssertEqual(found?.taskAssignments[1].templateTaskOrder, 2)
-        XCTAssertEqual(found?.taskAssignments[1].agentId, agent2.id)
+        XCTAssertEqual(found?.auditTasks.count, 2)
+        XCTAssertEqual(found?.auditTasks[0].order, 1)
+        XCTAssertEqual(found?.auditTasks[0].title, "Task1")
+        XCTAssertEqual(found?.auditTasks[0].assigneeId, agent1.id)
+        XCTAssertEqual(found?.auditTasks[1].order, 2)
+        XCTAssertEqual(found?.auditTasks[1].title, "Task2")
+        XCTAssertEqual(found?.auditTasks[1].assigneeId, agent2.id)
+        XCTAssertEqual(found?.auditTasks[1].dependsOnOrders, [1])
     }
 
     func testAuditRuleRepositoryWithTriggerConfig() throws {
@@ -1043,17 +1046,13 @@ final class InfrastructureTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
-
         let rule = AuditRule(
             id: AuditRuleID.generate(),
             auditId: audit.id,
             name: "Status Change Rule",
             triggerType: .statusChanged,
             triggerConfig: ["fromStatus": "todo", "toStatus": "in_progress"],
-            workflowTemplateId: template.id,
-            taskAssignments: []
+            auditTasks: []
         )
         try auditRuleRepo.save(rule)
 
@@ -1068,10 +1067,7 @@ final class InfrastructureTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
-
-        var rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Original", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
+        var rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Original", triggerType: .taskCompleted, auditTasks: [])
         try auditRuleRepo.save(rule)
 
         rule.name = "Updated"
@@ -1088,10 +1084,7 @@ final class InfrastructureTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
-
-        let rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "ToDelete", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
+        let rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "ToDelete", triggerType: .taskCompleted, auditTasks: [])
         try auditRuleRepo.save(rule)
 
         try auditRuleRepo.delete(rule.id)
@@ -1105,10 +1098,7 @@ final class InfrastructureTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
-
-        let rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
+        let rule = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule", triggerType: .taskCompleted, auditTasks: [])
         try auditRuleRepo.save(rule)
 
         // Audit削除
@@ -1132,12 +1122,9 @@ final class InfrastructureTests: XCTestCase {
         let audit = InternalAudit(id: InternalAuditID.generate(), name: "Test Audit")
         try internalAuditRepo.save(audit)
 
-        let template = WorkflowTemplate(id: WorkflowTemplateID.generate(), name: "Test Template")
-        try templateRepo.save(template)
-
-        let rule1 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule1", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
-        let rule2 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule2", triggerType: .taskCompleted, workflowTemplateId: template.id, taskAssignments: [])
-        let rule3 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule3", triggerType: .statusChanged, workflowTemplateId: template.id, taskAssignments: [])
+        let rule1 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule1", triggerType: .taskCompleted, auditTasks: [])
+        let rule2 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule2", triggerType: .taskCompleted, auditTasks: [])
+        let rule3 = AuditRule(id: AuditRuleID.generate(), auditId: audit.id, name: "Rule3", triggerType: .statusChanged, auditTasks: [])
         try auditRuleRepo.save(rule1)
         try auditRuleRepo.save(rule2)
         try auditRuleRepo.save(rule3)
