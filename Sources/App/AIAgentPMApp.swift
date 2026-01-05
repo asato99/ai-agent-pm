@@ -276,12 +276,20 @@ private final class TestDataSeeder {
 
     /// 基本的なテストデータを生成（プロジェクト、エージェント、タスク）
     func seedBasicData() async throws {
-        // プロジェクト作成
+        // 作業ディレクトリを作成（存在しない場合）
+        let workingDir = "/tmp/basic_test"
+        let fileManager = FileManager.default
+        if !fileManager.fileExists(atPath: workingDir) {
+            try fileManager.createDirectory(atPath: workingDir, withIntermediateDirectories: true)
+        }
+
+        // プロジェクト作成（workingDirectory設定済み）
         let project = Project(
             id: .generate(),
             name: "テストプロジェクト",
             description: "UIテスト用のサンプルプロジェクト",
             status: .active,
+            workingDirectory: workingDir,
             createdAt: Date(),
             updatedAt: Date()
         )
