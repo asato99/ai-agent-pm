@@ -109,6 +109,24 @@ struct TaskDetailView: View {
         .task {
             await loadData()
         }
+        .onChange(of: router.currentSheet) { oldValue, newValue in
+            // シートが閉じられた場合（editTask または addContext）、データを再読み込み
+            if newValue == nil {
+                if case .editTask(let editedTaskId) = oldValue, editedTaskId == taskId {
+                    AsyncTask {
+                        await loadData()
+                    }
+                } else if case .addContext(let contextTaskId) = oldValue, contextTaskId == taskId {
+                    AsyncTask {
+                        await loadData()
+                    }
+                } else if case .handoff(let handoffTaskId) = oldValue, handoffTaskId == taskId {
+                    AsyncTask {
+                        await loadData()
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -371,6 +389,7 @@ struct TaskDetailView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("HistorySection")
     }
 

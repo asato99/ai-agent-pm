@@ -28,6 +28,9 @@ public final class Router {
     /// Internal Audits一覧を表示中かどうか
     public var showingInternalAudits: Bool = false
 
+    /// 詳細ビューのリフレッシュ用ID（選択のたびに変更してビューを再作成）
+    public var detailRefreshId: UUID = UUID()
+
     // MARK: - Navigation Path
 
     /// NavigationStack用のパス
@@ -151,6 +154,8 @@ public final class Router {
     /// タスクを選択
     public func selectTask(_ taskId: TaskID?) {
         selectedTask = taskId
+        // タスク選択時は常にdetailRefreshIdを更新してビューを再作成
+        detailRefreshId = UUID()
     }
 
     /// エージェントを選択

@@ -31,6 +31,7 @@ struct ContentView: View {
             // 詳細: タスク詳細 or エージェント詳細
             if let taskId = router.selectedTask {
                 TaskDetailView(taskId: taskId)
+                    .id(router.detailRefreshId)  // タスク再選択時にビューを再作成
             } else if let agentId = router.selectedAgent {
                 AgentDetailView(agentId: agentId)
             } else {
