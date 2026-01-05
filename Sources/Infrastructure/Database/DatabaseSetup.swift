@@ -23,11 +23,18 @@ public final class DatabaseSetup {
 
         // WALモードを有効化した設定を作成
         var configuration = Configuration()
+
+        // マルチプロセス同時アクセス対応: ビジータイムアウト設定
+        // AppとMCPサーバーが同時にDBにアクセスする際のロック待機時間
+        configuration.busyMode = .timeout(5.0) // 5秒待機
+
         configuration.prepareDatabase { db in
             // WALモードを有効化（同時アクセス対応）
             try db.execute(sql: "PRAGMA journal_mode = WAL")
             // 外部キー制約を有効化
             try db.execute(sql: "PRAGMA foreign_keys = ON")
+            // 同期モードをNORMALに設定（パフォーマンスと安全性のバランス）
+            try db.execute(sql: "PRAGMA synchronous = NORMAL")
         }
 
         let dbQueue = try DatabaseQueue(path: path, configuration: configuration)

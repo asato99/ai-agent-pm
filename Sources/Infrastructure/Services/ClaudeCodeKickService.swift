@@ -26,26 +26,38 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
         task: Task,
         project: Project
     ) async throws -> AgentKickResult {
+        KickLogger.log("[KickService] kick() called")
+        KickLogger.log("[KickService] Agent: id=\(agent.id.value), name=\(agent.name), kickMethod=\(agent.kickMethod)")
+        KickLogger.log("[KickService] Task: id=\(task.id.value), title=\(task.title)")
+        KickLogger.log("[KickService] Project: id=\(project.id.value), name=\(project.name)")
+
         // 作業ディレクトリの確認
         guard let workingDirectory = project.workingDirectory, !workingDirectory.isEmpty else {
+            KickLogger.log("[KickService] ERROR: Working directory not set for project")
             throw AgentKickError.workingDirectoryNotSet(project.id)
         }
+        KickLogger.log("[KickService] Working directory: \(workingDirectory)")
 
         // 作業ディレクトリの存在確認
         let fileManager = FileManager.default
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: workingDirectory, isDirectory: &isDirectory),
               isDirectory.boolValue else {
+            KickLogger.log("[KickService] ERROR: Working directory not found: \(workingDirectory)")
             throw AgentKickError.workingDirectoryNotFound(workingDirectory)
         }
+        KickLogger.log("[KickService] Working directory exists: OK")
 
         // キックメソッドの確認
         guard agent.kickMethod == .cli else {
+            KickLogger.log("[KickService] ERROR: Kick method not supported: \(agent.kickMethod)")
             throw AgentKickError.kickMethodNotSupported(agent.kickMethod)
         }
+        KickLogger.log("[KickService] Kick method check: OK (.cli)")
 
         // シミュレートモード時は実際のプロセスを起動せずに成功を返す
         if shouldSimulate {
+            KickLogger.log("[KickService] Simulate mode: returning simulated success")
             return AgentKickResult(
                 success: true,
                 agentId: agent.id,
@@ -56,10 +68,13 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
         }
 
         // プロンプトを構築
+        KickLogger.log("[KickService] Building prompt...")
         let prompt = buildPrompt(task: task, agent: agent, project: project)
+        KickLogger.log("[KickService] Prompt built (\(prompt.count) characters)")
 
         // Claude Code CLIを起動
         do {
+            KickLogger.log("[KickService] Launching Claude Code CLI...")
             let processId = try await launchClaudeCode(
                 workingDirectory: workingDirectory,
                 prompt: prompt,
@@ -68,6 +83,7 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
                 project: project
             )
 
+            KickLogger.log("[KickService] Claude Code started successfully, processId=\(processId)")
             return AgentKickResult(
                 success: true,
                 agentId: agent.id,
@@ -76,6 +92,7 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
                 processId: processId
             )
         } catch {
+            KickLogger.log("[KickService] ERROR: Execution failed: \(error.localizedDescription)")
             throw AgentKickError.executionFailed(error.localizedDescription)
         }
     }
@@ -125,8 +142,11 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
 
     /// Claude CLIのパスを取得
     private func findClaudeCLI() throws -> String {
+        KickLogger.log("[KickService] findClaudeCLI() called")
+
         // 1. カスタムパスが設定されている場合はそれを使用
         if let customPath = ProcessInfo.processInfo.environment["CLAUDE_CLI_PATH"] {
+            KickLogger.log("[KickService] Using custom CLI path from CLAUDE_CLI_PATH: \(customPath)")
             return customPath
         }
 
@@ -140,9 +160,11 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
         let fileManager = FileManager.default
         for path in possiblePaths {
             if fileManager.isExecutableFile(atPath: path) {
+                KickLogger.log("[KickService] Found CLI at standard path: \(path)")
                 return path
             }
         }
+        KickLogger.log("[KickService] CLI not found in standard paths, trying 'which' command...")
 
         // 3. which コマンドで探す
         let whichProcess = Process()
@@ -159,10 +181,12 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                !path.isEmpty {
+                KickLogger.log("[KickService] Found CLI via 'which' command: \(path)")
                 return path
             }
         }
 
+        KickLogger.log("[KickService] ERROR: Claude CLI not found")
         throw AgentKickError.claudeCLINotFound
     }
 
@@ -174,19 +198,24 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
         task: Task,
         project: Project
     ) async throws -> Int {
+        KickLogger.log("[KickService] launchClaudeCode() called")
         let process = Process()
 
         // カスタムコマンドが設定されている場合はそれを使用
         if let kickCommand = agent.kickCommand, !kickCommand.isEmpty {
+            KickLogger.log("[KickService] Using custom kick command")
+            KickLogger.log("[KickService] Command: \(kickCommand)")
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
             process.arguments = ["-c", kickCommand]
         } else {
             // Claude CLIのパスを取得
             let claudePath = try findClaudeCLI()
+            KickLogger.log("[KickService] Claude CLI path: \(claudePath)")
 
             // プロンプトを一時ファイルに書き出す（長いプロンプトをシェル経由で渡すため）
             let promptFile = "/tmp/uc001_prompt_\(task.id.value).txt"
             try prompt.write(toFile: promptFile, atomically: true, encoding: .utf8)
+            KickLogger.log("[KickService] Prompt written to: \(promptFile)")
 
             // nohupでバックグラウンド実行するシェルコマンドを構築
             // アプリ終了後もプロセスが継続するようにする
@@ -195,6 +224,7 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
 
             // システムプロンプトが設定されている場合（シングルクォートをエスケープ）
             if let systemPrompt = agent.systemPrompt, !systemPrompt.isEmpty {
+                KickLogger.log("[KickService] Using system prompt (\(systemPrompt.count) characters)")
                 let escapedPrompt = systemPrompt.replacingOccurrences(of: "'", with: "'\"'\"'")
                 shellCommand += " --system-prompt '\(escapedPrompt)'"
             }
@@ -202,6 +232,8 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
             shellCommand += " --dangerously-skip-permissions"
             shellCommand += " -p \"$(cat '\(promptFile)')\""
             shellCommand += " > /tmp/uc001_claude_output.log 2>&1 &"
+
+            KickLogger.log("[KickService] Shell command: \(shellCommand)")
 
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
             process.arguments = ["-c", shellCommand]
@@ -215,10 +247,13 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
         environment["AGENT_ID"] = agent.id.value
         environment["AGENT_NAME"] = agent.name
         process.environment = environment
+        KickLogger.log("[KickService] Environment variables set for subprocess")
 
         // 実行
+        KickLogger.log("[KickService] Starting process...")
         try process.run()
         process.waitUntilExit()
+        KickLogger.log("[KickService] Process completed with termination status: \(process.terminationStatus)")
 
         // バックグラウンドプロセスのPIDを返す（nohupで起動したため実際のPIDは取得できない）
         return 1

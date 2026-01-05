@@ -437,6 +437,7 @@ struct TaskDetailView: View {
     private func updateStatus(_ newStatus: TaskStatus) {
         AsyncTask {
             do {
+                KickLogger.log("[TaskDetailView] updateStatus called: newStatus=\(newStatus)")
                 let updatedTask = try container.updateTaskStatusUseCase.execute(
                     taskId: taskId,
                     newStatus: newStatus,
@@ -444,15 +445,20 @@ struct TaskDetailView: View {
                     sessionId: nil,
                     reason: nil
                 )
+                KickLogger.log("[TaskDetailView] Status updated: taskId=\(taskId.value), assigneeId=\(updatedTask.assigneeId?.value ?? "nil")")
 
                 // in_progressへの遷移時はエージェントをキック
                 if newStatus == .inProgress && updatedTask.assigneeId != nil {
+                    KickLogger.log("[TaskDetailView] Kick condition met, calling kickAgentUseCase...")
                     do {
                         _ = try await container.kickAgentUseCase.execute(taskId: taskId)
                     } catch {
                         // キック失敗時はエラーを表示（ステータス変更は成功している）
+                        KickLogger.log("[TaskDetailView] Kick failed: \(error.localizedDescription)")
                         router.showAlert(.error(message: error.localizedDescription))
                     }
+                } else {
+                    KickLogger.log("[TaskDetailView] Kick skipped: newStatus=\(newStatus), hasAssignee=\(updatedTask.assigneeId != nil)")
                 }
 
                 // done への遷移時は親に完了通知イベントを記録

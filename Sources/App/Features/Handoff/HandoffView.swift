@@ -15,15 +15,17 @@ struct HandoffView: View {
 
     @State private var task: Task?
     @State private var agents: [Agent] = []
+    @State private var fromAgentId: AgentID?
     @State private var toAgentId: AgentID?
     @State private var summary: String = ""
     @State private var context: String = ""
     @State private var recommendations: String = ""
     @State private var isLoading = false
     @State private var isSaving = false
+    @State private var errorMessage: String?
 
     var isValid: Bool {
-        !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        fromAgentId != nil && !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -41,6 +43,13 @@ struct HandoffView: View {
                 }
 
                 Section("Handoff Details") {
+                    Picker("From", selection: $fromAgentId) {
+                        Text("Select agent").tag(nil as AgentID?)
+                        ForEach(agents, id: \.id) { agent in
+                            Text(agent.name).tag(agent.id as AgentID?)
+                        }
+                    }
+
                     Picker("Hand off to", selection: $toAgentId) {
                         Text("Anyone").tag(nil as AgentID?)
                         ForEach(agents, id: \.id) { agent in
@@ -83,6 +92,16 @@ struct HandoffView: View {
             .task {
                 await loadData()
             }
+            .alert("Error", isPresented: .init(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("OK") { errorMessage = nil }
+            } message: {
+                if let errorMessage = errorMessage {
+                    Text(errorMessage)
+                }
+            }
         }
         .frame(minWidth: 500, minHeight: 450)
     }
@@ -96,18 +115,17 @@ struct HandoffView: View {
             // エージェントはプロジェクト非依存なので全件取得
             agents = try container.getAgentsUseCase.execute()
         } catch {
-            router.showAlert(.error(message: error.localizedDescription))
+            errorMessage = error.localizedDescription
         }
     }
 
     private func createHandoff() {
+        guard let fromAgentId = fromAgentId else { return }
+
         isSaving = true
 
         AsyncTask {
             do {
-                // Note: In a real app, fromAgentId would come from the current user/session
-                let fromAgentId = AgentID.generate()
-
                 _ = try container.createHandoffUseCase.execute(
                     taskId: taskId,
                     fromAgentId: fromAgentId,
@@ -119,7 +137,7 @@ struct HandoffView: View {
                 dismiss()
             } catch {
                 isSaving = false
-                router.showAlert(.error(message: error.localizedDescription))
+                errorMessage = error.localizedDescription
             }
         }
     }

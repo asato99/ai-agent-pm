@@ -2,6 +2,7 @@
 // 設定ビュー
 
 import SwiftUI
+import Infrastructure
 
 struct SettingsView: View {
     @EnvironmentObject var container: DependencyContainer
@@ -129,17 +130,10 @@ struct DatabaseSettingsView: View {
     }
 
     private func loadDatabaseInfo() {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        let dbPath = appSupport
-            .appendingPathComponent("AIAgentPM")
-            .appendingPathComponent("pm.db")
+        // AppConfigから統一されたDBパスを取得
+        databasePath = AppConfig.databasePath
 
-        databasePath = dbPath.path
-
-        if let attributes = try? FileManager.default.attributesOfItem(atPath: dbPath.path),
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: databasePath),
            let size = attributes[.size] as? Int64 {
             let formatter = ByteCountFormatter()
             formatter.countStyle = .file

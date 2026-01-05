@@ -8,24 +8,8 @@ import Domain
 
 // MARK: - Constants
 
-enum AppConstants {
-    static let appName = "AIAgentPM"
-    static let defaultAgentId = "agt_claude"
-    static let defaultAgentName = "Claude Code"
-    static let defaultProjectId = "prj_default"
-    static let defaultProjectName = "Default Project"
-
-    /// ~/Library/Application Support/AIAgentPM/
-    static var appSupportDirectory: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/Library/Application Support/\(appName)"
-    }
-
-    /// デフォルトDBパス
-    static var defaultDatabasePath: String {
-        "\(appSupportDirectory)/data.db"
-    }
-
+/// MCPServer固有の設定（共通設定はInfrastructure.AppConfigを使用）
+enum MCPServerConstants {
     /// Claude Code設定ファイルパス
     static var claudeConfigPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -53,15 +37,13 @@ struct Serve: ParsableCommand {
         abstract: "MCPサーバーを起動（Claude Codeから自動呼び出し）"
     )
 
-    @Option(name: .long, help: "データベースパス（省略時: デフォルト位置）")
-    var db: String?
-
+    // DBパスは環境変数 AIAGENTPM_DB_PATH で切り替え（AppConfig.databasePath）
     // ステートレス設計: agent-id と project-id は起動引数で指定しない
     // IDはキック時のプロンプトで提供され、各ツール呼び出し時に引数として渡される
     // 参照: docs/prd/MCP_DESIGN.md
 
     func run() throws {
-        let dbPath = db ?? AppConstants.defaultDatabasePath
+        let dbPath = AppConfig.databasePath
 
         // 初回起動時は自動セットアップ
         if !FileManager.default.fileExists(atPath: dbPath) {
@@ -86,15 +68,15 @@ struct Serve: ParsableCommand {
         let agentRepo = AgentRepository(database: database)
 
         // デフォルトプロジェクト作成
-        let projectId = ProjectID(value: AppConstants.defaultProjectId)
-        let project = Project(id: projectId, name: AppConstants.defaultProjectName)
+        let projectId = ProjectID(value: AppConfig.DefaultProject.id)
+        let project = Project(id: projectId, name: AppConfig.DefaultProject.name)
         try projectRepo.save(project)
 
         // デフォルトエージェント作成
         let agent = Agent(
-            id: AgentID(value: AppConstants.defaultAgentId),
-            name: AppConstants.defaultAgentName,
-            role: "AI Assistant",
+            id: AgentID(value: AppConfig.DefaultAgent.id),
+            name: AppConfig.DefaultAgent.name,
+            role: AppConfig.DefaultAgent.role,
             type: .ai
         )
         try agentRepo.save(agent)
@@ -114,7 +96,7 @@ struct Setup: ParsableCommand {
     var withSampleTasks = false
 
     func run() throws {
-        let dbPath = AppConstants.defaultDatabasePath
+        let dbPath = AppConfig.databasePath
 
         print("AI Agent PM セットアップ")
         print("========================")
@@ -137,16 +119,16 @@ struct Setup: ParsableCommand {
         let taskRepo = TaskRepository(database: database)
 
         // プロジェクト作成
-        let projectId = ProjectID(value: AppConstants.defaultProjectId)
-        let project = Project(id: projectId, name: AppConstants.defaultProjectName)
+        let projectId = ProjectID(value: AppConfig.DefaultProject.id)
+        let project = Project(id: projectId, name: AppConfig.DefaultProject.name)
         try projectRepo.save(project)
         print("✓ プロジェクト作成: \(project.name)")
 
         // エージェント作成
         let agent = Agent(
-            id: AgentID(value: AppConstants.defaultAgentId),
-            name: AppConstants.defaultAgentName,
-            role: "AI Assistant",
+            id: AgentID(value: AppConfig.DefaultAgent.id),
+            name: AppConfig.DefaultAgent.name,
+            role: AppConfig.DefaultAgent.role,
             type: .ai
         )
         try agentRepo.save(agent)
@@ -309,7 +291,7 @@ struct Status: ParsableCommand {
         print("")
 
         // DB確認
-        let dbPath = AppConstants.defaultDatabasePath
+        let dbPath = AppConfig.databasePath
         if FileManager.default.fileExists(atPath: dbPath) {
             print("✓ データベース: \(dbPath)")
 
@@ -335,7 +317,7 @@ struct Status: ParsableCommand {
         print("")
 
         // Claude Code設定確認
-        let configPath = AppConstants.claudeConfigPath
+        let configPath = MCPServerConstants.claudeConfigPath
         if FileManager.default.fileExists(atPath: configPath) {
             let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
             if let config = try JSONSerialization.jsonObject(with: data) as? [String: Any],

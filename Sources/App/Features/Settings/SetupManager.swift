@@ -3,6 +3,7 @@
 
 import Foundation
 import Domain
+import Infrastructure
 
 /// Claude Codeとの連携設定を管理
 public final class SetupManager {
@@ -35,15 +36,9 @@ public final class SetupManager {
         return "/usr/local/bin/mcp-server-pm"
     }
 
-    /// データベースパス
+    /// データベースパス（AppConfigから取得）
     public var databasePath: String {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-
-        let appDirectory = appSupport.appendingPathComponent("AIAgentPM")
-        return appDirectory.appendingPathComponent("pm.db").path
+        AppConfig.databasePath
     }
 
     /// Claude Code設定ファイルパス
@@ -54,20 +49,14 @@ public final class SetupManager {
 
     // MARK: - Config Generation
 
-    /// エージェント用のClaude Code設定を生成
-    public func generateClaudeCodeConfig(
-        projectId: ProjectID,
-        agentId: AgentID
-    ) -> String {
+    /// Claude Code設定を生成（ステートレス設計: 引数なし）
+    /// IDはキック時のプロンプトで提供され、各ツール呼び出し時に引数として渡される
+    public func generateClaudeCodeConfig() -> String {
         let config: [String: Any] = [
             "mcpServers": [
                 "agent-pm": [
                     "command": mcpServerPath,
-                    "args": [
-                        "--db", databasePath,
-                        "--project-id", projectId.value,
-                        "--agent-id", agentId.value
-                    ]
+                    "args": [] as [String]
                 ]
             ]
         ]
@@ -83,27 +72,7 @@ public final class SetupManager {
           "mcpServers": {
             "agent-pm": {
               "command": "\(mcpServerPath)",
-              "args": [
-                "--db", "\(databasePath)",
-                "--project-id", "\(projectId.value)",
-                "--agent-id", "\(agentId.value)"
-              ]
-            }
-          }
-        }
-        """
-    }
-
-    /// 汎用的なClaude Code設定を生成（プロジェクト/エージェント指定なし）
-    public func generateGenericClaudeCodeConfig() -> String {
-        return """
-        {
-          "mcpServers": {
-            "agent-pm": {
-              "command": "\(mcpServerPath)",
-              "args": [
-                "--db", "\(databasePath)"
-              ]
+              "args": []
             }
           }
         }
@@ -113,17 +82,8 @@ public final class SetupManager {
     // MARK: - Config Installation
 
     /// Claude Code設定をインストール
-    public func installToClaudeCode(
-        projectId: ProjectID,
-        agentId: AgentID
-    ) throws {
-        let newConfig = generateClaudeCodeConfig(projectId: projectId, agentId: agentId)
-        try installConfig(newConfig)
-    }
-
-    /// 汎用設定をインストール
-    public func installGenericConfig() throws {
-        let newConfig = generateGenericClaudeCodeConfig()
+    public func installToClaudeCode() throws {
+        let newConfig = generateClaudeCodeConfig()
         try installConfig(newConfig)
     }
 

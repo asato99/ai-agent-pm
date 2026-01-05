@@ -264,6 +264,8 @@ public struct UpdateTaskUseCase: Sendable {
         title: String? = nil,
         description: String? = nil,
         priority: TaskPriority? = nil,
+        assigneeId: AgentID? = nil,
+        clearAssignee: Bool = false,
         estimatedMinutes: Int? = nil,
         actualMinutes: Int? = nil
     ) throws -> Task {
@@ -279,6 +281,11 @@ public struct UpdateTaskUseCase: Sendable {
         }
         if let priority = priority {
             task.priority = priority
+        }
+        if let assigneeId = assigneeId {
+            task.assigneeId = assigneeId
+        } else if clearAssignee {
+            task.assigneeId = nil
         }
         if let estimatedMinutes = estimatedMinutes {
             task.estimatedMinutes = estimatedMinutes

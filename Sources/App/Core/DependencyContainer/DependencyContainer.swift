@@ -353,13 +353,8 @@ public final class DependencyContainer: ObservableObject {
     }
 
     /// デフォルトのデータベースパスを使用して初期化
+    /// AppConfig.databasePath を使用（環境変数で切り替え可能）
     public convenience init() throws {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        let appDirectory = appSupport.appendingPathComponent("AIAgentPM")
-        let dbPath = appDirectory.appendingPathComponent("pm.db").path
-        try self.init(databasePath: dbPath)
+        try self.init(databasePath: AppConfig.databasePath)
     }
 }

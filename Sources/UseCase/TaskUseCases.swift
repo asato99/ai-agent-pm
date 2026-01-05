@@ -472,27 +472,39 @@ public struct KickAgentUseCase: Sendable {
     ///   - taskId: キック対象のタスクID
     /// - Returns: キック結果
     public func execute(taskId: TaskID) async throws -> AgentKickResult {
+        KickLogger.log("[KickUseCase] execute started: taskId=\(taskId.value)")
+
         // タスクを取得
         guard let task = try taskRepository.findById(taskId) else {
+            KickLogger.log("[KickUseCase] ERROR: Task not found: \(taskId.value)")
             throw UseCaseError.taskNotFound(taskId)
         }
+        KickLogger.log("[KickUseCase] Task found: '\(task.title)'")
 
         // アサイン先エージェントを確認
         guard let assigneeId = task.assigneeId else {
+            KickLogger.log("[KickUseCase] ERROR: Task not assigned: \(taskId.value)")
             throw AgentKickError.taskNotAssigned(taskId)
         }
+        KickLogger.log("[KickUseCase] Assignee ID: \(assigneeId.value)")
 
         guard let agent = try agentRepository.findById(assigneeId) else {
+            KickLogger.log("[KickUseCase] ERROR: Agent not found: \(assigneeId.value)")
             throw UseCaseError.agentNotFound(assigneeId)
         }
+        KickLogger.log("[KickUseCase] Agent found: '\(agent.name)', kickMethod=\(agent.kickMethod.rawValue)")
 
         // プロジェクトを取得
         guard let project = try projectRepository.findById(task.projectId) else {
+            KickLogger.log("[KickUseCase] ERROR: Project not found: \(task.projectId.value)")
             throw UseCaseError.projectNotFound(task.projectId)
         }
+        KickLogger.log("[KickUseCase] Project found: '\(project.name)', workingDir=\(project.workingDirectory ?? "nil")")
 
         // キックを実行
+        KickLogger.log("[KickUseCase] Calling kickService.kick()...")
         let result = try await kickService.kick(agent: agent, task: task, project: project)
+        KickLogger.log("[KickUseCase] Kick result: success=\(result.success), message=\(result.message ?? "nil")")
 
         // キックイベントを記録
         let event = StateChangeEvent(

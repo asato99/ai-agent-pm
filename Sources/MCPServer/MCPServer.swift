@@ -38,6 +38,37 @@ final class MCPServer {
         self.handoffRepository = HandoffRepository(database: database)
         self.eventRepository = EventRepository(database: database)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
+
+        // 起動時ログ（常に出力）- ファイルとstderrの両方に出力
+        let dbPath = AppConfig.databasePath
+        Self.log("[MCP] Started. DB Path: \(dbPath)")
+
+        // DB内のエージェント一覧をログ
+        do {
+            let agents = try agentRepository.findAll()
+            Self.log("[MCP] Agents in DB: \(agents.map { "\($0.id.value) (\($0.name))" })")
+        } catch {
+            Self.log("[MCP] Failed to list agents: \(error)")
+        }
+    }
+
+    /// ログ出力（ファイルとstderrの両方）
+    private static func log(_ message: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let logLine = "[\(timestamp)] \(message)\n"
+
+        // stderrに出力
+        FileHandle.standardError.write(logLine.data(using: .utf8)!)
+
+        // ファイルにも出力
+        let logPath = AppConfig.appSupportDirectory.appendingPathComponent("mcp-server.log").path
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            handle.seekToEndOfFile()
+            handle.write(logLine.data(using: .utf8)!)
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: logPath, contents: logLine.data(using: .utf8))
+        }
     }
 
     /// デバッグモード時のみログ出力
@@ -717,10 +748,16 @@ final class MCPServer {
 
     /// get_agent_profile - エージェント情報を取得
     private func getAgentProfile(agentId: String) throws -> [String: Any] {
+        Self.log("[MCP] getAgentProfile called with: '\(agentId)'")
+
         let id = AgentID(value: agentId)
         guard let agent = try agentRepository.findById(id) else {
+            // 見つからない場合、全エージェントをログ
+            let allAgents = try? agentRepository.findAll()
+            Self.log("[MCP] Agent '\(agentId)' not found. Available: \(allAgents?.map { $0.id.value } ?? [])")
             throw MCPError.agentNotFound(agentId)
         }
+        Self.log("[MCP] Found agent: \(agent.name)")
         return agentToDict(agent)
     }
 
@@ -840,7 +877,10 @@ final class MCPServer {
 
     /// assign_task - タスクをエージェントに割り当て
     private func assignTask(taskId: String, assigneeId: String?) throws -> [String: Any] {
+        Self.log("[MCP] assignTask called: taskId='\(taskId)', assigneeId='\(assigneeId ?? "nil")'")
+
         guard var task = try taskRepository.findById(TaskID(value: taskId)) else {
+            Self.log("[MCP] Task '\(taskId)' not found")
             throw MCPError.taskNotFound(taskId)
         }
 
@@ -848,6 +888,8 @@ final class MCPServer {
         if let assigneeIdStr = assigneeId {
             let targetAgentId = AgentID(value: assigneeIdStr)
             guard try agentRepository.findById(targetAgentId) != nil else {
+                let allAgents = try? agentRepository.findAll()
+                Self.log("[MCP] assignTask: Agent '\(assigneeIdStr)' not found. Available: \(allAgents?.map { $0.id.value } ?? [])")
                 throw MCPError.agentNotFound(assigneeIdStr)
             }
         }

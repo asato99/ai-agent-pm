@@ -61,6 +61,14 @@ struct AIAgentPMApp: App {
     }
 
     init() {
+        // アプリ起動ログ
+        KickLogger.log("=== AIAgentPM App Starting ===")
+        KickLogger.log("Version: 1.0.0")
+        KickLogger.log("UITesting: \(Self.isUITesting)")
+        if Self.isUITesting {
+            KickLogger.log("Test Scenario: \(Self.testScenario)")
+        }
+
         // Initialize container - any error here is fatal
         let newContainer: DependencyContainer
         do {
@@ -78,9 +86,11 @@ struct AIAgentPMApp: App {
                 newContainer = try DependencyContainer()
             }
         } catch {
+            KickLogger.log("ERROR: Failed to initialize DependencyContainer: \(error)")
             fatalError("Failed to initialize DependencyContainer: \(error)")
         }
         _container = StateObject(wrappedValue: newContainer)
+        KickLogger.log("=== AIAgentPM App Initialized Successfully ===")
     }
 
     @State private var isSeeded = false

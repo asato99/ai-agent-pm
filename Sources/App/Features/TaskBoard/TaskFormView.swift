@@ -145,6 +145,8 @@ struct TaskFormView: View {
                         title: title,
                         description: description.isEmpty ? nil : description,
                         priority: priority,
+                        assigneeId: assigneeId,
+                        clearAssignee: assigneeId == nil,
                         estimatedMinutes: estimatedMinutes
                     )
                 }
