@@ -171,22 +171,161 @@ IMPORTANT: Create any output files within this directory.
 
 | 方式 | 対象 | 実行コマンド例 |
 |------|------|---------------|
-| CLIヘッドレス起動 | Claude Code | `claude --headless` + プロンプト |
-| スクリプト実行 | カスタム | エージェント設定で定義したスクリプト |
-| API呼び出し | Gemini等 | 各AIのAPI経由 |
-| 通知 | 人間 | メール/Slack/Webhook |
+| CLIヘッドレス起動 | Claude Code | `claude --dangerously-skip-permissions` + プロンプト |
+| CLIヘッドレス起動 | Gemini CLI | `gemini --yolo` + パイプでプロンプト |
+| カスタムコマンド | 任意 | エージェント設定で定義したコマンド |
+| 通知 | 人間 | メール/Slack/Webhook（将来） |
 
 **注意**: `--agent-id` のようなコマンドライン引数ではなく、プロンプト内にID情報を含める。
 
-### エージェント管理画面での設定
+---
+
+## AIエージェントの種別設定
+
+### 概要
+
+エージェントの種別（type）が「AI」の場合、追加でAI種別（aiType）を選択する。
+AI種別に応じて、適切なCLI起動処理が自動的に適用される。
+
+### AI種別（aiType）
+
+| 種別 | 説明 | キック方式 |
+|------|------|-----------|
+| `claude` | Claude Code CLI | 自動設定（組み込み） |
+| `gemini` | Gemini CLI | 自動設定（組み込み） |
+| `custom` | カスタムコマンド | ユーザー定義 |
+
+### 種別ごとの動作
+
+#### Claude（組み込み）
+
+```bash
+# 自動生成されるコマンド
+source ~/.zshrc; source ~/.bashrc
+cd '{workingDirectory}'
+nohup claude --dangerously-skip-permissions \
+  [--system-prompt '{systemPrompt}'] \
+  -p "$(cat '{promptFile}')" \
+  > /tmp/uc001_claude_output.log 2>&1 &
+```
+
+| 設定項目 | 必須 | 説明 |
+|----------|------|------|
+| System Prompt | △ | Claude への追加指示 |
+
+#### Gemini（組み込み）
+
+```bash
+# 自動生成されるコマンド
+source ~/.zshrc; source ~/.bashrc
+cd '{workingDirectory}'
+cat '{promptFile}' | nohup gemini --yolo \
+  > /tmp/gemini_output.log 2>&1 &
+```
+
+| 設定項目 | 必須 | 説明 |
+|----------|------|------|
+| なし | - | 追加設定不要 |
+
+#### Custom（カスタム）
+
+ユーザーが任意のコマンドを定義。以下のプレースホルダーが使用可能：
+
+| プレースホルダー | 展開後の値 |
+|-----------------|-----------|
+| `$TASK_ID` / `${TASK_ID}` | タスクID |
+| `$PROJECT_ID` / `${PROJECT_ID}` | プロジェクトID |
+| `$AGENT_ID` / `${AGENT_ID}` | エージェントID |
+
+```bash
+# カスタムコマンド例
+cat /tmp/uc001_prompt_$TASK_ID.txt | my-custom-ai --execute
+```
+
+**注意**:
+- 作業ディレクトリへの `cd` は自動適用される
+- シェル設定（~/.zshrc等）は自動で読み込まれる
+- プロンプトファイルは `/tmp/uc001_prompt_{taskId}.txt` に自動作成される
+
+### UI設計
+
+```
+[エージェント作成/編集]
+│
+├── 基本情報
+│   ├── 名前: [________]
+│   ├── 種別: [Human ▼] / [AI ▼]  ← AI選択時、下記が表示
+│   └── 役割: [Developer ▼]
+│
+├── AI設定 (種別=AI の場合のみ表示)
+│   ├── AI種別: [Claude ▼] / [Gemini ▼] / [Custom ▼]
+│   │
+│   ├── (Claude選択時)
+│   │   └── System Prompt: [________________]
+│   │                      (オプション)
+│   │
+│   ├── (Gemini選択時)
+│   │   └── (追加設定なし)
+│   │
+│   └── (Custom選択時)
+│       └── 実行コマンド: [________________]
+│                        プレースホルダー: $TASK_ID, $PROJECT_ID, $AGENT_ID
+│
+└── 詳細設定
+    ├── 並列実行可能数: [1]
+    └── ステータス: [Active ▼]
+```
+
+### データモデル変更
+
+```swift
+// Agent エンティティの変更
+struct Agent {
+    // 既存フィールド
+    var type: AgentType           // .human / .ai
+
+    // 新規フィールド（typeが.aiの場合のみ使用）
+    var aiType: AIType?           // .claude / .gemini / .custom
+
+    // 既存フィールド（aiTypeが.customの場合のみ使用）
+    var kickCommand: String?      // カスタムコマンド
+
+    // 既存フィールド（aiTypeが.claudeの場合に使用）
+    var systemPrompt: String?     // Claudeへのシステムプロンプト
+}
+
+enum AIType: String, Codable {
+    case claude = "claude"
+    case gemini = "gemini"
+    case custom = "custom"
+}
+```
+
+### マイグレーション
+
+既存データの移行ルール：
+
+| 既存の状態 | 移行後 |
+|-----------|--------|
+| kickMethod=cli, kickCommand=空 | aiType=claude |
+| kickMethod=cli, kickCommand=設定あり | aiType=custom |
+| kickMethod=none | aiType=nil（人間または未設定） |
+
+### エージェント管理画面での設定（更新）
 
 ```
 [エージェント設定]
-├── 基本情報（名前、種別、役割）
-├── 実行設定
-│   ├── 起動方式: CLI / Script / API / Notification
-│   ├── 起動コマンド/スクリプトパス
-│   └── プロンプトテンプレート（オプション）
+├── 基本情報
+│   ├── 名前
+│   ├── 種別 (Human/AI)
+│   └── 役割
+├── AI設定 (AI選択時のみ)
+│   ├── AI種別 (Claude/Gemini/Custom)
+│   ├── System Prompt (Claude時)
+│   └── 実行コマンド (Custom時)
+├── 詳細設定
+│   ├── 並列実行可能数
+│   └── ステータス
 └── 認証設定
     ├── エージェントID（自動生成）
     └── パスキー（オプション）

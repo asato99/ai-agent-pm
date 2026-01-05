@@ -201,21 +201,31 @@ public final class ClaudeCodeKickService: AgentKickServiceProtocol, @unchecked S
         KickLogger.log("[KickService] launchClaudeCode() called")
         let process = Process()
 
+        // プロンプトを一時ファイルに書き出す（カスタムコマンドでも使用可能）
+        let promptFile = "/tmp/uc001_prompt_\(task.id.value).txt"
+        try prompt.write(toFile: promptFile, atomically: true, encoding: .utf8)
+        KickLogger.log("[KickService] Prompt written to: \(promptFile)")
+
         // カスタムコマンドが設定されている場合はそれを使用
         if let kickCommand = agent.kickCommand, !kickCommand.isEmpty {
             KickLogger.log("[KickService] Using custom kick command")
-            KickLogger.log("[KickService] Command: \(kickCommand)")
+            // プレースホルダーを実際の値に置換
+            let expandedCommand = kickCommand
+                .replacingOccurrences(of: "$TASK_ID", with: task.id.value)
+                .replacingOccurrences(of: "${TASK_ID}", with: task.id.value)
+                .replacingOccurrences(of: "$PROJECT_ID", with: project.id.value)
+                .replacingOccurrences(of: "${PROJECT_ID}", with: project.id.value)
+                .replacingOccurrences(of: "$AGENT_ID", with: agent.id.value)
+                .replacingOccurrences(of: "${AGENT_ID}", with: agent.id.value)
+            // シェル設定を読み込み、作業ディレクトリでカスタムコマンドを実行
+            let wrappedCommand = "source ~/.zshrc 2>/dev/null; source ~/.bashrc 2>/dev/null; cd '\(workingDirectory)' && \(expandedCommand)"
+            KickLogger.log("[KickService] Command: \(wrappedCommand)")
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = ["-c", kickCommand]
+            process.arguments = ["-c", wrappedCommand]
         } else {
             // Claude CLIのパスを取得
             let claudePath = try findClaudeCLI()
             KickLogger.log("[KickService] Claude CLI path: \(claudePath)")
-
-            // プロンプトを一時ファイルに書き出す（長いプロンプトをシェル経由で渡すため）
-            let promptFile = "/tmp/uc001_prompt_\(task.id.value).txt"
-            try prompt.write(toFile: promptFile, atomically: true, encoding: .utf8)
-            KickLogger.log("[KickService] Prompt written to: \(promptFile)")
 
             // nohupでバックグラウンド実行するシェルコマンドを構築
             // アプリ終了後もプロセスが継続するようにする
