@@ -331,6 +331,263 @@ enum AIType: String, Codable {
     └── パスキー（オプション）
 ```
 
+---
+
+## キックサービスアーキテクチャ
+
+### 概要
+
+エージェントのキック（起動）処理は、AI種別に応じて適切な起動方式を選択するストラテジーパターンで実装する。
+
+### クラス構造
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    AgentKickServiceProtocol                         │
+│  ─ kick(agent:task:project:) -> AgentKickResult                    │
+└─────────────────────────────────────────────────────────────────────┘
+                                  △
+                                  │ implements
+┌─────────────────────────────────────────────────────────────────────┐
+│                      AIAgentKickService                             │
+│  ─ Main orchestrator for agent kicks                               │
+│  ─ Routes to appropriate strategy based on aiType                  │
+│  ─ Handles common logic (prompt building, validation)              │
+├─────────────────────────────────────────────────────────────────────┤
+│  + kick(agent:task:project:) -> AgentKickResult                    │
+│  - buildPrompt(task:agent:project:) -> String                      │
+│  - selectStrategy(for aiType:) -> KickStrategyProtocol             │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ uses
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      KickStrategyProtocol                           │
+│  ─ Strategy interface for CLI launching                            │
+├─────────────────────────────────────────────────────────────────────┤
+│  + launch(workingDir:promptFile:agent:) async throws -> Int        │
+│  + cliName: String { get }                                         │
+└─────────────────────────────────────────────────────────────────────┘
+          △                       △                       △
+          │                       │                       │
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+│ ClaudeKickStrategy│   │ GeminiKickStrategy│   │ CustomKickStrategy│
+├─────────────────┤   ├─────────────────┤   ├─────────────────┤
+│ cliName: "claude" │   │ cliName: "gemini" │   │ cliName: "custom" │
+│                 │   │                 │   │                 │
+│ ─ findCLI()     │   │ ─ findCLI()     │   │ ─ expandCommand()│
+│ ─ buildCommand()│   │ ─ buildCommand()│   │                 │
+└─────────────────┘   └─────────────────┘   └─────────────────┘
+```
+
+### ファイル構成
+
+```
+Sources/
+├── Domain/
+│   └── Services/
+│       ├── AgentKickServiceProtocol.swift  # プロトコル定義（既存）
+│       ├── KickStrategyProtocol.swift      # ストラテジープロトコル（新規）
+│       └── KickLogger.swift                 # ロギング（既存）
+│
+└── Infrastructure/
+    └── Services/
+        ├── AIAgentKickService.swift         # メインサービス（リネーム）
+        └── KickStrategies/
+            ├── ClaudeKickStrategy.swift     # Claude起動ロジック（新規）
+            ├── GeminiKickStrategy.swift     # Gemini起動ロジック（新規）
+            └── CustomKickStrategy.swift     # カスタム起動ロジック（新規）
+```
+
+### 各コンポーネントの責務
+
+#### AIAgentKickService（旧 ClaudeCodeKickService）
+
+メインのオーケストレーターとして以下を担当：
+
+| 責務 | 説明 |
+|------|------|
+| バリデーション | 作業ディレクトリ確認、キックメソッド確認 |
+| プロンプト構築 | タスク情報からプロンプトを生成 |
+| プロンプトファイル作成 | `/tmp/uc001_prompt_{taskId}.txt` に書き出し |
+| ストラテジー選択 | `aiType` に基づき適切なストラテジーを選択 |
+| 環境変数設定 | TASK_ID, PROJECT_ID 等を設定 |
+| 結果返却 | `AgentKickResult` を構築して返却 |
+
+```swift
+public final class AIAgentKickService: AgentKickServiceProtocol {
+    private let claudeStrategy: KickStrategyProtocol
+    private let geminiStrategy: KickStrategyProtocol
+    private let customStrategy: KickStrategyProtocol
+
+    public func kick(agent: Agent, task: Task, project: Project) async throws -> AgentKickResult {
+        // 1. バリデーション
+        // 2. プロンプト構築
+        // 3. プロンプトファイル作成
+        // 4. ストラテジー選択 & 実行
+        let strategy = selectStrategy(for: agent.aiType)
+        let processId = try await strategy.launch(...)
+        // 5. 結果返却
+    }
+
+    private func selectStrategy(for aiType: AIType?) -> KickStrategyProtocol {
+        switch aiType {
+        case .claude, .none:  // デフォルトはClaude
+            return claudeStrategy
+        case .gemini:
+            return geminiStrategy
+        case .custom:
+            return customStrategy
+        }
+    }
+}
+```
+
+#### KickStrategyProtocol
+
+各AI種別の起動ロジックを抽象化：
+
+```swift
+public protocol KickStrategyProtocol: Sendable {
+    /// CLI名（ログ出力用）
+    var cliName: String { get }
+
+    /// CLIを起動
+    func launch(
+        workingDirectory: String,
+        promptFile: String,
+        agent: Agent,
+        environment: [String: String]
+    ) async throws -> Int
+}
+```
+
+#### ClaudeKickStrategy
+
+Claude Code CLI専用の起動ロジック：
+
+```swift
+public struct ClaudeKickStrategy: KickStrategyProtocol {
+    public var cliName: String { "claude" }
+
+    public func launch(...) async throws -> Int {
+        let claudePath = try findClaudeCLI()
+
+        var command = "source ~/.zshrc 2>/dev/null; source ~/.bashrc 2>/dev/null; "
+        command += "cd '\(workingDirectory)' && "
+        command += "nohup '\(claudePath)' --dangerously-skip-permissions"
+
+        if let systemPrompt = agent.systemPrompt, !systemPrompt.isEmpty {
+            command += " --system-prompt '\(escaped(systemPrompt))'"
+        }
+
+        command += " -p \"$(cat '\(promptFile)')\""
+        command += " > /tmp/uc001_claude_output.log 2>&1 &"
+
+        return try await executeShellCommand(command, environment: environment)
+    }
+
+    private func findClaudeCLI() throws -> String {
+        // CLAUDE_CLI_PATH 環境変数
+        // /opt/homebrew/bin/claude
+        // /usr/local/bin/claude
+        // which claude
+    }
+}
+```
+
+#### GeminiKickStrategy
+
+Gemini CLI専用の起動ロジック：
+
+```swift
+public struct GeminiKickStrategy: KickStrategyProtocol {
+    public var cliName: String { "gemini" }
+
+    public func launch(...) async throws -> Int {
+        let geminiPath = try findGeminiCLI()
+
+        // Gemini は stdin からプロンプトを受け取る
+        var command = "source ~/.zshrc 2>/dev/null; source ~/.bashrc 2>/dev/null; "
+        command += "cd '\(workingDirectory)' && "
+        command += "cat '\(promptFile)' | nohup '\(geminiPath)' --yolo"
+        command += " > /tmp/gemini_output.log 2>&1 &"
+
+        return try await executeShellCommand(command, environment: environment)
+    }
+
+    private func findGeminiCLI() throws -> String {
+        // GEMINI_CLI_PATH 環境変数
+        // /opt/homebrew/bin/gemini
+        // /usr/local/bin/gemini
+        // which gemini
+    }
+}
+```
+
+#### CustomKickStrategy
+
+ユーザー定義コマンド用のロジック：
+
+```swift
+public struct CustomKickStrategy: KickStrategyProtocol {
+    public var cliName: String { "custom" }
+
+    public func launch(...) async throws -> Int {
+        guard let kickCommand = agent.kickCommand, !kickCommand.isEmpty else {
+            throw AgentKickError.kickCommandNotSet(agent.id)
+        }
+
+        // プレースホルダー展開
+        let expandedCommand = expandPlaceholders(kickCommand, agent: agent, environment: environment)
+
+        var command = "source ~/.zshrc 2>/dev/null; source ~/.bashrc 2>/dev/null; "
+        command += "cd '\(workingDirectory)' && "
+        command += expandedCommand
+
+        return try await executeShellCommand(command, environment: environment)
+    }
+
+    private func expandPlaceholders(_ command: String, ...) -> String {
+        // $TASK_ID, ${TASK_ID} → 実際の値
+        // $PROJECT_ID, ${PROJECT_ID} → 実際の値
+        // $AGENT_ID, ${AGENT_ID} → 実際の値
+    }
+}
+```
+
+### エラーハンドリング
+
+```swift
+public enum AgentKickError: Error {
+    // 既存
+    case agentNotFound(AgentID)
+    case projectNotFound(ProjectID)
+    case workingDirectoryNotSet(ProjectID)
+    case workingDirectoryNotFound(String)
+    case kickMethodNotSupported(KickMethod)
+    case kickCommandNotSet(AgentID)
+    case executionFailed(String)
+    case taskNotAssigned(TaskID)
+
+    // リネーム
+    case claudeCLINotFound      // → cliNotFound(String)
+
+    // 新規
+    case geminiCLINotFound      // → cliNotFound("gemini") に統合
+    case cliNotFound(String)    // 汎用CLI未検出エラー
+}
+```
+
+### 設定可能項目（将来）
+
+| 項目 | 説明 | デフォルト |
+|------|------|-----------|
+| タイムアウト | 起動待機時間 | 30秒 |
+| リトライ回数 | 起動失敗時の再試行 | 0 |
+| ログ出力先 | 各CLIの出力ファイル | `/tmp/` |
+| 環境変数追加 | カスタム環境変数 | なし |
+
 ### 状態確認
 - 上位エージェント自身がMCP経由で下位の状態を確認可能
 - 下位からの能動的な報告は必須ではない
