@@ -81,6 +81,102 @@ get_pending_tasks(
 }
 ```
 
+### 実行ログ管理（Runner向け）
+
+| Tool | 引数 | 説明 |
+|------|------|------|
+| `report_execution_start` | `session_token`, `task_id` | 実行開始を報告、execution_idを取得 |
+| `report_execution_complete` | `session_token`, `execution_id`, `exit_code`, `duration_seconds`, `log_file_path` | 実行完了を報告 |
+| `list_execution_logs` | `task_id?`, `agent_id?`, `limit?` | 実行ログ一覧取得 |
+| `get_execution_log` | `execution_id` | 実行ログ詳細取得 |
+
+#### report_execution_start
+
+```python
+report_execution_start(
+    session_token: str,  # 認証で取得したトークン
+    task_id: str         # 実行対象のタスクID
+) -> {
+    "success": True,
+    "execution_id": "exec_abc123",
+    "started_at": "2025-01-06T10:00:00Z"
+}
+
+# 失敗時
+{
+    "success": False,
+    "error": "Invalid session_token or task_id"
+}
+```
+
+#### report_execution_complete
+
+```python
+report_execution_complete(
+    session_token: str,      # 認証で取得したトークン
+    execution_id: str,       # report_execution_startで取得したID
+    exit_code: int,          # CLIの終了コード（0=成功）
+    duration_seconds: float, # 実行時間（秒）
+    log_file_path: str       # ログファイルのパス
+) -> {
+    "success": True,
+    "execution_id": "exec_abc123",
+    "completed_at": "2025-01-06T10:15:30Z",
+    "status": "completed"  # completed / failed / error
+}
+
+# 失敗時
+{
+    "success": False,
+    "error": "Invalid execution_id or session_token"
+}
+```
+
+#### list_execution_logs
+
+```python
+list_execution_logs(
+    task_id: str = None,    # タスクでフィルタ（オプション）
+    agent_id: str = None,   # エージェントでフィルタ（オプション）
+    limit: int = 20         # 取得件数（デフォルト20）
+) -> {
+    "success": True,
+    "logs": [
+        {
+            "executionId": "exec_abc123",
+            "taskId": "tsk_xxx",
+            "agentId": "agt_xxx",
+            "status": "completed",
+            "exitCode": 0,
+            "durationSeconds": 930.5,
+            "startedAt": "2025-01-06T10:00:00Z",
+            "completedAt": "2025-01-06T10:15:30Z"
+        }
+    ]
+}
+```
+
+#### get_execution_log
+
+```python
+get_execution_log(
+    execution_id: str  # 実行ログID
+) -> {
+    "success": True,
+    "log": {
+        "executionId": "exec_abc123",
+        "taskId": "tsk_xxx",
+        "agentId": "agt_xxx",
+        "status": "completed",
+        "exitCode": 0,
+        "durationSeconds": 930.5,
+        "startedAt": "2025-01-06T10:00:00Z",
+        "completedAt": "2025-01-06T10:15:30Z",
+        "logFilePath": "~/Library/Application Support/AIAgentPM/logs/exec_abc123.log"
+    }
+}
+```
+
 ### エージェント管理
 
 | Tool | 引数 | 説明 |
@@ -132,6 +228,8 @@ get_pending_tasks(
 | `task://{id}` | タスク情報 |
 | `context://{taskId}` | タスクのコンテキスト |
 | `handoff://{taskId}` | 最新のハンドオフ情報 |
+| `execution://{id}` | 実行ログ情報 |
+| `executions://{taskId}` | タスクの実行履歴一覧 |
 
 **廃止されたリソース:**
 - `agent://me` → `agent://{id}` を使用
@@ -356,3 +454,4 @@ Handoff {
 | 2024-12-30 | 1.0.0 | PRD.mdから分離して初版作成 |
 | 2025-01-04 | 2.0.0 | ステートレス設計に変更。agent-id/project-idを起動引数から削除し、各ツール呼び出し時に引数で渡す設計に変更 |
 | 2025-01-06 | 3.0.0 | プル型アーキテクチャに変更。認証ツール（authenticate, logout, get_pending_tasks）を追加。アプリからのキック処理を廃止し、外部Runner経由でのタスク実行に変更 |
+| 2025-01-06 | 3.1.0 | 実行ログ管理ツールを追加（report_execution_start, report_execution_complete, list_execution_logs, get_execution_log）。execution://リソースを追加 |

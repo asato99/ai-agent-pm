@@ -496,6 +496,161 @@ permissions = {
 
 ---
 
+## 実行ログ管理
+
+### 概要
+
+タスク実行のログはアプリで管理します。
+Runner が MCP 経由でログファイルのパスを報告し、アプリがファイルを読み込んで表示します。
+
+### 設計方針
+
+| 項目 | 保存先 | 理由 |
+|------|--------|------|
+| メタデータ | DB | 小さい、検索可能、一覧表示用 |
+| ログ内容 | ファイル | 大きい（数KB〜数MB）、DB 肥大化を防ぐ |
+
+```
+[DB]
+  └─ execution_logs テーブル
+      ├─ id, task_id, agent_id
+      ├─ started_at, completed_at
+      ├─ exit_code, status
+      └─ log_file_path  ← ファイルパスのみ
+
+[ファイルシステム]
+  └─ ~/Library/Application Support/AIAgentPM/logs/
+      └─ tsk_xxx/
+          └─ exec_20250106_103000.log  ← 実際のログ内容
+```
+
+### Runner の責務
+
+```python
+import os
+import subprocess
+from datetime import datetime
+
+# ログディレクトリ
+LOG_BASE = os.path.expanduser(
+    "~/Library/Application Support/AIAgentPM/logs"
+)
+
+def execute_task(task, session_token):
+    task_id = task["taskId"]
+
+    # ログファイルパス
+    log_dir = f"{LOG_BASE}/{task_id}"
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = f"{log_dir}/exec_{timestamp}.log"
+
+    # 実行開始を報告
+    start_result = mcp.call("report_execution_start", {
+        "session_token": session_token,
+        "task_id": task_id
+    })
+    execution_id = start_result["execution_id"]
+
+    # CLI 実行（出力をファイルにリダイレクト）
+    start_time = datetime.now()
+    with open(log_file, "w") as log:
+        result = subprocess.run(
+            ["claude", "--dangerously-skip-permissions", "-p", prompt],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            cwd=task["workingDirectory"]
+        )
+    end_time = datetime.now()
+
+    # 実行完了を報告
+    mcp.call("report_execution_complete", {
+        "session_token": session_token,
+        "execution_id": execution_id,
+        "exit_code": result.returncode,
+        "duration_seconds": (end_time - start_time).total_seconds(),
+        "log_file_path": log_file
+    })
+```
+
+### データモデル
+
+```swift
+struct ExecutionLog {
+    let id: ExecutionLogID
+    let taskId: TaskID
+    let agentId: AgentID
+    let executionId: String         // exec_xxx
+
+    // タイムスタンプ
+    var startedAt: Date
+    var completedAt: Date?
+
+    // 結果
+    var exitCode: Int?
+    var durationSeconds: Double?
+    var status: ExecutionStatus     // running / completed / failed
+
+    // ログファイル（内容は保存しない、パスのみ）
+    var logFilePath: String?
+}
+
+enum ExecutionStatus: String, Codable {
+    case running = "running"
+    case completed = "completed"
+    case failed = "failed"
+}
+```
+
+### MCP ツール
+
+```python
+# 実行開始を報告
+report_execution_start(
+    session_token: str,
+    task_id: str
+) -> {
+    "success": True,
+    "execution_id": "exec_xxx"
+}
+
+# 実行完了を報告
+report_execution_complete(
+    session_token: str,
+    execution_id: str,
+    exit_code: int,
+    duration_seconds: float,
+    log_file_path: str
+) -> {
+    "success": True
+}
+```
+
+### アプリ UI
+
+```
+[タスク詳細画面]
+├── 基本情報
+├── ステータス: in_progress
+│
+└── 実行履歴
+    ├── #1 [2025-01-06 10:30:00] 完了 (exit: 0, 5分)
+    │   └── [ログを表示] ← クリックでログ内容表示
+    ├── #2 [2025-01-06 11:00:00] 失敗 (exit: 1, 2分)
+    │   └── [ログを表示]
+    └── #3 [2025-01-06 11:30:00] 実行中...
+```
+
+### ログローテーション（将来）
+
+| ポリシー | 設定 |
+|---------|------|
+| 保持期間 | 30日で自動削除 |
+| 最大サイズ | タスクあたり 50MB |
+| 圧縮 | 完了後 7日で gzip |
+
+---
+
 ## 状態確認
 - 上位エージェント自身がMCP経由で下位の状態を確認可能
 - 下位からの能動的な報告は必須ではない
