@@ -36,10 +36,6 @@ public final class DependencyContainer: ObservableObject {
 
     public let eventRecorder: EventRecorder
 
-    // MARK: - Services
-
-    public let kickService: ClaudeCodeKickService
-
     // MARK: - Use Cases (Project)
 
     public lazy var getProjectsUseCase: GetProjectsUseCase = {
@@ -108,16 +104,6 @@ public final class DependencyContainer: ObservableObject {
             taskRepository: taskRepository,
             agentRepository: agentRepository,
             eventRepository: eventRepository
-        )
-    }()
-
-    public lazy var kickAgentUseCase: KickAgentUseCase = {
-        KickAgentUseCase(
-            taskRepository: taskRepository,
-            agentRepository: agentRepository,
-            projectRepository: projectRepository,
-            eventRepository: eventRepository,
-            kickService: kickService
         )
     }()
 
@@ -367,7 +353,6 @@ public final class DependencyContainer: ObservableObject {
         self.auditRuleRepository = AuditRuleRepository(database: database)
         self.executionLogRepository = ExecutionLogRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
-        self.kickService = ClaudeCodeKickService()
     }
 
     /// デフォルトのデータベースパスを使用して初期化
