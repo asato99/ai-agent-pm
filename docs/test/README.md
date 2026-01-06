@@ -169,6 +169,36 @@ ProjectList exists: false
 - ⏳ 未実装のテストシナリオ（22件）はUIコンポーネント実装後に対応予定
 - 一部テストは現時点でアクセス可能なUI要素（空状態メッセージ等）で検証しているため、実際のコンテンツ実装後に詳細な検証に更新が必要
 
+## リアクティブ要件
+
+**原則**: UIは状態変更に自動的に反応して更新されるべき（リアクティブ）
+
+### テストでのリフレッシュ操作について
+
+テストコード内で**リフレッシュ操作（⌘R）を行う必要がある場合は、リアクティブ要件違反**として扱います。
+
+```swift
+// ❌ リアクティブ要件違反の疑い
+statusPicker.click()
+app.menuItems["Done"].click()
+app.typeKey("r", modifierFlags: .command)  // ← リフレッシュが必要 = 要件違反
+XCTAssertTrue(taskExistsInColumn(...))
+
+// ✅ 正しいリアクティブ実装
+statusPicker.click()
+app.menuItems["Done"].click()
+Thread.sleep(forTimeInterval: 0.5)  // UI更新待機のみ
+XCTAssertTrue(taskExistsInColumn(...))  // 自動的に反映されている
+```
+
+### 例外の扱い
+
+どうしてもリアクティブが技術的に困難な場合：
+1. **実装ファイル**に理由をコメントで明記
+2. テストコードにも `// NOTE: リアクティブ例外 - 理由: ...` を記載
+
+---
+
 ## シナリオ記載形式
 
 各シナリオは以下の形式で記載:
@@ -210,3 +240,4 @@ ProjectList exists: false
 | 2024-12-31 | UIテスト基盤改善: SQLite journal cleanup, NotificationCenter連携, AppDelegate追加 |
 | 2024-12-31 | macOS SwiftUI + XCUITest 制限事項を文書化（ターミナル実行不可） |
 | 2025-01-01 | 要件再整理: サブタスク削除、Reviewカラム削除、監査チーム・履歴画面追加 |
+| 2026-01-06 | リアクティブ要件追加: テストでのリフレッシュ操作は要件違反として扱う |
