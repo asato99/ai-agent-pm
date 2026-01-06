@@ -13,6 +13,7 @@
 | [NAMING_CONVENTIONS.md](./NAMING_CONVENTIONS.md) | ファイル・型・メソッドの命名規則 |
 | [DEPENDENCY_INJECTION.md](./DEPENDENCY_INJECTION.md) | 依存性注入の原則と実装パターン |
 | [CODE_REVIEW.md](./CODE_REVIEW.md) | コードレビューチェックリストと違反対応 |
+| [LOGGING.md](./LOGGING.md) | ログ取得ベストプラクティス（XCUITest環境対応） |
 
 ---
 

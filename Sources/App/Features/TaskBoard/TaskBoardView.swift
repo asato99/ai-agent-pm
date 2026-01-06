@@ -4,8 +4,84 @@
 
 import SwiftUI
 import Domain
+import UseCase
+import UniformTypeIdentifiers
 
 private typealias AsyncTask = _Concurrency.Task
+
+// MARK: - Debug Logging (ファイル出力でXCUITest環境でもログ確認可能)
+enum DebugLog {
+    static let logFile = "/tmp/aiagentpm_debug.log"
+
+    static func write(_ message: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let logMessage = "[\(timestamp)] \(message)\n"
+
+        if let data = logMessage.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logFile) {
+                if let handle = FileHandle(forWritingAtPath: logFile) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                FileManager.default.createFile(atPath: logFile, contents: data, attributes: nil)
+            }
+        }
+
+        // NSLogも出力（コンソール確認用）
+        NSLog("%@", message)
+    }
+}
+
+// MARK: - Drag & Drop Support
+
+/// UTType for TaskID transfer during drag and drop
+extension UTType {
+    static let taskID = UTType(exportedAs: "com.aiagentpm.taskid")
+}
+
+/// Wrapper for TaskID to support drag and drop via Transferable
+struct DraggableTaskID: Codable, Transferable {
+    let taskIdValue: String
+
+    init(taskId: TaskID) {
+        self.taskIdValue = taskId.value
+    }
+
+    var taskId: TaskID {
+        TaskID(value: taskIdValue)
+    }
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .taskID)
+    }
+}
+
+/// NSItemProvider extension for TaskID drag & drop (XCUITest compatibility)
+extension NSItemProvider {
+    static let taskIDTypeIdentifier = "com.aiagentpm.taskid"
+
+    convenience init(taskId: TaskID) {
+        self.init()
+        let data = taskId.value.data(using: .utf8)!
+        self.registerDataRepresentation(forTypeIdentifier: Self.taskIDTypeIdentifier, visibility: .all) { completion in
+            completion(data, nil)
+            return nil
+        }
+    }
+
+    func loadTaskID(completion: @escaping (TaskID?) -> Void) {
+        self.loadDataRepresentation(forTypeIdentifier: Self.taskIDTypeIdentifier) { data, _ in
+            guard let data = data,
+                  let value = String(data: data, encoding: .utf8) else {
+                completion(nil)
+                return
+            }
+            completion(TaskID(value: value))
+        }
+    }
+}
 
 struct TaskBoardView: View {
     @EnvironmentObject var container: DependencyContainer
@@ -88,9 +164,11 @@ struct TaskBoardView: View {
                         TaskColumnView(
                             status: status,
                             tasks: taskStore.tasks(for: status),
-                            agents: agents
+                            agents: agents,
+                            onTaskDropped: { taskId, newStatus in
+                                handleTaskDrop(taskId: taskId, newStatus: newStatus)
+                            }
                         )
-                        .accessibilityIdentifier("TaskColumn_\(status.rawValue)")
                     }
                 }
                 .padding()
@@ -172,6 +250,55 @@ struct TaskBoardView: View {
             )
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
+        }
+    }
+
+    /// ドラッグ&ドロップによるタスクのステータス変更
+    private func handleTaskDrop(taskId: TaskID, newStatus: TaskStatus) {
+        NSLog("🟣 [DragDrop] handleTaskDrop called: taskId=\(taskId.value), newStatus=\(newStatus.rawValue)")
+
+        // 現在のタスクの状態を確認
+        guard let currentTask = taskStore.tasks.first(where: { $0.id == taskId }) else {
+            NSLog("🔴 [DragDrop] Task not found in taskStore: \(taskId.value)")
+            return
+        }
+
+        NSLog("🟣 [DragDrop] Current task status: \(currentTask.status.rawValue)")
+
+        // 同じステータスへのドロップは無視
+        guard currentTask.status != newStatus else {
+            NSLog("🟡 [DragDrop] Same status, ignoring drop")
+            return
+        }
+
+        // ステータス遷移が有効か確認
+        guard UpdateTaskStatusUseCase.canTransition(from: currentTask.status, to: newStatus) else {
+            NSLog("🔴 [DragDrop] Invalid transition: \(currentTask.status.rawValue) -> \(newStatus.rawValue)")
+            router.showAlert(.error(message: "Cannot change status from \(currentTask.status.displayName) to \(newStatus.displayName)"))
+            return
+        }
+
+        NSLog("🟣 [DragDrop] Executing status update...")
+
+        // ステータス更新を実行
+        AsyncTask {
+            do {
+                _ = try container.updateTaskStatusUseCase.execute(
+                    taskId: taskId,
+                    newStatus: newStatus,
+                    agentId: nil,
+                    sessionId: nil,
+                    reason: "Status changed via drag and drop"
+                )
+                NSLog("🟢 [DragDrop] Status update successful")
+                // TaskStoreを再読み込みしてUIを更新
+                await taskStore.loadTasks()
+            } catch {
+                NSLog("🔴 [DragDrop] Status update failed: \(error.localizedDescription)")
+                await MainActor.run {
+                    router.showAlert(.error(message: error.localizedDescription))
+                }
+            }
         }
     }
 }
@@ -273,11 +400,15 @@ struct TemplatesPopoverView: View {
 }
 
 struct TaskColumnView: View {
+    @EnvironmentObject var container: DependencyContainer
     @Environment(Router.self) var router
 
     let status: TaskStatus
     let tasks: [Task]
     let agents: [Agent]
+    let onTaskDropped: (TaskID, TaskStatus) -> Void
+
+    @State private var isDropTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -294,6 +425,8 @@ struct TaskColumnView: View {
                     .padding(.vertical, 2)
                     .background(.quaternary)
                     .clipShape(Capsule())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(tasks.count)")
                     .accessibilityIdentifier("ColumnCount_\(status.rawValue)")
             }
             .padding(.horizontal, 8)
@@ -303,7 +436,24 @@ struct TaskColumnView: View {
                 LazyVStack(spacing: 8) {
                     ForEach(tasks, id: \.id) { task in
                         TaskCardButton(task: task, agents: agents) {
+                            DebugLog.write("🟠 [Click] TaskCard clicked: \(task.id.value)")
                             router.selectTask(task.id)
+                        }
+                        .onDrag {
+                            DebugLog.write("🔵 [onDrag] onDrag called for task: \(task.id.value), title: \(task.title)")
+                            let provider = NSItemProvider()
+                            let data = task.id.value.data(using: .utf8)!
+                            provider.registerDataRepresentation(forTypeIdentifier: UTType.taskID.identifier, visibility: .all) { completion in
+                                completion(data, nil)
+                                return nil
+                            }
+                            return provider
+                        } preview: {
+                            DebugLog.write("🔵 [onDrag] preview for task: \(task.id.value)")
+                            return TaskCardView(task: task, agents: agents)
+                                .frame(width: 260)
+                                .background(Color(.controlBackgroundColor))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                     }
                 }
@@ -311,8 +461,40 @@ struct TaskColumnView: View {
             }
         }
         .frame(width: 280)
+        .background(isDropTargeted ? Color.accentColor.opacity(0.1) : Color.clear)
         .background(.background.secondary)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
+        .onDrop(of: [.taskID], isTargeted: Binding(
+            get: { isDropTargeted },
+            set: { newValue in
+                DebugLog.write("🟡 [onDrop] isTargeted changed to: \(newValue) for column: \(status.rawValue)")
+                isDropTargeted = newValue
+            }
+        )) { providers in
+            DebugLog.write("🟢 [onDrop] onDrop called for column: \(status.rawValue), providers count: \(providers.count)")
+            guard let provider = providers.first else {
+                DebugLog.write("🔴 [onDrop] No provider")
+                return false
+            }
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.taskID.identifier) { data, error in
+                DebugLog.write("🟢 [onDrop] loadDataRepresentation callback")
+                guard let data = data,
+                      let taskIdValue = String(data: data, encoding: .utf8) else {
+                    DebugLog.write("🔴 [onDrop] Failed to decode taskId")
+                    return
+                }
+                DebugLog.write("🟢 [onDrop] Decoded taskId: \(taskIdValue)")
+                DispatchQueue.main.async {
+                    onTaskDropped(TaskID(value: taskIdValue), status)
+                }
+            }
+            return true
+        }
+        .accessibilityIdentifier("TaskColumn_\(status.rawValue)")
     }
 }
 

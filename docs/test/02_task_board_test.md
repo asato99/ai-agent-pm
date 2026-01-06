@@ -11,9 +11,12 @@
 | 状態 | 件数 |
 |------|------|
 | ✅ 実装済み | 9 |
-| ⏳ 未実装（UI未実装） | 7 |
+| ⚠️ XCUITest自動テスト不可 | 1 |
+| ⏳ 未実装（UI未実装） | 6 |
 
-**注記**: TS-02-008〜014はアプリのUI機能自体が未実装のためテスト不可
+**注記**:
+- TS-02-008（ドラッグ&ドロップ）: UI実装済みだがXCUITestがSwiftUIドラッグコールバックをトリガーしないため自動テスト不可
+- TS-02-009〜014: アプリのUI機能自体が未実装のためテスト不可
 
 ---
 
@@ -269,9 +272,17 @@
 
 ※ 依存関係・リソース可用性による強制ブロックあり（要件: TASKS.md, AGENTS.md）
 
-**実装状態**: ⏳ 未実装（UI未実装）
-**備考**: アプリのドラッグ&ドロップ機能自体が未実装。テストはXCTFailで明示的に失敗。
-**テストメソッド**: `testDragAndDropStatusChange()`
+**実装状態**: ⚠️ XCUITest自動テスト不可
+**備考**:
+- UIのドラッグ&ドロップ機能は実装済み（`onDrag` + `onDrop` API使用）
+- XCUITestの `click(forDuration:thenDragTo:)` および `press(forDuration:thenDragTo:)` はSwiftUIのドラッグコールバックをトリガーしない
+- 検証済みアプローチ:
+  1. `draggable` + `dropDestination` (Transferable API) - コールバック未呼出
+  2. `onDrag` + `onDrop` (NSItemProvider API) - コールバック未呼出
+  3. UTType登録追加 - 効果なし
+  4. 各種XCUITestドラッグAPI（press/click, 速度変更, ホールド時間延長） - 全て効果なし
+- **手動テストで動作確認が必要**
+**テストメソッド**: `testDragAndDropStatusChange()` - XCUITest制限により自動テスト不可として記録
 
 ---
 
@@ -457,3 +468,4 @@
 | 2025-01-01 | 要件再整理: Reviewカラム削除、サブタスク削除、依存関係・リソースブロックシナリオ追加 |
 | 2025-01-02 | カラム順序修正: Backlog → To Do → In Progress → Blocked → Done（UIテストと整合） |
 | 2025-01-06 | ドキュメントを実装状態に合わせて修正。テストメソッド名更新。進捗サマリ修正。 |
+| 2026-01-06 | TS-02-008: XCUITestがSwiftUIドラッグコールバックをトリガーしない問題を検証・記録。自動テスト不可として更新。 |
