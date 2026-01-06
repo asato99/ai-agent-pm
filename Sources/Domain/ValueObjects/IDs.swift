@@ -218,3 +218,21 @@ public struct AgentSessionID: Hashable, Codable, Sendable, CustomStringConvertib
 
     public var description: String { value }
 }
+
+// MARK: - ExecutionLogID
+
+/// 実行ログの一意識別子
+/// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+public struct ExecutionLogID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> ExecutionLogID {
+        ExecutionLogID(value: "exec_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}

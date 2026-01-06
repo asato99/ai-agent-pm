@@ -482,6 +482,29 @@ public final class DatabaseSetup {
             try db.create(indexOn: "agent_sessions", columns: ["expires_at"])
         }
 
+        // v16: 実行ログ（Phase 3-3）
+        // 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+        migrator.registerMigration("v16_execution_logs") { db in
+            // execution_logs テーブル
+            try db.create(table: "execution_logs", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("task_id", .text).notNull()
+                    .references("tasks", onDelete: .cascade)
+                t.column("agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("status", .text).notNull().defaults(to: "running")
+                t.column("started_at", .datetime).notNull()
+                t.column("completed_at", .datetime)
+                t.column("exit_code", .integer)
+                t.column("duration_seconds", .double)
+                t.column("log_file_path", .text)
+                t.column("error_message", .text)
+            }
+            try db.create(indexOn: "execution_logs", columns: ["task_id"])
+            try db.create(indexOn: "execution_logs", columns: ["agent_id"])
+            try db.create(indexOn: "execution_logs", columns: ["status"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

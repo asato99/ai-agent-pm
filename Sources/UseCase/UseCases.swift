@@ -31,6 +31,10 @@ public enum UseCaseError: Error, Sendable {
 
     // リソース可用性ブロック
     case maxParallelTasksReached(agentId: AgentID, maxParallel: Int, currentCount: Int)
+
+    // 実行ログエラー (Phase 3-3)
+    case executionLogNotFound(ExecutionLogID)
+    case invalidStateTransition(String)
 }
 
 extension UseCaseError: LocalizedError {
@@ -71,6 +75,10 @@ extension UseCaseError: LocalizedError {
             return "Task \(taskId.value) is blocked by incomplete dependencies: \(blockedIds)"
         case .maxParallelTasksReached(let agentId, let maxParallel, let currentCount):
             return "Agent \(agentId.value) has reached max parallel tasks limit (\(currentCount)/\(maxParallel))"
+        case .executionLogNotFound(let id):
+            return "Execution log not found: \(id.value)"
+        case .invalidStateTransition(let message):
+            return "Invalid state transition: \(message)"
         }
     }
 }

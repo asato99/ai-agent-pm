@@ -38,7 +38,11 @@ enum ToolDefinitions {
             // Handoff
             createHandoff,
             acceptHandoff,
-            getPendingHandoffs
+            getPendingHandoffs,
+
+            // Execution Log (Phase 3-3)
+            reportExecutionStart,
+            reportExecutionComplete
         ]
     }
 
@@ -394,6 +398,62 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": [] as [String]
+        ]
+    ]
+
+    // MARK: - Execution Log Tools (Phase 3-3)
+
+    /// report_execution_start - 実行開始を報告
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+    static let reportExecutionStart: [String: Any] = [
+        "name": "report_execution_start",
+        "description": "タスク実行の開始を報告します。Runnerがタスク実行を開始した際に呼び出します。execution_log_idが返されるので、完了時にreport_execution_completeに渡してください。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "task_id": [
+                    "type": "string",
+                    "description": "実行するタスクID"
+                ],
+                "agent_id": [
+                    "type": "string",
+                    "description": "実行するエージェントID"
+                ]
+            ] as [String: Any],
+            "required": ["task_id", "agent_id"]
+        ]
+    ]
+
+    /// report_execution_complete - 実行完了を報告
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+    static let reportExecutionComplete: [String: Any] = [
+        "name": "report_execution_complete",
+        "description": "タスク実行の完了を報告します。exit_codeが0なら成功、それ以外は失敗として記録されます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "execution_log_id": [
+                    "type": "string",
+                    "description": "report_execution_startで取得した実行ログID"
+                ],
+                "exit_code": [
+                    "type": "integer",
+                    "description": "終了コード（0=成功、それ以外=失敗）"
+                ],
+                "duration_seconds": [
+                    "type": "number",
+                    "description": "実行時間（秒）"
+                ],
+                "log_file_path": [
+                    "type": "string",
+                    "description": "ログファイルのパス（任意）"
+                ],
+                "error_message": [
+                    "type": "string",
+                    "description": "エラーメッセージ（失敗時のみ）"
+                ]
+            ] as [String: Any],
+            "required": ["execution_log_id", "exit_code", "duration_seconds"]
         ]
     ]
 }

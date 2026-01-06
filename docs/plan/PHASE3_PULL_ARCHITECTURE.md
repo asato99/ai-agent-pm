@@ -2598,3 +2598,112 @@ Sources/MCPServer/MCPServer.swift                  # authenticateハンドラ追
 | 2026-01-06 | 1.2.0 | Phase 3-1 認証基盤実装完了（MCP Tool除く） |
 | 2026-01-06 | 1.3.0 | Phase 3-1 完了: authenticate MCP Tool実装 |
 | 2026-01-06 | 1.4.0 | Phase 3-2 完了: get_pending_tasks MCP Tool実装 |
+| 2026-01-06 | 1.5.0 | Phase 3-3 完了: 実行ログ（ExecutionLog）実装 |
+
+---
+
+## Phase 3-3 実装完了ノート
+
+**実装日:** 2026-01-06
+**ステータス:** ✅ 完了
+
+### 実装した機能
+
+1. **Domain層 - ExecutionLog エンティティ**
+   - ExecutionLogID: 実行ログの識別子
+   - ExecutionStatus: running, completed, failed
+   - ExecutionLog: タスク実行のログを記録するエンティティ
+   - 6件のテスト追加・パス
+
+2. **Domain層 - ExecutionLogRepositoryProtocol**
+   - findById, findByTaskId, findByAgentId, findRunning, save, delete メソッド
+
+3. **Infrastructure層 - ExecutionLogRepository**
+   - GRDBを使用した実装
+   - v16マイグレーション: execution_logsテーブル追加
+   - インデックス: task_id, agent_id, status
+   - 8件のテスト追加・パス
+
+4. **UseCase層 - ExecutionLog UseCases**
+   - RecordExecutionStartUseCase: 実行開始を記録
+   - RecordExecutionCompleteUseCase: 実行完了を記録
+   - GetExecutionLogsUseCase: 実行ログを取得
+   - UseCaseError拡張: executionLogNotFound, invalidStateTransition
+   - 10件のテスト追加・パス
+
+5. **MCP層 - 実行ログツール**
+   - report_execution_start: タスク実行開始を報告
+   - report_execution_complete: タスク実行完了を報告
+   - ToolDefinitions: 2つのツール定義追加
+   - MCPServer: ハンドラー実装
+   - 5件のテスト追加・パス
+
+### テスト結果
+
+```
+329 tests, 2 failures (ViewInspector関連、Phase 3-3とは無関係)
+
+Domain (87 tests):
+- testExecutionLogInitialization: ✅
+- testExecutionLogStartsWithRunningStatus: ✅
+- testExecutionLogCompleteWithSuccessStatus: ✅
+- testExecutionLogCompleteWithFailedStatus: ✅
+- testExecutionLogStatusRawValues: ✅
+- testExecutionLogStatusCaseIterable: ✅
+
+Infrastructure (79 tests):
+- testExecutionLogRepositorySave: ✅
+- testExecutionLogRepositoryFindById: ✅
+- testExecutionLogRepositoryFindByTaskId: ✅
+- testExecutionLogRepositoryFindByAgentId: ✅
+- testExecutionLogRepositoryFindRunning: ✅
+- testExecutionLogRepositoryUpdate: ✅
+- testExecutionLogRepositoryDelete: ✅
+- testExecutionLogRepositoryNotFound: ✅
+
+UseCase (90 tests):
+- testRecordExecutionStartUseCaseSuccess: ✅
+- testRecordExecutionStartUseCaseTaskNotFound: ✅
+- testRecordExecutionStartUseCaseAgentNotFound: ✅
+- testRecordExecutionCompleteUseCaseSuccess: ✅
+- testRecordExecutionCompleteUseCaseFailedStatus: ✅
+- testRecordExecutionCompleteUseCaseNotFound: ✅
+- testRecordExecutionCompleteUseCaseAlreadyCompleted: ✅
+- testGetExecutionLogsByTaskId: ✅
+- testGetExecutionLogsByAgentId: ✅
+- testGetRunningExecutionLogs: ✅
+
+MCPServer (42 tests):
+- testReportExecutionStartToolDefinition: ✅
+- testReportExecutionCompleteToolDefinition: ✅
+- testExecutionLogToolsInAllTools: ✅
+- testToolCount: ✅ (19 tools)
+- testPRDComplianceSummary: ✅ (19 tools)
+```
+
+### 変更点
+
+- ツール数: 17 → 19（report_execution_start, report_execution_complete追加）
+
+### 実装済みファイル
+
+```
+Sources/Domain/ValueObjects/IDs.swift              # ExecutionLogID追加
+Sources/Domain/Entities/ExecutionLog.swift         # 新規作成
+Sources/Domain/Repositories/RepositoryProtocols.swift  # ExecutionLogRepositoryProtocol追加
+Sources/Infrastructure/Database/DatabaseSetup.swift    # v16_execution_logs追加
+Sources/Infrastructure/Repositories/ExecutionLogRepository.swift  # 新規作成
+Sources/UseCase/UseCases.swift                     # エラー型追加
+Sources/UseCase/ExecutionLogUseCases.swift         # 新規作成
+Sources/MCPServer/Tools/ToolDefinitions.swift      # report_execution_start/complete追加
+Sources/MCPServer/MCPServer.swift                  # ハンドラー追加
+```
+
+### Phase 3-3 進捗サマリー
+
+| タスク | ステータス | 備考 |
+|--------|----------|------|
+| 3-3-1: Domain - ExecutionLog | ✅ 完了 | ExecutionStatus enum付き |
+| 3-3-2: Repository - ExecutionLogRepository | ✅ 完了 | GRDB実装、マイグレーション追加 |
+| 3-3-3: UseCase - ExecutionLog UseCases | ✅ 完了 | Start/Complete/Get の3 UseCase |
+| 3-3-4: MCP Tool - report_execution_start/complete | ✅ 完了 | ToolDefinitions, MCPServer実装 |

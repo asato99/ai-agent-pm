@@ -164,3 +164,16 @@ public protocol AgentSessionRepositoryProtocol: Sendable {
     func deleteByAgentId(_ agentId: AgentID) throws
     func deleteExpired() throws
 }
+
+// MARK: - ExecutionLogRepositoryProtocol
+
+/// 実行ログリポジトリのプロトコル
+/// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+public protocol ExecutionLogRepositoryProtocol: Sendable {
+    func findById(_ id: ExecutionLogID) throws -> ExecutionLog?
+    func findByTaskId(_ taskId: TaskID) throws -> [ExecutionLog]
+    func findByAgentId(_ agentId: AgentID) throws -> [ExecutionLog]
+    func findRunning(agentId: AgentID) throws -> [ExecutionLog]
+    func save(_ log: ExecutionLog) throws
+    func delete(_ id: ExecutionLogID) throws
+}

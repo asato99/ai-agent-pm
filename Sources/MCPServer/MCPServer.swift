@@ -29,6 +29,9 @@ final class MCPServer {
     private let agentCredentialRepository: AgentCredentialRepository
     private let agentSessionRepository: AgentSessionRepository
 
+    // Phase 3-3: Execution Log Repository
+    private let executionLogRepository: ExecutionLogRepository
+
     private let debugMode: Bool
 
     /// ステートレス設計: DBパスのみで初期化
@@ -44,6 +47,8 @@ final class MCPServer {
         // Phase 3-1: Authentication Repositories
         self.agentCredentialRepository = AgentCredentialRepository(database: database)
         self.agentSessionRepository = AgentSessionRepository(database: database)
+        // Phase 3-3: Execution Log Repository
+        self.executionLogRepository = ExecutionLogRepository(database: database)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
 
         // 起動時ログ（常に出力）- ファイルとstderrの両方に出力
@@ -302,6 +307,29 @@ final class MCPServer {
         case "get_pending_handoffs":
             let agentId = arguments["agent_id"] as? String
             return try getPendingHandoffs(agentId: agentId)
+
+        // Execution Log (Phase 3-3)
+        case "report_execution_start":
+            guard let taskId = arguments["task_id"] as? String,
+                  let agentId = arguments["agent_id"] as? String else {
+                throw MCPError.missingArguments(["task_id", "agent_id"])
+            }
+            return try reportExecutionStart(taskId: taskId, agentId: agentId)
+        case "report_execution_complete":
+            guard let executionLogId = arguments["execution_log_id"] as? String,
+                  let exitCode = arguments["exit_code"] as? Int,
+                  let durationSeconds = arguments["duration_seconds"] as? Double else {
+                throw MCPError.missingArguments(["execution_log_id", "exit_code", "duration_seconds"])
+            }
+            let logFilePath = arguments["log_file_path"] as? String
+            let errorMessage = arguments["error_message"] as? String
+            return try reportExecutionComplete(
+                executionLogId: executionLogId,
+                exitCode: exitCode,
+                durationSeconds: durationSeconds,
+                logFilePath: logFilePath,
+                errorMessage: errorMessage
+            )
 
         default:
             throw MCPError.unknownTool(name)
@@ -1175,6 +1203,85 @@ final class MCPServer {
             handoffs = try handoffRepository.findAllPending()
         }
         return handoffs.map { handoffToDict($0) }
+    }
+
+    // MARK: - Execution Log (Phase 3-3)
+
+    /// report_execution_start - 実行開始を報告
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+    private func reportExecutionStart(taskId: String, agentId: String) throws -> [String: Any] {
+        Self.log("[MCP] reportExecutionStart called: taskId='\(taskId)', agentId='\(agentId)'")
+
+        let useCase = RecordExecutionStartUseCase(
+            executionLogRepository: executionLogRepository,
+            taskRepository: taskRepository,
+            agentRepository: agentRepository
+        )
+
+        let log = try useCase.execute(
+            taskId: TaskID(value: taskId),
+            agentId: AgentID(value: agentId)
+        )
+
+        Self.log("[MCP] ExecutionLog created: \(log.id.value)")
+
+        return [
+            "success": true,
+            "execution_log_id": log.id.value,
+            "task_id": log.taskId.value,
+            "agent_id": log.agentId.value,
+            "status": log.status.rawValue,
+            "started_at": ISO8601DateFormatter().string(from: log.startedAt)
+        ]
+    }
+
+    /// report_execution_complete - 実行完了を報告
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+    private func reportExecutionComplete(
+        executionLogId: String,
+        exitCode: Int,
+        durationSeconds: Double,
+        logFilePath: String?,
+        errorMessage: String?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] reportExecutionComplete called: executionLogId='\(executionLogId)', exitCode=\(exitCode)")
+
+        let useCase = RecordExecutionCompleteUseCase(
+            executionLogRepository: executionLogRepository
+        )
+
+        let log = try useCase.execute(
+            executionLogId: ExecutionLogID(value: executionLogId),
+            exitCode: exitCode,
+            durationSeconds: durationSeconds,
+            logFilePath: logFilePath,
+            errorMessage: errorMessage
+        )
+
+        Self.log("[MCP] ExecutionLog completed: \(log.id.value), status=\(log.status.rawValue)")
+
+        var result: [String: Any] = [
+            "success": true,
+            "execution_log_id": log.id.value,
+            "task_id": log.taskId.value,
+            "agent_id": log.agentId.value,
+            "status": log.status.rawValue,
+            "started_at": ISO8601DateFormatter().string(from: log.startedAt),
+            "exit_code": log.exitCode ?? 0,
+            "duration_seconds": log.durationSeconds ?? 0.0
+        ]
+
+        if let completedAt = log.completedAt {
+            result["completed_at"] = ISO8601DateFormatter().string(from: completedAt)
+        }
+        if let path = log.logFilePath {
+            result["log_file_path"] = path
+        }
+        if let error = log.errorMessage {
+            result["error_message"] = error
+        }
+
+        return result
     }
 
     // MARK: - Helper Methods

@@ -219,6 +219,59 @@ final class MCPServerTests: XCTestCase {
         XCTAssertTrue(toolNames.contains("get_pending_tasks"), "get_pending_tasks should be in all tools")
     }
 
+    /// Phase 3-3: report_execution_startツール定義
+    func testReportExecutionStartToolDefinition() {
+        let tool = ToolDefinitions.reportExecutionStart
+
+        XCTAssertEqual(tool["name"] as? String, "report_execution_start")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("task_id"), "report_execution_start should require task_id")
+            XCTAssertTrue(required.contains("agent_id"), "report_execution_start should require agent_id")
+
+            if let properties = schema["properties"] as? [String: Any] {
+                XCTAssertNotNil(properties["task_id"], "Should have task_id property")
+                XCTAssertNotNil(properties["agent_id"], "Should have agent_id property")
+            }
+        }
+    }
+
+    /// Phase 3-3: report_execution_completeツール定義
+    func testReportExecutionCompleteToolDefinition() {
+        let tool = ToolDefinitions.reportExecutionComplete
+
+        XCTAssertEqual(tool["name"] as? String, "report_execution_complete")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("execution_log_id"), "report_execution_complete should require execution_log_id")
+            XCTAssertTrue(required.contains("exit_code"), "report_execution_complete should require exit_code")
+            XCTAssertTrue(required.contains("duration_seconds"), "report_execution_complete should require duration_seconds")
+
+            if let properties = schema["properties"] as? [String: Any] {
+                XCTAssertNotNil(properties["execution_log_id"], "Should have execution_log_id property")
+                XCTAssertNotNil(properties["exit_code"], "Should have exit_code property")
+                XCTAssertNotNil(properties["duration_seconds"], "Should have duration_seconds property")
+                XCTAssertNotNil(properties["log_file_path"], "Should have log_file_path property")
+                XCTAssertNotNil(properties["error_message"], "Should have error_message property")
+            }
+        }
+    }
+
+    /// Phase 3-3: 実行ログツールがall()に含まれている
+    func testExecutionLogToolsInAllTools() {
+        let allTools = ToolDefinitions.all()
+        let toolNames = allTools.compactMap { $0["name"] as? String }
+
+        XCTAssertTrue(toolNames.contains("report_execution_start"), "report_execution_start should be in all tools")
+        XCTAssertTrue(toolNames.contains("report_execution_complete"), "report_execution_complete should be in all tools")
+    }
+
     /// update_task_statusツール定義
     func testUpdateTaskStatusToolDefinition() {
         let tool = ToolDefinitions.updateTaskStatus
@@ -438,14 +491,15 @@ final class MCPServerTests: XCTestCase {
     func testToolCount() {
         let tools = ToolDefinitions.all()
 
-        // ステートレス設計版ツール: 16個
+        // ステートレス設計版ツール: 19個
         // Authentication: 1 (authenticate) - Phase 3-1
         // Agent: 3 (get_agent_profile, get_my_profile, list_agents)
         // Project: 2 (list_projects, get_project)
         // Tasks: 6 (list_tasks, get_task, get_my_tasks, get_pending_tasks, update_task_status, assign_task)
         // Context: 2 (save_context, get_task_context)
         // Handoff: 3 (create_handoff, accept_handoff, get_pending_handoffs)
-        XCTAssertEqual(tools.count, 17, "Should have 17 tools defined (including authenticate and get_pending_tasks)")
+        // Execution Log: 2 (report_execution_start, report_execution_complete) - Phase 3-3
+        XCTAssertEqual(tools.count, 19, "Should have 19 tools defined (including Phase 3-1, 3-2, 3-3 tools)")
     }
 }
 
@@ -488,7 +542,11 @@ final class MCPPRDComplianceTests: XCTestCase {
             // ハンドオフ
             "create_handoff",
             "get_pending_handoffs",
-            "accept_handoff"
+            "accept_handoff",
+
+            // 実行ログ (Phase 3-3)
+            "report_execution_start",
+            "report_execution_complete"
         ]
 
         var implementedCount = 0
@@ -498,8 +556,8 @@ final class MCPPRDComplianceTests: XCTestCase {
             }
         }
 
-        // ステートレス設計版 + 認証 + Phase 3-2: 17個のツールが実装されている
-        XCTAssertEqual(implementedCount, 17, "Should have 17 tools implemented (including authenticate and get_pending_tasks)")
+        // ステートレス設計版 + 認証 + Phase 3-2 + Phase 3-3: 19個のツールが実装されている
+        XCTAssertEqual(implementedCount, 19, "Should have 19 tools implemented (including Phase 3-1, 3-2, 3-3 tools)")
 
         // ステートレス設計で削除されたツール
         let removedTools = ["start_session", "end_session", "get_my_sessions", "create_task", "update_task"]

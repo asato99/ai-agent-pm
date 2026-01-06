@@ -377,6 +377,34 @@ final class MockAgentSessionRepository: AgentSessionRepositoryProtocol {
     }
 }
 
+final class MockExecutionLogRepository: ExecutionLogRepositoryProtocol {
+    var logs: [ExecutionLogID: ExecutionLog] = [:]
+
+    func findById(_ id: ExecutionLogID) throws -> ExecutionLog? {
+        logs[id]
+    }
+
+    func findByTaskId(_ taskId: TaskID) throws -> [ExecutionLog] {
+        logs.values.filter { $0.taskId == taskId }.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    func findByAgentId(_ agentId: AgentID) throws -> [ExecutionLog] {
+        logs.values.filter { $0.agentId == agentId }.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    func findRunning(agentId: AgentID) throws -> [ExecutionLog] {
+        logs.values.filter { $0.agentId == agentId && $0.status == .running }.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    func save(_ log: ExecutionLog) throws {
+        logs[log.id] = log
+    }
+
+    func delete(_ id: ExecutionLogID) throws {
+        logs.removeValue(forKey: id)
+    }
+}
+
 // MARK: - UseCase Tests
 
 final class UseCaseTests: XCTestCase {
@@ -393,6 +421,7 @@ final class UseCaseTests: XCTestCase {
     var auditRuleRepo: MockAuditRuleRepository!
     var agentCredentialRepo: MockAgentCredentialRepository!
     var agentSessionRepo: MockAgentSessionRepository!
+    var executionLogRepo: MockExecutionLogRepository!
 
     override func setUp() {
         projectRepo = MockProjectRepository()
@@ -407,6 +436,7 @@ final class UseCaseTests: XCTestCase {
         auditRuleRepo = MockAuditRuleRepository()
         agentCredentialRepo = MockAgentCredentialRepository()
         agentSessionRepo = MockAgentSessionRepository()
+        executionLogRepo = MockExecutionLogRepository()
     }
 
     // MARK: - Error Description Tests
@@ -2460,5 +2490,266 @@ final class UseCaseTests: XCTestCase {
 
         XCTAssertEqual(agentSessionRepo.sessions.count, 1)
         XCTAssertNotNil(agentSessionRepo.sessions[validSession.id])
+    }
+
+    // MARK: - RecordExecutionStartUseCase Tests (Phase 3-3)
+
+    func testRecordExecutionStartUseCaseSuccess() throws {
+        // 正常系：実行開始を記録
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = RecordExecutionStartUseCase(
+            executionLogRepository: executionLogRepo,
+            taskRepository: taskRepo,
+            agentRepository: agentRepo
+        )
+
+        let log = try useCase.execute(taskId: task.id, agentId: agent.id)
+
+        XCTAssertEqual(log.taskId, task.id)
+        XCTAssertEqual(log.agentId, agent.id)
+        XCTAssertEqual(log.status, .running)
+        XCTAssertNil(log.completedAt)
+        XCTAssertNotNil(executionLogRepo.logs[log.id])
+    }
+
+    func testRecordExecutionStartUseCaseTaskNotFound() throws {
+        // タスクが見つからない場合
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let useCase = RecordExecutionStartUseCase(
+            executionLogRepository: executionLogRepo,
+            taskRepository: taskRepo,
+            agentRepository: agentRepo
+        )
+
+        let nonExistentTaskId = TaskID.generate()
+
+        XCTAssertThrowsError(try useCase.execute(taskId: nonExistentTaskId, agentId: agent.id)) { error in
+            if case UseCaseError.taskNotFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected taskNotFound error")
+            }
+        }
+    }
+
+    func testRecordExecutionStartUseCaseAgentNotFound() throws {
+        // エージェントが見つからない場合
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = RecordExecutionStartUseCase(
+            executionLogRepository: executionLogRepo,
+            taskRepository: taskRepo,
+            agentRepository: agentRepo
+        )
+
+        let nonExistentAgentId = AgentID.generate()
+
+        XCTAssertThrowsError(try useCase.execute(taskId: task.id, agentId: nonExistentAgentId)) { error in
+            if case UseCaseError.agentNotFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected agentNotFound error")
+            }
+        }
+    }
+
+    // MARK: - RecordExecutionCompleteUseCase Tests (Phase 3-3)
+
+    func testRecordExecutionCompleteUseCaseSuccess() throws {
+        // 正常系：実行完了を記録（exitCode=0で完了）
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let log = ExecutionLog(taskId: task.id, agentId: agent.id)
+        executionLogRepo.logs[log.id] = log
+
+        let useCase = RecordExecutionCompleteUseCase(executionLogRepository: executionLogRepo)
+
+        let updatedLog = try useCase.execute(
+            executionLogId: log.id,
+            exitCode: 0,
+            durationSeconds: 120.5,
+            logFilePath: "/tmp/log.txt"
+        )
+
+        XCTAssertEqual(updatedLog.status, .completed)
+        XCTAssertEqual(updatedLog.exitCode, 0)
+        XCTAssertEqual(updatedLog.durationSeconds, 120.5)
+        XCTAssertEqual(updatedLog.logFilePath, "/tmp/log.txt")
+        XCTAssertNotNil(updatedLog.completedAt)
+    }
+
+    func testRecordExecutionCompleteUseCaseFailedStatus() throws {
+        // 正常系：実行失敗を記録（exitCode≠0で失敗）
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        let log = ExecutionLog(taskId: task.id, agentId: agent.id)
+        executionLogRepo.logs[log.id] = log
+
+        let useCase = RecordExecutionCompleteUseCase(executionLogRepository: executionLogRepo)
+
+        let updatedLog = try useCase.execute(
+            executionLogId: log.id,
+            exitCode: 1,
+            durationSeconds: 45.0,
+            logFilePath: "/tmp/error.log",
+            errorMessage: "Command failed"
+        )
+
+        XCTAssertEqual(updatedLog.status, .failed)
+        XCTAssertEqual(updatedLog.exitCode, 1)
+        XCTAssertEqual(updatedLog.errorMessage, "Command failed")
+    }
+
+    func testRecordExecutionCompleteUseCaseNotFound() throws {
+        // 実行ログが見つからない場合
+        let useCase = RecordExecutionCompleteUseCase(executionLogRepository: executionLogRepo)
+
+        let nonExistentId = ExecutionLogID.generate()
+
+        XCTAssertThrowsError(try useCase.execute(
+            executionLogId: nonExistentId,
+            exitCode: 0,
+            durationSeconds: 10.0
+        )) { error in
+            if case UseCaseError.executionLogNotFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected executionLogNotFound error")
+            }
+        }
+    }
+
+    func testRecordExecutionCompleteUseCaseAlreadyCompleted() throws {
+        // 既に完了している実行ログに対するエラー
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task", status: .inProgress)
+        taskRepo.tasks[task.id] = task
+
+        var log = ExecutionLog(taskId: task.id, agentId: agent.id)
+        log.complete(exitCode: 0, durationSeconds: 60.0)  // 既に完了
+        executionLogRepo.logs[log.id] = log
+
+        let useCase = RecordExecutionCompleteUseCase(executionLogRepository: executionLogRepo)
+
+        XCTAssertThrowsError(try useCase.execute(
+            executionLogId: log.id,
+            exitCode: 0,
+            durationSeconds: 10.0
+        )) { error in
+            if case UseCaseError.invalidStateTransition = error {
+                // Expected
+            } else {
+                XCTFail("Expected invalidStateTransition error")
+            }
+        }
+    }
+
+    // MARK: - GetExecutionLogsUseCase Tests (Phase 3-3)
+
+    func testGetExecutionLogsByTaskId() throws {
+        // タスクIDで実行ログを取得
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task")
+        taskRepo.tasks[task.id] = task
+
+        let log1 = ExecutionLog(taskId: task.id, agentId: agent.id)
+        let log2 = ExecutionLog(taskId: task.id, agentId: agent.id)
+        executionLogRepo.logs[log1.id] = log1
+        executionLogRepo.logs[log2.id] = log2
+
+        let useCase = GetExecutionLogsUseCase(executionLogRepository: executionLogRepo)
+
+        let logs = try useCase.executeByTaskId(task.id)
+
+        XCTAssertEqual(logs.count, 2)
+    }
+
+    func testGetExecutionLogsByAgentId() throws {
+        // エージェントIDで実行ログを取得
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let task1 = Task(id: TaskID.generate(), projectId: project.id, title: "Task 1")
+        let task2 = Task(id: TaskID.generate(), projectId: project.id, title: "Task 2")
+        taskRepo.tasks[task1.id] = task1
+        taskRepo.tasks[task2.id] = task2
+
+        let log1 = ExecutionLog(taskId: task1.id, agentId: agent.id)
+        let log2 = ExecutionLog(taskId: task2.id, agentId: agent.id)
+        executionLogRepo.logs[log1.id] = log1
+        executionLogRepo.logs[log2.id] = log2
+
+        let useCase = GetExecutionLogsUseCase(executionLogRepository: executionLogRepo)
+
+        let logs = try useCase.executeByAgentId(agent.id)
+
+        XCTAssertEqual(logs.count, 2)
+    }
+
+    func testGetRunningExecutionLogs() throws {
+        // 実行中のログを取得
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task")
+        taskRepo.tasks[task.id] = task
+
+        let runningLog = ExecutionLog(taskId: task.id, agentId: agent.id)
+        var completedLog = ExecutionLog(taskId: task.id, agentId: agent.id)
+        completedLog.complete(exitCode: 0, durationSeconds: 60.0)
+
+        executionLogRepo.logs[runningLog.id] = runningLog
+        executionLogRepo.logs[completedLog.id] = completedLog
+
+        let useCase = GetExecutionLogsUseCase(executionLogRepository: executionLogRepo)
+
+        let logs = try useCase.executeRunning(agentId: agent.id)
+
+        XCTAssertEqual(logs.count, 1)
+        XCTAssertEqual(logs.first?.status, .running)
     }
 }

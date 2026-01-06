@@ -1056,4 +1056,121 @@ final class DomainTests: XCTestCase {
         // Then
         XCTAssertEqual(session.expiresAt, customExpiry, "Should use custom expiry")
     }
+
+    // MARK: - ExecutionLog Tests (Phase 3-3)
+
+    func testExecutionLogCreation_SetsStatusToRunning() {
+        // Given
+        let taskId = TaskID(value: "tsk_test123")
+        let agentId = AgentID(value: "agt_test456")
+
+        // When
+        let log = ExecutionLog(taskId: taskId, agentId: agentId)
+
+        // Then
+        XCTAssertEqual(log.status, .running, "New execution log should have running status")
+        XCTAssertEqual(log.taskId, taskId)
+        XCTAssertEqual(log.agentId, agentId)
+        XCTAssertNil(log.completedAt, "New log should not have completedAt")
+        XCTAssertNil(log.exitCode, "New log should not have exitCode")
+        XCTAssertNil(log.durationSeconds, "New log should not have durationSeconds")
+        XCTAssertNil(log.logFilePath, "New log should not have logFilePath")
+        XCTAssertNil(log.errorMessage, "New log should not have errorMessage")
+    }
+
+    func testExecutionLogComplete_WithZeroExitCode_SetsStatusToCompleted() {
+        // Given
+        var log = ExecutionLog(
+            taskId: TaskID(value: "tsk_test123"),
+            agentId: AgentID(value: "agt_test456")
+        )
+
+        // When
+        log.complete(exitCode: 0, durationSeconds: 120.5, logFilePath: "/tmp/log.txt")
+
+        // Then
+        XCTAssertEqual(log.status, .completed, "Exit code 0 should set status to completed")
+        XCTAssertEqual(log.exitCode, 0)
+        XCTAssertEqual(log.durationSeconds, 120.5)
+        XCTAssertEqual(log.logFilePath, "/tmp/log.txt")
+        XCTAssertNotNil(log.completedAt, "completedAt should be set")
+        XCTAssertNil(log.errorMessage, "errorMessage should be nil for successful completion")
+    }
+
+    func testExecutionLogComplete_WithNonZeroExitCode_SetsStatusToFailed() {
+        // Given
+        var log = ExecutionLog(
+            taskId: TaskID(value: "tsk_test123"),
+            agentId: AgentID(value: "agt_test456")
+        )
+
+        // When
+        log.complete(
+            exitCode: 1,
+            durationSeconds: 45.0,
+            logFilePath: "/tmp/error.log",
+            errorMessage: "Command failed with exit code 1"
+        )
+
+        // Then
+        XCTAssertEqual(log.status, .failed, "Non-zero exit code should set status to failed")
+        XCTAssertEqual(log.exitCode, 1)
+        XCTAssertEqual(log.durationSeconds, 45.0)
+        XCTAssertEqual(log.logFilePath, "/tmp/error.log")
+        XCTAssertEqual(log.errorMessage, "Command failed with exit code 1")
+        XCTAssertNotNil(log.completedAt, "completedAt should be set")
+    }
+
+    func testExecutionLogIDGeneration() {
+        // When
+        let id1 = ExecutionLogID.generate()
+        let id2 = ExecutionLogID.generate()
+
+        // Then
+        XCTAssertTrue(id1.value.hasPrefix("exec_"), "ExecutionLogID should have exec_ prefix")
+        XCTAssertNotEqual(id1, id2, "Generated IDs should be unique")
+    }
+
+    func testExecutionLogFromDB_RestoresAllFields() {
+        // Given
+        let id = ExecutionLogID(value: "exec_test123")
+        let taskId = TaskID(value: "tsk_abc")
+        let agentId = AgentID(value: "agt_xyz")
+        let startedAt = Date()
+        let completedAt = Date().addingTimeInterval(60)
+
+        // When
+        let log = ExecutionLog(
+            id: id,
+            taskId: taskId,
+            agentId: agentId,
+            status: .completed,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            exitCode: 0,
+            durationSeconds: 60.0,
+            logFilePath: "/var/log/exec.log",
+            errorMessage: nil
+        )
+
+        // Then
+        XCTAssertEqual(log.id, id)
+        XCTAssertEqual(log.taskId, taskId)
+        XCTAssertEqual(log.agentId, agentId)
+        XCTAssertEqual(log.status, .completed)
+        XCTAssertEqual(log.startedAt, startedAt)
+        XCTAssertEqual(log.completedAt, completedAt)
+        XCTAssertEqual(log.exitCode, 0)
+        XCTAssertEqual(log.durationSeconds, 60.0)
+        XCTAssertEqual(log.logFilePath, "/var/log/exec.log")
+        XCTAssertNil(log.errorMessage)
+    }
+
+    func testExecutionStatusCases() {
+        // Then
+        XCTAssertEqual(ExecutionStatus.running.rawValue, "running")
+        XCTAssertEqual(ExecutionStatus.completed.rawValue, "completed")
+        XCTAssertEqual(ExecutionStatus.failed.rawValue, "failed")
+        XCTAssertEqual(ExecutionStatus.allCases.count, 3)
+    }
 }

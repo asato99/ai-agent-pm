@@ -24,6 +24,7 @@ final class InfrastructureTests: XCTestCase {
     var auditRuleRepo: AuditRuleRepository!
     var agentCredentialRepo: AgentCredentialRepository!
     var agentSessionRepo: AgentSessionRepository!
+    var executionLogRepo: ExecutionLogRepository!
 
     override func setUpWithError() throws {
         // インメモリデータベースを使用
@@ -44,6 +45,7 @@ final class InfrastructureTests: XCTestCase {
         auditRuleRepo = AuditRuleRepository(database: db)
         agentCredentialRepo = AgentCredentialRepository(database: db)
         agentSessionRepo = AgentSessionRepository(database: db)
+        executionLogRepo = ExecutionLogRepository(database: db)
     }
 
     override func tearDownWithError() throws {
@@ -1422,6 +1424,171 @@ final class InfrastructureTests: XCTestCase {
         // セッションも削除されていること
         let found = try agentSessionRepo.findById(session.id)
         XCTAssertNil(found)
+    }
+
+    // MARK: - ExecutionLogRepository Tests (Phase 3-3)
+
+    func testExecutionLogRepositorySaveAndFindById() throws {
+        // Given
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        try projectRepo.save(project)
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task")
+        try taskRepo.save(task)
+
+        let log = ExecutionLog(taskId: task.id, agentId: agent.id)
+
+        // When
+        try executionLogRepo.save(log)
+        let found = try executionLogRepo.findById(log.id)
+
+        // Then
+        XCTAssertNotNil(found)
+        XCTAssertEqual(found?.id, log.id)
+        XCTAssertEqual(found?.taskId, task.id)
+        XCTAssertEqual(found?.agentId, agent.id)
+        XCTAssertEqual(found?.status, .running)
+    }
+
+    func testExecutionLogRepositoryFindByTaskId() throws {
+        // Given
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        try projectRepo.save(project)
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task")
+        try taskRepo.save(task)
+
+        let log1 = ExecutionLog(taskId: task.id, agentId: agent.id)
+        let log2 = ExecutionLog(taskId: task.id, agentId: agent.id)
+        try executionLogRepo.save(log1)
+        try executionLogRepo.save(log2)
+
+        // When
+        let logs = try executionLogRepo.findByTaskId(task.id)
+
+        // Then
+        XCTAssertEqual(logs.count, 2)
+    }
+
+    func testExecutionLogRepositoryFindByAgentId() throws {
+        // Given
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        try projectRepo.save(project)
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+        let task1 = Task(id: TaskID.generate(), projectId: project.id, title: "Task 1")
+        let task2 = Task(id: TaskID.generate(), projectId: project.id, title: "Task 2")
+        try taskRepo.save(task1)
+        try taskRepo.save(task2)
+
+        let log1 = ExecutionLog(taskId: task1.id, agentId: agent.id)
+        let log2 = ExecutionLog(taskId: task2.id, agentId: agent.id)
+        try executionLogRepo.save(log1)
+        try executionLogRepo.save(log2)
+
+        // When
+        let logs = try executionLogRepo.findByAgentId(agent.id)
+
+        // Then
+        XCTAssertEqual(logs.count, 2)
+    }
+
+    func testExecutionLogRepositoryFindRunning() throws {
+        // Given
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        try projectRepo.save(project)
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task")
+        try taskRepo.save(task)
+
+        var runningLog = ExecutionLog(taskId: task.id, agentId: agent.id)
+        var completedLog = ExecutionLog(taskId: task.id, agentId: agent.id)
+        completedLog.complete(exitCode: 0, durationSeconds: 60.0)
+
+        try executionLogRepo.save(runningLog)
+        try executionLogRepo.save(completedLog)
+
+        // When
+        let runningLogs = try executionLogRepo.findRunning(agentId: agent.id)
+
+        // Then
+        XCTAssertEqual(runningLogs.count, 1)
+        XCTAssertEqual(runningLogs.first?.status, .running)
+    }
+
+    func testExecutionLogRepositoryUpdateStatus() throws {
+        // Given
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        try projectRepo.save(project)
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task")
+        try taskRepo.save(task)
+
+        var log = ExecutionLog(taskId: task.id, agentId: agent.id)
+        try executionLogRepo.save(log)
+
+        // When
+        log.complete(exitCode: 0, durationSeconds: 120.5, logFilePath: "/tmp/log.txt")
+        try executionLogRepo.save(log)
+
+        // Then
+        let found = try executionLogRepo.findById(log.id)
+        XCTAssertEqual(found?.status, .completed)
+        XCTAssertEqual(found?.exitCode, 0)
+        XCTAssertEqual(found?.durationSeconds, 120.5)
+        XCTAssertEqual(found?.logFilePath, "/tmp/log.txt")
+        XCTAssertNotNil(found?.completedAt)
+    }
+
+    func testExecutionLogRepositoryCascadeDeleteOnTaskDelete() throws {
+        // Given
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        try projectRepo.save(project)
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task")
+        try taskRepo.save(task)
+
+        let log = ExecutionLog(taskId: task.id, agentId: agent.id)
+        try executionLogRepo.save(log)
+
+        // When - タスク削除
+        try taskRepo.delete(task.id)
+
+        // Then - 実行ログも削除されていること
+        let found = try executionLogRepo.findById(log.id)
+        XCTAssertNil(found)
+    }
+
+    func testExecutionLogRepositoryCascadeDeleteOnAgentDelete() throws {
+        // Given
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        try projectRepo.save(project)
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Test Task")
+        try taskRepo.save(task)
+
+        let log = ExecutionLog(taskId: task.id, agentId: agent.id)
+        try executionLogRepo.save(log)
+
+        // When - エージェント削除
+        try agentRepo.delete(agent.id)
+
+        // Then - 実行ログも削除されていること
+        let found = try executionLogRepo.findById(log.id)
+        XCTAssertNil(found)
+    }
+
+    func testExecutionLogsTableExists() throws {
+        // execution_logs テーブルが存在することを確認
+        try db.read { db in
+            XCTAssertTrue(try db.tableExists("execution_logs"))
+        }
     }
 
 }
