@@ -324,6 +324,22 @@ public struct ListTemplatesUseCase: Sendable {
     }
 }
 
+// MARK: - ListAllTemplatesUseCase
+
+/// 全プロジェクトのテンプレート一覧取得ユースケース
+/// 用途: Internal Auditのルール作成時にテンプレートをインポート元として選択
+public struct ListAllTemplatesUseCase: Sendable {
+    private let templateRepository: any WorkflowTemplateRepositoryProtocol
+
+    public init(templateRepository: any WorkflowTemplateRepositoryProtocol) {
+        self.templateRepository = templateRepository
+    }
+
+    public func execute() throws -> [WorkflowTemplate] {
+        try templateRepository.findAllActive()
+    }
+}
+
 // MARK: - GetTemplateWithTasksUseCase
 
 /// テンプレートとタスク取得ユースケース

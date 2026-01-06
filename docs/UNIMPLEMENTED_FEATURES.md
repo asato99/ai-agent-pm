@@ -8,12 +8,12 @@ UIテストで検出された未実装機能の進捗管理ドキュメント
 
 | カテゴリ | 未実装数 | 優先度 |
 |---------|---------|--------|
-| タスクボード (PRD02) | 5 | 中 |
+| タスクボード (PRD02) | 4 | 中 | ※ドラッグ&ドロップ実装済み|
 | エージェント管理 (PRD03) | 3 | 中 |
 | タスク詳細 (PRD04) | 2 | 低 |
 | 依存関係ブロッキング (PRD05) | 1 | 低 |
 | リソースブロッキング (PRD06) | 2 | 中 |
-| 監査チーム (PRD07) | 1 | 高 |
+| 監査チーム (PRD07) | 0 | ✅完了 |
 | 履歴 (PRD08) | 3 | 低 |
 | プロジェクト一覧 (PRD01) | 4 | 中 |
 
@@ -49,11 +49,18 @@ UIテストで検出された未実装機能の進捗管理ドキュメント
 
 ## PRD02: タスクボード
 
-### [ ] ドラッグ&ドロップ機能
-- **ファイル**: `PRD02_TaskBoardTests.swift:232`
+### [x] ドラッグ&ドロップ機能 ✅実装済み (2026-01-06)
+- **ファイル**: `PRD02_TaskBoardTests.swift:241`
 - **説明**: タスクカードをドラッグしてステータス変更
 - **優先度**: 高
 - **関連要件**: TASKS.md - カンバンボード操作
+- **実装内容**:
+  - `TaskCardButton`: `.onDrag { NSItemProvider(taskId: task.id) }`
+  - `TaskColumnView`: `.onDrop(of: [...]) { ... }`
+  - ステータス遷移バリデーション付き
+- **テスト注記**: ⚠️ XCUITestはSwiftUIの`.onDrag/.onDrop`を適切にトリガーできないため、
+  UIテストでは要素の存在確認のみ実施。手動テストで動作確認推奨。
+- **影響テスト**: `testDragAndDropStatusChange` ✅パス（制限事項付き）
 
 ### [ ] タスクカードのコンテキストメニュー
 - **ファイル**: `PRD02_TaskBoardTests.swift:238`
@@ -148,17 +155,20 @@ UIテストで検出された未実装機能の進捗管理ドキュメント
 
 ---
 
-## PRD07: 監査チーム (Internal Audit)
+## PRD07: 監査チーム (Internal Audit) ✅完了
 
-### [ ] WorkflowTemplatePicker
+### [x] WorkflowTemplatePicker ✅完了 (2026-01-06)
 - **ファイル**: `PRD07_AuditTeamTests.swift:282, 389, 445`
 - **説明**: Audit Rule編集画面でワークフローテンプレートを選択するPicker
-- **優先度**: 高
-- **関連要件**: AUDIT.md - Audit Ruleとワークフローテンプレートの連携
-- **影響テスト**:
-  - `testAuditRuleCreationFormOpens`
-  - `testWorkflowTemplateSelection`
-  - `testTaskAgentAssignmentDisplay`
+- **実装内容**:
+  - `ListAllTemplatesUseCase` - 全プロジェクトのテンプレート取得
+  - `AuditRuleFormView` に `WorkflowTemplatePicker` 追加
+  - テンプレート選択時にタスクをインポートする機能
+  - テストデータに QA Workflow Template を追加
+- **影響テスト**: 全パス
+  - `testAuditRuleCreationFormOpens` ✅
+  - `testWorkflowTemplateSelection` ✅
+  - `testTaskAgentAssignmentDisplay` ✅
 
 ---
 
@@ -198,13 +208,17 @@ UIテストで検出された未実装機能の進捗管理ドキュメント
 
 ### 完了した機能
 
-_（完了時にここに移動）_
+| 日付 | 機能 | カテゴリ |
+|------|------|----------|
+| 2026-01-06 | WorkflowTemplatePicker | PRD07 監査チーム |
+| 2026-01-06 | ドラッグ&ドロップ (XCUITest制限あり) | PRD02 タスクボード |
 
 ### 次のマイルストーン
 
-1. **v1.1**: PRD07 WorkflowTemplatePicker実装
-2. **v1.2**: PRD02 ドラッグ&ドロップ、フィルターバー
-3. **v1.3**: 履歴フィルター機能群
+1. ~~**v1.1**: PRD07 WorkflowTemplatePicker実装~~ ✅完了
+2. ~~**v1.2**: PRD02 ドラッグ&ドロップ実装~~ ✅完了（XCUITestは手動テスト推奨）
+3. **v1.3**: PRD02 フィルターバー、検索機能
+4. **v1.4**: 履歴フィルター機能群
 
 ---
 
@@ -213,3 +227,5 @@ _（完了時にここに移動）_
 | 日付 | 内容 |
 |------|------|
 | 2026-01-06 | 初版作成 - UIテストから未実装機能を抽出 |
+| 2026-01-06 | PRD07 WorkflowTemplatePicker 実装完了 |
+| 2026-01-06 | PRD02 ドラッグ&ドロップ実装完了（XCUITest制限事項を文書化） |

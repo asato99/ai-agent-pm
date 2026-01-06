@@ -107,6 +107,17 @@ public final class WorkflowTemplateRepository: WorkflowTemplateRepositoryProtoco
         try findByProject(projectId, includeArchived: false)
     }
 
+    /// 全プロジェクトのアクティブなテンプレートを取得（Internal Audit用）
+    public func findAllActive() throws -> [WorkflowTemplate] {
+        try db.read { db in
+            try WorkflowTemplateRecord
+                .filter(Column("status") == TemplateStatus.active.rawValue)
+                .order(Column("name").asc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
     public func save(_ template: WorkflowTemplate) throws {
         try db.write { db in
             try WorkflowTemplateRecord.fromDomain(template).save(db)

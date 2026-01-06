@@ -95,6 +95,8 @@ public protocol WorkflowTemplateRepositoryProtocol: Sendable {
     func findById(_ id: WorkflowTemplateID) throws -> WorkflowTemplate?
     func findByProject(_ projectId: ProjectID, includeArchived: Bool) throws -> [WorkflowTemplate]
     func findActiveByProject(_ projectId: ProjectID) throws -> [WorkflowTemplate]
+    /// 全プロジェクトのアクティブなテンプレートを取得（Internal Audit用）
+    func findAllActive() throws -> [WorkflowTemplate]
     func save(_ template: WorkflowTemplate) throws
     func delete(_ id: WorkflowTemplateID) throws
 }

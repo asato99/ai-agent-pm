@@ -818,6 +818,52 @@ private final class TestDataSeeder {
         )
         try await projectRepository.save(triggerTestProject)
 
+        // WorkflowTemplate作成（AuditRule作成時のテンプレートインポート用）
+        if let templateRepository = templateRepository,
+           let templateTaskRepository = templateTaskRepository {
+            let qaTemplateId = WorkflowTemplateID(value: "uitest_qa_template")
+            let qaTemplate = WorkflowTemplate(
+                id: qaTemplateId,
+                projectId: triggerTestProject.id,
+                name: "QA Workflow Template",
+                description: "品質保証用ワークフローテンプレート",
+                variables: [],
+                status: .active,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+            try templateRepository.save(qaTemplate)
+
+            // テンプレートタスク作成
+            let task1 = TemplateTask(
+                id: TemplateTaskID(value: "uitest_qa_template_task_1"),
+                templateId: qaTemplateId,
+                title: "Quality Check",
+                description: "品質チェックを実行",
+                order: 1,
+                dependsOnOrders: [],
+                defaultAssigneeRole: .developer,
+                defaultPriority: .high,
+                estimatedMinutes: 60
+            )
+            try templateTaskRepository.save(task1)
+
+            let task2 = TemplateTask(
+                id: TemplateTaskID(value: "uitest_qa_template_task_2"),
+                templateId: qaTemplateId,
+                title: "Approval",
+                description: "承認プロセス",
+                order: 2,
+                dependsOnOrders: [1],
+                defaultAssigneeRole: .manager,
+                defaultPriority: .medium,
+                estimatedMinutes: 30
+            )
+            try templateTaskRepository.save(task2)
+
+            print("✅ UITest: QA Workflow Template created with 2 tasks")
+        }
+
         // トリガーテスト用タスク（inProgress状態 → doneに変更でトリガー発火）
         let triggerTestTask = Task(
             id: TaskID(value: "uitest_trigger_task"),

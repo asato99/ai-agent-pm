@@ -31,6 +31,10 @@ struct AuditRuleFormView: View {
     @State private var targetStatus: TaskStatus = .done
     @State private var graceMinutes: Int = 30
 
+    // Workflow Template import state
+    @State private var workflowTemplates: [WorkflowTemplate] = []
+    @State private var selectedTemplateId: WorkflowTemplateID?
+
     /// Audit Task入力用の構造体
     struct AuditTaskInput: Identifiable {
         let id = UUID()
@@ -78,6 +82,19 @@ struct AuditRuleFormView: View {
                                 }
                             }
                             .accessibilityIdentifier("TriggerTypePicker")
+
+                            Picker("Import from Template", selection: $selectedTemplateId) {
+                                Text("None").tag(nil as WorkflowTemplateID?)
+                                ForEach(workflowTemplates) { template in
+                                    Text(template.name).tag(template.id as WorkflowTemplateID?)
+                                }
+                            }
+                            .accessibilityIdentifier("WorkflowTemplatePicker")
+                            .onChange(of: selectedTemplateId) { _, newValue in
+                                if let templateId = newValue {
+                                    loadTemplateTasks(templateId: templateId)
+                                }
+                            }
                         }
 
                         // Trigger-specific configuration
@@ -170,6 +187,7 @@ struct AuditRuleFormView: View {
 
         do {
             agents = try container.getAgentsUseCase.execute()
+            workflowTemplates = try container.listAllTemplatesUseCase.execute()
 
             if case .edit(let ruleId, _) = mode {
                 // Load existing rule data
@@ -190,6 +208,29 @@ struct AuditRuleFormView: View {
                         )
                     }
                 }
+            }
+        } catch {
+            router.showAlert(.error(message: error.localizedDescription))
+        }
+    }
+
+    /// テンプレートからタスクをインポート
+    private func loadTemplateTasks(templateId: WorkflowTemplateID) {
+        do {
+            guard let result = try container.getTemplateWithTasksUseCase.execute(templateId: templateId) else {
+                return
+            }
+
+            // Convert TemplateTask to AuditTaskInput
+            auditTaskInputs = result.tasks.map { task in
+                AuditTaskInput(
+                    order: task.order,
+                    title: task.title,
+                    description: task.description,
+                    agentId: nil,  // エージェントは手動で割り当て
+                    priority: task.defaultPriority,
+                    dependsOnOrders: task.dependsOnOrders
+                )
             }
         } catch {
             router.showAlert(.error(message: error.localizedDescription))

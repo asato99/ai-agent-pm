@@ -189,6 +189,10 @@ public final class DependencyContainer: ObservableObject {
         ListTemplatesUseCase(templateRepository: workflowTemplateRepository)
     }()
 
+    public lazy var listAllTemplatesUseCase: ListAllTemplatesUseCase = {
+        ListAllTemplatesUseCase(templateRepository: workflowTemplateRepository)
+    }()
+
     public lazy var createTemplateUseCase: CreateTemplateUseCase = {
         CreateTemplateUseCase(
             templateRepository: workflowTemplateRepository,
