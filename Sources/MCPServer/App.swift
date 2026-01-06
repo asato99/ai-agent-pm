@@ -24,8 +24,8 @@ struct MCPServerCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mcp-server-pm",
         abstract: "AI Agent Project Manager - MCP Server",
-        version: "0.1.0",
-        subcommands: [Serve.self, Setup.self, Install.self, Status.self],
+        version: "0.2.0",
+        subcommands: [Serve.self, Daemon.self, Setup.self, Install.self, Status.self],
         defaultSubcommand: Serve.self
     )
 }
@@ -53,6 +53,101 @@ struct Serve: ParsableCommand {
         let database = try DatabaseSetup.createDatabase(at: dbPath)
         let server = MCPServer(database: database)
         try server.run()
+    }
+
+    private func performAutoSetup(dbPath: String) throws {
+        // ディレクトリ作成
+        let directory = (dbPath as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(
+            atPath: directory,
+            withIntermediateDirectories: true
+        )
+
+        let database = try DatabaseSetup.createDatabase(at: dbPath)
+        let projectRepo = ProjectRepository(database: database)
+        let agentRepo = AgentRepository(database: database)
+
+        // デフォルトプロジェクト作成
+        let projectId = ProjectID(value: AppConfig.DefaultProject.id)
+        let project = Project(id: projectId, name: AppConfig.DefaultProject.name)
+        try projectRepo.save(project)
+
+        // デフォルトエージェント作成
+        let agent = Agent(
+            id: AgentID(value: AppConfig.DefaultAgent.id),
+            name: AppConfig.DefaultAgent.name,
+            role: AppConfig.DefaultAgent.role,
+            type: .ai
+        )
+        try agentRepo.save(agent)
+
+        FileHandle.standardError.write("[mcp-server-pm] Auto-setup completed\n".data(using: .utf8)!)
+    }
+}
+
+// MARK: - Daemon Command
+
+struct Daemon: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "デーモンモードでMCPサーバーを起動（Runner用Unix Socket）"
+    )
+
+    @Option(name: .long, help: "Unixソケットのパス（デフォルト: ~/Library/Application Support/AIAgentPM/mcp.sock）")
+    var socketPath: String?
+
+    @Flag(name: .long, help: "フォアグラウンドで実行（デバッグ用）")
+    var foreground = false
+
+    func run() throws {
+        let dbPath = AppConfig.databasePath
+
+        // 初回起動時は自動セットアップ
+        if !FileManager.default.fileExists(atPath: dbPath) {
+            try performAutoSetup(dbPath: dbPath)
+        }
+
+        let database = try DatabaseSetup.createDatabase(at: dbPath)
+
+        // PIDファイルを作成
+        let pidPath = AppConfig.appSupportDirectory.appendingPathComponent("daemon.pid").path
+        let pid = ProcessInfo.processInfo.processIdentifier
+        try "\(pid)".write(toFile: pidPath, atomically: true, encoding: .utf8)
+
+        FileHandle.standardError.write("[mcp-server-pm] Daemon starting (PID: \(pid))\n".data(using: .utf8)!)
+
+        // Unixソケットサーバーを起動
+        let server = UnixSocketServer(socketPath: socketPath, database: database)
+
+        // SIGTERMで終了するためのハンドリング
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler {
+            server.stop()
+            try? FileManager.default.removeItem(atPath: pidPath)
+            Darwin.exit(0)
+        }
+        source.resume()
+        signal(SIGTERM, SIG_IGN)
+
+        // SIGINTも同様に処理
+        let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+        intSource.setEventHandler {
+            server.stop()
+            try? FileManager.default.removeItem(atPath: pidPath)
+            Darwin.exit(0)
+        }
+        intSource.resume()
+        signal(SIGINT, SIG_IGN)
+
+        do {
+            try server.start()
+        } catch {
+            FileHandle.standardError.write("[mcp-server-pm] Daemon error: \(error)\n".data(using: .utf8)!)
+            try? FileManager.default.removeItem(atPath: pidPath)
+            throw error
+        }
+
+        // PIDファイルを削除
+        try? FileManager.default.removeItem(atPath: pidPath)
     }
 
     private func performAutoSetup(dbPath: String) throws {

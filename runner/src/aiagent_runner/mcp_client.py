@@ -108,7 +108,19 @@ class MCPClient:
             if "error" in data:
                 raise MCPError(data["error"].get("message", "Unknown error"))
 
-            return data.get("result", {})
+            # Parse MCP protocol response format
+            # MCP returns: {"result": {"content": [{"type": "text", "text": "JSON"}]}}
+            result = data.get("result", {})
+            content = result.get("content", [])
+            if content and isinstance(content, list) and len(content) > 0:
+                first_content = content[0]
+                if isinstance(first_content, dict) and first_content.get("type") == "text":
+                    text = first_content.get("text", "{}")
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError:
+                        return {"text": text}
+            return result
         finally:
             writer.close()
             await writer.wait_closed()
@@ -167,7 +179,7 @@ class MCPClient:
         tasks = []
         for t in result.get("tasks", []):
             tasks.append(TaskInfo(
-                task_id=t.get("task_id", t.get("taskId", "")),
+                task_id=t.get("task_id", t.get("taskId", t.get("id", ""))),
                 project_id=t.get("project_id", t.get("projectId", "")),
                 title=t.get("title", ""),
                 description=t.get("description", ""),

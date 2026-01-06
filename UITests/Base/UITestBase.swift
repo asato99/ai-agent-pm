@@ -18,6 +18,7 @@ enum UITestScenario: String {
     case basic = "Basic"           // 基本データ（プロジェクト+エージェント+タスク）
     case multiProject = "MultiProject"  // 複数プロジェクト
     case internalAudit = "InternalAudit" // Internal Audit機能テスト用
+    case uc001 = "UC001"           // UC001: エージェントによるタスク実行（Runner統合テスト用）
 }
 
 // MARK: - Base Test Class
@@ -89,4 +90,9 @@ class MultiProjectUITestCase: AIAgentPMUITestCase {
 /// Internal Audit機能テスト用ベースクラス
 class InternalAuditUITestCase: AIAgentPMUITestCase {
     override var testScenario: UITestScenario { .internalAudit }
+}
+
+/// UC001テスト用ベースクラス（Runner統合テスト用）
+class UC001UITestCase: AIAgentPMUITestCase {
+    override var testScenario: UITestScenario { .uc001 }
 }

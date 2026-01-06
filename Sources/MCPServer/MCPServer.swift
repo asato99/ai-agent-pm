@@ -14,7 +14,7 @@ import UseCase
 /// IDはサーバー起動時ではなく、各ツール呼び出し時に引数として受け取る。
 /// キック時にプロンプトでID情報を提供し、LLM（Claude Code）が橋渡しする。
 final class MCPServer {
-    private let transport: StdioTransport
+    private let transport: MCPTransport
 
     // Repositories
     private let agentRepository: AgentRepository
@@ -34,9 +34,14 @@ final class MCPServer {
 
     private let debugMode: Bool
 
-    /// ステートレス設計: DBパスのみで初期化
-    init(database: DatabaseQueue) {
-        self.transport = StdioTransport()
+    /// ステートレス設計: DBパスのみで初期化（stdio用）
+    convenience init(database: DatabaseQueue) {
+        self.init(database: database, transport: StdioTransport())
+    }
+
+    /// カスタムトランスポートで初期化（デーモンモード用）
+    init(database: DatabaseQueue, transport: MCPTransport) {
+        self.transport = transport
         self.agentRepository = AgentRepository(database: database)
         self.taskRepository = TaskRepository(database: database)
         self.projectRepository = ProjectRepository(database: database)
@@ -90,7 +95,7 @@ final class MCPServer {
         }
     }
 
-    /// サーバーを起動してリクエストをループ処理
+    /// サーバーを起動してリクエストをループ処理（stdio用）
     func run() throws {
         logDebug("MCP Server started (stateless mode)")
 
@@ -107,6 +112,29 @@ final class MCPServer {
             } catch {
                 logDebug("Error: \(error)")
                 // エラーが発生してもループは継続
+            }
+        }
+    }
+
+    /// 単一リクエストを処理（デーモンモード用）
+    /// Unixソケット経由の場合、1接続につき複数リクエストを処理
+    func runOnce() throws {
+        logDebug("MCP Server handling connection (daemon mode)")
+
+        // 接続中はリクエストをループ処理
+        while true {
+            do {
+                let request = try transport.readMessage()
+                // 通知（id == nil）にはレスポンスを返さない
+                if let response = handleRequest(request) {
+                    try transport.writeMessage(response)
+                }
+            } catch TransportError.endOfInput {
+                logDebug("Client disconnected")
+                break
+            } catch {
+                logDebug("Error: \(error)")
+                // エラーが発生しても接続を維持
             }
         }
     }
@@ -891,10 +919,13 @@ final class MCPServer {
 
     /// Phase 3-2: get_pending_tasks - 作業中タスク取得
     /// 外部Runnerが作業継続のため現在進行中のタスクを取得
-    private func getPendingTasks(agentId: String) throws -> [[String: Any]] {
+    private func getPendingTasks(agentId: String) throws -> [String: Any] {
         let useCase = GetPendingTasksUseCase(taskRepository: taskRepository)
         let tasks = try useCase.execute(agentId: AgentID(value: agentId))
-        return tasks.map { taskToDict($0) }
+        return [
+            "success": true,
+            "tasks": tasks.map { taskToDict($0) }
+        ]
     }
 
     /// get_task - タスク詳細を取得

@@ -205,7 +205,8 @@ struct AIAgentPMApp: App {
             templateRepository: container.workflowTemplateRepository,
             templateTaskRepository: container.templateTaskRepository,
             internalAuditRepository: container.internalAuditRepository,
-            auditRuleRepository: container.auditRuleRepository
+            auditRuleRepository: container.auditRuleRepository,
+            credentialRepository: container.agentCredentialRepository
         )
 
         do {
@@ -247,6 +248,7 @@ private final class TestDataSeeder {
     private let templateTaskRepository: TemplateTaskRepository?
     private let internalAuditRepository: InternalAuditRepository?
     private let auditRuleRepository: AuditRuleRepository?
+    private let credentialRepository: AgentCredentialRepository?
 
     init(
         projectRepository: ProjectRepository,
@@ -255,7 +257,8 @@ private final class TestDataSeeder {
         templateRepository: WorkflowTemplateRepository? = nil,
         templateTaskRepository: TemplateTaskRepository? = nil,
         internalAuditRepository: InternalAuditRepository? = nil,
-        auditRuleRepository: AuditRuleRepository? = nil
+        auditRuleRepository: AuditRuleRepository? = nil,
+        credentialRepository: AgentCredentialRepository? = nil
     ) {
         self.projectRepository = projectRepository
         self.agentRepository = agentRepository
@@ -264,6 +267,7 @@ private final class TestDataSeeder {
         self.templateTaskRepository = templateTaskRepository
         self.internalAuditRepository = internalAuditRepository
         self.auditRuleRepository = auditRuleRepository
+        self.credentialRepository = credentialRepository
     }
 
     /// 基本的なテストデータを生成（プロジェクト、エージェント、タスク）
@@ -498,6 +502,59 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await agentRepository.save(claudeAgent)
+
+        // Phase 3 Pull Architecture用: Runner統合テスト用エージェント
+        // Runnerはこのエージェントとしてタスクをポーリング・実行する
+        let runnerAgentId = AgentID(value: "agt_uitest_runner")
+        let runnerAgent = Agent(
+            id: runnerAgentId,
+            name: "runner-test-agent",
+            role: "Runner統合テスト用エージェント",
+            type: .ai,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 1,
+            capabilities: ["TypeScript", "Python", "Swift"],
+            systemPrompt: "Runner経由でClaude Codeを実行するテスト用エージェント",
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(runnerAgent)
+
+        // Runner認証用クレデンシャル（Passkey: test_passkey_12345）
+        if let credentialRepository = credentialRepository {
+            let credential = AgentCredential(
+                agentId: runnerAgentId,
+                rawPasskey: "test_passkey_12345"
+            )
+            try credentialRepository.save(credential)
+            print("✅ UC001: Runner credential created for agent \(runnerAgentId.value)")
+        }
+
+        // Runner統合テスト用タスク（runnerAgentにアサイン、backlog状態）
+        // UIテストでin_progressに変更後、Runnerが検出して実行する
+        let runnerTestTask = Task(
+            id: TaskID(value: "uitest_runner_task"),
+            projectId: uc001Project.id,
+            title: "Runner統合テストタスク",
+            description: """
+                Runner統合テスト用タスク。
+
+                【指示】
+                ファイル名: \(outputFile)
+                内容: テスト用のMarkdownファイルを作成してください。内容には'integration test content'という文字列を含めること。
+                """,
+            status: .backlog,
+            priority: .high,
+            assigneeId: runnerAgentId,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(runnerTestTask)
+        print("✅ UC001: Runner test task created - id=\(runnerTestTask.id.value)")
 
         // 人間オーナー（kickMethod=none）
         let ownerAgent = Agent(

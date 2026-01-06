@@ -5,7 +5,7 @@ import Foundation
 
 /// stdio経由でのJSON-RPC通信を管理
 /// MCPプロトコルはContent-Lengthヘッダーベースのメッセージ形式を使用
-final class StdioTransport {
+final class StdioTransport: MCPTransport {
     private let input = FileHandle.standardInput
     private let output = FileHandle.standardOutput
     private let errorOutput = FileHandle.standardError
