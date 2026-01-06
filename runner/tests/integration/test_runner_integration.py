@@ -190,7 +190,9 @@ class TestRunnerIntegration:
                 agent_name=result.get("agent_name")
             )
 
-        async def mock_get_pending_tasks(agent_id):
+        async def mock_get_pending_tasks():
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.get_pending_tasks(agent_id)
             return [
                 TaskInfo(
@@ -203,7 +205,9 @@ class TestRunnerIntegration:
                 for t in result["tasks"]
             ]
 
-        async def mock_report_start(task_id, agent_id):
+        async def mock_report_start(task_id):
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.report_execution_start(task_id, agent_id)
             return ExecutionStartResult(
                 execution_id=result["execution_log_id"],
@@ -266,7 +270,9 @@ class TestRunnerIntegration:
         runner._authenticated = True
         runner.prompt_builder = MagicMock()
 
-        async def mock_get_pending_tasks(agent_id):
+        async def mock_get_pending_tasks():
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.get_pending_tasks(agent_id)
             return []
 
@@ -302,7 +308,9 @@ class TestRunnerIntegration:
                 agent_name=result.get("agent_name")
             )
 
-        async def mock_get_pending_tasks(agent_id):
+        async def mock_get_pending_tasks():
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.get_pending_tasks(agent_id)
             return [
                 TaskInfo(
@@ -315,7 +323,9 @@ class TestRunnerIntegration:
                 for t in result["tasks"]
             ]
 
-        async def mock_report_start(task_id, agent_id):
+        async def mock_report_start(task_id):
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.report_execution_start(task_id, agent_id)
             return ExecutionStartResult(
                 execution_id=result["execution_log_id"],
@@ -356,7 +366,9 @@ class TestRunnerIntegration:
                 agent_name=result.get("agent_name")
             )
 
-        async def mock_get_pending_tasks(agent_id):
+        async def mock_get_pending_tasks():
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             call_count["tasks"] += 1
             if call_count["tasks"] == 1:
                 # First call raises session expired
@@ -394,7 +406,9 @@ class TestRunnerExecutionLogging:
                 agent_name=result.get("agent_name")
             )
 
-        async def mock_get_pending_tasks(agent_id):
+        async def mock_get_pending_tasks():
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.get_pending_tasks(agent_id)
             return [
                 TaskInfo(
@@ -407,7 +421,9 @@ class TestRunnerExecutionLogging:
                 for t in result["tasks"]
             ]
 
-        async def mock_report_start(task_id, agent_id):
+        async def mock_report_start(task_id):
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.report_execution_start(task_id, agent_id)
             return ExecutionStartResult(
                 execution_id=result["execution_log_id"],
@@ -456,7 +472,9 @@ class TestRunnerExecutionLogging:
                 agent_name=result.get("agent_name")
             )
 
-        async def mock_get_pending_tasks(agent_id):
+        async def mock_get_pending_tasks():
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.get_pending_tasks(agent_id)
             return [
                 TaskInfo(
@@ -469,7 +487,9 @@ class TestRunnerExecutionLogging:
                 for t in result["tasks"]
             ]
 
-        async def mock_report_start(task_id, agent_id):
+        async def mock_report_start(task_id):
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.report_execution_start(task_id, agent_id)
             return ExecutionStartResult(
                 execution_id=result["execution_log_id"],
@@ -522,7 +542,9 @@ class TestRunnerPromptBuilding:
                 agent_name=result.get("agent_name")
             )
 
-        async def mock_get_pending_tasks(agent_id):
+        async def mock_get_pending_tasks():
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.get_pending_tasks(agent_id)
             return [
                 TaskInfo(
@@ -535,7 +557,9 @@ class TestRunnerPromptBuilding:
                 for t in result["tasks"]
             ]
 
-        async def mock_report_start(task_id, agent_id):
+        async def mock_report_start(task_id):
+            # agent_id is derived from session token internally
+            agent_id = integration_config.agent_id
             result = await mock_mcp_server.report_execution_start(task_id, agent_id)
             return ExecutionStartResult(
                 execution_id=result["execution_log_id"],

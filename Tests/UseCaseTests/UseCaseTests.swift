@@ -362,6 +362,13 @@ final class MockAgentSessionRepository: AgentSessionRepositoryProtocol {
         sessions.removeValue(forKey: id)
     }
 
+    func deleteByToken(_ token: String) throws {
+        let toDelete = sessions.values.filter { $0.token == token }.map { $0.id }
+        for id in toDelete {
+            sessions.removeValue(forKey: id)
+        }
+    }
+
     func deleteByAgentId(_ agentId: AgentID) throws {
         let toDelete = sessions.values.filter { $0.agentId == agentId }.map { $0.id }
         for id in toDelete {

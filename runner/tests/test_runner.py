@@ -154,7 +154,8 @@ class TestRunnerRunOnce:
 
         call_count = 0
 
-        async def mock_get_tasks(agent_id):
+        async def mock_get_tasks():
+            # No agent_id argument - derived from session token internally
             nonlocal call_count
             call_count += 1
             if call_count == 1:

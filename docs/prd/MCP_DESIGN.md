@@ -26,15 +26,90 @@ MCPサーバーは**ステートレス**に設計されています。
 
 ## MCPサーバーが提供するTools
 
-### 認証（Runner向け）
+### Coordinator向けAPI（Phase 4）
+
+Coordinatorは以下の3ステップでポーリングを行う：
+1. `health_check` - サーバー起動確認
+2. `list_managed_agents` - エージェント一覧取得
+3. `should_start` - 各エージェントの起動判断
 
 | Tool | 引数 | 説明 |
 |------|------|------|
-| `authenticate` | `agent_id`, `passkey` | セッショントークンを取得 |
+| `health_check` | なし | MCPサーバーの起動確認 |
+| `list_managed_agents` | なし | 管理対象エージェント一覧を取得 |
+| `should_start` | `agent_id` | エージェントを起動すべきかどうかを返す |
+
+#### health_check
+
+MCPサーバーの起動状態を確認する。
+
+```python
+health_check() -> {
+    "status": "ok",
+    "version": "1.0.0",
+    "timestamp": "2025-01-06T10:00:00Z"
+}
+```
+
+**用途**:
+- サーバー起動確認
+- 接続テスト
+- バージョン確認（将来の互換性チェック用）
+
+#### list_managed_agents
+
+Coordinatorが管理すべきエージェントの一覧を取得する。
+
+```python
+list_managed_agents() -> {
+    "success": True,
+    "agents": [
+        { "agent_id": "agt_frontend" },
+        { "agent_id": "agt_backend" },
+        { "agent_id": "agt_infra" }
+    ]
+}
+```
+
+**実装ロジック（内部）**:
+- `active` 状態のエージェントのみ返す
+- passkey、role、typeなどの詳細は返さない（Coordinatorは知る必要がない）
+
+#### should_start
+
+エージェントを起動すべきかどうかを返す。内部の詳細（タスクステータス等）は隠蔽。
+
+```python
+should_start(
+    agent_id: str       # エージェントID
+) -> {
+    "should_start": True  # or False
+}
+```
+
+**実装ロジック（内部）**:
+1. エージェントが存在しない → `False`
+2. 既に実行中（アクティブセッションあり）→ `False`
+3. `in_progress` 状態のタスクがある → `True`
+4. それ以外 → `False`
+
+**重要**: 戻り値にタスク情報は含めない。Coordinatorはタスクの存在を知る必要がない。
+
+---
+
+### Agent向けAPI（Phase 4）
+
+| Tool | 引数 | 説明 |
+|------|------|------|
+| `authenticate` | `agent_id`, `passkey` | セッショントークンとinstructionを取得 |
 | `logout` | `session_token` | セッションを終了 |
-| `get_pending_tasks` | `session_token` | 自分に割り当てられた実行待ちタスクを取得 |
+| `get_my_task` | `session_token` | 現在のタスク詳細を取得 |
+| `report_completed` | `session_token`, `result`, `summary?`, `next_steps?` | タスク完了を報告 |
 
 #### authenticate
+
+認証後、次に何をすべきかの instruction を返す。
+認証成功時にエージェントは「実行中」状態になる（冪等性確保）。
 
 ```python
 authenticate(
@@ -44,17 +119,86 @@ authenticate(
     "success": True,
     "session_token": "sess_xxxxx",
     "expires_in": 3600,  # 秒（1時間）
-    "agent_name": "frontend-dev"
+    "agent_name": "frontend-dev",
+    "instruction": "get_my_task を呼び出してタスク詳細を取得してください"
 }
 
-# 失敗時
+# 認証失敗時
 {
     "success": False,
     "error": "Invalid agent_id or passkey"
 }
+
+# 既に実行中の場合（二重起動防止）
+{
+    "success": False,
+    "error": "Agent already running"
+}
 ```
 
-#### get_pending_tasks
+**実行状態の遷移**:
+- 認証成功 → `running` フラグ ON
+- `report_completed` 呼び出し → `running` フラグ OFF
+- セッションタイムアウト → `running` フラグ OFF（自動リカバリー）
+
+#### get_my_task
+
+認証済みエージェントの現在のタスクを取得。
+
+```python
+get_my_task(
+    session_token: str  # 認証で取得したトークン
+) -> {
+    "success": True,
+    "has_task": True,
+    "task": {
+        "task_id": "tsk_xxx",
+        "title": "機能実装",
+        "description": "ログイン画面のUIを実装する",
+        "working_directory": "/path/to/project",
+        "context": { ... },      # 前回の進捗等
+        "handoff": { ... }       # 引き継ぎ情報（あれば）
+    },
+    "instruction": "タスクを完了したら report_completed を呼び出してください"
+}
+
+# タスクがない場合
+{
+    "success": True,
+    "has_task": False,
+    "instruction": "現在割り当てられたタスクはありません"
+}
+```
+
+#### report_completed
+
+タスク完了を報告。
+
+```python
+report_completed(
+    session_token: str,     # 認証で取得したトークン
+    result: str,            # "success" | "failed" | "blocked"
+    summary: str = None,    # 作業サマリー（オプション）
+    next_steps: str = None  # 次のステップ（オプション）
+) -> {
+    "success": True,
+    "instruction": "タスクが完了しました。セッションを終了します。"
+}
+```
+
+---
+
+### 旧API（非推奨・Phase 3）
+
+以下のAPIは非推奨です。Phase 4の新APIを使用してください。
+
+| 旧Tool | 新Tool | 備考 |
+|--------|--------|------|
+| `get_pending_tasks` | `get_my_task` | 単一タスクに簡略化 |
+| `report_execution_start` | 不要 | `get_my_task` 呼び出し時に自動記録 |
+| `report_execution_complete` | `report_completed` | 簡略化 |
+
+#### get_pending_tasks（非推奨）
 
 ```python
 get_pending_tasks(
@@ -253,100 +397,110 @@ get_execution_log(
 
 ## タスク実行アーキテクチャ
 
-### プル型設計
+### Phase 4: Coordinator + Agent アーキテクチャ
 
-タスクの実行は **プル型** で設計されています：
+責務を明確に分離した設計：
 
-- **アプリの責務**: タスクのステータス管理のみ（CLI実行は行わない）
-- **Runner の責務**: MCP経由でタスクを検知し、CLI（Claude/Gemini等）を実行
+- **Coordinator**: 起動判断のみ（タスク詳細は知らない）
+- **Agent**: MCPとの全やりとり、タスク実行（Claude Code等）
+- **MCPサーバー**: 状態管理、認証、APIゲートウェイ
 
 ```
-┌─────────────────────┐         ┌─────────────────────┐
-│       アプリ         │         │  Runner（外部）      │
-│                     │         │   ユーザーが実装     │
-│  Task → in_progress │         │                     │
-│         ↓           │         │    ┌─────────────┐  │
-│    DB に保存         │         │    │ ポーリング   │  │
-│                     │         │    │  ループ     │  │
-└─────────────────────┘         │    └──────┬──────┘  │
-                                │           │         │
-┌─────────────────────┐         │           ▼         │
-│    MCPサーバー       │◀────────│  get_pending_tasks  │
-│                     │         │           │         │
-│  認証 + タスク取得   │────────▶│    タスク取得        │
-│                     │         │           │         │
-└─────────────────────┘         │           ▼         │
-                                │    CLI実行          │
-                                │    (claude/gemini)  │
-                                └─────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Coordinator                                  │
+│                                                                      │
+│  責務:                                                               │
+│  - 管理対象エージェント一覧の保持                                      │
+│  - 各エージェントの起動判断（should_start の呼び出し）                  │
+│  - エージェントプロセスの起動                                          │
+│                                                                      │
+│  知らないこと:                                                        │
+│  - タスクの内容、ステータス、プロジェクト                               │
+│  - MCPの内部構造                                                      │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               │ should_start(agent_id) → bool
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                          MCP Server                                  │
+│                                                                      │
+│  Coordinator向けAPI:                                                 │
+│  - should_start(agent_id) → bool                                    │
+│                                                                      │
+│  Agent向けAPI:                                                       │
+│  - authenticate(agent_id, passkey) → {token, instruction}           │
+│  - get_my_task(token) → task details                                │
+│  - report_completed(token, result)                                  │
+└─────────────────────────────────────────────────────────────────────┘
+                               ▲
+                               │ 認証後、直接やりとり
+                               │
+┌──────────────────────────────┴──────────────────────────────────────┐
+│                            Agent                                     │
+│                      (Claude Code等)                                 │
+│                                                                      │
+│  1. 起動される（agent_id, passkeyを受け取る）                          │
+│  2. authenticate() → instruction を受け取る                          │
+│  3. instruction に従い get_my_task() を呼ぶ                          │
+│  4. タスクを実行                                                      │
+│  5. report_completed() で完了報告                                    │
+│  6. 終了                                                             │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Runner が構築するプロンプト
+### 各コンポーネントの知識範囲
 
-Runner は取得したタスク情報からプロンプトを構築し、CLIに渡します：
+| コンポーネント | 知っている | 知らない |
+|--------------|-----------|---------|
+| **Coordinator** | agent_id一覧、passkey、起動コマンド | タスク、ステータス、プロジェクト |
+| **Agent** | 自分のagent_id、認証情報、タスク詳細 | 他エージェントの情報、システム全体 |
+| **MCP Server** | すべて | - |
 
-```markdown
-# Task: 機能実装
+### 設計原則
 
-## Identification
-- Task ID: task_abc123
-- Project ID: proj_xyz789
-- Agent ID: agt_dev001
-- Agent Name: frontend-dev
-
-## Description
-ログイン画面のUIを実装する
-
-## Working Directory
-Path: /Users/xxx/projects/myproject
-
-## Instructions
-1. Complete the task as described above
-2. When done, update the task status using:
-   update_task_status(task_id="task_abc123", status="done")
-3. If handing off to another agent, use:
-   create_handoff(task_id="task_abc123", from_agent_id="agt_dev001", ...)
-```
-
-### LLMの役割
-
-Claude Code / Gemini（LLM）は:
-1. プロンプトからID情報を読み取る
-2. MCPツール呼び出し時に引数としてIDを渡す
-3. 作業完了時に適切なツールを呼び出す
+1. **責務の明確な分離**: 各コンポーネントは必要最小限の情報のみを持つ
+2. **カプセル化**: 内部ステータス（`in_progress`等）は外部に公開しない
+3. **汎用性**: Claude Code以外のMCP対応エージェントも利用可能
 
 ---
 
 ## 典型的なワークフロー
 
-### タスク実行フロー（プル型）
+### タスク実行フロー（Phase 4）
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  1. PMアプリでタスクをin_progressに変更                      │
-│     - DBにステータス保存                                    │
-│     - アプリはここで完了（CLI実行しない）                    │
-└─────────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────────┐
-│  2. Runner（外部）がポーリング                               │
-│     - authenticate(agent_id, passkey) でセッション取得      │
-│     - get_pending_tasks(session_token) でタスク検知         │
-└─────────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────────┐
-│  3. Runner がプロンプトを構築してCLI起動                     │
-│     - タスク情報からプロンプトを生成                         │
-│     - claude / gemini CLI を起動                            │
-└─────────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────────┐
-│  4. LLM（Claude/Gemini）が作業実行                          │
-│     - プロンプトからID情報を読み取る                        │
-│     - 作業中: save_context(task_id, ...) で進捗を記録       │
-│     - 完了時: update_task_status(task_id, "done")           │
-│     - 引継時: create_handoff(task_id, from_agent_id, ...)   │
-└─────────────────────────────────────────────────────────────┘
+Coordinator                    MCP Server                    Agent (Claude Code)
+     │                              │                              │
+     │  should_start(agt_xxx)       │                              │
+     │─────────────────────────────►│                              │
+     │                              │                              │
+     │  { should_start: true }      │                              │
+     │◄─────────────────────────────│                              │
+     │                              │                              │
+     │  spawn_agent(agt_xxx)        │                              │
+     │──────────────────────────────────────────────────────────────►
+     │                              │                              │
+     │                              │  authenticate(agt_xxx, key)  │
+     │                              │◄─────────────────────────────│
+     │                              │                              │
+     │                              │  { token, instruction }      │
+     │                              │─────────────────────────────►│
+     │                              │                              │
+     │                              │  get_my_task(token)          │
+     │                              │◄─────────────────────────────│
+     │                              │                              │
+     │                              │  { task details }            │
+     │                              │─────────────────────────────►│
+     │                              │                              │
+     │                              │         [タスク実行]          │
+     │                              │                              │
+     │                              │  report_completed(token)     │
+     │                              │◄─────────────────────────────│
+     │                              │                              │
+     │                              │  { success }                 │
+     │                              │─────────────────────────────►│
+     │                              │                              │
+     │                              │         [プロセス終了]        │
 ```
 
 ### ハンドオフフロー
@@ -455,3 +609,4 @@ Handoff {
 | 2025-01-04 | 2.0.0 | ステートレス設計に変更。agent-id/project-idを起動引数から削除し、各ツール呼び出し時に引数で渡す設計に変更 |
 | 2025-01-06 | 3.0.0 | プル型アーキテクチャに変更。認証ツール（authenticate, logout, get_pending_tasks）を追加。アプリからのキック処理を廃止し、外部Runner経由でのタスク実行に変更 |
 | 2025-01-06 | 3.1.0 | 実行ログ管理ツールを追加（report_execution_start, report_execution_complete, list_execution_logs, get_execution_log）。execution://リソースを追加 |
+| 2025-01-06 | 4.0.0 | Coordinator + Agent アーキテクチャに変更。should_start、get_my_task、report_completed APIを追加。authenticateにinstruction追加。旧API（get_pending_tasks, report_execution_start, report_execution_complete）を非推奨化。責務の明確な分離と内部ステータスのカプセル化を実現 |

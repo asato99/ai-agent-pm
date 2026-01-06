@@ -105,6 +105,7 @@ class TestMCPClientGetPendingTasks:
     async def test_get_pending_tasks_success(self):
         """Should return list of pending tasks."""
         client = MCPClient("/tmp/test.sock")
+        client._session_token = "test-session-token"  # Must be authenticated
 
         mock_response = {
             "success": True,
@@ -130,7 +131,8 @@ class TestMCPClientGetPendingTasks:
         with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = mock_response
 
-            tasks = await client.get_pending_tasks("agent-001")
+            # No agent_id argument - derived from session token internally
+            tasks = await client.get_pending_tasks()
 
             assert len(tasks) == 2
             assert tasks[0].task_id == "task-001"
@@ -142,6 +144,7 @@ class TestMCPClientGetPendingTasks:
     async def test_get_pending_tasks_empty(self):
         """Should return empty list when no tasks."""
         client = MCPClient("/tmp/test.sock")
+        client._session_token = "test-session-token"  # Must be authenticated
 
         mock_response = {
             "success": True,
@@ -151,7 +154,8 @@ class TestMCPClientGetPendingTasks:
         with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = mock_response
 
-            tasks = await client.get_pending_tasks("agent-001")
+            # No agent_id argument - derived from session token internally
+            tasks = await client.get_pending_tasks()
 
             assert tasks == []
 
@@ -159,6 +163,7 @@ class TestMCPClientGetPendingTasks:
     async def test_get_pending_tasks_session_expired(self):
         """Should raise SessionExpiredError when session expired."""
         client = MCPClient("/tmp/test.sock")
+        client._session_token = "test-session-token"  # Must be authenticated
 
         mock_response = {
             "success": False,
@@ -169,7 +174,8 @@ class TestMCPClientGetPendingTasks:
             mock_call.return_value = mock_response
 
             with pytest.raises(SessionExpiredError):
-                await client.get_pending_tasks("agent-001")
+                # No agent_id argument - derived from session token internally
+                await client.get_pending_tasks()
 
 
 class TestMCPClientReportExecution:
@@ -179,6 +185,7 @@ class TestMCPClientReportExecution:
     async def test_report_execution_start(self):
         """Should report execution start."""
         client = MCPClient("/tmp/test.sock")
+        client._session_token = "test-session-token"  # Must be authenticated
 
         mock_response = {
             "success": True,
@@ -189,7 +196,8 @@ class TestMCPClientReportExecution:
         with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = mock_response
 
-            result = await client.report_execution_start("task-001", "agent-001")
+            # No agent_id argument - derived from session token internally
+            result = await client.report_execution_start("task-001")
 
             assert isinstance(result, ExecutionStartResult)
             assert result.execution_id == "exec-001"
@@ -198,6 +206,7 @@ class TestMCPClientReportExecution:
     async def test_report_execution_complete(self):
         """Should report execution complete."""
         client = MCPClient("/tmp/test.sock")
+        client._session_token = "test-session-token"  # Must be authenticated
 
         mock_response = {"success": True}
 

@@ -11,8 +11,15 @@ enum ToolDefinitions {
     /// 全Tool一覧
     static func all() -> [[String: Any]] {
         [
-            // Authentication (Phase 3-1)
-            authenticate,
+            // Phase 4: Coordinator API
+            healthCheck,
+            listManagedAgents,
+            shouldStart,
+
+            // Phase 4: Agent API
+            authenticate,  // instruction追加
+            getMyTask,
+            reportCompleted,
 
             // Agent
             getAgentProfile,
@@ -26,7 +33,7 @@ enum ToolDefinitions {
             // Tasks
             listTasks,
             getMyTasks,  // 後方互換性のため維持（非推奨）
-            getPendingTasks,  // Phase 3-2: 作業中タスク取得
+            getPendingTasks,  // Phase 3-2: 作業中タスク取得（Phase 4で非推奨）
             getTask,
             updateTaskStatus,
             assignTask,
@@ -40,19 +47,66 @@ enum ToolDefinitions {
             acceptHandoff,
             getPendingHandoffs,
 
-            // Execution Log (Phase 3-3)
+            // Execution Log (Phase 3-3, Phase 4で非推奨)
             reportExecutionStart,
             reportExecutionComplete
         ]
     }
 
-    // MARK: - Authentication Tools (Phase 3-1)
+    // MARK: - Phase 4: Coordinator API
+
+    /// health_check - サーバー起動確認
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// Coordinatorが最初に呼び出す。サーバーが応答可能かを確認。
+    static let healthCheck: [String: Any] = [
+        "name": "health_check",
+        "description": "MCPサーバーの起動状態を確認します。Coordinatorがポーリングの最初に呼び出します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [:] as [String: Any],
+            "required": [] as [String]
+        ]
+    ]
+
+    /// list_managed_agents - 管理対象エージェント一覧を取得
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// Coordinatorがポーリング対象のエージェントIDを取得。詳細は隠蔽。
+    static let listManagedAgents: [String: Any] = [
+        "name": "list_managed_agents",
+        "description": "Coordinatorの管理対象となるAIエージェントのID一覧を取得します。エージェントの詳細は隠蔽されます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [:] as [String: Any],
+            "required": [] as [String]
+        ]
+    ]
+
+    /// should_start - エージェントを起動すべきかどうかを返す
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// Coordinatorはタスクの詳細を知らない。boolのみ返す。
+    static let shouldStart: [String: Any] = [
+        "name": "should_start",
+        "description": "エージェントを起動すべきかどうかを判定します。Coordinatorが使用します。タスク詳細は返さず、起動判断のみを提供します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID"
+                ]
+            ] as [String: Any],
+            "required": ["agent_id"]
+        ]
+    ]
+
+    // MARK: - Phase 4: Agent API
 
     /// authenticate - エージェント認証
-    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md, PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// Phase 4: instruction フィールドを追加
     static let authenticate: [String: Any] = [
         "name": "authenticate",
-        "description": "エージェントIDとパスキーで認証し、セッショントークンを取得します。Runnerがタスクを実行する前に呼び出します。",
+        "description": "エージェントIDとパスキーで認証し、セッショントークンとinstructionを取得します。Agentが起動後に最初に呼び出します。instructionに従って次のアクション（get_my_task）を実行してください。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -68,6 +122,55 @@ enum ToolDefinitions {
             "required": ["agent_id", "passkey"]
         ]
     ]
+
+    /// get_my_task - 現在のタスクを取得
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    static let getMyTask: [String: Any] = [
+        "name": "get_my_task",
+        "description": "認証済みエージェントの現在のタスク詳細を取得します。タスクがあればcontextやhandoff情報も含まれます。instructionに従って次のアクション（タスク実行→report_completed）を実行してください。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ]
+            ] as [String: Any],
+            "required": ["session_token"]
+        ]
+    ]
+
+    /// report_completed - タスク完了を報告
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    static let reportCompleted: [String: Any] = [
+        "name": "report_completed",
+        "description": "タスク完了を報告します。resultには 'success', 'failed', 'blocked' のいずれかを指定します。成功時はタスクがdoneに、失敗・ブロック時はblockedに変更されます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "result": [
+                    "type": "string",
+                    "description": "実行結果",
+                    "enum": ["success", "failed", "blocked"]
+                ],
+                "summary": [
+                    "type": "string",
+                    "description": "作業サマリー（任意）"
+                ],
+                "next_steps": [
+                    "type": "string",
+                    "description": "次のステップ（任意）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "result"]
+        ]
+    ]
+
+    // MARK: - Deprecated (Phase 3, use Phase 4 APIs instead)
 
     // MARK: - Agent Tools
 
@@ -188,9 +291,10 @@ enum ToolDefinitions {
     /// 外部Runnerが作業継続のため現在進行中のタスクを取得
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
     /// Phase 3-4: セッショントークン検証必須
+    /// ⚠️ Phase 4で非推奨: get_my_task を使用してください
     static let getPendingTasks: [String: Any] = [
         "name": "get_pending_tasks",
-        "description": "認証済みエージェントの作業中（in_progress）タスク一覧を取得します。外部Runnerが作業継続のために使用します。セッショントークンで認証済みのエージェントのみ取得可能です。",
+        "description": "【非推奨: get_my_task を使用してください】認証済みエージェントの作業中（in_progress）タスク一覧を取得します。外部Runnerが作業継続のために使用します。セッショントークンで認証済みのエージェントのみ取得可能です。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -402,14 +506,15 @@ enum ToolDefinitions {
         ]
     ]
 
-    // MARK: - Execution Log Tools (Phase 3-3, Phase 3-4: セッション検証必須)
+    // MARK: - Execution Log Tools (Phase 3-3, Phase 4で非推奨)
 
     /// report_execution_start - 実行開始を報告
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
     /// Phase 3-4: セッショントークン検証必須
+    /// ⚠️ Phase 4で非推奨: get_my_task呼び出し時に自動記録されます
     static let reportExecutionStart: [String: Any] = [
         "name": "report_execution_start",
-        "description": "タスク実行の開始を報告します。Runnerがタスク実行を開始した際に呼び出します。execution_log_idが返されるので、完了時にreport_execution_completeに渡してください。セッショントークンで認証が必要です。",
+        "description": "【非推奨: get_my_task呼び出し時に自動記録されます】タスク実行の開始を報告します。Runnerがタスク実行を開始した際に呼び出します。execution_log_idが返されるので、完了時にreport_execution_completeに渡してください。セッショントークンで認証が必要です。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -429,9 +534,10 @@ enum ToolDefinitions {
     /// report_execution_complete - 実行完了を報告
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
     /// Phase 3-4: セッショントークン検証必須
+    /// ⚠️ Phase 4で非推奨: report_completed を使用してください
     static let reportExecutionComplete: [String: Any] = [
         "name": "report_execution_complete",
-        "description": "タスク実行の完了を報告します。exit_codeが0なら成功、それ以外は失敗として記録されます。セッショントークンで認証が必要です。",
+        "description": "【非推奨: report_completed を使用してください】タスク実行の完了を報告します。exit_codeが0なら成功、それ以外は失敗として記録されます。セッショントークンで認証が必要です。",
         "inputSchema": [
             "type": "object",
             "properties": [

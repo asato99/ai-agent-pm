@@ -98,6 +98,15 @@ public final class AgentSessionRepository: AgentSessionRepositoryProtocol, Senda
         }
     }
 
+    /// Phase 4: セッショントークンでセッションを削除
+    public func deleteByToken(_ token: String) throws {
+        try db.write { db in
+            _ = try AgentSessionRecord
+                .filter(Column("token") == token)
+                .deleteAll(db)
+        }
+    }
+
     public func deleteByAgentId(_ agentId: AgentID) throws {
         try db.write { db in
             _ = try AgentSessionRecord

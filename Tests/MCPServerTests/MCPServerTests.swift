@@ -199,6 +199,7 @@ final class MCPServerTests: XCTestCase {
     }
 
     /// Phase 3-2: get_pending_tasksツール定義
+    /// Phase 3-4: session_token検証必須（agent_idはセッションから取得）
     func testGetPendingTasksToolDefinition() {
         let tool = ToolDefinitions.getPendingTasks
 
@@ -207,7 +208,7 @@ final class MCPServerTests: XCTestCase {
 
         if let schema = tool["inputSchema"] as? [String: Any] {
             let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.contains("agent_id"), "get_pending_tasks should require agent_id")
+            XCTAssertTrue(required.contains("session_token"), "get_pending_tasks should require session_token")
         }
     }
 
@@ -220,6 +221,7 @@ final class MCPServerTests: XCTestCase {
     }
 
     /// Phase 3-3: report_execution_startツール定義
+    /// Phase 3-4: session_token検証必須
     func testReportExecutionStartToolDefinition() {
         let tool = ToolDefinitions.reportExecutionStart
 
@@ -229,12 +231,12 @@ final class MCPServerTests: XCTestCase {
         if let schema = tool["inputSchema"] as? [String: Any] {
             XCTAssertEqual(schema["type"] as? String, "object")
             let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("session_token"), "report_execution_start should require session_token")
             XCTAssertTrue(required.contains("task_id"), "report_execution_start should require task_id")
-            XCTAssertTrue(required.contains("agent_id"), "report_execution_start should require agent_id")
 
             if let properties = schema["properties"] as? [String: Any] {
+                XCTAssertNotNil(properties["session_token"], "Should have session_token property")
                 XCTAssertNotNil(properties["task_id"], "Should have task_id property")
-                XCTAssertNotNil(properties["agent_id"], "Should have agent_id property")
             }
         }
     }
@@ -492,14 +494,15 @@ final class MCPServerTests: XCTestCase {
         let tools = ToolDefinitions.all()
 
         // ステートレス設計版ツール: 19個
-        // Authentication: 1 (authenticate) - Phase 3-1
+        // Phase 4 Coordinator API: 3 (health_check, list_managed_agents, should_start)
+        // Phase 4 Agent API: 3 (authenticate, get_my_task, report_completed)
         // Agent: 3 (get_agent_profile, get_my_profile, list_agents)
         // Project: 2 (list_projects, get_project)
         // Tasks: 6 (list_tasks, get_task, get_my_tasks, get_pending_tasks, update_task_status, assign_task)
         // Context: 2 (save_context, get_task_context)
         // Handoff: 3 (create_handoff, accept_handoff, get_pending_handoffs)
-        // Execution Log: 2 (report_execution_start, report_execution_complete) - Phase 3-3
-        XCTAssertEqual(tools.count, 19, "Should have 19 tools defined (including Phase 3-1, 3-2, 3-3 tools)")
+        // Execution Log (Phase 3-3, Phase 4で非推奨): 2 (report_execution_start, report_execution_complete)
+        XCTAssertEqual(tools.count, 24, "Should have 24 tools defined (including Phase 4 Coordinator/Agent APIs)")
     }
 }
 

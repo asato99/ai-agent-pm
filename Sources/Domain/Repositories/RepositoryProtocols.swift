@@ -161,6 +161,7 @@ public protocol AgentSessionRepositoryProtocol: Sendable {
     func findByAgentId(_ agentId: AgentID) throws -> [AgentSession]
     func save(_ session: AgentSession) throws
     func delete(_ id: AgentSessionID) throws
+    func deleteByToken(_ token: String) throws  // Phase 4: セッション終了用
     func deleteByAgentId(_ agentId: AgentID) throws
     func deleteExpired() throws
 }
