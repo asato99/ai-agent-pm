@@ -26,6 +26,61 @@ MCPサーバーは**ステートレス**に設計されています。
 
 ## MCPサーバーが提供するTools
 
+### 認証（Runner向け）
+
+| Tool | 引数 | 説明 |
+|------|------|------|
+| `authenticate` | `agent_id`, `passkey` | セッショントークンを取得 |
+| `logout` | `session_token` | セッションを終了 |
+| `get_pending_tasks` | `session_token` | 自分に割り当てられた実行待ちタスクを取得 |
+
+#### authenticate
+
+```python
+authenticate(
+    agent_id: str,      # エージェントID
+    passkey: str        # パスキー
+) -> {
+    "success": True,
+    "session_token": "sess_xxxxx",
+    "expires_in": 3600,  # 秒（1時間）
+    "agent_name": "frontend-dev"
+}
+
+# 失敗時
+{
+    "success": False,
+    "error": "Invalid agent_id or passkey"
+}
+```
+
+#### get_pending_tasks
+
+```python
+get_pending_tasks(
+    session_token: str  # 認証で取得したトークン
+) -> {
+    "success": True,
+    "tasks": [
+        {
+            "taskId": "tsk_xxx",
+            "projectId": "prj_xxx",
+            "title": "機能実装",
+            "description": "ログイン画面のUIを実装する",
+            "priority": "high",
+            "workingDirectory": "/path/to/project",
+            "assignedAt": "2025-01-06T10:00:00Z"
+        }
+    ]
+}
+
+# トークン無効時
+{
+    "success": False,
+    "error": "Invalid or expired session_token"
+}
+```
+
 ### エージェント管理
 
 | Tool | 引数 | 説明 |
@@ -61,9 +116,9 @@ MCPサーバーは**ステートレス**に設計されています。
 | 旧ツール | 代替 |
 |---------|------|
 | `get_my_profile` | `get_agent_profile(agent_id)` |
-| `get_my_tasks` | `list_tasks(assignee_id=agent_id)` |
-| `start_session` | 廃止（セッション管理はオプション） |
-| `end_session` | 廃止 |
+| `get_my_tasks` | `list_tasks(assignee_id=agent_id)` または `get_pending_tasks(session_token)` |
+| `start_session` | `authenticate(agent_id, passkey)` |
+| `end_session` | `logout(session_token)` |
 | `get_my_sessions` | 廃止 |
 
 ---
@@ -98,11 +153,39 @@ MCPサーバーは**ステートレス**に設計されています。
 
 ---
 
-## キック時の情報共有
+## タスク実行アーキテクチャ
 
-### プロンプトに含める情報
+### プル型設計
 
-PMアプリがエージェントをキックする際、プロンプトに必要なIDを含める:
+タスクの実行は **プル型** で設計されています：
+
+- **アプリの責務**: タスクのステータス管理のみ（CLI実行は行わない）
+- **Runner の責務**: MCP経由でタスクを検知し、CLI（Claude/Gemini等）を実行
+
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│       アプリ         │         │  Runner（外部）      │
+│                     │         │   ユーザーが実装     │
+│  Task → in_progress │         │                     │
+│         ↓           │         │    ┌─────────────┐  │
+│    DB に保存         │         │    │ ポーリング   │  │
+│                     │         │    │  ループ     │  │
+└─────────────────────┘         │    └──────┬──────┘  │
+                                │           │         │
+┌─────────────────────┐         │           ▼         │
+│    MCPサーバー       │◀────────│  get_pending_tasks  │
+│                     │         │           │         │
+│  認証 + タスク取得   │────────▶│    タスク取得        │
+│                     │         │           │         │
+└─────────────────────┘         │           ▼         │
+                                │    CLI実行          │
+                                │    (claude/gemini)  │
+                                └─────────────────────┘
+```
+
+### Runner が構築するプロンプト
+
+Runner は取得したタスク情報からプロンプトを構築し、CLIに渡します：
 
 ```markdown
 # Task: 機能実装
@@ -116,6 +199,9 @@ PMアプリがエージェントをキックする際、プロンプトに必要
 ## Description
 ログイン画面のUIを実装する
 
+## Working Directory
+Path: /Users/xxx/projects/myproject
+
 ## Instructions
 1. Complete the task as described above
 2. When done, update the task status using:
@@ -126,7 +212,7 @@ PMアプリがエージェントをキックする際、プロンプトに必要
 
 ### LLMの役割
 
-Claude Code（LLM）は:
+Claude Code / Gemini（LLM）は:
 1. プロンプトからID情報を読み取る
 2. MCPツール呼び出し時に引数としてIDを渡す
 3. 作業完了時に適切なツールを呼び出す
@@ -135,23 +221,33 @@ Claude Code（LLM）は:
 
 ## 典型的なワークフロー
 
-### タスク実行フロー
+### タスク実行フロー（プル型）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  PMアプリでタスクをin_progressに変更                         │
-│      ↓                                                      │
-│  エージェントをキック（プロンプトにID情報を含める）           │
-│      ↓                                                      │
-│  Claude Code起動                                            │
-│  - プロンプトからID情報を読み取る                           │
-│      ↓                                                      │
-│  作業中...                                                  │
-│  - save_context(task_id, ...) で進捗を記録                  │
-│      ↓                                                      │
-│  作業完了時                                                 │
-│  - update_task_status(task_id, "done")                     │
-│  - または create_handoff(task_id, from_agent_id, ...)      │
+│  1. PMアプリでタスクをin_progressに変更                      │
+│     - DBにステータス保存                                    │
+│     - アプリはここで完了（CLI実行しない）                    │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│  2. Runner（外部）がポーリング                               │
+│     - authenticate(agent_id, passkey) でセッション取得      │
+│     - get_pending_tasks(session_token) でタスク検知         │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│  3. Runner がプロンプトを構築してCLI起動                     │
+│     - タスク情報からプロンプトを生成                         │
+│     - claude / gemini CLI を起動                            │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│  4. LLM（Claude/Gemini）が作業実行                          │
+│     - プロンプトからID情報を読み取る                        │
+│     - 作業中: save_context(task_id, ...) で進捗を記録       │
+│     - 完了時: update_task_status(task_id, "done")           │
+│     - 引継時: create_handoff(task_id, from_agent_id, ...)   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -159,23 +255,20 @@ Claude Code（LLM）は:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Agent A: 作業完了、引き継ぎが必要                           │
+│  Agent A の Runner: 作業完了、引き継ぎが必要                 │
 │      ↓                                                      │
-│  create_handoff(                                            │
+│  LLM が create_handoff(                                     │
 │      task_id="task_123",                                    │
 │      from_agent_id="agt_A",                                 │
-│      to_agent_id="agt_B",  // または省略                    │
+│      to_agent_id="agt_B",                                   │
 │      summary="認証機能実装完了。UIテストが必要"              │
-│  )                                                          │
+│  ) を呼び出し                                                │
 │      ↓                                                      │
-│  Agent B: キックされる                                      │
-│  - プロンプトにタスク情報が含まれる                         │
+│  Agent B の Runner: 次回ポーリング時にタスクを検知           │
 │      ↓                                                      │
-│  get_pending_handoffs(agent_id="agt_B")                    │
-│  - 引き継ぎ情報を確認                                       │
+│  LLM が get_pending_handoffs(agent_id="agt_B") で確認       │
 │      ↓                                                      │
-│  accept_handoff(handoff_id="...", agent_id="agt_B")        │
-│  - 引き継ぎを受領                                           │
+│  accept_handoff(handoff_id="...", agent_id="agt_B")         │
 │      ↓                                                      │
 │  作業継続...                                                │
 └─────────────────────────────────────────────────────────────┘
@@ -262,3 +355,4 @@ Handoff {
 |------|-----------|----------|
 | 2024-12-30 | 1.0.0 | PRD.mdから分離して初版作成 |
 | 2025-01-04 | 2.0.0 | ステートレス設計に変更。agent-id/project-idを起動引数から削除し、各ツール呼び出し時に引数で渡す設計に変更 |
+| 2025-01-06 | 3.0.0 | プル型アーキテクチャに変更。認証ツール（authenticate, logout, get_pending_tasks）を追加。アプリからのキック処理を廃止し、外部Runner経由でのタスク実行に変更 |
