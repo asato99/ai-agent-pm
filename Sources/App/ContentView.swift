@@ -47,6 +47,7 @@ struct ContentView: View {
                     .id(router.detailRefreshId)  // タスク再選択時にビューを再作成
             } else if let agentId = router.selectedAgent {
                 AgentDetailView(agentId: agentId)
+                    .id(agentId)  // エージェント再選択時にビューを再作成
             } else {
                 ContentUnavailableView(
                     "No Selection",
