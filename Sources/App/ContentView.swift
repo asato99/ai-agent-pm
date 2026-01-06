@@ -1,5 +1,6 @@
 // Sources/App/ContentView.swift
 // メインコンテンツビュー - 3カラムレイアウト
+// リアクティブ要件: TaskStoreを共有してUIの自動更新を実現
 
 import SwiftUI
 import Domain
@@ -7,6 +8,10 @@ import Domain
 struct ContentView: View {
     @EnvironmentObject var container: DependencyContainer
     @Environment(Router.self) var router
+
+    /// プロジェクト単位でタスクを管理する共有ストア
+    /// TaskBoardViewとTaskDetailViewが同じインスタンスを参照
+    @State private var taskStore: TaskStore?
 
     var body: some View {
         @Bindable var router = router
@@ -19,7 +24,15 @@ struct ContentView: View {
             if router.showingInternalAudits {
                 InternalAuditListView()
             } else if let projectId = router.selectedProject {
-                TaskBoardView(projectId: projectId)
+                if let store = taskStore, store.projectId == projectId {
+                    TaskBoardView(projectId: projectId, taskStore: store)
+                } else {
+                    // TaskStoreが未作成またはプロジェクトが変わった場合
+                    TaskBoardView(projectId: projectId, taskStore: nil)
+                        .onAppear {
+                            taskStore = TaskStore(projectId: projectId, container: container)
+                        }
+                }
             } else {
                 ContentUnavailableView(
                     "No Project Selected",
@@ -30,7 +43,7 @@ struct ContentView: View {
         } detail: {
             // 詳細: タスク詳細 or エージェント詳細
             if let taskId = router.selectedTask {
-                TaskDetailView(taskId: taskId)
+                TaskDetailView(taskId: taskId, taskStore: taskStore)
                     .id(router.detailRefreshId)  // タスク再選択時にビューを再作成
             } else if let agentId = router.selectedAgent {
                 AgentDetailView(agentId: agentId)
@@ -40,6 +53,14 @@ struct ContentView: View {
                     systemImage: "doc.text",
                     description: Text("Select a task or agent to view details.")
                 )
+            }
+        }
+        .onChange(of: router.selectedProject) { oldValue, newValue in
+            // プロジェクトが変わったらTaskStoreを再作成
+            if let projectId = newValue {
+                taskStore = TaskStore(projectId: projectId, container: container)
+            } else {
+                taskStore = nil
             }
         }
         .sheet(item: $router.currentSheet) { destination in

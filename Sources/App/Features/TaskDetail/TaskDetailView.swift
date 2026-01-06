@@ -1,6 +1,7 @@
 // Sources/App/Features/TaskDetail/TaskDetailView.swift
 // タスク詳細ビュー
 // 要件: サブタスク概念は削除（タスク間の関係は依存関係のみで表現）
+// リアクティブ要件: TaskStoreを使用してUIの自動更新を実現
 
 import SwiftUI
 import Domain
@@ -13,6 +14,10 @@ struct TaskDetailView: View {
     @Environment(Router.self) var router
 
     let taskId: TaskID
+
+    /// 共有タスクストア（ContentViewから渡される）
+    /// ステータス変更時にこのストアを更新することで、TaskBoardViewも自動更新される
+    var taskStore: TaskStore?
 
     @State private var task: Task?
     @State private var contexts: [Context] = []
@@ -465,6 +470,9 @@ struct TaskDetailView: View {
                     reason: nil
                 )
                 KickLogger.log("[TaskDetailView] Status updated: taskId=\(taskId.value), assigneeId=\(updatedTask.assigneeId?.value ?? "nil")")
+
+                // 🔄 リアクティブ更新: TaskStoreを即座に更新してTaskBoardViewに反映
+                taskStore?.updateTask(updatedTask)
 
                 // in_progressへの遷移時はエージェントをキック
                 if newStatus == .inProgress && updatedTask.assigneeId != nil {

@@ -90,6 +90,8 @@ struct AIAgentPMApp: App {
             fatalError("Failed to initialize DependencyContainer: \(error)")
         }
         _container = StateObject(wrappedValue: newContainer)
+        // グローバル共有インスタンスを設定（TaskStore等のフォールバック用）
+        DependencyContainer.shared = newContainer
         KickLogger.log("=== AIAgentPM App Initialized Successfully ===")
     }
 

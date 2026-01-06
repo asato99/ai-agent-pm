@@ -1,5 +1,6 @@
 // Sources/App/Features/TaskBoard/TaskBoardView.swift
 // カンバンスタイルのタスクボードビュー
+// リアクティブ要件: TaskStoreを使用してUIの自動更新を実現
 
 import SwiftUI
 import Domain
@@ -12,7 +13,10 @@ struct TaskBoardView: View {
 
     let projectId: ProjectID
 
-    @State private var tasks: [Task] = []
+    /// 共有タスクストア（ContentViewから渡される）
+    /// nilの場合はローカルで作成
+    @ObservedObject var taskStore: TaskStore
+
     @State private var agents: [Agent] = []
     @State private var templates: [WorkflowTemplate] = []
     @State private var project: Project?
@@ -20,6 +24,12 @@ struct TaskBoardView: View {
     @State private var showingTemplates = false
 
     private let columns: [TaskStatus] = [.backlog, .todo, .inProgress, .blocked, .done]
+
+    init(projectId: ProjectID, taskStore: TaskStore?) {
+        self.projectId = projectId
+        // taskStoreがnilの場合は一時的なダミーを作成（すぐにContentViewから正しいものが渡される）
+        self._taskStore = ObservedObject(wrappedValue: taskStore ?? TaskStore(projectId: projectId, container: DependencyContainer.shared))
+    }
 
     @ViewBuilder
     private var templatesButton: some View {
@@ -77,7 +87,7 @@ struct TaskBoardView: View {
                     ForEach(columns, id: \.self) { status in
                         TaskColumnView(
                             status: status,
-                            tasks: tasks.filter { $0.status == status },
+                            tasks: taskStore.tasks(for: status),
                             agents: agents
                         )
                         .accessibilityIdentifier("TaskColumn_\(status.rawValue)")
@@ -120,7 +130,7 @@ struct TaskBoardView: View {
             }
         }
         .overlay {
-            if isLoading {
+            if isLoading || taskStore.isLoading {
                 ProgressView()
                     .accessibilityIdentifier("LoadingIndicator")
             }
@@ -142,7 +152,8 @@ struct TaskBoardView: View {
 
         do {
             project = try container.projectRepository.findById(projectId)
-            tasks = try container.getTasksUseCase.execute(projectId: projectId, status: nil)
+            // タスクはTaskStore経由で読み込み
+            await taskStore.loadTasks()
             agents = try container.getAgentsUseCase.execute()
             templates = try container.listTemplatesUseCase.execute(
                 projectId: projectId,

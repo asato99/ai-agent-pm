@@ -11,6 +11,12 @@ import Infrastructure
 @MainActor
 public final class DependencyContainer: ObservableObject {
 
+    // MARK: - Shared Instance
+
+    /// グローバル共有インスタンス（アプリ起動時に設定）
+    /// 注意: 通常は@EnvironmentObject経由でアクセスすべき
+    public static var shared: DependencyContainer!
+
     // MARK: - Repositories
 
     public let projectRepository: ProjectRepository

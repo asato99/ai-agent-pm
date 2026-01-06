@@ -598,13 +598,9 @@ final class UC001_TaskExecutionByAgentTests: BasicDataUITestCase {
         XCTAssertEqual(afterValue, targetStatus,
                        "❌ STATUS-AFTER: ステータスが\(targetStatus)に更新されていない（実際の値: \(afterValue ?? "nil")）")
 
-        // #5: 詳細画面を閉じてリフレッシュ
+        // #5: 詳細画面を閉じる（リアクティブ更新を期待）
         app.typeKey(.escape, modifierFlags: [])
-        Thread.sleep(forTimeInterval: 0.5)
-
-        // ボードをリフレッシュしてUIを更新（⌘R）
-        app.typeKey("r", modifierFlags: .command)
-        Thread.sleep(forTimeInterval: 1.0)
+        Thread.sleep(forTimeInterval: 1.0)  // UI更新待機
 
         // タスクカードがまだ存在することを確認
         let taskCard = findTaskCard(withTitle: taskTitle)
