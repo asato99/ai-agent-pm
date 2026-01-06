@@ -36,6 +36,8 @@ public protocol TaskRepositoryProtocol: Sendable {
     func findAll(projectId: ProjectID) throws -> [Task]
     func findByProject(_ projectId: ProjectID, status: TaskStatus?) throws -> [Task]
     func findByAssignee(_ agentId: AgentID) throws -> [Task]
+    /// Phase 3-2: 作業中タスクを取得（特定エージェント）
+    func findPendingByAssignee(_ agentId: AgentID) throws -> [Task]
     func findByStatus(_ status: TaskStatus, projectId: ProjectID) throws -> [Task]
     func findLocked(byAuditId: InternalAuditID?) throws -> [Task]
     func save(_ task: Task) throws

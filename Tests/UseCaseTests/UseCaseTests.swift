@@ -90,6 +90,10 @@ final class MockTaskRepository: TaskRepositoryProtocol {
         tasks.values.filter { $0.assigneeId == agentId }
     }
 
+    func findPendingByAssignee(_ agentId: AgentID) throws -> [Task] {
+        tasks.values.filter { $0.assigneeId == agentId && $0.status == .inProgress }
+    }
+
     func findByStatus(_ status: TaskStatus, projectId: ProjectID) throws -> [Task] {
         tasks.values.filter { $0.projectId == projectId && $0.status == status }
     }
@@ -585,6 +589,58 @@ final class UseCaseTests: XCTestCase {
         let myTasks = try useCase.execute(agentId: agent.id)
 
         XCTAssertEqual(myTasks.count, 2)
+    }
+
+    // MARK: - Phase 3-2: GetPendingTasksUseCase Tests
+
+    func testGetPendingTasksUseCase() throws {
+        // Phase 3-2: 作業中タスクのみ取得（in_progress）
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
+        agentRepo.agents[agent.id] = agent
+
+        // in_progressのタスク2つ
+        var task1 = Task(id: TaskID.generate(), projectId: ProjectID.generate(), title: "InProgress1", assigneeId: agent.id)
+        task1.status = .inProgress
+        var task2 = Task(id: TaskID.generate(), projectId: ProjectID.generate(), title: "InProgress2", assigneeId: agent.id)
+        task2.status = .inProgress
+        // backlogのタスク（含まれない）
+        let task3 = Task(id: TaskID.generate(), projectId: ProjectID.generate(), title: "Backlog", assigneeId: agent.id)
+        // doneのタスク（含まれない）
+        var task4 = Task(id: TaskID.generate(), projectId: ProjectID.generate(), title: "Done", assigneeId: agent.id)
+        task4.status = .done
+
+        taskRepo.tasks[task1.id] = task1
+        taskRepo.tasks[task2.id] = task2
+        taskRepo.tasks[task3.id] = task3
+        taskRepo.tasks[task4.id] = task4
+
+        let useCase = GetPendingTasksUseCase(taskRepository: taskRepo)
+        let pendingTasks = try useCase.execute(agentId: agent.id)
+
+        XCTAssertEqual(pendingTasks.count, 2)
+        XCTAssertTrue(pendingTasks.allSatisfy { $0.status == .inProgress })
+    }
+
+    func testGetPendingTasksUseCaseExcludesOtherAgents() throws {
+        // Phase 3-2: 他のエージェントのタスクは含まない
+        let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Role")
+        let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Role")
+        agentRepo.agents[agent1.id] = agent1
+        agentRepo.agents[agent2.id] = agent2
+
+        var task1 = Task(id: TaskID.generate(), projectId: ProjectID.generate(), title: "Agent1Task", assigneeId: agent1.id)
+        task1.status = .inProgress
+        var task2 = Task(id: TaskID.generate(), projectId: ProjectID.generate(), title: "Agent2Task", assigneeId: agent2.id)
+        task2.status = .inProgress
+
+        taskRepo.tasks[task1.id] = task1
+        taskRepo.tasks[task2.id] = task2
+
+        let useCase = GetPendingTasksUseCase(taskRepository: taskRepo)
+        let pendingTasks = try useCase.execute(agentId: agent1.id)
+
+        XCTAssertEqual(pendingTasks.count, 1)
+        XCTAssertEqual(pendingTasks.first?.assigneeId, agent1.id)
     }
 
     // MARK: - Task Status Transition Tests (要件: ステータスフロー - inReview削除済み)

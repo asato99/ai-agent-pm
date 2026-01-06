@@ -442,6 +442,23 @@ public struct GetMyTasksUseCase: Sendable {
     }
 }
 
+// MARK: - GetPendingTasksUseCase
+
+/// Phase 3-2: 作業中タスク取得ユースケース
+/// 外部Runnerが作業継続のため現在進行中のタスクを取得
+/// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+public struct GetPendingTasksUseCase: Sendable {
+    private let taskRepository: any TaskRepositoryProtocol
+
+    public init(taskRepository: any TaskRepositoryProtocol) {
+        self.taskRepository = taskRepository
+    }
+
+    public func execute(agentId: AgentID) throws -> [Task] {
+        try taskRepository.findPendingByAssignee(agentId)
+    }
+}
+
 // MARK: - KickAgentUseCase
 
 /// エージェントキックユースケース

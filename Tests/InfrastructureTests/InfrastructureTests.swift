@@ -347,6 +347,118 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertTrue(found?.dependencies.contains(dep2.id) ?? false)
     }
 
+    // MARK: - Phase 3-2: findPendingByAssignee Tests
+
+    /// Phase 3-2: 実行待ちタスク（in_progress）のみを返すことを確認
+    func testTaskRepositoryFindPendingByAssignee() throws {
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "Test Agent", role: "Developer")
+        try agentRepo.save(agent)
+
+        // in_progress タスク（実行待ち）
+        let inProgressTask = Task(
+            id: TaskID.generate(),
+            projectId: project.id,
+            title: "In Progress Task",
+            status: .inProgress,
+            assigneeId: agent.id
+        )
+        try taskRepo.save(inProgressTask)
+
+        // done タスク（完了済み - 対象外）
+        let doneTask = Task(
+            id: TaskID.generate(),
+            projectId: project.id,
+            title: "Done Task",
+            status: .done,
+            assigneeId: agent.id
+        )
+        try taskRepo.save(doneTask)
+
+        // todo タスク（未着手 - 対象外）
+        let todoTask = Task(
+            id: TaskID.generate(),
+            projectId: project.id,
+            title: "Todo Task",
+            status: .todo,
+            assigneeId: agent.id
+        )
+        try taskRepo.save(todoTask)
+
+        // When
+        let result = try taskRepo.findPendingByAssignee(agent.id)
+
+        // Then: in_progressのタスクのみ返される
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.id, inProgressTask.id)
+        XCTAssertEqual(result.first?.status, .inProgress)
+    }
+
+    /// Phase 3-2: 他のエージェントのタスクは含まれないことを確認
+    func testTaskRepositoryFindPendingByAssigneeExcludesOtherAgents() throws {
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
+
+        let agent1 = Agent(id: AgentID.generate(), name: "Agent 1", role: "Developer")
+        let agent2 = Agent(id: AgentID.generate(), name: "Agent 2", role: "Developer")
+        try agentRepo.save(agent1)
+        try agentRepo.save(agent2)
+
+        // Agent1のin_progressタスク
+        let agent1Task = Task(
+            id: TaskID.generate(),
+            projectId: project.id,
+            title: "Agent1 Task",
+            status: .inProgress,
+            assigneeId: agent1.id
+        )
+        try taskRepo.save(agent1Task)
+
+        // Agent2のin_progressタスク
+        let agent2Task = Task(
+            id: TaskID.generate(),
+            projectId: project.id,
+            title: "Agent2 Task",
+            status: .inProgress,
+            assigneeId: agent2.id
+        )
+        try taskRepo.save(agent2Task)
+
+        // When: Agent1のペンディングタスクを取得
+        let result = try taskRepo.findPendingByAssignee(agent1.id)
+
+        // Then: Agent1のタスクのみ
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.id, agent1Task.id)
+    }
+
+    /// Phase 3-2: 担当者がいないタスクは含まれないことを確認
+    func testTaskRepositoryFindPendingByAssigneeExcludesUnassigned() throws {
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "Test Agent", role: "Developer")
+        try agentRepo.save(agent)
+
+        // 未割り当てのin_progressタスク
+        let unassignedTask = Task(
+            id: TaskID.generate(),
+            projectId: project.id,
+            title: "Unassigned Task",
+            status: .inProgress,
+            assigneeId: nil
+        )
+        try taskRepo.save(unassignedTask)
+
+        // When
+        let result = try taskRepo.findPendingByAssignee(agent.id)
+
+        // Then: 空の配列
+        XCTAssertEqual(result.count, 0)
+    }
+
     // MARK: - SessionRepository Tests (PRD: AGENT_CONCEPT.md - Session)
 
     func testSessionRepositorySaveAndFindById() throws {

@@ -247,6 +247,12 @@ final class MCPServer {
                 throw MCPError.missingArguments(["agent_id"])
             }
             return try listTasks(status: nil, assigneeId: agentId)
+        case "get_pending_tasks":
+            // Phase 3-2: 作業中タスク取得
+            guard let agentId = arguments["agent_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id"])
+            }
+            return try getPendingTasks(agentId: agentId)
         case "get_task":
             guard let taskId = arguments["task_id"] as? String else {
                 throw MCPError.missingArguments(["task_id"])
@@ -852,6 +858,14 @@ final class MCPServer {
             tasks = tasks.filter { $0.assigneeId == targetAgentId }
         }
 
+        return tasks.map { taskToDict($0) }
+    }
+
+    /// Phase 3-2: get_pending_tasks - 作業中タスク取得
+    /// 外部Runnerが作業継続のため現在進行中のタスクを取得
+    private func getPendingTasks(agentId: String) throws -> [[String: Any]] {
+        let useCase = GetPendingTasksUseCase(taskRepository: taskRepository)
+        let tasks = try useCase.execute(agentId: AgentID(value: agentId))
         return tasks.map { taskToDict($0) }
     }
 

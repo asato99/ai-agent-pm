@@ -198,6 +198,27 @@ final class MCPServerTests: XCTestCase {
         }
     }
 
+    /// Phase 3-2: get_pending_tasksツール定義
+    func testGetPendingTasksToolDefinition() {
+        let tool = ToolDefinitions.getPendingTasks
+
+        XCTAssertEqual(tool["name"] as? String, "get_pending_tasks")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("agent_id"), "get_pending_tasks should require agent_id")
+        }
+    }
+
+    /// Phase 3-2: get_pending_tasksがall()に含まれている
+    func testGetPendingTasksToolInAllTools() {
+        let allTools = ToolDefinitions.all()
+        let toolNames = allTools.compactMap { $0["name"] as? String }
+
+        XCTAssertTrue(toolNames.contains("get_pending_tasks"), "get_pending_tasks should be in all tools")
+    }
+
     /// update_task_statusツール定義
     func testUpdateTaskStatusToolDefinition() {
         let tool = ToolDefinitions.updateTaskStatus
@@ -421,10 +442,10 @@ final class MCPServerTests: XCTestCase {
         // Authentication: 1 (authenticate) - Phase 3-1
         // Agent: 3 (get_agent_profile, get_my_profile, list_agents)
         // Project: 2 (list_projects, get_project)
-        // Tasks: 5 (list_tasks, get_task, get_my_tasks, update_task_status, assign_task)
+        // Tasks: 6 (list_tasks, get_task, get_my_tasks, get_pending_tasks, update_task_status, assign_task)
         // Context: 2 (save_context, get_task_context)
         // Handoff: 3 (create_handoff, accept_handoff, get_pending_handoffs)
-        XCTAssertEqual(tools.count, 16, "Should have 16 tools defined (including authenticate)")
+        XCTAssertEqual(tools.count, 17, "Should have 17 tools defined (including authenticate and get_pending_tasks)")
     }
 }
 
@@ -456,6 +477,7 @@ final class MCPPRDComplianceTests: XCTestCase {
             "list_tasks",
             "get_task",
             "get_my_tasks",       // 後方互換
+            "get_pending_tasks",  // Phase 3-2
             "update_task_status",
             "assign_task",
 
@@ -476,8 +498,8 @@ final class MCPPRDComplianceTests: XCTestCase {
             }
         }
 
-        // ステートレス設計版 + 認証: 16個のツールが実装されている
-        XCTAssertEqual(implementedCount, 16, "Should have 16 tools implemented (including authenticate)")
+        // ステートレス設計版 + 認証 + Phase 3-2: 17個のツールが実装されている
+        XCTAssertEqual(implementedCount, 17, "Should have 17 tools implemented (including authenticate and get_pending_tasks)")
 
         // ステートレス設計で削除されたツール
         let removedTools = ["start_session", "end_session", "get_my_sessions", "create_task", "update_task"]

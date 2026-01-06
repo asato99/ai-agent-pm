@@ -26,6 +26,7 @@ enum ToolDefinitions {
             // Tasks
             listTasks,
             getMyTasks,  // 後方互換性のため維持（非推奨）
+            getPendingTasks,  // Phase 3-2: 作業中タスク取得
             getTask,
             updateTaskStatus,
             assignTask,
@@ -173,6 +174,24 @@ enum ToolDefinitions {
                 "agent_id": [
                     "type": "string",
                     "description": "エージェントID（キック時のプロンプトから取得）"
+                ]
+            ] as [String: Any],
+            "required": ["agent_id"]
+        ]
+    ]
+
+    /// get_pending_tasks - Phase 3-2: 作業中タスク取得
+    /// 外部Runnerが作業継続のため現在進行中のタスクを取得
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+    static let getPendingTasks: [String: Any] = [
+        "name": "get_pending_tasks",
+        "description": "指定エージェントの作業中（in_progress）タスク一覧を取得します。外部Runnerが作業継続のために使用します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID"
                 ]
             ] as [String: Any],
             "required": ["agent_id"]

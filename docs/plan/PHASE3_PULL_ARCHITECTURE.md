@@ -2547,6 +2547,48 @@ Sources/MCPServer/MCPServer.swift                  # authenticateハンドラ追
 
 ---
 
+## Phase 3-2 実装完了ノート
+
+**実装日:** 2026-01-06
+**ステータス:** ✅ 完了
+
+### 実装した機能
+
+1. **TaskRepositoryProtocol拡張**
+   - `findPendingByAssignee(_ agentId: AgentID) throws -> [Task]` を追加
+   - in_progressステータスかつ指定エージェントにアサインされたタスクを取得
+
+2. **TaskRepository実装**
+   - GRDBを使用したfindPendingByAssignee実装
+   - 3件のテスト追加・パス
+
+3. **GetPendingTasksUseCase**
+   - 外部Runnerが作業継続のため現在進行中のタスクを取得するUseCase
+   - 2件のテスト追加・パス
+
+4. **get_pending_tasks MCP Tool**
+   - ToolDefinitions: ツール定義追加
+   - MCPServer: ハンドラー実装
+   - 2件のテスト追加・パス
+
+### テスト結果
+
+```
+302 tests, 2 failures (ViewInspector関連、Phase 3-2とは無関係)
+- testGetPendingTasksToolDefinition: ✅
+- testGetPendingTasksToolInAllTools: ✅
+- testGetPendingTasksUseCase: ✅
+- testGetPendingTasksUseCaseExcludesOtherAgents: ✅
+- testTaskRepositoryFindPendingByAssignee: ✅
+- testTaskRepositoryFindPendingByAssigneeExcludesOtherAgents: ✅
+- testTaskRepositoryFindPendingByAssigneeExcludesUnassigned: ✅
+```
+
+**変更点:**
+- ツール数: 16 → 17（get_pending_tasks追加）
+
+---
+
 ## 変更履歴
 
 | 日付 | バージョン | 変更内容 |
@@ -2555,3 +2597,4 @@ Sources/MCPServer/MCPServer.swift                  # authenticateハンドラ追
 | 2026-01-06 | 1.1.0 | Phase 3-5, 3-6 Runner実装を追加 |
 | 2026-01-06 | 1.2.0 | Phase 3-1 認証基盤実装完了（MCP Tool除く） |
 | 2026-01-06 | 1.3.0 | Phase 3-1 完了: authenticate MCP Tool実装 |
+| 2026-01-06 | 1.4.0 | Phase 3-2 完了: get_pending_tasks MCP Tool実装 |

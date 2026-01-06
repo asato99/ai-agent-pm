@@ -158,6 +158,20 @@ public final class TaskRepository: TaskRepositoryProtocol, Sendable {
         }
     }
 
+    /// Phase 3-2: 作業中タスクを取得（特定エージェント）
+    /// 外部Runnerが作業継続のため現在進行中のタスクを取得
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+    public func findPendingByAssignee(_ agentId: AgentID) throws -> [Task] {
+        try db.read { db in
+            try TaskRecord
+                .filter(Column("assignee_id") == agentId.value)
+                .filter(Column("status") == TaskStatus.inProgress.rawValue)
+                .order(Column("priority"), Column("updated_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
     /// 全タスクを取得（プロジェクト横断）
     /// ステートレスMCPサーバー用
     public func findAllTasks() throws -> [Task] {
