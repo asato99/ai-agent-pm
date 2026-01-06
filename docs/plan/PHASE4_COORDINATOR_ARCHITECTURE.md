@@ -146,21 +146,24 @@ list_managed_agents() → {
 should_start(
     agent_id: str
 ) → {
-    "should_start": true | false
+    "should_start": true | false,
+    "ai_type": "claude"  # should_start が true の場合のみ
 }
 ```
 
 **実装ロジック（内部）**:
-- `in_progress` 状態のタスクがあり、かつ実行中でない → `true`
+- `in_progress` 状態のタスクがあり、かつ実行中でない → `true` + `ai_type`
 - それ以外 → `false`
 
-**重要**: 戻り値にタスク情報は含めない。Coordinatorはタスクの存在を知る必要がない。
+**重要**:
+- タスク情報は含めない（Coordinatorはタスクの存在を知る必要がない）
+- `ai_type` はアプリDBから取得し、Coordinatorが適切なCLIを選択するために使用
 
 ### Agent向けAPI
 
 #### authenticate（拡張）
 
-認証後、次に何をすべきかの instruction を返す。
+認証後、エージェントの役割（system_prompt）と次に何をすべきかの instruction を返す。
 
 ```python
 authenticate(
@@ -171,6 +174,7 @@ authenticate(
     "session_token": "sess_xxxxx",
     "expires_in": 3600,
     "agent_name": "frontend-dev",
+    "system_prompt": "あなたはフロントエンド開発者です...",  # DBから取得
     "instruction": "get_my_task を呼び出してタスク詳細を取得してください"
 }
 
@@ -180,6 +184,11 @@ authenticate(
     "error": "Invalid agent_id or passkey"
 }
 ```
+
+**ポイント**: `system_prompt` はアプリ側（DB）で管理され、認証時にエージェントに渡される。これにより:
+- Coordinatorは認証情報のみ保持（シンプル化）
+- エージェントの役割変更がアプリUIで完結
+- Single Source of Truth
 
 #### get_my_task
 
@@ -235,28 +244,42 @@ report_completed(
 ```yaml
 # coordinator_config.yaml
 
-# エージェント起動設定（agent_idごとのpasskeyと起動コマンド）
-# 注意: 監視対象エージェントの一覧はMCPサーバーから動的に取得
-agent_configs:
-  agt_frontend:
-    passkey: ${FRONTEND_PASSKEY}
-    cli_command: claude
-    cli_args:
-      - "--dangerously-skip-permissions"
-    working_directory: /path/to/frontend
-
-  agt_backend:
-    passkey: ${BACKEND_PASSKEY}
-    cli_command: claude
-    cli_args:
-      - "--dangerously-skip-permissions"
-    working_directory: /path/to/backend
-
 polling_interval: 10  # 秒
 max_concurrent: 3     # 同時実行数
 mcp_socket_path: ~/Library/Application Support/AIAgentPM/mcp.sock
-health_check_interval: 60  # ヘルスチェック間隔（秒）
+
+# AIプロバイダーごとの起動方法
+ai_providers:
+  claude:
+    cli_command: claude
+    cli_args: ["--dangerously-skip-permissions"]
+  gemini:
+    cli_command: gemini-cli
+    cli_args: ["--project", "my-project"]
+
+# エージェント設定
+# 注意: 監視対象の一覧は list_managed_agents で動的取得
+# ai_type, system_prompt はアプリ側（DB）で管理
+agents:
+  agt_developer:
+    passkey: ${DEV_PASSKEY}
+    working_directory: /projects/myapp
+
+  agt_reviewer:
+    passkey: ${REVIEWER_PASSKEY}
+    working_directory: /projects/myapp
 ```
+
+**設定項目**:
+
+| セクション | 項目 | 説明 |
+|-----------|------|------|
+| `ai_providers` | `cli_command` | AIプロバイダーのCLIコマンド |
+| `ai_providers` | `cli_args` | CLI引数 |
+| `agents` | `passkey` | 認証用パスキー（必須） |
+| `agents` | `working_directory` | 作業ディレクトリ（オプション） |
+
+**ポイント**: `ai_type` と `system_prompt` はアプリ側で管理（Single Source of Truth）
 
 ### ポーリングループ
 
@@ -290,38 +313,47 @@ class Coordinator:
                 agent_id = agent_info.agent_id
 
                 # 設定ファイルに起動設定がないエージェントはスキップ
-                if agent_id not in self.agent_configs:
+                if agent_id not in self.agents:
                     logger.debug(f"No config for {agent_id}, skipping")
                     continue
 
                 # 起動すべきか確認
                 try:
-                    should_start = await self.mcp_client.should_start(agent_id)
-                    if should_start.should_start:
-                        self.spawn_agent(agent_id)
+                    result = await self.mcp_client.should_start(agent_id)
+                    if result.should_start:
+                        self.spawn_agent(agent_id, result.ai_type)
                 except MCPError as e:
                     logger.error(f"Failed to check {agent_id}: {e}")
 
             await asyncio.sleep(self.polling_interval)
 
-    def spawn_agent(self, agent_id: str):
+    def spawn_agent(self, agent_id: str, ai_type: str):
         """エージェントプロセスを起動"""
-        config = self.agent_configs[agent_id]
+        agent_config = self.agents[agent_id]
 
-        # Claude Code を起動し、プロンプトで認証情報を渡す
+        # ai_type から起動方法を取得
+        provider = self.ai_providers.get(ai_type, self.ai_providers["claude"])
+        cli_command = provider["cli_command"]
+        cli_args = provider.get("cli_args", [])
+        working_dir = agent_config.get("working_directory")
+
+        # 認証情報 + 手順のみ（system_prompt は authenticate で取得）
         prompt = f"""
-あなたは {agent_id} として認証し、タスクを実行してください。
+Agent ID: {agent_id}
+Passkey: {agent_config["passkey"]}
 
-1. authenticate(agent_id="{agent_id}", passkey="{config.passkey}") を呼び出す
-2. 返された instruction に従う
+手順:
+1. authenticate(agent_id="{agent_id}", passkey="{agent_config["passkey"]}") で認証
+2. 返された system_prompt があなたの役割です。その役割に従って行動してください
+3. get_my_task() でタスク取得
+4. タスク実行
+5. report_completed() で完了報告
 """
-        subprocess.Popen([
-            config.cli_command,
-            *config.cli_args,
-            "-p", prompt
-        ], cwd=config.working_directory)
-
-        logger.info(f"Spawned agent {agent_id}")
+        subprocess.Popen(
+            [cli_command, *cli_args, "-p", prompt],
+            cwd=working_dir
+        )
+        logger.info(f"Spawned agent {agent_id} with {ai_type}")
 ```
 
 ---
