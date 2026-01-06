@@ -182,3 +182,39 @@ public struct AuditRuleID: Hashable, Codable, Sendable, CustomStringConvertible 
 
     public var description: String { value }
 }
+
+// MARK: - AgentCredentialID
+
+/// エージェント認証情報の一意識別子
+/// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+public struct AgentCredentialID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> AgentCredentialID {
+        AgentCredentialID(value: "crd_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}
+
+// MARK: - AgentSessionID
+
+/// エージェントセッションの一意識別子（認証後のセッション管理用）
+/// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+public struct AgentSessionID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> AgentSessionID {
+        AgentSessionID(value: "asn_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}

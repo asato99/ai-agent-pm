@@ -137,3 +137,28 @@ public protocol AuditRuleRepositoryProtocol: Sendable {
     func save(_ rule: AuditRule) throws
     func delete(_ id: AuditRuleID) throws
 }
+
+// MARK: - AgentCredentialRepositoryProtocol
+
+/// エージェント認証情報リポジトリのプロトコル
+/// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+public protocol AgentCredentialRepositoryProtocol: Sendable {
+    func findById(_ id: AgentCredentialID) throws -> AgentCredential?
+    func findByAgentId(_ agentId: AgentID) throws -> AgentCredential?
+    func save(_ credential: AgentCredential) throws
+    func delete(_ id: AgentCredentialID) throws
+}
+
+// MARK: - AgentSessionRepositoryProtocol
+
+/// エージェントセッションリポジトリのプロトコル
+/// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+public protocol AgentSessionRepositoryProtocol: Sendable {
+    func findById(_ id: AgentSessionID) throws -> AgentSession?
+    func findByToken(_ token: String) throws -> AgentSession?
+    func findByAgentId(_ agentId: AgentID) throws -> [AgentSession]
+    func save(_ session: AgentSession) throws
+    func delete(_ id: AgentSessionID) throws
+    func deleteByAgentId(_ agentId: AgentID) throws
+    func deleteExpired() throws
+}

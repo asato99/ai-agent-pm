@@ -306,7 +306,8 @@ final class TaskColumnViewTests: XCTestCase {
         let column = TaskColumnView(
             status: .inProgress,
             tasks: [],
-            agents: []
+            agents: [],
+            onTaskDropped: { _, _ in }
         )
 
         let view = try column.inspect()
@@ -325,7 +326,8 @@ final class TaskColumnViewTests: XCTestCase {
         let column = TaskColumnView(
             status: .todo,
             tasks: tasks,
-            agents: []
+            agents: [],
+            onTaskDropped: { _, _ in }
         )
 
         let view = try column.inspect()

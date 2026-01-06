@@ -208,6 +208,11 @@ final class MockWorkflowTemplateRepository: WorkflowTemplateRepositoryProtocol {
         try findByProject(projectId, includeArchived: false)
     }
 
+    func findAllActive() throws -> [WorkflowTemplate] {
+        templates.values.filter { $0.status == .active }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
     func save(_ template: WorkflowTemplate) throws {
         templates[template.id] = template
     }
@@ -308,6 +313,66 @@ final class MockAuditRuleRepository: AuditRuleRepositoryProtocol {
     }
 }
 
+// MARK: - Authentication Mock Repositories (Phase 3-1)
+
+final class MockAgentCredentialRepository: AgentCredentialRepositoryProtocol {
+    var credentials: [AgentCredentialID: AgentCredential] = [:]
+
+    func findById(_ id: AgentCredentialID) throws -> AgentCredential? {
+        credentials[id]
+    }
+
+    func findByAgentId(_ agentId: AgentID) throws -> AgentCredential? {
+        credentials.values.first { $0.agentId == agentId }
+    }
+
+    func save(_ credential: AgentCredential) throws {
+        credentials[credential.id] = credential
+    }
+
+    func delete(_ id: AgentCredentialID) throws {
+        credentials.removeValue(forKey: id)
+    }
+}
+
+final class MockAgentSessionRepository: AgentSessionRepositoryProtocol {
+    var sessions: [AgentSessionID: AgentSession] = [:]
+
+    func findById(_ id: AgentSessionID) throws -> AgentSession? {
+        sessions[id]
+    }
+
+    func findByToken(_ token: String) throws -> AgentSession? {
+        sessions.values.first { $0.token == token && !$0.isExpired }
+    }
+
+    func findByAgentId(_ agentId: AgentID) throws -> [AgentSession] {
+        sessions.values.filter { $0.agentId == agentId }
+    }
+
+    func save(_ session: AgentSession) throws {
+        sessions[session.id] = session
+    }
+
+    func delete(_ id: AgentSessionID) throws {
+        sessions.removeValue(forKey: id)
+    }
+
+    func deleteByAgentId(_ agentId: AgentID) throws {
+        let toDelete = sessions.values.filter { $0.agentId == agentId }.map { $0.id }
+        for id in toDelete {
+            sessions.removeValue(forKey: id)
+        }
+    }
+
+    func deleteExpired() throws {
+        let toDelete = sessions.values.filter { $0.isExpired }.map { $0.id }
+        for id in toDelete {
+            sessions.removeValue(forKey: id)
+        }
+    }
+}
+
 // MARK: - UseCase Tests
 
 final class UseCaseTests: XCTestCase {
@@ -322,6 +387,8 @@ final class UseCaseTests: XCTestCase {
     var templateTaskRepo: MockTemplateTaskRepository!
     var internalAuditRepo: MockInternalAuditRepository!
     var auditRuleRepo: MockAuditRuleRepository!
+    var agentCredentialRepo: MockAgentCredentialRepository!
+    var agentSessionRepo: MockAgentSessionRepository!
 
     override func setUp() {
         projectRepo = MockProjectRepository()
@@ -334,6 +401,8 @@ final class UseCaseTests: XCTestCase {
         templateTaskRepo = MockTemplateTaskRepository()
         internalAuditRepo = MockInternalAuditRepository()
         auditRuleRepo = MockAuditRuleRepository()
+        agentCredentialRepo = MockAgentCredentialRepository()
+        agentSessionRepo = MockAgentSessionRepository()
     }
 
     // MARK: - Error Description Tests
@@ -2078,5 +2147,262 @@ final class UseCaseTests: XCTestCase {
 
         // マッチするルールがないので空
         XCTAssertTrue(result.firedRules.isEmpty)
+    }
+
+    // MARK: - AuthenticateUseCase Tests (Phase 3-1: 認証基盤)
+
+    func testAuthenticateUseCaseSuccess() throws {
+        // 正しい認証情報でセッションを取得
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let credential = AgentCredential(agentId: agent.id, rawPasskey: "secret123")
+        agentCredentialRepo.credentials[credential.id] = credential
+
+        let useCase = AuthenticateUseCase(
+            credentialRepository: agentCredentialRepo,
+            sessionRepository: agentSessionRepo,
+            agentRepository: agentRepo
+        )
+
+        let result = try useCase.execute(agentId: agent.id.value, passkey: "secret123")
+
+        XCTAssertTrue(result.success)
+        XCTAssertNotNil(result.sessionToken)
+        XCTAssertEqual(result.agentName, "TestAgent")
+        XCTAssertNotNil(result.expiresIn)
+        XCTAssertGreaterThan(result.expiresIn ?? 0, 0)
+    }
+
+    func testAuthenticateUseCaseInvalidPasskey() throws {
+        // 誤ったパスキーでエラーを返す
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let credential = AgentCredential(agentId: agent.id, rawPasskey: "secret123")
+        agentCredentialRepo.credentials[credential.id] = credential
+
+        let useCase = AuthenticateUseCase(
+            credentialRepository: agentCredentialRepo,
+            sessionRepository: agentSessionRepo,
+            agentRepository: agentRepo
+        )
+
+        let result = try useCase.execute(agentId: agent.id.value, passkey: "wrongpassword")
+
+        XCTAssertFalse(result.success)
+        XCTAssertNil(result.sessionToken)
+        XCTAssertEqual(result.error, "Invalid agent_id or passkey")
+    }
+
+    func testAuthenticateUseCaseUnknownAgentId() throws {
+        // 存在しないエージェントIDでエラーを返す
+        let useCase = AuthenticateUseCase(
+            credentialRepository: agentCredentialRepo,
+            sessionRepository: agentSessionRepo,
+            agentRepository: agentRepo
+        )
+
+        let result = try useCase.execute(agentId: "unknown_agent", passkey: "anypasskey")
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.error, "Invalid agent_id or passkey")
+    }
+
+    func testAuthenticateUseCaseNoCredential() throws {
+        // 認証情報が設定されていないエージェント
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+        // 認証情報は追加しない
+
+        let useCase = AuthenticateUseCase(
+            credentialRepository: agentCredentialRepo,
+            sessionRepository: agentSessionRepo,
+            agentRepository: agentRepo
+        )
+
+        let result = try useCase.execute(agentId: agent.id.value, passkey: "anypasskey")
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.error, "Invalid agent_id or passkey")
+    }
+
+    func testAuthenticateUseCaseSavesSession() throws {
+        // 認証成功時にセッションが保存される
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let credential = AgentCredential(agentId: agent.id, rawPasskey: "secret123")
+        agentCredentialRepo.credentials[credential.id] = credential
+
+        let useCase = AuthenticateUseCase(
+            credentialRepository: agentCredentialRepo,
+            sessionRepository: agentSessionRepo,
+            agentRepository: agentRepo
+        )
+
+        let result = try useCase.execute(agentId: agent.id.value, passkey: "secret123")
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(agentSessionRepo.sessions.count, 1)
+    }
+
+    // MARK: - ValidateSessionUseCase Tests
+
+    func testValidateSessionUseCaseValid() throws {
+        // 有効なセッションでエージェントIDを返す
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let session = AgentSession(agentId: agent.id)
+        agentSessionRepo.sessions[session.id] = session
+
+        let useCase = ValidateSessionUseCase(
+            sessionRepository: agentSessionRepo,
+            agentRepository: agentRepo
+        )
+
+        let result = try useCase.execute(sessionToken: session.token)
+
+        XCTAssertEqual(result, agent.id)
+    }
+
+    func testValidateSessionUseCaseExpired() throws {
+        // 期限切れセッションでnilを返す
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let expiredSession = AgentSession(
+            agentId: agent.id,
+            expiresAt: Date().addingTimeInterval(-100)
+        )
+        agentSessionRepo.sessions[expiredSession.id] = expiredSession
+
+        let useCase = ValidateSessionUseCase(
+            sessionRepository: agentSessionRepo,
+            agentRepository: agentRepo
+        )
+
+        let result = try useCase.execute(sessionToken: expiredSession.token)
+
+        XCTAssertNil(result)
+    }
+
+    func testValidateSessionUseCaseInvalidToken() throws {
+        // 無効なトークンでnilを返す
+        let useCase = ValidateSessionUseCase(
+            sessionRepository: agentSessionRepo,
+            agentRepository: agentRepo
+        )
+
+        let result = try useCase.execute(sessionToken: "invalid_token")
+
+        XCTAssertNil(result)
+    }
+
+    // MARK: - LogoutUseCase Tests
+
+    func testLogoutUseCaseSuccess() throws {
+        // セッションを削除してログアウト
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let session = AgentSession(agentId: agent.id)
+        agentSessionRepo.sessions[session.id] = session
+
+        let useCase = LogoutUseCase(sessionRepository: agentSessionRepo)
+
+        let result = try useCase.execute(sessionToken: session.token)
+
+        XCTAssertTrue(result)
+        XCTAssertTrue(agentSessionRepo.sessions.isEmpty)
+    }
+
+    func testLogoutUseCaseInvalidToken() throws {
+        // 無効なトークンでfalseを返す
+        let useCase = LogoutUseCase(sessionRepository: agentSessionRepo)
+
+        let result = try useCase.execute(sessionToken: "invalid_token")
+
+        XCTAssertFalse(result)
+    }
+
+    // MARK: - CreateCredentialUseCase Tests
+
+    func testCreateCredentialUseCaseSuccess() throws {
+        // 認証情報を作成
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let useCase = CreateCredentialUseCase(
+            credentialRepository: agentCredentialRepo,
+            agentRepository: agentRepo
+        )
+
+        let credential = try useCase.execute(agentId: agent.id, passkey: "newsecret123")
+
+        XCTAssertEqual(credential.agentId, agent.id)
+        XCTAssertEqual(agentCredentialRepo.credentials.count, 1)
+    }
+
+    func testCreateCredentialUseCaseShortPasskey() throws {
+        // 短すぎるパスキーでエラー
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let useCase = CreateCredentialUseCase(
+            credentialRepository: agentCredentialRepo,
+            agentRepository: agentRepo
+        )
+
+        XCTAssertThrowsError(try useCase.execute(agentId: agent.id, passkey: "short")) { error in
+            if case UseCaseError.validationFailed = error {
+                // Expected
+            } else {
+                XCTFail("Expected validationFailed error")
+            }
+        }
+    }
+
+    func testCreateCredentialUseCaseReplacesExisting() throws {
+        // 既存の認証情報を置き換え
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let oldCredential = AgentCredential(agentId: agent.id, rawPasskey: "oldsecret123")
+        agentCredentialRepo.credentials[oldCredential.id] = oldCredential
+
+        let useCase = CreateCredentialUseCase(
+            credentialRepository: agentCredentialRepo,
+            agentRepository: agentRepo
+        )
+
+        let newCredential = try useCase.execute(agentId: agent.id, passkey: "newsecret123")
+
+        XCTAssertEqual(agentCredentialRepo.credentials.count, 1)
+        XCTAssertNotEqual(newCredential.id, oldCredential.id)
+    }
+
+    // MARK: - CleanupExpiredSessionsUseCase Tests
+
+    func testCleanupExpiredSessionsUseCase() throws {
+        // 期限切れセッションをクリーンアップ
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        agentRepo.agents[agent.id] = agent
+
+        let expiredSession = AgentSession(
+            agentId: agent.id,
+            expiresAt: Date().addingTimeInterval(-100)
+        )
+        let validSession = AgentSession(agentId: agent.id)
+        agentSessionRepo.sessions[expiredSession.id] = expiredSession
+        agentSessionRepo.sessions[validSession.id] = validSession
+
+        let useCase = CleanupExpiredSessionsUseCase(sessionRepository: agentSessionRepo)
+
+        try useCase.execute()
+
+        XCTAssertEqual(agentSessionRepo.sessions.count, 1)
+        XCTAssertNotNil(agentSessionRepo.sessions[validSession.id])
     }
 }

@@ -863,4 +863,197 @@ final class DomainTests: XCTestCase {
         )
         XCTAssertFalse(ruleWithoutTasks.hasTasks)
     }
+
+    // MARK: - AgentCredential Tests (Phase 3-1: 認証基盤)
+    // 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+
+    func testAgentCredentialIDGeneration() {
+        let id = AgentCredentialID.generate()
+        XCTAssertTrue(id.value.hasPrefix("crd_"), "AgentCredential ID must start with 'crd_'")
+    }
+
+    func testAgentSessionIDGeneration() {
+        let id = AgentSessionID.generate()
+        XCTAssertTrue(id.value.hasPrefix("asn_"), "AgentSession ID must start with 'asn_'")
+    }
+
+    func testAgentCredentialCreation_HashesPasskey() {
+        // Given
+        let agentId = AgentID(value: "agt_test")
+        let rawPasskey = "secret123"
+
+        // When
+        let credential = AgentCredential(
+            agentId: agentId,
+            rawPasskey: rawPasskey
+        )
+
+        // Then
+        XCTAssertNotEqual(credential.passkeyHash, rawPasskey, "Passkey should be hashed")
+        XCTAssertFalse(credential.passkeyHash.isEmpty, "Hash should not be empty")
+        XCTAssertFalse(credential.salt.isEmpty, "Salt should not be empty")
+    }
+
+    func testAgentCredentialVerify_WithCorrectPasskey_ReturnsTrue() {
+        // Given
+        let credential = AgentCredential(
+            agentId: AgentID(value: "agt_test"),
+            rawPasskey: "secret123"
+        )
+
+        // When
+        let result = credential.verify(passkey: "secret123")
+
+        // Then
+        XCTAssertTrue(result, "Should verify correct passkey")
+    }
+
+    func testAgentCredentialVerify_WithWrongPasskey_ReturnsFalse() {
+        // Given
+        let credential = AgentCredential(
+            agentId: AgentID(value: "agt_test"),
+            rawPasskey: "secret123"
+        )
+
+        // When
+        let result = credential.verify(passkey: "wrongpassword")
+
+        // Then
+        XCTAssertFalse(result, "Should not verify wrong passkey")
+    }
+
+    func testAgentCredentialVerify_WithEmptyPasskey_ReturnsFalse() {
+        // Given
+        let credential = AgentCredential(
+            agentId: AgentID(value: "agt_test"),
+            rawPasskey: "secret123"
+        )
+
+        // When
+        let result = credential.verify(passkey: "")
+
+        // Then
+        XCTAssertFalse(result, "Should not verify empty passkey")
+    }
+
+    func testAgentCredential_DifferentCredentialsHaveDifferentSalts() {
+        // Given
+        let agentId = AgentID(value: "agt_test")
+        let passkey = "secret123"
+
+        // When
+        let credential1 = AgentCredential(agentId: agentId, rawPasskey: passkey)
+        let credential2 = AgentCredential(agentId: agentId, rawPasskey: passkey)
+
+        // Then
+        XCTAssertNotEqual(credential1.salt, credential2.salt, "Different credentials should have different salts")
+        XCTAssertNotEqual(credential1.passkeyHash, credential2.passkeyHash, "Different salts should produce different hashes")
+    }
+
+    func testAgentCredentialWithLastUsedAt() {
+        // Given
+        let credential = AgentCredential(
+            agentId: AgentID(value: "agt_test"),
+            rawPasskey: "secret123"
+        )
+        let now = Date()
+
+        // When
+        let updated = credential.withLastUsedAt(now)
+
+        // Then
+        XCTAssertEqual(updated.lastUsedAt, now)
+        XCTAssertEqual(updated.id, credential.id)
+        XCTAssertEqual(updated.agentId, credential.agentId)
+        XCTAssertEqual(updated.passkeyHash, credential.passkeyHash)
+    }
+
+    // MARK: - AgentSession Tests (Phase 3-1: 認証基盤)
+
+    func testAgentSessionCreation_GeneratesUniqueToken() {
+        // Given/When
+        let session1 = AgentSession(agentId: AgentID(value: "agt_1"))
+        let session2 = AgentSession(agentId: AgentID(value: "agt_1"))
+
+        // Then
+        XCTAssertNotEqual(session1.token, session2.token, "Each session should have unique token")
+        XCTAssertTrue(session1.token.hasPrefix("sess_"), "Token should start with 'sess_'")
+    }
+
+    func testAgentSessionCreation_ExpiresInOneHour() {
+        // Given
+        let now = Date()
+
+        // When
+        let session = AgentSession(agentId: AgentID(value: "agt_1"), createdAt: now)
+
+        // Then
+        let expectedExpiry = now.addingTimeInterval(3600)
+        XCTAssertEqual(
+            session.expiresAt.timeIntervalSince1970,
+            expectedExpiry.timeIntervalSince1970,
+            accuracy: 1.0,
+            "Session should expire in 1 hour"
+        )
+    }
+
+    func testAgentSessionIsExpired_BeforeExpiry_ReturnsFalse() {
+        // Given
+        let session = AgentSession(agentId: AgentID(value: "agt_1"))
+
+        // When/Then
+        XCTAssertFalse(session.isExpired, "Newly created session should not be expired")
+    }
+
+    func testAgentSessionIsExpired_AfterExpiry_ReturnsTrue() {
+        // Given
+        let session = AgentSession(
+            agentId: AgentID(value: "agt_1"),
+            expiresAt: Date().addingTimeInterval(-1)  // 1秒前に期限切れ
+        )
+
+        // When/Then
+        XCTAssertTrue(session.isExpired, "Session past expiry should be expired")
+    }
+
+    func testAgentSessionRemainingSeconds_ValidSession() {
+        // Given
+        let now = Date()
+        let session = AgentSession(agentId: AgentID(value: "agt_1"), createdAt: now)
+
+        // When
+        let remaining = session.remainingSeconds
+
+        // Then
+        XCTAssertGreaterThan(remaining, 3500, "Should have ~1 hour remaining")
+        XCTAssertLessThanOrEqual(remaining, 3600, "Should not exceed 1 hour")
+    }
+
+    func testAgentSessionRemainingSeconds_ExpiredSession() {
+        // Given
+        let session = AgentSession(
+            agentId: AgentID(value: "agt_1"),
+            expiresAt: Date().addingTimeInterval(-100)
+        )
+
+        // When
+        let remaining = session.remainingSeconds
+
+        // Then
+        XCTAssertEqual(remaining, 0, "Expired session should have 0 remaining seconds")
+    }
+
+    func testAgentSessionCustomExpiry() {
+        // Given
+        let customExpiry = Date().addingTimeInterval(7200) // 2 hours
+
+        // When
+        let session = AgentSession(
+            agentId: AgentID(value: "agt_1"),
+            expiresAt: customExpiry
+        )
+
+        // Then
+        XCTAssertEqual(session.expiresAt, customExpiry, "Should use custom expiry")
+    }
 }

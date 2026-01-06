@@ -11,6 +11,9 @@ enum ToolDefinitions {
     /// 全Tool一覧
     static func all() -> [[String: Any]] {
         [
+            // Authentication (Phase 3-1)
+            authenticate,
+
             // Agent
             getAgentProfile,
             getMyProfile,  // 後方互換性のため維持（非推奨）
@@ -37,6 +40,29 @@ enum ToolDefinitions {
             getPendingHandoffs
         ]
     }
+
+    // MARK: - Authentication Tools (Phase 3-1)
+
+    /// authenticate - エージェント認証
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+    static let authenticate: [String: Any] = [
+        "name": "authenticate",
+        "description": "エージェントIDとパスキーで認証し、セッショントークンを取得します。Runnerがタスクを実行する前に呼び出します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID"
+                ],
+                "passkey": [
+                    "type": "string",
+                    "description": "エージェントのパスキー"
+                ]
+            ] as [String: Any],
+            "required": ["agent_id", "passkey"]
+        ]
+    ]
 
     // MARK: - Agent Tools
 

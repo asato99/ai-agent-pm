@@ -2500,9 +2500,58 @@ build-backend = "hatchling.build"
 
 ---
 
+## 実装進捗
+
+### Phase 3-1: 認証基盤（2026-01-06更新）
+
+| タスク | ステータス | 備考 |
+|--------|----------|------|
+| 3-1-1: Domain - AgentCredential | ✅ 完了 | SHA256 + salt方式（bcryptではなく） |
+| 3-1-2: Domain - AgentSession | ✅ 完了 | 1時間有効期限、sess_プレフィックス |
+| 3-1-3: Repository - AgentCredentialRepository | ✅ 完了 | GRDBベース |
+| 3-1-3: Repository - AgentSessionRepository | ✅ 完了 | 期限切れ自動フィルタリング |
+| 3-1-4: UseCase - 認証 | ✅ 完了 | AuthenticateUseCase等6つ実装 |
+| 3-1-5: MCP Tool - authenticate | ✅ 完了 | ToolDefinitions, MCPServer実装 |
+
+**実装済みファイル:**
+
+```
+Sources/Domain/ValueObjects/IDs.swift              # AgentCredentialID, AgentSessionID追加
+Sources/Domain/Entities/AgentCredential.swift      # 新規作成
+Sources/Domain/Entities/AgentSession.swift         # 新規作成
+Sources/Domain/Repositories/RepositoryProtocols.swift  # プロトコル追加
+Sources/Infrastructure/Database/DatabaseSetup.swift    # v15_authentication追加
+Sources/Infrastructure/Repositories/AgentCredentialRepository.swift  # 新規作成
+Sources/Infrastructure/Repositories/AgentSessionRepository.swift     # 新規作成
+Sources/UseCase/UseCases.swift                     # エラー型追加
+Sources/UseCase/AuthenticationUseCases.swift       # 新規作成
+Sources/MCPServer/Tools/ToolDefinitions.swift      # authenticate追加
+Sources/MCPServer/MCPServer.swift                  # authenticateハンドラ追加
+```
+
+**テスト:**
+- DomainTests: AgentCredential, AgentSessionテスト ✅
+- InfrastructureTests: AgentCredentialRepository, AgentSessionRepositoryテスト ✅
+- UseCaseTests: 認証関連UseCase全テスト ✅
+- MCPServerTests: AuthenticateToolTests（4テスト）✅
+
+**テスト結果サマリー:**
+- 全295テスト実行
+- 2件のViewInspector関連失敗（認証実装とは無関係）
+- 認証関連テストは全て合格
+
+**変更点:**
+- bcryptの代わりにSHA256 + salt方式を採用（Swift標準CryptoKit使用）
+- ステートレス設計に対応するためMCPServerTestsを更新
+- ツール数: 15 → 16（authenticate追加）
+
+---
+
 ## 変更履歴
 
 | 日付 | バージョン | 変更内容 |
 |------|-----------|----------|
 | 2026-01-06 | 1.0.0 | 初版作成 |
 | 2026-01-06 | 1.1.0 | Phase 3-5, 3-6 Runner実装を追加 |
+| 2026-01-06 | 1.2.0 | Phase 3-1 認証基盤実装完了（MCP Tool除く） |
+| 2026-01-06 | 1.3.0 | Phase 3-1 完了: authenticate MCP Tool実装 |

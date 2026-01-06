@@ -4,6 +4,7 @@
 import XCTest
 @testable import MCPServer
 @testable import Domain
+@testable import UseCase
 
 /// MCP_DESIGN.md仕様に基づくMCPServerテスト
 final class MCPServerTests: XCTestCase {
@@ -11,22 +12,22 @@ final class MCPServerTests: XCTestCase {
     // MARK: - ToolDefinitions Tests
 
     /// MCP_DESIGN.md: 全ツールが定義されていることを確認
+    /// ステートレス設計: セッション管理ツール（start_session, end_session）は削除済み
     func testToolDefinitionsContainsAllTools() {
         let tools = ToolDefinitions.all()
         let toolNames = tools.compactMap { $0["name"] as? String }
 
-        // PRD定義ツール（MCP_DESIGN.md）
-        // エージェント・セッション管理
+        // PRD定義ツール（MCP_DESIGN.md）- ステートレス設計版
+        // エージェント管理
         XCTAssertTrue(toolNames.contains("get_my_profile"), "get_my_profile should be defined per MCP_DESIGN.md")
-        // list_agents - PRD仕様にあるが未実装（後で実装が必要）
-        // get_agent - PRD仕様にあるが未実装（後で実装が必要）
-        XCTAssertTrue(toolNames.contains("start_session"), "start_session should be defined per MCP_DESIGN.md")
-        XCTAssertTrue(toolNames.contains("end_session"), "end_session should be defined per MCP_DESIGN.md")
-        // get_my_sessions - PRD仕様にあるが未実装（後で実装が必要）
+        XCTAssertTrue(toolNames.contains("get_agent_profile"), "get_agent_profile should be defined for stateless design")
+        XCTAssertTrue(toolNames.contains("list_agents"), "list_agents should be defined")
 
-        // プロジェクト・タスク管理
-        // list_projects - PRD仕様にあるが未実装（後で実装が必要）
-        // get_project - PRD仕様にあるが未実装（後で実装が必要）
+        // プロジェクト管理
+        XCTAssertTrue(toolNames.contains("list_projects"), "list_projects should be defined")
+        XCTAssertTrue(toolNames.contains("get_project"), "get_project should be defined")
+
+        // タスク管理
         XCTAssertTrue(toolNames.contains("list_tasks"), "list_tasks should be defined per MCP_DESIGN.md")
         XCTAssertTrue(toolNames.contains("get_task"), "get_task should be defined per MCP_DESIGN.md")
         XCTAssertTrue(toolNames.contains("get_my_tasks"), "get_my_tasks should be defined per MCP_DESIGN.md")
@@ -34,32 +35,29 @@ final class MCPServerTests: XCTestCase {
         XCTAssertTrue(toolNames.contains("assign_task"), "assign_task should be defined per MCP_DESIGN.md")
 
         // コンテキスト・ハンドオフ
-        // add_context → save_context として実装
         XCTAssertTrue(toolNames.contains("save_context"), "save_context should be defined (add_context in MCP_DESIGN.md)")
-        // get_context → get_task_context として実装
         XCTAssertTrue(toolNames.contains("get_task_context"), "get_task_context should be defined (get_context in MCP_DESIGN.md)")
         XCTAssertTrue(toolNames.contains("create_handoff"), "create_handoff should be defined per MCP_DESIGN.md")
         XCTAssertTrue(toolNames.contains("get_pending_handoffs"), "get_pending_handoffs should be defined per MCP_DESIGN.md")
-        // acknowledge_handoff → accept_handoff として実装
         XCTAssertTrue(toolNames.contains("accept_handoff"), "accept_handoff should be defined (acknowledge_handoff in MCP_DESIGN.md)")
     }
 
-    /// MCP_DESIGN.md仕様にある未実装ツールを記録（将来の実装タスク）
-    func testMissingToolsFromPRD() {
+    /// ステートレス設計で削除されたツールが存在しないことを確認
+    func testRemovedToolsFromStatelessDesign() {
         let tools = ToolDefinitions.all()
         let toolNames = tools.compactMap { $0["name"] as? String }
 
-        // MCP_DESIGN.mdに定義されているが未実装のツール
-        let missingTools = [
-            "list_agents",     // プロジェクトのエージェント一覧
-            "get_agent",       // 特定エージェントの詳細
-            "get_my_sessions", // 自分の過去セッション一覧
-            "list_projects",   // プロジェクト一覧取得
-            "get_project"      // プロジェクト詳細取得
+        // ステートレス設計により削除されたツール
+        let removedTools = [
+            "start_session",   // セッション管理は削除
+            "end_session",     // セッション管理は削除
+            "get_my_sessions", // セッション管理は削除
+            "create_task",     // UIでのみ作成可能
+            "update_task"      // UIでのみ編集可能
         ]
 
-        for tool in missingTools {
-            XCTAssertFalse(toolNames.contains(tool), "\(tool) is defined in MCP_DESIGN.md but not yet implemented - needs implementation")
+        for tool in removedTools {
+            XCTAssertFalse(toolNames.contains(tool), "\(tool) should not exist in stateless design")
         }
     }
 
@@ -80,7 +78,7 @@ final class MCPServerTests: XCTestCase {
         }
     }
 
-    /// get_my_profileツール定義
+    /// get_my_profileツール定義（後方互換、ステートレス設計）
     func testGetMyProfileToolDefinition() {
         let tool = ToolDefinitions.getMyProfile
 
@@ -90,40 +88,64 @@ final class MCPServerTests: XCTestCase {
         if let schema = tool["inputSchema"] as? [String: Any] {
             XCTAssertEqual(schema["type"] as? String, "object")
             let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.isEmpty, "get_my_profile should have no required parameters")
+            // ステートレス設計: agent_idが必須
+            XCTAssertTrue(required.contains("agent_id"), "get_my_profile should require agent_id in stateless design")
         }
     }
 
-    /// start_sessionツール定義
-    func testStartSessionToolDefinition() {
-        let tool = ToolDefinitions.startSession
+    /// get_agent_profileツール定義（ステートレス設計）
+    func testGetAgentProfileToolDefinition() {
+        let tool = ToolDefinitions.getAgentProfile
 
-        XCTAssertEqual(tool["name"] as? String, "start_session")
+        XCTAssertEqual(tool["name"] as? String, "get_agent_profile")
         XCTAssertNotNil(tool["description"])
 
         if let schema = tool["inputSchema"] as? [String: Any] {
             XCTAssertEqual(schema["type"] as? String, "object")
             let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.isEmpty, "start_session should have no required parameters")
+            XCTAssertTrue(required.contains("agent_id"), "get_agent_profile should require agent_id")
         }
     }
 
-    /// end_sessionツール定義
-    func testEndSessionToolDefinition() {
-        let tool = ToolDefinitions.endSession
+    /// list_agentsツール定義
+    func testListAgentsToolDefinition() {
+        let tool = ToolDefinitions.listAgents
 
-        XCTAssertEqual(tool["name"] as? String, "end_session")
+        XCTAssertEqual(tool["name"] as? String, "list_agents")
         XCTAssertNotNil(tool["description"])
 
-        if let schema = tool["inputSchema"] as? [String: Any],
-           let properties = schema["properties"] as? [String: Any] {
-            // status: completed | abandoned
-            XCTAssertNotNil(properties["status"], "end_session should have status property")
-            if let statusProp = properties["status"] as? [String: Any],
-               let enumValues = statusProp["enum"] as? [String] {
-                XCTAssertTrue(enumValues.contains("completed"))
-                XCTAssertTrue(enumValues.contains("abandoned"))
-            }
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.isEmpty, "list_agents should have no required parameters")
+        }
+    }
+
+    /// list_projectsツール定義
+    func testListProjectsToolDefinition() {
+        let tool = ToolDefinitions.listProjects
+
+        XCTAssertEqual(tool["name"] as? String, "list_projects")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.isEmpty, "list_projects should have no required parameters")
+        }
+    }
+
+    /// get_projectツール定義
+    func testGetProjectToolDefinition() {
+        let tool = ToolDefinitions.getProject
+
+        XCTAssertEqual(tool["name"] as? String, "get_project")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("project_id"), "get_project should require project_id")
         }
     }
 
@@ -162,7 +184,7 @@ final class MCPServerTests: XCTestCase {
         }
     }
 
-    /// get_my_tasksツール定義
+    /// get_my_tasksツール定義（後方互換、ステートレス設計）
     func testGetMyTasksToolDefinition() {
         let tool = ToolDefinitions.getMyTasks
 
@@ -171,7 +193,8 @@ final class MCPServerTests: XCTestCase {
 
         if let schema = tool["inputSchema"] as? [String: Any] {
             let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.isEmpty, "get_my_tasks should have no required parameters")
+            // ステートレス設計: agent_idが必須
+            XCTAssertTrue(required.contains("agent_id"), "get_my_tasks should require agent_id in stateless design")
         }
     }
 
@@ -365,64 +388,26 @@ final class MCPServerTests: XCTestCase {
         XCTAssertTrue(error.description.contains("Invalid resource URI"))
     }
 
-    // MARK: - Additional Tool Tests
+    // MARK: - Status Enum Tests
 
-    /// create_taskツール定義
-    func testCreateTaskToolDefinition() {
-        let tool = ToolDefinitions.createTask
-
-        XCTAssertEqual(tool["name"] as? String, "create_task")
-        XCTAssertNotNil(tool["description"])
-
-        if let schema = tool["inputSchema"] as? [String: Any],
-           let properties = schema["properties"] as? [String: Any] {
-            let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.contains("title"), "create_task should require title")
-
-            XCTAssertNotNil(properties["title"])
-            XCTAssertNotNil(properties["description"])
-            XCTAssertNotNil(properties["priority"])
-            XCTAssertNotNil(properties["assignee_id"])
-        }
-    }
-
-    /// update_taskツール定義
-    func testUpdateTaskToolDefinition() {
-        let tool = ToolDefinitions.updateTask
-
-        XCTAssertEqual(tool["name"] as? String, "update_task")
-        XCTAssertNotNil(tool["description"])
-
-        if let schema = tool["inputSchema"] as? [String: Any],
-           let properties = schema["properties"] as? [String: Any] {
-            let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.contains("task_id"), "update_task should require task_id")
-
-            XCTAssertNotNil(properties["title"])
-            XCTAssertNotNil(properties["description"])
-            XCTAssertNotNil(properties["priority"])
-            XCTAssertNotNil(properties["estimated_minutes"])
-            XCTAssertNotNil(properties["actual_minutes"])
-        }
-    }
-
-    // MARK: - Priority Enum Tests
-
-    /// ToolDefinitionsのpriority enumがPRD仕様と一致することを確認
-    /// PRD仕様: low, medium, high, urgent
-    func testPriorityEnumInToolDefinitions() {
-        let tool = ToolDefinitions.createTask
+    /// ToolDefinitionsのstatus enumがPRD仕様と一致することを確認
+    /// PRD仕様: backlog, todo, in_progress, blocked, done, cancelled
+    func testStatusEnumInToolDefinitions() {
+        let tool = ToolDefinitions.listTasks
 
         if let schema = tool["inputSchema"] as? [String: Any],
            let properties = schema["properties"] as? [String: Any],
-           let priorityProp = properties["priority"] as? [String: Any],
-           let enumValues = priorityProp["enum"] as? [String] {
+           let statusProp = properties["status"] as? [String: Any],
+           let enumValues = statusProp["enum"] as? [String] {
             // PRD仕様通りのenum値を確認
-            XCTAssertTrue(enumValues.contains("urgent"), "Should contain 'urgent' per PRD")
-            XCTAssertTrue(enumValues.contains("high"), "Should contain 'high' per PRD")
-            XCTAssertTrue(enumValues.contains("medium"), "Should contain 'medium' per PRD")
-            XCTAssertTrue(enumValues.contains("low"), "Should contain 'low' per PRD")
-            XCTAssertFalse(enumValues.contains("critical"), "Should not contain 'critical' - use 'urgent' per PRD")
+            XCTAssertTrue(enumValues.contains("backlog"), "Should contain 'backlog' per PRD")
+            XCTAssertTrue(enumValues.contains("todo"), "Should contain 'todo' per PRD")
+            XCTAssertTrue(enumValues.contains("in_progress"), "Should contain 'in_progress' per PRD")
+            XCTAssertTrue(enumValues.contains("blocked"), "Should contain 'blocked' per PRD")
+            XCTAssertTrue(enumValues.contains("done"), "Should contain 'done' per PRD")
+            XCTAssertTrue(enumValues.contains("cancelled"), "Should contain 'cancelled' per PRD")
+            // in_review は削除済み
+            XCTAssertFalse(enumValues.contains("in_review"), "Should not contain 'in_review' - removed per PRD")
         }
     }
 
@@ -432,84 +417,148 @@ final class MCPServerTests: XCTestCase {
     func testToolCount() {
         let tools = ToolDefinitions.all()
 
-        // 現在実装されているツール: 15個
-        // Profile: 1 (get_my_profile)
-        // Session: 2 (start_session, end_session)
-        // Tasks: 7 (list_tasks, get_task, get_my_tasks, create_task, update_task, update_task_status, assign_task)
+        // ステートレス設計版ツール: 16個
+        // Authentication: 1 (authenticate) - Phase 3-1
+        // Agent: 3 (get_agent_profile, get_my_profile, list_agents)
+        // Project: 2 (list_projects, get_project)
+        // Tasks: 5 (list_tasks, get_task, get_my_tasks, update_task_status, assign_task)
         // Context: 2 (save_context, get_task_context)
         // Handoff: 3 (create_handoff, accept_handoff, get_pending_handoffs)
-        XCTAssertEqual(tools.count, 15, "Should have 15 tools defined")
+        XCTAssertEqual(tools.count, 16, "Should have 16 tools defined (including authenticate)")
     }
 }
 
 // MARK: - PRD Compliance Summary Tests
 
-/// PRD仕様との適合性サマリーテスト
+/// ステートレス設計版PRD仕様との適合性サマリーテスト
 final class MCPPRDComplianceTests: XCTestCase {
 
-    /// MCP_DESIGN.md仕様との適合性サマリー
+    /// ステートレス設計版MCP_DESIGN.md仕様との適合性サマリー
     func testPRDComplianceSummary() {
         let tools = ToolDefinitions.all()
         let toolNames = Set(tools.compactMap { $0["name"] as? String })
 
-        // MCP_DESIGN.mdで定義されているツール
-        let prdTools = [
-            // エージェント・セッション管理
-            "get_my_profile",
-            "list_agents",      // 未実装
-            "get_agent",        // 未実装
-            "start_session",
-            "end_session",
-            "get_my_sessions",  // 未実装
+        // ステートレス設計版で実装されているツール
+        let implementedTools = [
+            // 認証 (Phase 3-1)
+            "authenticate",
 
-            // プロジェクト・タスク管理
-            "list_projects",    // 未実装
-            "get_project",      // 未実装
+            // エージェント管理
+            "get_agent_profile",  // 新規追加
+            "get_my_profile",     // 後方互換
+            "list_agents",
+
+            // プロジェクト管理
+            "list_projects",
+            "get_project",
+
+            // タスク管理
             "list_tasks",
             "get_task",
-            "get_my_tasks",
+            "get_my_tasks",       // 後方互換
             "update_task_status",
             "assign_task",
 
-            // コンテキスト・ハンドオフ
-            // add_context → save_context
-            // get_context → get_task_context
-            "create_handoff",
-            "get_pending_handoffs",
-            // acknowledge_handoff → accept_handoff
-        ]
+            // コンテキスト
+            "save_context",
+            "get_task_context",
 
-        // 実装済みのPRDツール（名前が異なるものを含む）
-        let implementedPRDTools = [
-            "get_my_profile",
-            "start_session",
-            "end_session",
-            "list_tasks",
-            "get_task",
-            "get_my_tasks",
-            "update_task_status",
-            "assign_task",
-            "save_context",      // add_context
-            "get_task_context",  // get_context
+            // ハンドオフ
             "create_handoff",
             "get_pending_handoffs",
-            "accept_handoff"     // acknowledge_handoff
+            "accept_handoff"
         ]
 
         var implementedCount = 0
-        for tool in implementedPRDTools {
+        for tool in implementedTools {
             if toolNames.contains(tool) {
                 implementedCount += 1
             }
         }
 
-        // 13個のPRDツールが実装されている（名前変更を含む）
-        XCTAssertEqual(implementedCount, 13, "Should have 13 PRD-defined tools implemented")
+        // ステートレス設計版 + 認証: 16個のツールが実装されている
+        XCTAssertEqual(implementedCount, 16, "Should have 16 tools implemented (including authenticate)")
 
-        // 未実装のPRDツール
-        let missingTools = ["list_agents", "get_agent", "get_my_sessions", "list_projects", "get_project"]
-        for tool in missingTools {
-            XCTAssertFalse(toolNames.contains(tool), "\(tool) is in PRD but not implemented")
+        // ステートレス設計で削除されたツール
+        let removedTools = ["start_session", "end_session", "get_my_sessions", "create_task", "update_task"]
+        for tool in removedTools {
+            XCTAssertFalse(toolNames.contains(tool), "\(tool) should be removed in stateless design")
         }
+    }
+}
+
+// MARK: - Authenticate Tool Tests
+
+/// Phase 3-1: 認証ツールのテスト
+final class AuthenticateToolTests: XCTestCase {
+
+    // MARK: - Tool Definition Tests
+
+    /// authenticate ツールが定義されていることを確認
+    func testAuthenticateToolDefinition() {
+        let tool = ToolDefinitions.authenticate
+
+        XCTAssertEqual(tool["name"] as? String, "authenticate")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("agent_id"), "authenticate should require agent_id")
+            XCTAssertTrue(required.contains("passkey"), "authenticate should require passkey")
+
+            if let properties = schema["properties"] as? [String: Any] {
+                XCTAssertNotNil(properties["agent_id"], "Should have agent_id property")
+                XCTAssertNotNil(properties["passkey"], "Should have passkey property")
+            }
+        }
+    }
+
+    /// authenticate ツールが全ツール一覧に含まれることを確認
+    func testAuthenticateToolInAllTools() {
+        let tools = ToolDefinitions.all()
+        let toolNames = tools.compactMap { $0["name"] as? String }
+
+        XCTAssertTrue(toolNames.contains("authenticate"), "authenticate should be in all tools")
+    }
+
+    // MARK: - AuthenticateResult Tests
+
+    /// 認証成功結果の生成テスト
+    func testAuthenticateResultSuccess() {
+        let result = AuthenticateResult.success(
+            token: "sess_abc123",
+            expiresIn: 3600,
+            agentName: "Test Agent"
+        )
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.sessionToken, "sess_abc123")
+        XCTAssertEqual(result.expiresIn, 3600)
+        XCTAssertEqual(result.agentName, "Test Agent")
+        XCTAssertNil(result.error)
+    }
+
+    /// 認証失敗結果の生成テスト
+    func testAuthenticateResultFailure() {
+        let result = AuthenticateResult.failure(error: "Invalid agent_id or passkey")
+
+        XCTAssertFalse(result.success)
+        XCTAssertNil(result.sessionToken)
+        XCTAssertNil(result.expiresIn)
+        XCTAssertNil(result.agentName)
+        XCTAssertEqual(result.error, "Invalid agent_id or passkey")
+    }
+}
+
+// MARK: - MCPError Authentication Tests
+
+/// 認証関連エラーのテスト
+extension MCPServerTests {
+
+    /// MCPError.invalidCredentialsのテスト
+    func testMCPErrorInvalidCredentials() {
+        let error = MCPError.invalidCredentials
+        XCTAssertTrue(error.description.contains("Invalid"))
     }
 }

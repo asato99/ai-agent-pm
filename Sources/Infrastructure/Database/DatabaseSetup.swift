@@ -453,6 +453,35 @@ public final class DatabaseSetup {
             try db.create(indexOn: "audit_rules", columns: ["is_enabled"])
         }
 
+        // v15: 認証基盤（Phase 3-1）
+        // 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+        migrator.registerMigration("v15_authentication") { db in
+            // agent_credentials テーブル
+            try db.create(table: "agent_credentials", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("agent_id", .text).notNull().unique()
+                    .references("agents", onDelete: .cascade)
+                t.column("passkey_hash", .text).notNull()
+                t.column("salt", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("last_used_at", .datetime)
+            }
+            try db.create(indexOn: "agent_credentials", columns: ["agent_id"])
+
+            // agent_sessions テーブル
+            try db.create(table: "agent_sessions", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("token", .text).notNull().unique()
+                t.column("agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("expires_at", .datetime).notNull()
+                t.column("created_at", .datetime).notNull()
+            }
+            try db.create(indexOn: "agent_sessions", columns: ["token"])
+            try db.create(indexOn: "agent_sessions", columns: ["agent_id"])
+            try db.create(indexOn: "agent_sessions", columns: ["expires_at"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

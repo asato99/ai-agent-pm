@@ -22,6 +22,8 @@ final class InfrastructureTests: XCTestCase {
     var templateTaskRepo: TemplateTaskRepository!
     var internalAuditRepo: InternalAuditRepository!
     var auditRuleRepo: AuditRuleRepository!
+    var agentCredentialRepo: AgentCredentialRepository!
+    var agentSessionRepo: AgentSessionRepository!
 
     override func setUpWithError() throws {
         // インメモリデータベースを使用
@@ -40,6 +42,8 @@ final class InfrastructureTests: XCTestCase {
         templateTaskRepo = TemplateTaskRepository(database: db)
         internalAuditRepo = InternalAuditRepository(database: db)
         auditRuleRepo = AuditRuleRepository(database: db)
+        agentCredentialRepo = AgentCredentialRepository(database: db)
+        agentSessionRepo = AgentSessionRepository(database: db)
     }
 
     override func tearDownWithError() throws {
@@ -1134,6 +1138,178 @@ final class InfrastructureTests: XCTestCase {
 
         let statusChangedRules = try auditRuleRepo.findByTriggerType(.statusChanged)
         XCTAssertEqual(statusChangedRules.count, 1)
+    }
+
+    // MARK: - AgentCredentialRepository Tests (Phase 3-1: 認証基盤)
+
+    func testDatabaseSetupCreatesAuthenticationTables() throws {
+        // 認証関連テーブルが作成されること
+        try db.read { db in
+            XCTAssertTrue(try db.tableExists("agent_credentials"))
+            XCTAssertTrue(try db.tableExists("agent_sessions"))
+        }
+    }
+
+    func testAgentCredentialRepositorySaveAndFindById() throws {
+        // エージェント認証情報の保存と取得
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let credential = AgentCredential(agentId: agent.id, rawPasskey: "secret123")
+        try agentCredentialRepo.save(credential)
+
+        let found = try agentCredentialRepo.findById(credential.id)
+        XCTAssertNotNil(found)
+        XCTAssertEqual(found?.agentId, agent.id)
+        XCTAssertEqual(found?.passkeyHash, credential.passkeyHash)
+    }
+
+    func testAgentCredentialRepositoryFindByAgentId() throws {
+        // エージェントID別の認証情報取得
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let credential = AgentCredential(agentId: agent.id, rawPasskey: "secret123")
+        try agentCredentialRepo.save(credential)
+
+        let found = try agentCredentialRepo.findByAgentId(agent.id)
+        XCTAssertNotNil(found)
+        XCTAssertEqual(found?.id, credential.id)
+    }
+
+    func testAgentCredentialRepositoryFindByAgentId_NotFound() throws {
+        // 存在しないエージェントIDの場合nilを返す
+        let found = try agentCredentialRepo.findByAgentId(AgentID(value: "nonexistent"))
+        XCTAssertNil(found)
+    }
+
+    func testAgentCredentialRepositoryDelete() throws {
+        // 認証情報の削除
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let credential = AgentCredential(agentId: agent.id, rawPasskey: "secret123")
+        try agentCredentialRepo.save(credential)
+
+        try agentCredentialRepo.delete(credential.id)
+
+        let found = try agentCredentialRepo.findByAgentId(agent.id)
+        XCTAssertNil(found)
+    }
+
+    func testAgentCredentialCascadeDeleteOnAgentDelete() throws {
+        // エージェント削除時のカスケード削除
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let credential = AgentCredential(agentId: agent.id, rawPasskey: "secret123")
+        try agentCredentialRepo.save(credential)
+
+        // エージェント削除
+        try agentRepo.delete(agent.id)
+
+        // 認証情報も削除されていること
+        let found = try agentCredentialRepo.findById(credential.id)
+        XCTAssertNil(found)
+    }
+
+    // MARK: - AgentSessionRepository Tests (Phase 3-1: 認証基盤)
+
+    func testAgentSessionRepositorySaveAndFindByToken() throws {
+        // セッションの保存とトークンによる取得
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let session = AgentSession(agentId: agent.id)
+        try agentSessionRepo.save(session)
+
+        let found = try agentSessionRepo.findByToken(session.token)
+        XCTAssertNotNil(found)
+        XCTAssertEqual(found?.agentId, agent.id)
+        XCTAssertEqual(found?.token, session.token)
+    }
+
+    func testAgentSessionRepositoryFindByToken_ExpiredSession() throws {
+        // 期限切れセッションはnilを返す
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let expiredSession = AgentSession(
+            agentId: agent.id,
+            expiresAt: Date().addingTimeInterval(-100) // 100秒前に期限切れ
+        )
+        try agentSessionRepo.save(expiredSession)
+
+        let found = try agentSessionRepo.findByToken(expiredSession.token)
+        XCTAssertNil(found, "Expired session should not be returned")
+    }
+
+    func testAgentSessionRepositoryFindByAgentId() throws {
+        // エージェントID別のセッション取得
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let session1 = AgentSession(agentId: agent.id)
+        let session2 = AgentSession(agentId: agent.id)
+        try agentSessionRepo.save(session1)
+        try agentSessionRepo.save(session2)
+
+        let sessions = try agentSessionRepo.findByAgentId(agent.id)
+        XCTAssertEqual(sessions.count, 2)
+    }
+
+    func testAgentSessionRepositoryDeleteExpired() throws {
+        // 期限切れセッションの一括削除
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let expiredSession = AgentSession(
+            agentId: agent.id,
+            expiresAt: Date().addingTimeInterval(-100)
+        )
+        let validSession = AgentSession(agentId: agent.id)
+        try agentSessionRepo.save(expiredSession)
+        try agentSessionRepo.save(validSession)
+
+        // 期限切れセッションを削除
+        try agentSessionRepo.deleteExpired()
+
+        // 期限切れセッションは削除されている
+        let sessions = try agentSessionRepo.findByAgentId(agent.id)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.token, validSession.token)
+    }
+
+    func testAgentSessionRepositoryDeleteByAgentId() throws {
+        // エージェント別のセッション一括削除
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let session1 = AgentSession(agentId: agent.id)
+        let session2 = AgentSession(agentId: agent.id)
+        try agentSessionRepo.save(session1)
+        try agentSessionRepo.save(session2)
+
+        try agentSessionRepo.deleteByAgentId(agent.id)
+
+        let sessions = try agentSessionRepo.findByAgentId(agent.id)
+        XCTAssertTrue(sessions.isEmpty)
+    }
+
+    func testAgentSessionCascadeDeleteOnAgentDelete() throws {
+        // エージェント削除時のカスケード削除
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let session = AgentSession(agentId: agent.id)
+        try agentSessionRepo.save(session)
+
+        // エージェント削除
+        try agentRepo.delete(agent.id)
+
+        // セッションも削除されていること
+        let found = try agentSessionRepo.findById(session.id)
+        XCTAssertNil(found)
     }
 
 }

@@ -25,6 +25,10 @@ final class MCPServer {
     private let handoffRepository: HandoffRepository
     private let eventRepository: EventRepository
 
+    // Phase 3-1: Authentication Repositories
+    private let agentCredentialRepository: AgentCredentialRepository
+    private let agentSessionRepository: AgentSessionRepository
+
     private let debugMode: Bool
 
     /// ステートレス設計: DBパスのみで初期化
@@ -37,6 +41,9 @@ final class MCPServer {
         self.contextRepository = ContextRepository(database: database)
         self.handoffRepository = HandoffRepository(database: database)
         self.eventRepository = EventRepository(database: database)
+        // Phase 3-1: Authentication Repositories
+        self.agentCredentialRepository = AgentCredentialRepository(database: database)
+        self.agentSessionRepository = AgentSessionRepository(database: database)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
 
         // 起動時ログ（常に出力）- ファイルとstderrの両方に出力
@@ -195,6 +202,14 @@ final class MCPServer {
     /// ステートレス設計: 必要なIDは全て引数として受け取る
     private func executeTool(name: String, arguments: [String: Any]) throws -> Any {
         switch name {
+        // Authentication (Phase 3-1)
+        case "authenticate":
+            guard let agentId = arguments["agent_id"] as? String,
+                  let passkey = arguments["passkey"] as? String else {
+                throw MCPError.missingArguments(["agent_id", "passkey"])
+            }
+            return try authenticate(agentId: agentId, passkey: passkey)
+
         // Agent
         case "get_my_profile":
             // 後方互換性のため維持（非推奨）
@@ -746,6 +761,41 @@ final class MCPServer {
     // 参照: docs/prd/MCP_DESIGN.md
     // 全てのツールは必要なIDを引数として受け取る
 
+    // MARK: Authentication (Phase 3-1)
+
+    /// authenticate - エージェント認証
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+    private func authenticate(agentId: String, passkey: String) throws -> [String: Any] {
+        Self.log("[MCP] authenticate called for agent: '\(agentId)'")
+
+        // AuthenticateUseCaseを使用して認証
+        let useCase = AuthenticateUseCase(
+            credentialRepository: agentCredentialRepository,
+            sessionRepository: agentSessionRepository,
+            agentRepository: agentRepository
+        )
+
+        let result = try useCase.execute(agentId: agentId, passkey: passkey)
+
+        if result.success {
+            Self.log("[MCP] Authentication successful for agent: \(result.agentName ?? agentId)")
+            return [
+                "success": true,
+                "session_token": result.sessionToken ?? "",
+                "expires_in": result.expiresIn ?? 0,
+                "agent_name": result.agentName ?? ""
+            ]
+        } else {
+            Self.log("[MCP] Authentication failed for agent: \(agentId) - \(result.error ?? "Unknown error")")
+            return [
+                "success": false,
+                "error": result.error ?? "Authentication failed"
+            ]
+        }
+    }
+
+    // MARK: Agent Tools
+
     /// get_agent_profile - エージェント情報を取得
     private func getAgentProfile(agentId: String) throws -> [String: Any] {
         Self.log("[MCP] getAgentProfile called with: '\(agentId)'")
@@ -1290,6 +1340,7 @@ enum MCPError: Error, CustomStringConvertible {
     case handoffAlreadyAccepted(String)
     case handoffNotForYou(String)
     case invalidResourceURI(String)
+    case invalidCredentials  // Phase 3-1: 認証エラー
 
     var description: String {
         switch self {
@@ -1323,6 +1374,8 @@ enum MCPError: Error, CustomStringConvertible {
             return "Handoff \(id) is not addressed to you"
         case .invalidResourceURI(let uri):
             return "Invalid resource URI: \(uri)"
+        case .invalidCredentials:
+            return "Invalid agent_id or passkey"
         }
     }
 }

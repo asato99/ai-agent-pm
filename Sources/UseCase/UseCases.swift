@@ -21,6 +21,11 @@ public enum UseCaseError: Error, Sendable {
     case unauthorized
     case validationFailed(String)
 
+    // 認証エラー (Phase 3-1)
+    case invalidCredentials
+    case credentialNotFound(AgentID)
+    case sessionExpired
+
     // 依存関係ブロック
     case dependencyNotComplete(taskId: TaskID, blockedByTasks: [TaskID])
 
@@ -55,6 +60,12 @@ extension UseCaseError: LocalizedError {
             return "Unauthorized operation"
         case .validationFailed(let message):
             return "Validation failed: \(message)"
+        case .invalidCredentials:
+            return "Invalid agent_id or passkey"
+        case .credentialNotFound(let agentId):
+            return "Credential not found for agent: \(agentId.value)"
+        case .sessionExpired:
+            return "Session has expired"
         case .dependencyNotComplete(let taskId, let blockedByTasks):
             let blockedIds = blockedByTasks.map { $0.value }.joined(separator: ", ")
             return "Task \(taskId.value) is blocked by incomplete dependencies: \(blockedIds)"
