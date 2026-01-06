@@ -281,11 +281,13 @@ final class MCPServer {
             }
             return try listTasks(status: nil, assigneeId: agentId)
         case "get_pending_tasks":
-            // Phase 3-2: 作業中タスク取得
-            guard let agentId = arguments["agent_id"] as? String else {
-                throw MCPError.missingArguments(["agent_id"])
+            // Phase 3-2: 作業中タスク取得（Phase 3-4: セッション検証必須）
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
             }
-            return try getPendingTasks(agentId: agentId)
+            // セッションからエージェントIDを取得（引数のagent_idは信頼しない）
+            let validatedAgentId = try validateSession(token: sessionToken)
+            return try getPendingTasks(agentId: validatedAgentId.value)
         case "get_task":
             guard let taskId = arguments["task_id"] as? String else {
                 throw MCPError.missingArguments(["task_id"])
@@ -336,19 +338,29 @@ final class MCPServer {
             let agentId = arguments["agent_id"] as? String
             return try getPendingHandoffs(agentId: agentId)
 
-        // Execution Log (Phase 3-3)
+        // Execution Log (Phase 3-3, Phase 3-4: セッション検証必須)
         case "report_execution_start":
-            guard let taskId = arguments["task_id"] as? String,
-                  let agentId = arguments["agent_id"] as? String else {
-                throw MCPError.missingArguments(["task_id", "agent_id"])
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
             }
-            return try reportExecutionStart(taskId: taskId, agentId: agentId)
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            // セッションからエージェントIDを取得（引数のagent_idは信頼しない）
+            let validatedAgentId = try validateSession(token: sessionToken)
+            return try reportExecutionStart(taskId: taskId, agentId: validatedAgentId.value)
         case "report_execution_complete":
+            // Phase 3-4: セッション検証必須
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
+            }
             guard let executionLogId = arguments["execution_log_id"] as? String,
                   let exitCode = arguments["exit_code"] as? Int,
                   let durationSeconds = arguments["duration_seconds"] as? Double else {
                 throw MCPError.missingArguments(["execution_log_id", "exit_code", "duration_seconds"])
             }
+            // セッションを検証（エージェントIDを取得）
+            let validatedAgentId = try validateSession(token: sessionToken)
             let logFilePath = arguments["log_file_path"] as? String
             let errorMessage = arguments["error_message"] as? String
             return try reportExecutionComplete(
@@ -356,7 +368,8 @@ final class MCPServer {
                 exitCode: exitCode,
                 durationSeconds: durationSeconds,
                 logFilePath: logFilePath,
-                errorMessage: errorMessage
+                errorMessage: errorMessage,
+                validatedAgentId: validatedAgentId.value
             )
 
         default:
@@ -823,6 +836,35 @@ final class MCPServer {
     // 参照: docs/prd/MCP_DESIGN.md
     // 全てのツールは必要なIDを引数として受け取る
 
+    // MARK: Session Validation (Phase 3-4)
+
+    /// セッショントークンを検証し、関連するエージェントIDを返す
+    /// 参照: セキュリティ改善 - セッショントークン検証の実装
+    private func validateSession(token: String) throws -> AgentID {
+        guard let session = try agentSessionRepository.findByToken(token) else {
+            // findByToken は期限切れセッションを除外するので、
+            // トークンが見つからない = 無効または期限切れ
+            Self.log("[MCP] Session validation failed: token not found or expired")
+            throw MCPError.sessionTokenInvalid
+        }
+
+        Self.log("[MCP] Session validated for agent: \(session.agentId.value)")
+        return session.agentId
+    }
+
+    /// セッショントークンを検証し、指定されたエージェントIDとの一致も確認
+    private func validateSessionWithAgent(token: String, expectedAgentId: String) throws -> AgentID {
+        let sessionAgentId = try validateSession(token: token)
+
+        // セッションに紐づくエージェントIDと、リクエストのエージェントIDが一致するか確認
+        if sessionAgentId.value != expectedAgentId {
+            Self.log("[MCP] Session agent mismatch: session=\(sessionAgentId.value), requested=\(expectedAgentId)")
+            throw MCPError.sessionAgentMismatch(expected: expectedAgentId, actual: sessionAgentId.value)
+        }
+
+        return sessionAgentId
+    }
+
     // MARK: Authentication (Phase 3-1)
 
     /// authenticate - エージェント認証
@@ -1268,14 +1310,28 @@ final class MCPServer {
 
     /// report_execution_complete - 実行完了を報告
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+    /// Phase 3-4: セッション検証追加
     private func reportExecutionComplete(
         executionLogId: String,
         exitCode: Int,
         durationSeconds: Double,
         logFilePath: String?,
-        errorMessage: String?
+        errorMessage: String?,
+        validatedAgentId: String
     ) throws -> [String: Any] {
-        Self.log("[MCP] reportExecutionComplete called: executionLogId='\(executionLogId)', exitCode=\(exitCode)")
+        Self.log("[MCP] reportExecutionComplete called: executionLogId='\(executionLogId)', exitCode=\(exitCode), validatedAgent='\(validatedAgentId)'")
+
+        // Phase 3-4: まずExecutionLogを取得してエージェントを検証
+        guard let existingLog = try executionLogRepository.findById(ExecutionLogID(value: executionLogId)) else {
+            Self.log("[MCP] ExecutionLog not found: \(executionLogId)")
+            throw MCPError.sessionNotFound(executionLogId)
+        }
+
+        // セッションのエージェントIDとExecutionLogのエージェントIDが一致するか確認
+        if existingLog.agentId.value != validatedAgentId {
+            Self.log("[MCP] Agent mismatch: log belongs to \(existingLog.agentId.value), but session is for \(validatedAgentId)")
+            throw MCPError.sessionAgentMismatch(expected: existingLog.agentId.value, actual: validatedAgentId)
+        }
 
         let useCase = RecordExecutionCompleteUseCase(
             executionLogRepository: executionLogRepository
@@ -1493,6 +1549,10 @@ enum MCPError: Error, CustomStringConvertible {
     case handoffNotForYou(String)
     case invalidResourceURI(String)
     case invalidCredentials  // Phase 3-1: 認証エラー
+    case sessionTokenRequired  // Phase 3-4: セッショントークン必須
+    case sessionTokenInvalid  // Phase 3-4: セッショントークン無効
+    case sessionTokenExpired  // Phase 3-4: セッショントークン期限切れ
+    case sessionAgentMismatch(expected: String, actual: String)  // Phase 3-4: エージェントID不一致
 
     var description: String {
         switch self {
@@ -1528,6 +1588,14 @@ enum MCPError: Error, CustomStringConvertible {
             return "Invalid resource URI: \(uri)"
         case .invalidCredentials:
             return "Invalid agent_id or passkey"
+        case .sessionTokenRequired:
+            return "session_token is required for this operation. Authenticate first using the authenticate tool."
+        case .sessionTokenInvalid:
+            return "Invalid session_token. Please re-authenticate."
+        case .sessionTokenExpired:
+            return "Session token has expired. Please re-authenticate."
+        case .sessionAgentMismatch(let expected, let actual):
+            return "Session belongs to agent '\(actual)' but operation requested for agent '\(expected)'"
         }
     }
 }

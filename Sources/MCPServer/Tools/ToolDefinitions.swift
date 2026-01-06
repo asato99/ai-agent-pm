@@ -187,18 +187,19 @@ enum ToolDefinitions {
     /// get_pending_tasks - Phase 3-2: 作業中タスク取得
     /// 外部Runnerが作業継続のため現在進行中のタスクを取得
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
+    /// Phase 3-4: セッショントークン検証必須
     static let getPendingTasks: [String: Any] = [
         "name": "get_pending_tasks",
-        "description": "指定エージェントの作業中（in_progress）タスク一覧を取得します。外部Runnerが作業継続のために使用します。",
+        "description": "認証済みエージェントの作業中（in_progress）タスク一覧を取得します。外部Runnerが作業継続のために使用します。セッショントークンで認証済みのエージェントのみ取得可能です。",
         "inputSchema": [
             "type": "object",
             "properties": [
-                "agent_id": [
+                "session_token": [
                     "type": "string",
-                    "description": "エージェントID"
+                    "description": "authenticateツールで取得したセッショントークン"
                 ]
             ] as [String: Any],
-            "required": ["agent_id"]
+            "required": ["session_token"]
         ]
     ]
 
@@ -401,37 +402,43 @@ enum ToolDefinitions {
         ]
     ]
 
-    // MARK: - Execution Log Tools (Phase 3-3)
+    // MARK: - Execution Log Tools (Phase 3-3, Phase 3-4: セッション検証必須)
 
     /// report_execution_start - 実行開始を報告
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+    /// Phase 3-4: セッショントークン検証必須
     static let reportExecutionStart: [String: Any] = [
         "name": "report_execution_start",
-        "description": "タスク実行の開始を報告します。Runnerがタスク実行を開始した際に呼び出します。execution_log_idが返されるので、完了時にreport_execution_completeに渡してください。",
+        "description": "タスク実行の開始を報告します。Runnerがタスク実行を開始した際に呼び出します。execution_log_idが返されるので、完了時にreport_execution_completeに渡してください。セッショントークンで認証が必要です。",
         "inputSchema": [
             "type": "object",
             "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
                 "task_id": [
                     "type": "string",
                     "description": "実行するタスクID"
-                ],
-                "agent_id": [
-                    "type": "string",
-                    "description": "実行するエージェントID"
                 ]
             ] as [String: Any],
-            "required": ["task_id", "agent_id"]
+            "required": ["session_token", "task_id"]
         ]
     ]
 
     /// report_execution_complete - 実行完了を報告
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-3
+    /// Phase 3-4: セッショントークン検証必須
     static let reportExecutionComplete: [String: Any] = [
         "name": "report_execution_complete",
-        "description": "タスク実行の完了を報告します。exit_codeが0なら成功、それ以外は失敗として記録されます。",
+        "description": "タスク実行の完了を報告します。exit_codeが0なら成功、それ以外は失敗として記録されます。セッショントークンで認証が必要です。",
         "inputSchema": [
             "type": "object",
             "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
                 "execution_log_id": [
                     "type": "string",
                     "description": "report_execution_startで取得した実行ログID"
@@ -453,7 +460,7 @@ enum ToolDefinitions {
                     "description": "エラーメッセージ（失敗時のみ）"
                 ]
             ] as [String: Any],
-            "required": ["execution_log_id", "exit_code", "duration_seconds"]
+            "required": ["session_token", "execution_log_id", "exit_code", "duration_seconds"]
         ]
     ]
 }

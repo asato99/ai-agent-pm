@@ -153,21 +153,21 @@ class MCPClient:
             agent_name=result.get("agent_name")
         )
 
-    async def get_pending_tasks(self, agent_id: str) -> list[TaskInfo]:
-        """Get pending tasks for the agent.
-
-        Args:
-            agent_id: Agent ID to get tasks for
+    async def get_pending_tasks(self) -> list[TaskInfo]:
+        """Get pending tasks for the authenticated agent.
 
         Returns:
             List of pending TaskInfo objects
 
         Raises:
             SessionExpiredError: If session has expired
-            MCPError: If request fails
+            MCPError: If request fails or not authenticated
         """
+        if not self._session_token:
+            raise MCPError("Not authenticated. Call authenticate() first.")
+
         result = await self._call_tool("get_pending_tasks", {
-            "agent_id": agent_id
+            "session_token": self._session_token
         })
 
         if not result.get("success"):
@@ -191,23 +191,25 @@ class MCPClient:
         return tasks
 
     async def report_execution_start(
-        self, task_id: str, agent_id: str
+        self, task_id: str
     ) -> ExecutionStartResult:
         """Report that task execution has started.
 
         Args:
             task_id: Task ID being executed
-            agent_id: Agent ID executing the task
 
         Returns:
             ExecutionStartResult with execution ID
 
         Raises:
-            MCPError: If reporting fails
+            MCPError: If reporting fails or not authenticated
         """
+        if not self._session_token:
+            raise MCPError("Not authenticated. Call authenticate() first.")
+
         result = await self._call_tool("report_execution_start", {
-            "task_id": task_id,
-            "agent_id": agent_id
+            "session_token": self._session_token,
+            "task_id": task_id
         })
 
         if not result.get("success"):
@@ -240,9 +242,13 @@ class MCPClient:
             error_message: Error message if execution failed (optional)
 
         Raises:
-            MCPError: If reporting fails
+            MCPError: If reporting fails or not authenticated
         """
+        if not self._session_token:
+            raise MCPError("Not authenticated. Call authenticate() first.")
+
         args = {
+            "session_token": self._session_token,
             "execution_log_id": execution_id,
             "exit_code": exit_code,
             "duration_seconds": duration_seconds

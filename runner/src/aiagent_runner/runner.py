@@ -107,14 +107,14 @@ class Runner:
         # Ensure authenticated
         await self._ensure_authenticated()
 
-        # Get pending tasks
+        # Get pending tasks (agent_id is derived from session token)
         try:
-            tasks = await self.mcp_client.get_pending_tasks(self.config.agent_id)
+            tasks = await self.mcp_client.get_pending_tasks()
         except SessionExpiredError:
             logger.info("Session expired, re-authenticating")
             self._authenticated = False
             await self._ensure_authenticated()
-            tasks = await self.mcp_client.get_pending_tasks(self.config.agent_id)
+            tasks = await self.mcp_client.get_pending_tasks()
 
         if not tasks:
             logger.debug("No pending tasks")
@@ -155,11 +155,10 @@ class Runner:
         """
         logger.info(f"Processing task {task.task_id}: {task.title}")
 
-        # Report execution start
+        # Report execution start (agent_id is derived from session token)
         try:
             start_result = await self.mcp_client.report_execution_start(
-                task.task_id,
-                self.config.agent_id
+                task.task_id
             )
             execution_id = start_result.execution_id
         except MCPError as e:
