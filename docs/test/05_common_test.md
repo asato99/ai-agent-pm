@@ -1,7 +1,8 @@
 # 共通テストシナリオ
 
-**テストクラス**: `AppLaunchTests`, `NavigationTests`, `EmptyStateTests`, `InteractionTests`, `AccessibilityTests`, `PerformanceTests`, `ErrorHandlingTests`, `DataPersistenceTests`
-**最終更新**: 2024-12-31
+**テストクラス**: `CommonNavigationTests`, `CommonAccessibilityTests`, `CommonPerformanceTests`
+**テストファイル**: `UITests/Common/CommonUITests.swift`
+**最終更新**: 2025-01-06
 
 ---
 
@@ -9,11 +10,10 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装済み | 25 |
-| 🔸 スタブ | 0 |
-| ⏳ 未実装 | 0 |
+| ✅ 実装済み | 7 |
+| ⏳ 未実装（UI未実装/未着手） | 18 |
 
-※ 全テストに具体的なアサーションを実装済み
+**注記**: ドキュメントには25シナリオを記載しているが、実際のテストは7メソッドのみ実装。設定画面、ディープリンク、エラーハンドリング、データ永続性等は未実装。
 
 ---
 
@@ -32,9 +32,8 @@
 - アプリがクラッシュせずに起動する
 - メインウィンドウが表示される
 
-**実装状態**: 🔸 スタブ
-**現状**: `assertWindowExists()` のみ。クラッシュしないことは確認できるが、メインウィンドウ要素の検証なし。
-**テストメソッド**: `testAppLaunches()`
+**実装状態**: ⏳ 未実装
+**備考**: 専用テストなし。起動確認は`CommonPerformanceTests.testAppLaunchPerformance()`のパフォーマンス計測に含まれる。
 
 ---
 
@@ -56,9 +55,9 @@
 
 ※ サイドバー構成は要件再整理により変更（要件: UI_MODIFICATIONS.md）
 
-**実装状態**: 🔸 スタブ
-**現状**: `assertWindowExists()` のみ。3カラムレイアウト構造の検証なし。
-**テストメソッド**: `testMainWindowHasCorrectStructure()`
+**実装状態**: ✅ 実装済み
+**検証内容**: メインウィンドウ、サイドバー（ProjectList識別子）、「No Project Selected」プレースホルダーの存在確認
+**テストメソッド**: `CommonNavigationTests.testThreeColumnLayout()`
 
 ---
 
@@ -76,9 +75,9 @@
 - プロジェクト未選択状態が表示される
 - または空状態メッセージが表示される
 
-**実装状態**: 🔸 スタブ
-**現状**: `assertWindowExists()` のみ。初期状態メッセージの検証なし。
-**テストメソッド**: `testAppShowsInitialState()`
+**実装状態**: ✅ 実装済み
+**検証内容**: 「No Project Selected」プレースホルダーテキストの表示確認
+**テストメソッド**: `CommonNavigationTests.testThreeColumnLayout()`（統合）
 
 ---
 
@@ -102,9 +101,9 @@
 - 中央カラム選択 → 右カラム更新
 - 各カラムが連動して動作する
 
-**実装状態**: 🔸 スタブ
-**現状**: `assertWindowExists()` のみ。カラム間連動動作の検証なし。
-**テストメソッド**: `testThreeColumnNavigation()`
+**実装状態**: ✅ 実装済み
+**検証内容**: プロジェクト選択後にTaskBoardが表示されることを確認
+**テストメソッド**: `CommonNavigationTests.testProjectSelectionUpdatesContent()`
 
 ---
 
@@ -124,9 +123,9 @@
 - 背景が暗くなる
 - 閉じるボタン（×）が機能する
 
-**実装状態**: 🔸 スタブ
-**現状**: `assertWindowExists()` のみ。シート表示とモーダル動作の検証なし。
-**テストメソッド**: `testSheetPresentation()`
+**実装状態**: ✅ 実装済み
+**検証内容**: Cmd+Nで新規プロジェクトシートが表示されることを確認
+**テストメソッド**: `CommonNavigationTests.testKeyboardShortcuts()`
 
 ---
 
