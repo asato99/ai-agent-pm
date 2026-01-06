@@ -35,10 +35,11 @@ final class Feature05_CompletionTests: XCTestCase {
         app = nil
     }
 
-    // MARK: - Helper Methods
+    // MARK: - Test Cases
 
-    /// プロジェクトを選択
-    private func selectProject() throws {
+    /// F05-01: タスク完了時にHandoffが自動作成される
+    func testCompletionCreatesHandoff() throws {
+        // プロジェクトを選択
         let projectRow = app.staticTexts["テストプロジェクト"]
         guard projectRow.waitForExistence(timeout: 5) else {
             XCTFail("テストプロジェクトが存在しません")
@@ -46,10 +47,7 @@ final class Feature05_CompletionTests: XCTestCase {
         }
         projectRow.click()
         Thread.sleep(forTimeInterval: 0.5)
-    }
 
-    /// タスク詳細を開く（キーボードショートカット使用）
-    private func openResourceTestTask() throws {
         // リソーステストタスクを選択（Cmd+Shift+G）
         app.typeKey("g", modifierFlags: [.command, .shift])
         Thread.sleep(forTimeInterval: 0.5)
@@ -59,34 +57,6 @@ final class Feature05_CompletionTests: XCTestCase {
             XCTFail("タスク詳細が開けません")
             throw TestError.failedPrecondition("タスク詳細が開けません")
         }
-    }
-
-    /// タスクステータスをdoneに変更
-    private func changeStatusToDone() throws {
-        let statusPicker = app.popUpButtons.matching(NSPredicate(format: "identifier == 'StatusPicker'")).firstMatch
-        guard statusPicker.waitForExistence(timeout: 3) else {
-            XCTFail("StatusPickerが見つかりません")
-            throw TestError.failedPrecondition("StatusPickerが見つかりません")
-        }
-
-        statusPicker.click()
-        Thread.sleep(forTimeInterval: 0.3)
-
-        let doneOption = app.menuItems["Done"]
-        guard doneOption.waitForExistence(timeout: 2) else {
-            XCTFail("Doneオプションが見つかりません")
-            throw TestError.failedPrecondition("Doneオプションが見つかりません")
-        }
-        doneOption.click()
-        Thread.sleep(forTimeInterval: 0.5)
-    }
-
-    // MARK: - Test Cases
-
-    /// F05-01: タスク完了時にHandoffが自動作成される
-    func testCompletionCreatesHandoff() throws {
-        try selectProject()
-        try openResourceTestTask()
 
         // HandoffsSectionの存在確認（複数形: HandoffsSection）
         let handoffsSection = app.descendants(matching: .any).matching(identifier: "HandoffsSection").firstMatch
@@ -103,8 +73,24 @@ final class Feature05_CompletionTests: XCTestCase {
 
     /// F05-02: 作成されたHandoffがタスク詳細に表示される
     func testHandoffVisibleInTaskDetail() throws {
-        try selectProject()
-        try openResourceTestTask()
+        // プロジェクトを選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        guard projectRow.waitForExistence(timeout: 5) else {
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
+        }
+        projectRow.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // リソーステストタスクを選択（Cmd+Shift+G）
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("タスク詳細が開けません")
+            throw TestError.failedPrecondition("タスク詳細が開けません")
+        }
 
         // HandoffsSectionの存在確認（複数形: HandoffsSection）
         let handoffsSection = app.descendants(matching: .any).matching(identifier: "HandoffsSection").firstMatch
@@ -130,8 +116,24 @@ final class Feature05_CompletionTests: XCTestCase {
     /// F05-03: 親エージェント/ユーザーに通知が送られる
     /// タスク詳細にNotificationSectionが表示され、完了時に通知状態が確認できる
     func testNotificationToParent() throws {
-        try selectProject()
-        try openResourceTestTask()
+        // プロジェクトを選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        guard projectRow.waitForExistence(timeout: 5) else {
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
+        }
+        projectRow.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // リソーステストタスクを選択（Cmd+Shift+G）
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("タスク詳細が開けません")
+            throw TestError.failedPrecondition("タスク詳細が開けません")
+        }
 
         // NotificationSectionの存在確認
         let notificationSection = app.descendants(matching: .any).matching(identifier: "NotificationSection").firstMatch
@@ -160,8 +162,24 @@ final class Feature05_CompletionTests: XCTestCase {
 
     /// F05-04: 完了履歴がHistoryセクションに記録される
     func testCompletionRecordedInHistory() throws {
-        try selectProject()
-        try openResourceTestTask()
+        // プロジェクトを選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        guard projectRow.waitForExistence(timeout: 5) else {
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
+        }
+        projectRow.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // リソーステストタスクを選択（Cmd+Shift+G）
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("タスク詳細が開けません")
+            throw TestError.failedPrecondition("タスク詳細が開けません")
+        }
 
         // Historyセクションの確認
         let historySection = app.descendants(matching: .any).matching(identifier: "HistorySection").firstMatch

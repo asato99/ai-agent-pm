@@ -35,42 +35,12 @@ final class Feature01_AgentKickSettingsTests: XCTestCase {
         app = nil
     }
 
-    // MARK: - Helper Methods
-
-    /// エージェント編集フォームを開く
-    private func openAgentEditForm() throws {
-        // Agentsセクションの存在確認
-        let agentsSection = app.descendants(matching: .any).matching(identifier: "AgentsSection").firstMatch
-        guard agentsSection.waitForExistence(timeout: 5) else {
-            XCTFail("Agentsセクションが存在しません")
-            throw TestError.failedPrecondition("Agentsセクションが存在しません")
-        }
-
-        // テストデータのエージェント（backend-dev）をクリック
-        let agentRow = app.staticTexts["backend-dev"]
-        guard agentRow.waitForExistence(timeout: 5) else {
-            XCTFail("テストエージェントが存在しません")
-            throw TestError.failedPrecondition("テストエージェントが存在しません")
-        }
-        agentRow.click()
-        Thread.sleep(forTimeInterval: 0.5)
-
-        // 編集ボタンをクリック（⌘E）
-        app.typeKey("e", modifierFlags: [.command])
-        Thread.sleep(forTimeInterval: 0.5)
-    }
-
-    /// 新規エージェント作成フォームを開く
-    private func openNewAgentForm() {
-        // ⌘⇧A で新規エージェント作成
-        app.typeKey("a", modifierFlags: [.command, .shift])
-    }
-
     // MARK: - Test Cases
 
     /// F01-01: エージェントフォームに「実行設定」セクションが存在
     func testKickSettingsSectionExists() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")
@@ -83,7 +53,8 @@ final class Feature01_AgentKickSettingsTests: XCTestCase {
 
     /// F01-02: 起動方式（CLI/Script/API/Notification）を選択可能
     func testKickMethodPicker() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")
@@ -114,7 +85,8 @@ final class Feature01_AgentKickSettingsTests: XCTestCase {
 
     /// F01-03: 起動コマンド入力フィールドが存在
     func testKickCommandField() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")
@@ -135,7 +107,8 @@ final class Feature01_AgentKickSettingsTests: XCTestCase {
 
     /// F01-04: 設定が保存され、再表示時に反映されている
     func testKickSettingsSaved() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")

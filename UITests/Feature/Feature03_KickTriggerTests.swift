@@ -35,10 +35,11 @@ final class Feature03_KickTriggerTests: XCTestCase {
         app = nil
     }
 
-    // MARK: - Helper Methods
+    // MARK: - Test Cases
 
-    /// プロジェクトを選択
-    private func selectProject() throws {
+    /// F03-01: in_progress変更時にキック処理が呼ばれる
+    func testKickTriggeredOnStatusChange() throws {
+        // プロジェクトを選択
         let projectRow = app.staticTexts["テストプロジェクト"]
         guard projectRow.waitForExistence(timeout: 5) else {
             XCTFail("テストプロジェクトが存在しません")
@@ -46,10 +47,7 @@ final class Feature03_KickTriggerTests: XCTestCase {
         }
         projectRow.click()
         Thread.sleep(forTimeInterval: 0.5)
-    }
 
-    /// タスク詳細を開く（キーボードショートカット使用）
-    private func openResourceTestTask() throws {
         // リソーステストタスクを選択（Cmd+Shift+G）
         app.typeKey("g", modifierFlags: [.command, .shift])
         Thread.sleep(forTimeInterval: 0.5)
@@ -59,14 +57,6 @@ final class Feature03_KickTriggerTests: XCTestCase {
             XCTFail("タスク詳細が開けません")
             throw TestError.failedPrecondition("タスク詳細が開けません")
         }
-    }
-
-    // MARK: - Test Cases
-
-    /// F03-01: in_progress変更時にキック処理が呼ばれる
-    func testKickTriggeredOnStatusChange() throws {
-        try selectProject()
-        try openResourceTestTask()
 
         // StatusPickerでin_progressに変更
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")
@@ -113,8 +103,24 @@ final class Feature03_KickTriggerTests: XCTestCase {
 
     /// F03-02: キック状態（成功/失敗）がUI上に表示される
     func testKickStatusDisplayed() throws {
-        try selectProject()
-        try openResourceTestTask()
+        // プロジェクトを選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        guard projectRow.waitForExistence(timeout: 5) else {
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
+        }
+        projectRow.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // リソーステストタスクを選択（Cmd+Shift+G）
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("タスク詳細が開けません")
+            throw TestError.failedPrecondition("タスク詳細が開けません")
+        }
 
         // キック状態セクションの存在確認
         let kickStatusSection = app.descendants(matching: .any).matching(identifier: "KickStatusSection").firstMatch
@@ -142,8 +148,24 @@ final class Feature03_KickTriggerTests: XCTestCase {
 
     /// F03-03: キックのログ/履歴が確認可能
     func testKickLogVisible() throws {
-        try selectProject()
-        try openResourceTestTask()
+        // プロジェクトを選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        guard projectRow.waitForExistence(timeout: 5) else {
+            XCTFail("テストプロジェクトが存在しません")
+            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
+        }
+        projectRow.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // リソーステストタスクを選択（Cmd+Shift+G）
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("タスク詳細が開けません")
+            throw TestError.failedPrecondition("タスク詳細が開けません")
+        }
 
         // Historyセクションにキックログが表示されることを確認
         let historySection = app.descendants(matching: .any).matching(identifier: "HistorySection").firstMatch

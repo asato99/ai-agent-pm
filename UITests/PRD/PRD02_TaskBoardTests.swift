@@ -12,22 +12,14 @@ import XCTest
 
 final class TaskBoardTests: BasicDataUITestCase {
 
-    /// ヘルパー: プロジェクトを選択してタスクボードを表示
-    private func selectProject() throws {
-        let projectRow = app.staticTexts["テストプロジェクト"]
-        if projectRow.waitForExistence(timeout: 5) {
-            projectRow.click()
-        } else {
-            XCTFail("テストプロジェクトが存在しません")
-            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
-        }
-    }
-
     /// TS-02-001: カンバンカラム構造確認
-    /// 期待結果: Backlog, To Do, In Progress, Blocked, Doneカラムが左から順に表示される
+    /// 検証内容: 全5カラム(Backlog, To Do, In Progress, Blocked, Done)の存在確認とframe.xによる左右順序検証
     /// 要件: TaskStatusは backlog, todo, in_progress, blocked, done, cancelled のみ（in_review は削除）
     func testKanbanColumnsStructure() throws {
-        try selectProject()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
         // タスクボードの存在確認
         let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
@@ -45,7 +37,6 @@ final class TaskBoardTests: BasicDataUITestCase {
         }
 
         // カラム順序の検証（frame.xを比較）
-        // 注意: macOS SwiftUIではframe取得が可能
         for i in 0..<(columnElements.count - 1) {
             let currentColumn = columnElements[i]
             let nextColumn = columnElements[i + 1]
@@ -57,42 +48,13 @@ final class TaskBoardTests: BasicDataUITestCase {
         }
     }
 
-    /// TS-02-002: カラムヘッダーにタスク件数が表示される
-    /// 注意: SwiftUI Textの件数バッジはXCUITestのアクセシビリティ階層に
-    ///       必ずしも露出しない。カラムヘッダーの存在とタスクカードの存在で
-    ///       カンバンボードが正常に動作していることを確認する。
-    func testColumnHeadersShowTaskCount() throws {
-        try selectProject()
-
-        // タスクボードの存在確認
-        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
-        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
-
-        // 全カラムヘッダーの存在確認
-        let columnHeaders = ["Backlog", "To Do", "In Progress", "Blocked", "Done"]
-        for header in columnHeaders {
-            let column = app.staticTexts[header]
-            XCTAssertTrue(column.exists, "\(header)カラムヘッダーが存在すること")
-        }
-
-        // タスクカードが存在することを確認（件数 > 0 の間接的確認）
-        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
-        XCTAssertTrue(taskCards.count > 0, "タスクカードが存在すること（件数バッジの間接的確認）")
-
-        // 件数バッジの確認（オプショナル - 見つからなくても失敗しない）
-        // SwiftUIのText要素はアクセシビリティ階層に露出しない場合がある
-        let countBadges = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'ColumnCount_'"))
-        if countBadges.count > 0 {
-            // 件数バッジが識別子で見つかる場合は追加検証
-            XCTAssertTrue(countBadges.count >= 1, "件数バッジが存在すること: \(countBadges.count)")
-        }
-        // 件数バッジが見つからない場合でも、カラムとタスクカードが存在すれば成功とする
-    }
-
     /// TS-02-001b: カラム識別子による構造確認
-    /// 期待結果: TaskColumn_* 識別子を持つカラムが5つ存在する
+    /// 検証内容: TaskColumn_* 識別子を持つカラムが5つ存在する
     func testKanbanColumnIdentifiers() throws {
-        try selectProject()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
         // タスクボードの存在確認
         let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
@@ -113,11 +75,47 @@ final class TaskBoardTests: BasicDataUITestCase {
         }
     }
 
+    /// TS-02-002: カラムヘッダーにタスク件数が表示される
+    /// 検証内容: 全カラムヘッダーの存在確認、タスクカードの存在確認、件数バッジの存在確認（オプショナル）
+    func testColumnHeadersShowTaskCount() throws {
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクボードの存在確認
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
+
+        // 全カラムヘッダーの存在確認
+        let columnHeaders = ["Backlog", "To Do", "In Progress", "Blocked", "Done"]
+        for header in columnHeaders {
+            let column = app.staticTexts[header]
+            XCTAssertTrue(column.exists, "\(header)カラムヘッダーが存在すること")
+        }
+
+        // タスクカードが存在することを確認（件数 > 0 の間接的確認）
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        XCTAssertTrue(taskCards.count > 0, "タスクカードが存在すること（件数バッジの間接的確認）")
+
+        // 件数バッジの確認（オプショナル - 見つからなくても失敗しない）
+        let countBadges = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'ColumnCount_'"))
+        if countBadges.count > 0 {
+            XCTAssertTrue(countBadges.count >= 1, "件数バッジが存在すること: \(countBadges.count)")
+        }
+    }
+
     /// TS-02-003: 新規タスク作成ボタン
-    /// 注意: macOS SwiftUIのツールバーボタンはXCUITestに公開されないため、
-    ///       キーボードショートカット(⇧⌘T)で機能をテストする
+    /// 検証内容: キーボードショートカット(⇧⌘T)でシートが表示されることを検証
     func testNewTaskButtonExists() throws {
-        try selectProject()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクボードの存在確認
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
 
         // キーボードショートカットで新規タスクシートを開く
         app.typeKey("t", modifierFlags: [.command, .shift])
@@ -128,11 +126,16 @@ final class TaskBoardTests: BasicDataUITestCase {
     }
 
     /// TS-02-004: タスクカード構造確認
-    /// 期待結果: タイトル、優先度バッジ、担当エージェント名が表示される
-    /// 注意: TaskCardButtonは.accessibilityElement(children: .combine)を使用しているため、
-    ///       子要素の個別識別子は外部からアクセス不可。カードのaccessibilityLabelで確認。
+    /// 検証内容: TaskCard_*識別子のカード存在確認、アクセシビリティラベル存在確認、ボタン要素タイプ確認
     func testTaskCardStructure() throws {
-        try selectProject()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクボードの存在確認
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
 
         // タスクカードの存在確認（TaskCard_* 形式のIDを持つ要素）
         let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
@@ -141,7 +144,6 @@ final class TaskBoardTests: BasicDataUITestCase {
         XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクカードが存在すること")
 
         // タスクカードのaccessibilityLabelが設定されていることを確認
-        // （children: .combineによりタイトルがラベルに含まれる）
         let cardLabel = firstCard.label
         XCTAssertFalse(cardLabel.isEmpty, "タスクカードにアクセシビリティラベルが設定されていること")
 
@@ -153,12 +155,20 @@ final class TaskBoardTests: BasicDataUITestCase {
     }
 
     /// TS-02-005: タスク選択で詳細表示
+    /// 検証内容: タスクカードクリック後にTaskDetailView識別子を持つ詳細パネルが表示されることを確認
     func testTaskSelectionShowsDetail() throws {
-        try selectProject()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
+        // タスクボードの存在確認
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
+
+        // タスクカード選択
         let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
         let firstCard = taskCards.firstMatch
-
         XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
         firstCard.click()
 
@@ -168,16 +178,21 @@ final class TaskBoardTests: BasicDataUITestCase {
     }
 
     /// TS-02-006: 優先度バッジ表示確認
-    /// 注意: macOS SwiftUIでは背景付きText要素のaccessibilityは制限される場合があるため、
-    ///       タスクカードの存在とPriorityBadge識別子の存在で確認
+    /// 検証内容: PriorityBadge_*識別子の存在確認（またはタスクカード存在での間接確認）
     func testPriorityBadgeDisplay() throws {
-        try selectProject()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
-        // タスクカードが存在することを確認（タスクカードには優先度バッジが必ず含まれる）
+        // タスクボードの存在確認
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが存在すること")
+
+        // タスクカードが存在することを確認
         let taskCards = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
         let firstCard = taskCards.firstMatch
-
         XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクカードが存在すること")
 
         // タスクカード内の優先度バッジ識別子を確認
@@ -194,17 +209,18 @@ final class TaskBoardTests: BasicDataUITestCase {
     }
 
     /// TS-02-007: リフレッシュボタン
-    /// 注意: macOS SwiftUIのツールバーボタンはXCUITestに公開されないため、
-    ///       キーボードショートカット(⌘R)で機能をテストする
+    /// 検証内容: キーボードショートカット(⌘R)でリフレッシュ実行、タスクボードが引き続き表示されることを確認
     func testRefreshButtonExists() throws {
-        try selectProject()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
         // タスクボードが表示されていることを確認
         let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
         XCTAssertTrue(taskBoard.waitForExistence(timeout: 5), "タスクボードが表示されること")
 
         // キーボードショートカットでリフレッシュ（⌘R）
-        // 注意: リフレッシュはシートを開かないため、タスクボードが引き続き表示されることで確認
         app.typeKey("r", modifierFlags: [.command])
 
         // リフレッシュ後もタスクボードが表示されている

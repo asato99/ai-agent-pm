@@ -36,34 +36,12 @@ final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
         app = nil
     }
 
-    // MARK: - Helper Methods
-
-    /// 新規プロジェクト作成フォームを開く
-    private func openNewProjectForm() {
-        // グローバルショートカットは Cmd+N（Shiftなし）
-        app.typeKey("n", modifierFlags: [.command])
-    }
-
-    /// 既存プロジェクトの編集フォームを開く
-    private func openEditProjectForm(projectName: String) {
-        let projectRow = app.staticTexts[projectName]
-        guard projectRow.waitForExistence(timeout: 5) else { return }
-
-        // 右クリックまたはコンテキストメニューで編集
-        projectRow.rightClick()
-        Thread.sleep(forTimeInterval: 0.3)
-
-        let editMenuItem = app.menuItems["Edit"]
-        if editMenuItem.waitForExistence(timeout: 2) {
-            editMenuItem.click()
-        }
-    }
-
     // MARK: - Test Cases
 
     /// F06-01: プロジェクトフォームに作業ディレクトリフィールドが存在する
     func testWorkingDirectoryFieldExists() throws {
-        openNewProjectForm()
+        // グローバルショートカットは Cmd+N（Shiftなし）で新規プロジェクト作成
+        app.typeKey("n", modifierFlags: [.command])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "プロジェクトフォームが表示されること")
@@ -76,7 +54,8 @@ final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
 
     /// F06-02: 作業ディレクトリを入力して保存できる
     func testWorkingDirectorySave() throws {
-        openNewProjectForm()
+        // グローバルショートカットは Cmd+N（Shiftなし）で新規プロジェクト作成
+        app.typeKey("n", modifierFlags: [.command])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "プロジェクトフォームが表示されること")
@@ -190,7 +169,14 @@ final class Feature06_ProjectWorkingDirectoryTests: XCTestCase {
             throw TestError.failedPrecondition("テストプロジェクトが存在しません")
         }
 
-        openEditProjectForm(projectName: "テストプロジェクト")
+        // 右クリックまたはコンテキストメニューで編集
+        projectRow.rightClick()
+        Thread.sleep(forTimeInterval: 0.3)
+
+        let editMenuItem = app.menuItems["Edit"]
+        if editMenuItem.waitForExistence(timeout: 2) {
+            editMenuItem.click()
+        }
 
         let editSheet = app.sheets.firstMatch
         guard editSheet.waitForExistence(timeout: 5) else {

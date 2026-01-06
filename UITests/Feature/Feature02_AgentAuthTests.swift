@@ -35,18 +35,12 @@ final class Feature02_AgentAuthTests: XCTestCase {
         app = nil
     }
 
-    // MARK: - Helper Methods
-
-    /// 新規エージェント作成フォームを開く
-    private func openNewAgentForm() {
-        app.typeKey("a", modifierFlags: [.command, .shift])
-    }
-
     // MARK: - Test Cases
 
     /// F02-01: エージェントフォームに「認証設定」セクションが存在
     func testAuthSectionExists() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")
@@ -59,7 +53,8 @@ final class Feature02_AgentAuthTests: XCTestCase {
 
     /// F02-02: パスキー入力フィールドが存在（SecureField）
     func testPasskeyField() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")
@@ -73,7 +68,8 @@ final class Feature02_AgentAuthTests: XCTestCase {
 
     /// F02-03: 入力されたパスキーがマスク表示される
     func testPasskeyMasked() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")
@@ -96,7 +92,8 @@ final class Feature02_AgentAuthTests: XCTestCase {
 
     /// F02-04: 認証レベル（0/1/2）を選択可能
     func testAuthLevelPicker() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")
@@ -125,7 +122,8 @@ final class Feature02_AgentAuthTests: XCTestCase {
 
     /// F02-05: パスキーが保存される（表示はマスク）
     func testPasskeySaved() throws {
-        openNewAgentForm()
+        // ⌘⇧A で新規エージェント作成
+        app.typeKey("a", modifierFlags: [.command, .shift])
 
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "エージェントフォームが表示されること")

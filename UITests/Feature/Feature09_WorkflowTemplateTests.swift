@@ -45,7 +45,27 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
     /// F09-01: プロジェクト選択時にTemplatesボタンがTaskBoardに表示される
     func testTemplatesButtonExistsInTaskBoard() throws {
         // プロジェクトを選択
-        guard selectFirstProject() else {
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            // フォールバック: テキストで直接選択
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
@@ -66,30 +86,86 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
 
     /// F09-02: 新規テンプレート作成フォームが開く
     func testNewTemplateFormOpens() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
         // キーボードショートカット⇧⌘Mでフォームを開く
-        guard openNewTemplateForm() else {
-            XCTFail("Template form could not be opened via ⇧⌘M")
-            return
+        app.typeKey("m", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let form = app.sheets.firstMatch
+        guard form.waitForExistence(timeout: 3) else {
+            XCTFail("Template form could not be opened via ⇧⌘M"); return
+        }
+
+        let templateNameField = form.textFields["TemplateNameField"]
+        guard templateNameField.waitForExistence(timeout: 2) else {
+            XCTFail("TemplateNameField not found - not a template form"); return
         }
 
         // フォームが正常に表示されていれば成功とする
-        let form = app.sheets.firstMatch
         XCTAssertTrue(form.exists, "Template form should be visible")
     }
 
     /// F09-03: テンプレート名が必須
     func testTemplateNameRequired() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
-        guard openNewTemplateForm() else {
-            XCTFail("Template form could not be opened via ⇧⌘M")
-            return
+        // キーボードショートカット⇧⌘Mでフォームを開く
+        app.typeKey("m", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let form = app.sheets.firstMatch
+        guard form.waitForExistence(timeout: 3) else {
+            XCTFail("Template form could not be opened via ⇧⌘M"); return
+        }
+
+        let templateNameField = form.textFields["TemplateNameField"]
+        guard templateNameField.waitForExistence(timeout: 2) else {
+            XCTFail("TemplateNameField not found"); return
         }
 
         // 名前を入力せずに保存を試みる - "Save" ボタンを探す
@@ -106,22 +182,47 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
     /// F09-04: テンプレートにタスクを追加できる
     /// NOTE: Form 内の Button が XCUITest からアクセスしにくい場合があります
     func testAddTaskToTemplate() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
-        guard openNewTemplateForm() else {
-            XCTFail("Template form could not be opened via ⇧⌘M")
-            return
+        // キーボードショートカット⇧⌘Mでフォームを開く
+        app.typeKey("m", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let sheet = app.sheets.firstMatch
+        guard sheet.waitForExistence(timeout: 3) else {
+            XCTFail("Template form could not be opened via ⇧⌘M"); return
+        }
+
+        let templateNameField = sheet.textFields["TemplateNameField"]
+        guard templateNameField.waitForExistence(timeout: 2) else {
+            XCTFail("TemplateNameField not found"); return
         }
 
         // テンプレート名を入力
-        let sheet = app.sheets.firstMatch
-        let templateNameField = sheet.textFields["TemplateNameField"]
-        if templateNameField.exists {
-            templateNameField.click()
-            templateNameField.typeText("Feature Development")
-        }
+        templateNameField.click()
+        templateNameField.typeText("Feature Development")
         Thread.sleep(forTimeInterval: 0.3)
 
         // タスク追加ボタンを探す
@@ -146,20 +247,42 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
 
     /// F09-05: 変数を追加できる
     func testAddVariableToTemplate() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
-        guard openNewTemplateForm() else {
-            XCTFail("Template form could not be opened via ⇧⌘M")
-            return
-        }
+        // キーボードショートカット⇧⌘Mでフォームを開く
+        app.typeKey("m", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
 
         let form = app.sheets.firstMatch
+        guard form.waitForExistence(timeout: 3) else {
+            XCTFail("Template form could not be opened via ⇧⌘M"); return
+        }
 
         // テンプレート名を入力
         let templateNameField = form.textFields["TemplateNameField"]
-        if templateNameField.exists {
+        if templateNameField.waitForExistence(timeout: 2) {
             templateNameField.click()
             templateNameField.typeText("Feature Development")
             Thread.sleep(forTimeInterval: 0.3)
@@ -178,17 +301,39 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
 
     /// F09-06: テンプレートを保存できる
     func testSaveTemplate() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
         // ⇧⌘Mでテンプレートフォームを開く
-        guard openNewTemplateForm() else {
-            XCTFail("Template form could not be opened via ⇧⌘M")
-            return
-        }
+        app.typeKey("m", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
 
         let sheet = app.sheets.firstMatch
+        guard sheet.waitForExistence(timeout: 3) else {
+            XCTFail("Template form could not be opened via ⇧⌘M"); return
+        }
+
         let templateNameField = sheet.textFields["TemplateNameField"]
         guard templateNameField.waitForExistence(timeout: 2) else {
             XCTFail("TemplateNameField not accessible - macOS SwiftUI Form accessibility limitation")
@@ -216,12 +361,64 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
 
     /// F09-07: テンプレート詳細からインスタンス化できる
     func testInstantiateFromTemplateDetail() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
-        // Templatesポップオーバーからテンプレートを選択
-        guard selectTemplate(named: "Feature Development") else {
+        // Templatesポップオーバーを開く
+        let templatesButton = app.buttons["TemplatesButton"].firstMatch
+        guard templatesButton.waitForExistence(timeout: 3) else {
+            XCTFail("TemplatesButton not found"); return
+        }
+        templatesButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let popover = app.popovers.firstMatch
+        guard popover.waitForExistence(timeout: 3) else {
+            XCTFail("Templates popover not found"); return
+        }
+
+        // テンプレートを選択
+        let templateRowPredicate = NSPredicate(format: "identifier BEGINSWITH 'TemplateRow_'")
+        let templateRows = popover.descendants(matching: .any).matching(templateRowPredicate)
+        var templateSelected = false
+        if templateRows.count > 0 {
+            let firstRow = templateRows.firstMatch
+            if firstRow.waitForExistence(timeout: 2) {
+                firstRow.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        if !templateSelected {
+            let templateText = popover.staticTexts["Feature Development"]
+            if templateText.waitForExistence(timeout: 3) {
+                templateText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        guard templateSelected else {
             XCTFail("Could not select template 'Feature Development'"); return
         }
 
@@ -239,11 +436,97 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
 
     /// F09-08: 変数入力フィールドが表示される
     func testVariableInputFieldsDisplayed() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
-        guard openInstantiateSheet() else {
+        // Templatesポップオーバーを開く
+        let templatesButton = app.buttons["TemplatesButton"].firstMatch
+        guard templatesButton.waitForExistence(timeout: 3) else {
+            XCTFail("TemplatesButton not found"); return
+        }
+        templatesButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let popover = app.popovers.firstMatch
+        guard popover.waitForExistence(timeout: 3) else {
+            XCTFail("Templates popover not found"); return
+        }
+
+        // テンプレートを選択
+        let templateRowPredicate = NSPredicate(format: "identifier BEGINSWITH 'TemplateRow_'")
+        let templateRows = popover.descendants(matching: .any).matching(templateRowPredicate)
+        var templateSelected = false
+        if templateRows.count > 0 {
+            let firstRow = templateRows.firstMatch
+            if firstRow.waitForExistence(timeout: 2) {
+                firstRow.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        if !templateSelected {
+            let templateText = popover.staticTexts["Feature Development"]
+            if templateText.waitForExistence(timeout: 3) {
+                templateText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        guard templateSelected else {
+            XCTFail("Could not select template 'Feature Development'"); return
+        }
+
+        let detailSheet = app.sheets.firstMatch
+        guard detailSheet.waitForExistence(timeout: 3) else {
+            XCTFail("Template detail sheet not found"); return
+        }
+
+        // Actions menu からApply to Projectを選択
+        var actionsMenu: XCUIElement = detailSheet.popUpButtons.firstMatch
+        if !actionsMenu.waitForExistence(timeout: 1) {
+            actionsMenu = detailSheet.menuButtons.firstMatch
+        }
+        var sheetOpened = false
+        if actionsMenu.waitForExistence(timeout: 2) {
+            actionsMenu.click()
+            Thread.sleep(forTimeInterval: 0.3)
+            let applyMenuItem = app.menuItems["Apply to Project"]
+            if applyMenuItem.waitForExistence(timeout: 2) {
+                applyMenuItem.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                sheetOpened = true
+            }
+        }
+        if !sheetOpened {
+            let instantiateButton = app.buttons["Apply to Project"]
+            if instantiateButton.waitForExistence(timeout: 3) {
+                instantiateButton.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                sheetOpened = true
+            }
+        }
+        guard sheetOpened else {
             XCTFail("Could not open instantiate sheet"); return
         }
 
@@ -254,11 +537,97 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
 
     /// F09-09: タスク生成が実行される
     func testInstantiateCreatesTasks() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
-        guard openInstantiateSheet() else {
+        // Templatesポップオーバーを開く
+        let templatesButton = app.buttons["TemplatesButton"].firstMatch
+        guard templatesButton.waitForExistence(timeout: 3) else {
+            XCTFail("TemplatesButton not found"); return
+        }
+        templatesButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let popover = app.popovers.firstMatch
+        guard popover.waitForExistence(timeout: 3) else {
+            XCTFail("Templates popover not found"); return
+        }
+
+        // テンプレートを選択
+        let templateRowPredicate = NSPredicate(format: "identifier BEGINSWITH 'TemplateRow_'")
+        let templateRows = popover.descendants(matching: .any).matching(templateRowPredicate)
+        var templateSelected = false
+        if templateRows.count > 0 {
+            let firstRow = templateRows.firstMatch
+            if firstRow.waitForExistence(timeout: 2) {
+                firstRow.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        if !templateSelected {
+            let templateText = popover.staticTexts["Feature Development"]
+            if templateText.waitForExistence(timeout: 3) {
+                templateText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        guard templateSelected else {
+            XCTFail("Could not select template 'Feature Development'"); return
+        }
+
+        let detailSheet = app.sheets.firstMatch
+        guard detailSheet.waitForExistence(timeout: 3) else {
+            XCTFail("Template detail sheet not found"); return
+        }
+
+        // Actions menu からApply to Projectを選択
+        var actionsMenu: XCUIElement = detailSheet.popUpButtons.firstMatch
+        if !actionsMenu.waitForExistence(timeout: 1) {
+            actionsMenu = detailSheet.menuButtons.firstMatch
+        }
+        var sheetOpened = false
+        if actionsMenu.waitForExistence(timeout: 2) {
+            actionsMenu.click()
+            Thread.sleep(forTimeInterval: 0.3)
+            let applyMenuItem = app.menuItems["Apply to Project"]
+            if applyMenuItem.waitForExistence(timeout: 2) {
+                applyMenuItem.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                sheetOpened = true
+            }
+        }
+        if !sheetOpened {
+            let instantiateButton = app.buttons["Apply to Project"]
+            if instantiateButton.waitForExistence(timeout: 3) {
+                instantiateButton.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                sheetOpened = true
+            }
+        }
+        guard sheetOpened else {
             XCTFail("Could not open instantiate sheet"); return
         }
 
@@ -324,12 +693,64 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
 
     /// F09-10: テンプレートを編集できる
     func testEditTemplate() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
-        // Templatesポップオーバーからテンプレートを選択
-        guard selectTemplate(named: "Feature Development") else {
+        // Templatesポップオーバーを開く
+        let templatesButton = app.buttons["TemplatesButton"].firstMatch
+        guard templatesButton.waitForExistence(timeout: 3) else {
+            XCTFail("TemplatesButton not found"); return
+        }
+        templatesButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let popover = app.popovers.firstMatch
+        guard popover.waitForExistence(timeout: 3) else {
+            XCTFail("Templates popover not found"); return
+        }
+
+        // テンプレートを選択
+        let templateRowPredicate = NSPredicate(format: "identifier BEGINSWITH 'TemplateRow_'")
+        let templateRows = popover.descendants(matching: .any).matching(templateRowPredicate)
+        var templateSelected = false
+        if templateRows.count > 0 {
+            let firstRow = templateRows.firstMatch
+            if firstRow.waitForExistence(timeout: 2) {
+                firstRow.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        if !templateSelected {
+            let templateText = popover.staticTexts["Feature Development"]
+            if templateText.waitForExistence(timeout: 3) {
+                templateText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        guard templateSelected else {
             XCTFail("Could not select template 'Feature Development'"); return
         }
 
@@ -401,12 +822,64 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
 
     /// F09-11: テンプレートをアーカイブできる
     func testArchiveTemplate() throws {
-        guard selectFirstProject() else {
+        // プロジェクトを選択
+        let projectRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
+            .firstMatch
+
+        var projectSelected = false
+        if projectRow.waitForExistence(timeout: 10) {
+            projectRow.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            projectSelected = true
+        } else {
+            let projectText = app.staticTexts.matching(
+                NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
+            ).firstMatch
+            if projectText.waitForExistence(timeout: 3) && projectText.isHittable {
+                projectText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                projectSelected = true
+            }
+        }
+        guard projectSelected else {
             XCTFail("No project found for testing"); return
         }
 
-        // Templatesポップオーバーからテンプレートを選択
-        guard selectTemplate(named: "Feature Development") else {
+        // Templatesポップオーバーを開く
+        let templatesButton = app.buttons["TemplatesButton"].firstMatch
+        guard templatesButton.waitForExistence(timeout: 3) else {
+            XCTFail("TemplatesButton not found"); return
+        }
+        templatesButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let popover = app.popovers.firstMatch
+        guard popover.waitForExistence(timeout: 3) else {
+            XCTFail("Templates popover not found"); return
+        }
+
+        // テンプレートを選択
+        let templateRowPredicate = NSPredicate(format: "identifier BEGINSWITH 'TemplateRow_'")
+        let templateRows = popover.descendants(matching: .any).matching(templateRowPredicate)
+        var templateSelected = false
+        if templateRows.count > 0 {
+            let firstRow = templateRows.firstMatch
+            if firstRow.waitForExistence(timeout: 2) {
+                firstRow.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        if !templateSelected {
+            let templateText = popover.staticTexts["Feature Development"]
+            if templateText.waitForExistence(timeout: 3) {
+                templateText.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                templateSelected = true
+            }
+        }
+        guard templateSelected else {
             XCTFail("Could not select template 'Feature Development'"); return
         }
 
@@ -451,162 +924,5 @@ final class Feature09_WorkflowTemplateTests: XCTestCase {
         let archivedStatus = app.staticTexts["Archived"]
         XCTAssertTrue(archivedStatus.waitForExistence(timeout: 5),
                       "Template status should change to Archived")
-    }
-
-    // MARK: - Helper Methods
-
-    /// 最初のプロジェクトを選択
-    @discardableResult
-    private func selectFirstProject() -> Bool {
-        // テストデータのシードが完了するまで待機（timeout延長）
-        let projectRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'ProjectRow_'"))
-            .firstMatch
-
-        if projectRow.waitForExistence(timeout: 10) {
-            projectRow.click()
-            Thread.sleep(forTimeInterval: 0.5)
-            return true
-        }
-
-        // フォールバック: テキストで直接選択を試みる
-        // NOTE: SwiftUI List + Section では、ForEachの内容に設定した accessibilityIdentifier が
-        //       セルレベルで認識されないことがある
-        // Use value predicate to find the specific text, not identifier
-        let projectPredicate = NSPredicate(format: "value == 'テンプレートテストPJ' OR label == 'テンプレートテストPJ'")
-        let projectText = app.staticTexts.matching(projectPredicate).firstMatch
-        if projectText.waitForExistence(timeout: 3) {
-            print("ℹ️ DEBUG: Using fallback - clicking on project text directly")
-            // Try to ensure element is hittable
-            if projectText.isHittable {
-                projectText.click()
-                Thread.sleep(forTimeInterval: 0.5)
-                return true
-            } else {
-                // Element exists but not hittable, try scrolling or force click
-                print("ℹ️ DEBUG: Project text not hittable, trying coordinate click")
-                let coordinate = projectText.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                coordinate.click()
-                Thread.sleep(forTimeInterval: 0.5)
-                return true
-            }
-        }
-
-        print("⚠️ DEBUG: ProjectRow not found and fallback failed")
-        return false
-    }
-
-    /// 新規テンプレートフォームを開く（⇧⌘M）
-    /// Returns: true if TemplateForm opened, false if form did not open
-    @discardableResult
-    private func openNewTemplateForm() -> Bool {
-        // キーボードショートカット ⇧⌘M でテンプレートフォームを開く
-        app.typeKey("m", modifierFlags: [.command, .shift])
-        Thread.sleep(forTimeInterval: 0.5)
-
-        // フォームが表示されるまで待機
-        let form = app.sheets.firstMatch
-        guard form.waitForExistence(timeout: 3) else {
-            return false
-        }
-
-        // Verify this is the Template form
-        let templateNameField = form.textFields["TemplateNameField"]
-        return templateNameField.waitForExistence(timeout: 2)
-    }
-
-    /// Templatesポップオーバーを開く
-    @discardableResult
-    private func openTemplatesPopover() -> Bool {
-        // Note: SwiftUIのToolbarButton+Popoverは重複アクセシビリティ要素を生成するため.firstMatchを使用
-        let templatesButton = app.buttons["TemplatesButton"].firstMatch
-        guard templatesButton.waitForExistence(timeout: 3) else {
-            print("🔍 DEBUG: TemplatesButton not found")
-            return false
-        }
-        templatesButton.click()
-        Thread.sleep(forTimeInterval: 0.5)
-
-        let popover = app.popovers.firstMatch
-        return popover.waitForExistence(timeout: 3)
-    }
-
-    /// テンプレートを選択してテンプレート詳細シートを開く
-    @discardableResult
-    private func selectTemplate(named name: String) -> Bool {
-        // Templatesポップオーバーを開く
-        guard openTemplatesPopover() else {
-            print("🔍 DEBUG: Could not open Templates popover")
-            return false
-        }
-
-        let popover = app.popovers.firstMatch
-
-        // まずTemplateRow_* identifierで検索（より確実）
-        let templateRowPredicate = NSPredicate(format: "identifier BEGINSWITH 'TemplateRow_'")
-        let templateRows = popover.descendants(matching: .any).matching(templateRowPredicate)
-        if templateRows.count > 0 {
-            // 最初のテンプレート行をクリック（テスト用）
-            let firstRow = templateRows.firstMatch
-            if firstRow.waitForExistence(timeout: 2) {
-                firstRow.click()
-                Thread.sleep(forTimeInterval: 0.5)
-                let detailSheet = app.sheets.firstMatch
-                return detailSheet.waitForExistence(timeout: 3)
-            }
-        }
-
-        // フォールバック: テンプレート名のstaticTextで検索
-        let templateText = popover.staticTexts[name]
-        guard templateText.waitForExistence(timeout: 3) else {
-            print("🔍 DEBUG: Template '\(name)' not found in popover (checked both TemplateRow and staticText)")
-            return false
-        }
-        templateText.click()
-        Thread.sleep(forTimeInterval: 0.5)
-
-        // テンプレート詳細シートが表示される
-        let detailSheet = app.sheets.firstMatch
-        return detailSheet.waitForExistence(timeout: 3)
-    }
-
-    /// インスタンス化シートを開く
-    @discardableResult
-    private func openInstantiateSheet() -> Bool {
-        // テンプレートを選択
-        guard selectTemplate(named: "Feature Development") else {
-            print("🔍 DEBUG: Could not select template")
-            return false
-        }
-
-        let detailSheet = app.sheets.firstMatch
-
-        // Actions menu をクリックしてからメニュー項目を選択
-        // NOTE: SwiftUI Menu in toolbar is rendered as popUpButton
-        var actionsMenu: XCUIElement = detailSheet.popUpButtons.firstMatch
-        if !actionsMenu.waitForExistence(timeout: 1) {
-            actionsMenu = detailSheet.menuButtons.firstMatch
-        }
-        if actionsMenu.waitForExistence(timeout: 2) {
-            actionsMenu.click()
-            Thread.sleep(forTimeInterval: 0.3)
-            let applyMenuItem = app.menuItems["Apply to Project"]
-            if applyMenuItem.waitForExistence(timeout: 2) {
-                applyMenuItem.click()
-                Thread.sleep(forTimeInterval: 0.5)
-                return true
-            }
-        }
-
-        // Fallback: Try direct button access
-        let instantiateButton = app.buttons["Apply to Project"]
-        if instantiateButton.waitForExistence(timeout: 3) {
-            instantiateButton.click()
-            Thread.sleep(forTimeInterval: 0.5)
-            return true
-        }
-
-        print("🔍 DEBUG: Apply to Project button/menu not accessible")
-        return false
     }
 }

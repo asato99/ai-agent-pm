@@ -91,8 +91,37 @@ final class Feature10_InternalAuditTests: XCTestCase {
 
     /// F10-01: Internal Audit一覧からの新規作成
     func testCreateInternalAudit() throws {
-        guard navigateToInternalAudits() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
+        }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigated = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigated = true
+                break
+            }
+        }
+
+        if !navigated {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
         }
 
         // 新規作成ボタンをクリック（ツールバーのボタンを使用）
@@ -141,11 +170,45 @@ final class Feature10_InternalAuditTests: XCTestCase {
 
     /// F10-02: Internal Auditの名前が必須
     func testAuditNameRequired() throws {
-        guard navigateToInternalAudits() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
         }
 
-        openNewAuditForm()
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigated = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigated = true
+                break
+            }
+        }
+
+        if !navigated {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // 新規Auditフォームを開く
+        let newButton = app.buttons.matching(identifier: "NewInternalAuditButton").firstMatch
+        if newButton.waitForExistence(timeout: 3) {
+            newButton.click()
+            Thread.sleep(forTimeInterval: 0.5)
+        }
 
         // 名前を入力せずに保存を試みる
         let saveButton = app.buttons["SaveAuditButton"]
@@ -163,8 +226,54 @@ final class Feature10_InternalAuditTests: XCTestCase {
     /// 注意: UpdateInternalAuditUseCaseはstatusパラメータをサポートしていない
     /// ステータス変更にはSuspendInternalAuditUseCase/ResumeInternalAuditUseCaseを使用する必要がある
     func testChangeAuditStatus() throws {
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
+        }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigatedToList = true
+                break
+            }
+        }
+
+        if !navigatedToList {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditRowが見つかりません"); return
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditDetailViewに遷移できません"); return
         }
 
         // 編集ボタンをクリック
@@ -213,8 +322,54 @@ final class Feature10_InternalAuditTests: XCTestCase {
     /// F10-04: Audit Ruleを作成できる
     /// 設計変更: AuditRuleはauditTasksをインラインで保持
     func testCreateAuditRule() throws {
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
+        }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigatedToList = true
+                break
+            }
+        }
+
+        if !navigatedToList {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditRowが見つかりません"); return
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditDetailViewに遷移できません"); return
         }
 
         // 新規ルールボタンをクリック
@@ -281,9 +436,53 @@ final class Feature10_InternalAuditTests: XCTestCase {
                       "Form sheet should close after save")
 
         // 再度Audit詳細を開いて確認
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let section2 = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section2.waitForExistence(timeout: 5) else {
+            XCTFail("Failed to navigate back - InternalAuditsSection not found"); return
+        }
+
+        let auditsTexts2 = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList2 = false
+        for text in auditsTexts2 where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView2 = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView2.waitForExistence(timeout: 3) {
+                navigatedToList2 = true
+                break
+            }
+        }
+
+        if !navigatedToList2 {
+            let listView2 = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView2.waitForExistence(timeout: 2) else {
+                XCTFail("Failed to navigate back to list"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow2 = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow2.waitForExistence(timeout: 5) else {
+            XCTFail("Failed to navigate back - InternalAuditRow not found"); return
+        }
+        auditRow2.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView2 = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView2.waitForExistence(timeout: 5) else {
             XCTFail("Failed to navigate back to audit detail"); return
-            return
         }
 
         // ルールが一覧に表示される
@@ -296,8 +495,54 @@ final class Feature10_InternalAuditTests: XCTestCase {
     /// 注意: macOS SwiftUIではForm内のToggleのaccessibilityIdentifierが正しく公開されない制限がある
     /// このテストはルールの存在確認のみを行い、トグル操作は手動テストで確認する
     func testToggleAuditRuleEnabled() throws {
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
+        }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigatedToList = true
+                break
+            }
+        }
+
+        if !navigatedToList {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditRowが見つかりません"); return
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditDetailViewに遷移できません"); return
         }
 
         // Wait for AuditRulesSection to ensure data has loaded
@@ -355,9 +600,63 @@ final class Feature10_InternalAuditTests: XCTestCase {
 
     /// F10-06: Audit Ruleのルール名が必須
     func testAuditRuleNameRequired() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
         }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigatedToList = true
+                break
+            }
+        }
+
+        if !navigatedToList {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditRowが見つかりません"); return
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditDetailViewに遷移できません"); return
+        }
+
+        // Audit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            XCTFail("NewAuditRuleButton not found"); return
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // タスクを追加（名前以外を入力）
         let addTaskButton = app.buttons["AddAuditTaskButton"]
@@ -387,15 +686,68 @@ final class Feature10_InternalAuditTests: XCTestCase {
     /// F10-07: タスクなしでもルールを保存できる
     /// 設計変更: auditTasksはインラインで、エージェント割り当てはオプション
     func testRuleCanBeSavedWithoutTasks() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
         }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigatedToList = true
+                break
+            }
+        }
+
+        if !navigatedToList {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditRowが見つかりません"); return
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditDetailViewに遷移できません"); return
+        }
+
+        // Audit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            XCTFail("NewAuditRuleButton not found"); return
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // ルール名を入力
         let nameField = app.textFields["AuditRuleNameField"]
         guard nameField.waitForExistence(timeout: 3) else {
             XCTFail("AuditRuleNameField not found"); return
-            return
         }
         nameField.click()
         nameField.typeText("Rule Without Tasks")
@@ -404,7 +756,6 @@ final class Feature10_InternalAuditTests: XCTestCase {
         let saveButton = app.buttons["SaveAuditRuleButton"]
         guard saveButton.waitForExistence(timeout: 3) else {
             XCTFail("SaveAuditRuleButton not found"); return
-            return
         }
 
         // 名前があれば保存ボタンは有効
@@ -419,9 +770,51 @@ final class Feature10_InternalAuditTests: XCTestCase {
                       "Form sheet should close after save")
 
         // 再度Audit詳細を開いて確認
-        guard navigateToAuditDetail() else {
+        let section2 = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section2.waitForExistence(timeout: 5) else {
+            XCTFail("Failed to navigate back - InternalAuditsSection not found"); return
+        }
+
+        let auditsTexts2 = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList2 = false
+        for text in auditsTexts2 where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView2 = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView2.waitForExistence(timeout: 3) {
+                navigatedToList2 = true
+                break
+            }
+        }
+
+        if !navigatedToList2 {
+            let listView2 = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView2.waitForExistence(timeout: 2) else {
+                XCTFail("Failed to navigate back to list"); return
+            }
+        }
+
+        let auditRow2 = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow2.waitForExistence(timeout: 5) else {
+            XCTFail("Failed to navigate back - InternalAuditRow not found"); return
+        }
+        auditRow2.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView2 = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView2.waitForExistence(timeout: 5) else {
             XCTFail("Failed to navigate back to audit detail"); return
-            return
         }
 
         // ルールが保存されていることを確認
@@ -434,9 +827,63 @@ final class Feature10_InternalAuditTests: XCTestCase {
 
     /// F10-08: status_changedトリガーで対象ステータスを選択できる
     func testStatusChangedTriggerConfiguration() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
         }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigatedToList = true
+                break
+            }
+        }
+
+        if !navigatedToList {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditRowが見つかりません"); return
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditDetailViewに遷移できません"); return
+        }
+
+        // Audit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            XCTFail("NewAuditRuleButton not found"); return
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // TriggerTypePickerを取得
         let triggerPicker = app.popUpButtons["TriggerTypePicker"]
@@ -462,9 +909,63 @@ final class Feature10_InternalAuditTests: XCTestCase {
 
     /// F10-09: deadline_exceededトリガーで猶予時間を設定できる
     func testDeadlineExceededTriggerConfiguration() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
         }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigatedToList = true
+                break
+            }
+        }
+
+        if !navigatedToList {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditRowが見つかりません"); return
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditDetailViewに遷移できません"); return
+        }
+
+        // Audit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            XCTFail("NewAuditRuleButton not found"); return
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // TriggerTypePickerを取得
         let triggerPicker = app.popUpButtons["TriggerTypePicker"]
@@ -493,15 +994,68 @@ final class Feature10_InternalAuditTests: XCTestCase {
     /// F10-10: 複数のインラインタスクを追加できる
     /// 設計変更: AuditRuleはauditTasksをインラインで保持
     func testAddMultipleInlineTasks() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装"); return
         }
+
+        // セクション内の「Internal Audits」テキストをクリック
+        let auditsTexts = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList = false
+        for text in auditsTexts where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView.waitForExistence(timeout: 3) {
+                navigatedToList = true
+                break
+            }
+        }
+
+        if !navigatedToList {
+            let listView = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView.waitForExistence(timeout: 2) else {
+                XCTFail("InternalAuditListViewに遷移できません"); return
+            }
+        }
+
+        // Audit詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditRowが見つかりません"); return
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("InternalAuditDetailViewに遷移できません"); return
+        }
+
+        // Audit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            XCTFail("NewAuditRuleButton not found"); return
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // ルール名を入力
         let nameField = app.textFields["AuditRuleNameField"]
         guard nameField.waitForExistence(timeout: 3) else {
             XCTFail("AuditRuleNameField not found"); return
-            return
         }
         nameField.click()
         nameField.typeText("Multi-Task Rule")
@@ -510,7 +1064,6 @@ final class Feature10_InternalAuditTests: XCTestCase {
         let addTaskButton = app.buttons["AddAuditTaskButton"]
         guard addTaskButton.waitForExistence(timeout: 3) else {
             XCTFail("AddAuditTaskButton not found"); return
-            return
         }
 
         // 1つ目のタスクを追加
@@ -541,7 +1094,6 @@ final class Feature10_InternalAuditTests: XCTestCase {
         let saveButton = app.buttons["SaveAuditRuleButton"]
         guard saveButton.waitForExistence(timeout: 3) else {
             XCTFail("SaveAuditRuleButton not found"); return
-            return
         }
         saveButton.click()
 
@@ -551,91 +1103,56 @@ final class Feature10_InternalAuditTests: XCTestCase {
                       "Form sheet should close after save")
 
         // 再度Audit詳細を開いて確認
-        guard navigateToAuditDetail() else {
+        let section2 = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditsSection").firstMatch
+        guard section2.waitForExistence(timeout: 5) else {
+            XCTFail("Failed to navigate back - InternalAuditsSection not found"); return
+        }
+
+        let auditsTexts2 = app.staticTexts.matching(
+            NSPredicate(format: "label == 'Internal Audits'")
+        ).allElementsBoundByIndex
+
+        var navigatedToList2 = false
+        for text in auditsTexts2 where text.isHittable {
+            text.click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            let listView2 = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            if listView2.waitForExistence(timeout: 3) {
+                navigatedToList2 = true
+                break
+            }
+        }
+
+        if !navigatedToList2 {
+            let listView2 = app.descendants(matching: .any)
+                .matching(identifier: "InternalAuditListView").firstMatch
+            guard listView2.waitForExistence(timeout: 2) else {
+                XCTFail("Failed to navigate back to list"); return
+            }
+        }
+
+        let auditRow2 = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+
+        guard auditRow2.waitForExistence(timeout: 5) else {
+            XCTFail("Failed to navigate back - InternalAuditRow not found"); return
+        }
+        auditRow2.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let detailView2 = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView2.waitForExistence(timeout: 5) else {
             XCTFail("Failed to navigate back to audit detail"); return
-            return
         }
 
         // ルールが保存されていることを確認
         let ruleRow = app.staticTexts["Multi-Task Rule"]
         XCTAssertTrue(ruleRow.waitForExistence(timeout: 3),
                       "Created rule should appear in list")
-    }
-
-    // MARK: - Helper Methods
-
-    /// Internal Auditsナビゲーションに移動
-    @discardableResult
-    private func navigateToInternalAudits() -> Bool {
-        // サイドバーのInternal Auditsセクションを探す
-        let section = app.descendants(matching: .any)
-            .matching(identifier: "InternalAuditsSection").firstMatch
-        guard section.waitForExistence(timeout: 5) else { return false }
-
-        // セクション内の「Internal Audits」テキストをクリック
-        // macOSではSection header内のボタンはbutton型として認識されないため、テキストをクリック
-        let auditsTexts = app.staticTexts.matching(
-            NSPredicate(format: "label == 'Internal Audits'")
-        ).allElementsBoundByIndex
-
-        for text in auditsTexts where text.isHittable {
-            text.click()
-            Thread.sleep(forTimeInterval: 0.5)
-
-            // InternalAuditListViewが表示されたか確認
-            let listView = app.descendants(matching: .any)
-                .matching(identifier: "InternalAuditListView").firstMatch
-            if listView.waitForExistence(timeout: 3) {
-                return true
-            }
-        }
-
-        // フォールバック: リストビューが既に表示されているかチェック
-        let listView = app.descendants(matching: .any)
-            .matching(identifier: "InternalAuditListView").firstMatch
-        return listView.waitForExistence(timeout: 2)
-    }
-
-    /// Internal Audit詳細画面に移動
-    @discardableResult
-    private func navigateToAuditDetail() -> Bool {
-        guard navigateToInternalAudits() else { return false }
-
-        let auditRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
-            .firstMatch
-
-        guard auditRow.waitForExistence(timeout: 5) else { return false }
-        auditRow.click()
-        Thread.sleep(forTimeInterval: 1.0)
-
-        // Wait for detail view to load
-        let detailView = app.descendants(matching: .any)
-            .matching(identifier: "InternalAuditDetailView").firstMatch
-        return detailView.waitForExistence(timeout: 5)
-    }
-
-    /// 新規Auditフォームを開く
-    private func openNewAuditForm() {
-        // 複数のボタンがある場合があるのでfirstMatchを使用
-        let newButton = app.buttons.matching(identifier: "NewInternalAuditButton").firstMatch
-        if newButton.waitForExistence(timeout: 3) {
-            newButton.click()
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-    }
-
-    /// Audit Rule編集画面を開く
-    @discardableResult
-    private func openAuditRuleEditView() -> Bool {
-        guard navigateToAuditDetail() else { return false }
-
-        let newRuleButton = app.buttons["NewAuditRuleButton"]
-        if newRuleButton.waitForExistence(timeout: 3) {
-            newRuleButton.click()
-            Thread.sleep(forTimeInterval: 0.5)
-            return true
-        }
-        return false
     }
 }

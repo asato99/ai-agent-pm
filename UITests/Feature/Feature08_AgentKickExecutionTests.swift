@@ -51,19 +51,7 @@ final class Feature08_AgentKickExecutionTests: XCTestCase {
             Thread.sleep(forTimeInterval: 2.0)
         }
 
-        // UC001テストプロジェクトを選択
-        selectUC001Project()
-    }
-
-    override func tearDownWithError() throws {
-        app = nil
-    }
-
-    // MARK: - Helper Methods
-
-    /// UC001テストプロジェクトを選択
-    private func selectUC001Project() {
-        // UC001用のプロジェクトを選択（workingDirectory設定済み）
+        // UC001テストプロジェクトを選択（workingDirectory設定済み）
         let projectRow = app.staticTexts["UC001テストプロジェクト"]
         if projectRow.waitForExistence(timeout: 5) {
             projectRow.click()
@@ -78,95 +66,8 @@ final class Feature08_AgentKickExecutionTests: XCTestCase {
         }
     }
 
-    /// タスクを作成してエージェントをアサインする
-    private func createTaskWithAgent(taskTitle: String, agentName: String) throws {
-        // ⇧⌘T でタスク作成フォームを開く
-        app.typeKey("t", modifierFlags: [.command, .shift])
-
-        let sheet = app.sheets.firstMatch
-        guard sheet.waitForExistence(timeout: 5) else {
-            XCTFail("タスクフォームが表示されません")
-            throw TestError.failedPrecondition("タスクフォームが表示されません")
-        }
-
-        // エージェントリストのロードを待つ
-        Thread.sleep(forTimeInterval: 1.0)
-
-        // タイトル入力
-        let titleField = app.textFields["TaskTitleField"]
-        guard titleField.waitForExistence(timeout: 3) else {
-            XCTFail("TaskTitleFieldが見つかりません")
-            throw TestError.failedPrecondition("TaskTitleFieldが見つかりません")
-        }
-        titleField.click()
-        titleField.typeText(taskTitle)
-
-        // エージェントをアサイン（リスト読み込み完了を待つ）
-        let assigneePicker = app.popUpButtons["TaskAssigneePicker"]
-        if assigneePicker.waitForExistence(timeout: 3) {
-            assigneePicker.click()
-            Thread.sleep(forTimeInterval: 0.5)  // メニュー表示を待つ
-            let agentOption = app.menuItems[agentName]
-            if agentOption.waitForExistence(timeout: 3) {
-                agentOption.click()
-                Thread.sleep(forTimeInterval: 0.3)
-            } else {
-                // エージェントが見つからない場合はエラーとして失敗
-                XCTFail("エージェント '\(agentName)' がPickerに表示されません")
-            }
-        }
-
-        // 保存
-        let saveButton = app.buttons["TaskFormSaveButton"]
-        saveButton.click()
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 5))
-    }
-
-    /// タスク詳細を開いてステータスをin_progressに変更
-    private func changeTaskStatusToInProgress(taskTitle: String) throws {
-        Thread.sleep(forTimeInterval: 1.0)
-
-        // タスクカードをクリック
-        let taskCard = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", taskTitle))
-            .firstMatch
-
-        guard taskCard.waitForExistence(timeout: 5) else {
-            XCTFail("タスク '\(taskTitle)' が見つかりません")
-            throw TestError.failedPrecondition("タスク '\(taskTitle)' が見つかりません")
-        }
-        taskCard.click()
-        Thread.sleep(forTimeInterval: 1.0)
-
-        // TaskDetailViewを確認
-        let detailView = app.descendants(matching: .any)
-            .matching(identifier: "TaskDetailView").firstMatch
-        guard detailView.waitForExistence(timeout: 5) else {
-            XCTFail("TaskDetailViewが表示されません")
-            throw TestError.failedPrecondition("TaskDetailViewが表示されません")
-        }
-
-        // まずステータスをtodoに変更（backlogからin_progressへは直接遷移不可）
-        let statusPicker = app.popUpButtons["StatusPicker"]
-        if statusPicker.waitForExistence(timeout: 3) {
-            statusPicker.click()
-            Thread.sleep(forTimeInterval: 0.3)
-            let todoOption = app.menuItems["To Do"]
-            if todoOption.waitForExistence(timeout: 2) {
-                todoOption.click()
-                Thread.sleep(forTimeInterval: 0.5)
-            }
-
-            // in_progressに変更（キック＋履歴更新の完了を待つ）
-            statusPicker.click()
-            Thread.sleep(forTimeInterval: 0.3)
-            let inProgressOption = app.menuItems["In Progress"]
-            if inProgressOption.waitForExistence(timeout: 2) {
-                inProgressOption.click()
-                // キック処理とloadData()の完了を待つ
-                Thread.sleep(forTimeInterval: 3.0)
-            }
-        }
+    override func tearDownWithError() throws {
+        app = nil
     }
 
     // MARK: - Test Cases

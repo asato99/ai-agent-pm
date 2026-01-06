@@ -14,42 +14,21 @@ import XCTest
 /// 要件: AGENTS.md / TASKS.md - リソース可用性の遵守
 final class ResourceBlockingTests: BasicDataUITestCase {
 
-    /// ヘルパー: プロジェクトを選択してタスクボードを表示
-    private func selectProject() throws {
-        let projectRow = app.staticTexts["テストプロジェクト"]
-        if projectRow.waitForExistence(timeout: 5) {
-            projectRow.click()
-        } else {
-            XCTFail("テストプロジェクトが存在しません")
-            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
-        }
-    }
-
-    /// ヘルパー: 指定タイトルのタスクを選択して詳細を開く
-    /// 戦略: UIテスト用キーボードショートカットを使用
-    /// - 追加開発タスク: Cmd+Shift+G
-    private func openTaskDetail(title: String) throws {
-        try selectProject()
-        Thread.sleep(forTimeInterval: 1.0)
-
-        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
-
-        if title.contains("追加開発タスク") {
-            // Cmd+Shift+G でリソーステストタスクを選択
-            app.typeKey("g", modifierFlags: [.command, .shift])
-            Thread.sleep(forTimeInterval: 0.5)
-            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "リソーステストタスクの詳細が表示されること")
-        } else {
-            XCTFail("タスク「\(title)」用のショートカットが定義されていません")
-            throw TestError.failedPrecondition("タスク「\(title)」用のショートカットが定義されていません")
-        }
-    }
-
     /// TS-RES-001: 並列上限到達時は新規in_progress不可
     /// 要件: アサイン先エージェントの並列実行可能数を超える場合、in_progress に移行不可
     func testBlockedWhenMaxParallelReached() throws {
-        // 追加開発タスクを選択（backend-devにアサイン済み、devAgentはすでにAPI実装がin_progress）
-        try openTaskDetail(title: "追加開発タスク")
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 追加開発タスクを選択（Cmd+Shift+G）
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "リソーステストタスクの詳細が表示されること")
 
         // TaskDetailView内のステータスPickerを探す
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")
@@ -112,8 +91,18 @@ final class ResourceBlockingTests: BasicDataUITestCase {
     /// 要件: 並列上限到達時にエラーメッセージを表示
     /// 注: このテストはtestBlockedWhenMaxParallelReachedと同様のシナリオ
     func testResourceErrorDisplayedOnStatusChange() throws {
-        // 追加開発タスクを選択してステータス変更を試みる
-        try openTaskDetail(title: "追加開発タスク")
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 追加開発タスクを選択（Cmd+Shift+G）
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "リソーステストタスクの詳細が表示されること")
 
         // TaskDetailView内のステータスPickerを探す
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")

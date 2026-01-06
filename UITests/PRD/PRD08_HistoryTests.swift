@@ -14,8 +14,9 @@ import XCTest
 /// 要件: HISTORY.md - 履歴の表示とフィルタリング
 final class HistoryTests: BasicDataUITestCase {
 
-    /// ヘルパー: タスク詳細を開く
-    private func openTaskDetail() throws {
+    /// TS-HIST-001: 履歴画面が表示される
+    /// 要件: タスク詳細に履歴セクションが表示される
+    func testHistoryViewDisplay() throws {
         // プロジェクト選択
         let projectRow = app.staticTexts["テストプロジェクト"]
         XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
@@ -26,12 +27,6 @@ final class HistoryTests: BasicDataUITestCase {
         let firstCard = taskCards.firstMatch
         XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
         firstCard.click()
-    }
-
-    /// TS-HIST-001: 履歴画面が表示される
-    /// 要件: タスク詳細に履歴セクションが表示される
-    func testHistoryViewDisplay() throws {
-        try openTaskDetail()
 
         // 履歴セクションの存在確認
         let historySection = app.descendants(matching: .any).matching(identifier: "HistorySection").firstMatch

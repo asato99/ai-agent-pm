@@ -14,51 +14,22 @@ import XCTest
 /// 要件: TASKS.md - 依存関係の遵守（アプリで強制ブロック）
 final class DependencyBlockingTests: BasicDataUITestCase {
 
-    /// ヘルパー: プロジェクトを選択してタスクボードを表示
-    private func selectProject() throws {
+    /// TS-DEP-001: 依存タスク未完了時はin_progressに遷移不可
+    /// 要件: 先行タスクが done になるまで in_progress に移行不可
+    func testBlockedWhenDependencyNotComplete() throws {
+        // プロジェクト選択
         let projectRow = app.staticTexts["テストプロジェクト"]
-        if projectRow.waitForExistence(timeout: 5) {
-            projectRow.click()
-        } else {
-            XCTFail("テストプロジェクトが存在しません")
-            throw TestError.failedPrecondition("テストプロジェクトが存在しません")
-        }
-    }
-
-    /// ヘルパー: 指定タイトルのタスクを選択して詳細を開く
-    /// 戦略: UIテスト用キーボードショートカットを使用
-    /// - 依存タスク: Cmd+Shift+D
-    /// - リソーステストタスク: Cmd+Shift+G
-    private func openTaskDetail(title: String) throws {
-        try selectProject()
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
         // タスクボードの読み込みを待つ
         Thread.sleep(forTimeInterval: 1.0)
 
-        // タスクに応じたキーボードショートカットを使用
+        // 依存タスクを選択（Cmd+Shift+D）
         let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
-
-        if title.contains("依存タスク") {
-            // Cmd+Shift+D で依存タスクを選択
-            app.typeKey("d", modifierFlags: [.command, .shift])
-            Thread.sleep(forTimeInterval: 0.5)
-            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "依存タスクの詳細が表示されること")
-        } else if title.contains("追加開発タスク") {
-            // Cmd+Shift+G でリソーステストタスクを選択
-            app.typeKey("g", modifierFlags: [.command, .shift])
-            Thread.sleep(forTimeInterval: 0.5)
-            XCTAssertTrue(detailView.waitForExistence(timeout: 5), "リソーステストタスクの詳細が表示されること")
-        } else {
-            XCTFail("タスク「\(title)」用のショートカットが定義されていません")
-            throw TestError.failedPrecondition("タスク「\(title)」用のショートカットが定義されていません")
-        }
-    }
-
-    /// TS-DEP-001: 依存タスク未完了時はin_progressに遷移不可
-    /// 要件: 先行タスクが done になるまで in_progress に移行不可
-    func testBlockedWhenDependencyNotComplete() throws {
-        // 依存タスクを選択（先行タスクがbacklogで未完了）
-        try openTaskDetail(title: "依存タスク")
+        app.typeKey("d", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "依存タスクの詳細が表示されること")
 
         // TaskDetailView内のステータスPickerを探す（識別子で検索）
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")
@@ -111,7 +82,11 @@ final class DependencyBlockingTests: BasicDataUITestCase {
     /// TS-DEP-003: Blockedカラムに依存待ちタスクが表示される
     /// 要件: blocked状態のタスクはBlockedカラムに表示
     func testBlockedTasksInBlockedColumn() throws {
-        try selectProject()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
         Thread.sleep(forTimeInterval: 1.0)  // タスクボード読み込み待ち
 
         // Blockedカラムの存在確認 - カラムヘッダーで検索
@@ -129,8 +104,19 @@ final class DependencyBlockingTests: BasicDataUITestCase {
     /// 要件: MCP経由の状態変更もブロック対象
     /// 注: このテストはtestBlockedWhenDependencyNotCompleteと同様のシナリオ
     func testBlockErrorDisplayedOnStatusChange() throws {
-        // 依存タスクを選択（先行タスクがbacklogで未完了）
-        try openTaskDetail(title: "依存タスク")
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクボードの読み込みを待つ
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 依存タスクを選択（Cmd+Shift+D）
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        app.typeKey("d", modifierFlags: [.command, .shift])
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "依存タスクの詳細が表示されること")
 
         // TaskDetailView内のステータスPickerを探す
         let statusPickerPredicate = NSPredicate(format: "identifier == 'StatusPicker'")

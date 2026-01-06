@@ -39,10 +39,14 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-002: Internal Audit一覧が表示される
     /// 要件: 複数のInternal Auditインスタンスを管理
     func testInternalAuditListDisplay() throws {
-        guard navigateToInternalAudits() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装 - AUDIT.md要件の実装が必要")
             throw TestError.failedPrecondition("Internal Audit機能は未実装")
         }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // 一覧画面が表示される
         let auditList = app.descendants(matching: .any)
@@ -59,10 +63,14 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-003: Internal Audit作成フォームが開く
     /// 要件: Internal Auditの作成機能
     func testInternalAuditCreationFormOpens() throws {
-        guard navigateToInternalAudits() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装")
             throw TestError.failedPrecondition("Internal Audit機能は未実装")
         }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // 新規作成ボタンをクリック（ツールバーボタンの重複対策でfirstMatch使用）
         let newButton = app.buttons["NewInternalAuditButton"].firstMatch
@@ -90,7 +98,30 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// 要件: Active / Suspended / Inactive の3状態
     /// 参照: docs/ui/07_audit_team.md - Status: 🟢 Active / 🟡 Suspended / ⚫ Inactive
     func testAuditStatusDisplay() throws {
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
+            XCTFail("Internal Audit詳細への遷移に失敗")
+            throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
+        }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("Internal Audit詳細への遷移に失敗")
+            throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit詳細への遷移に失敗")
             throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
         }
@@ -115,10 +146,14 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-005: Internal Audit詳細画面が表示される
     /// 要件: Audit Rules一覧を含む詳細画面
     func testInternalAuditDetailView() throws {
-        guard navigateToInternalAudits() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit機能は未実装")
             throw TestError.failedPrecondition("Internal Audit機能は未実装")
         }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // Audit行をクリック
         let auditRow = app.descendants(matching: .any)
@@ -147,7 +182,30 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-006: Audit Rules一覧が表示される
     /// 要件: Internal Audit内のAudit Rule一覧
     func testAuditRulesListDisplay() throws {
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
+            XCTFail("Internal Audit詳細への遷移に失敗")
+            throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
+        }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("Internal Audit詳細への遷移に失敗")
+            throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit詳細への遷移に失敗")
             throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
         }
@@ -169,7 +227,30 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-007: Audit Rule作成フォームが開く
     /// 要件: トリガー + ワークフロー + エージェント割り当て
     func testAuditRuleCreationFormOpens() throws {
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
+            XCTFail("Internal Audit詳細への遷移に失敗")
+            throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
+        }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("Internal Audit詳細への遷移に失敗")
+            throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
             XCTFail("Internal Audit詳細への遷移に失敗")
             throw TestError.failedPrecondition("Internal Audit詳細への遷移に失敗")
         }
@@ -197,16 +278,51 @@ final class InternalAuditTests: InternalAuditUITestCase {
         XCTAssertTrue(triggerPicker.exists, "TriggerTypePicker should exist")
 
         let templatePicker = app.popUpButtons["WorkflowTemplatePicker"]
-        XCTAssertTrue(templatePicker.exists, "WorkflowTemplatePicker should exist")
+        if !templatePicker.exists {
+            XCTFail("WorkflowTemplatePickerは未実装")
+            return
+        }
     }
 
     /// TS-AUD-008: トリガー種別が選択できる
     /// 要件: task_completed, status_changed, handoff_completed, deadline_exceeded
     func testTriggerTypeSelection() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
             XCTFail("Audit Rule編集画面を開けません")
             throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
         }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+
+        // 新規ルールボタンをクリックしてAudit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // トリガーピッカーをクリック
         let triggerPicker = app.popUpButtons["TriggerTypePicker"]
@@ -230,15 +346,47 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-009: ワークフローテンプレートが選択できる
     /// 要件: 既存のワークフローテンプレートから選択
     func testWorkflowTemplateSelection() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
             XCTFail("Audit Rule編集画面を開けません")
             throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
         }
 
+        // 新規ルールボタンをクリックしてAudit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
         // テンプレートピッカーをクリック
         let templatePicker = app.popUpButtons["WorkflowTemplatePicker"]
         guard templatePicker.waitForExistence(timeout: 3) else {
-            XCTFail("WorkflowTemplatePicker not found")
+            XCTFail("WorkflowTemplatePickerは未実装")
             return
         }
         templatePicker.click()
@@ -254,15 +402,47 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// 要件: ワークフローの各タスクにエージェントを割り当て
     /// 参照: docs/ui/07_audit_team.md - TaskAgentPicker_{taskOrder}
     func testTaskAgentAssignmentDisplay() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
             XCTFail("Audit Rule編集画面を開けません")
             throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
         }
 
+        // 新規ルールボタンをクリックしてAudit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            XCTFail("Audit Rule編集画面を開けません")
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
         // テンプレートピッカーをクリック
         let templatePicker = app.popUpButtons["WorkflowTemplatePicker"]
         guard templatePicker.waitForExistence(timeout: 3) else {
-            XCTFail("WorkflowTemplatePicker not found")
+            XCTFail("WorkflowTemplatePickerは未実装")
             return
         }
         templatePicker.click()
@@ -299,8 +479,28 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-011: タスクロック機能のUI要素が表示される
     /// 要件: 監査エージェントによるタスクのロック機能
     func testTaskLockFunction() throws {
-        // Internal Audit詳細画面に移動
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
+            throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
+        }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
             throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
         }
 
@@ -333,8 +533,28 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-012: エージェントロック機能のUI要素が表示される
     /// 要件: 監査エージェントによるエージェントのロック機能
     func testAgentLockFunction() throws {
-        // Internal Audit詳細画面に移動
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
+            throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
+        }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
             throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
         }
 
@@ -359,8 +579,28 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-013: ロック解除UIが監査詳細画面に表示される
     /// 要件: ロックの解除権限は監査エージェントのみ
     func testOnlyAuditAgentCanUnlock() throws {
-        // Internal Audit詳細画面に移動
-        guard navigateToAuditDetail() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
+            throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
+        }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
             throw TestError.failedPrecondition("Internal Audit詳細画面に移動できませんでした")
         }
 
@@ -394,9 +634,38 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-014: Audit Ruleトリガータイプの選択肢が表示される
     /// 要件: AUDIT.md - TriggerType: taskCompleted, statusChanged, handoffCompleted, deadlineExceeded
     func testTriggerTypeOptionsDisplay() throws {
-        guard openAuditRuleEditView() else {
+        // Internal Auditsナビゲーションに移動
+        let auditsNavItem = app.staticTexts["Internal Audits"]
+        guard auditsNavItem.waitForExistence(timeout: 5) else {
             throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
         }
+        auditsNavItem.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Audit行をクリックして詳細画面に移動
+        let auditRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
+            .firstMatch
+        guard auditRow.waitForExistence(timeout: 5) else {
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        auditRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が表示されるのを待つ
+        let detailView = app.descendants(matching: .any)
+            .matching(identifier: "InternalAuditDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 5) else {
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+
+        // 新規ルールボタンをクリックしてAudit Rule編集画面を開く
+        let newRuleButton = app.buttons["NewAuditRuleButton"]
+        guard newRuleButton.waitForExistence(timeout: 3) else {
+            throw TestError.failedPrecondition("Audit Rule編集画面を開けません")
+        }
+        newRuleButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         // トリガータイプピッカーが存在
         let triggerTypePicker = app.popUpButtons["TriggerTypePicker"]
@@ -426,8 +695,32 @@ final class InternalAuditTests: InternalAuditUITestCase {
     ///   2. inProgressのタスクを完了（done）に変更
     ///   3. Audit Ruleトリガーが発火し、新規タスクが生成されることを確認
     func testTaskCompletionTriggerFiresAuditRule() throws {
-        // トリガーテストプロジェクトに移動
-        guard navigateToTriggerTestProject() else {
+        // サイドバーでトリガーテストプロジェクトを探す
+        let projectNav = app.staticTexts["トリガーテストPJ"]
+        var projectFound = false
+        if projectNav.waitForExistence(timeout: 5) {
+            projectNav.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            let taskBoard = app.descendants(matching: .any)
+                .matching(identifier: "TaskBoard").firstMatch
+            projectFound = taskBoard.waitForExistence(timeout: 5)
+        }
+
+        // サイドバーで見つからない場合はプロジェクトリストから探す
+        if !projectFound {
+            let projectRow = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier == 'ProjectRow_uitest_trigger_project'"))
+                .firstMatch
+            if projectRow.waitForExistence(timeout: 5) {
+                projectRow.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                let taskBoard = app.descendants(matching: .any)
+                    .matching(identifier: "TaskBoard").firstMatch
+                projectFound = taskBoard.waitForExistence(timeout: 5)
+            }
+        }
+
+        guard projectFound else {
             throw TestError.failedPrecondition("トリガーテストプロジェクトに移動できませんでした")
         }
 
@@ -479,8 +772,32 @@ final class InternalAuditTests: InternalAuditUITestCase {
     /// TS-AUD-016: ロック中タスクのステータス変更禁止確認
     /// 要件: AUDIT.md - ロック中のタスクは状態変更を禁止
     func testLockedTaskCannotChangeStatus() throws {
-        // トリガーテストプロジェクトに移動（ロック済みタスクが含まれる）
-        guard navigateToTriggerTestProject() else {
+        // サイドバーでトリガーテストプロジェクトを探す
+        let projectNav = app.staticTexts["トリガーテストPJ"]
+        var projectFound = false
+        if projectNav.waitForExistence(timeout: 5) {
+            projectNav.click()
+            Thread.sleep(forTimeInterval: 0.5)
+            let taskBoard = app.descendants(matching: .any)
+                .matching(identifier: "TaskBoard").firstMatch
+            projectFound = taskBoard.waitForExistence(timeout: 5)
+        }
+
+        // サイドバーで見つからない場合はプロジェクトリストから探す
+        if !projectFound {
+            let projectRow = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier == 'ProjectRow_uitest_trigger_project'"))
+                .firstMatch
+            if projectRow.waitForExistence(timeout: 5) {
+                projectRow.click()
+                Thread.sleep(forTimeInterval: 0.5)
+                let taskBoard = app.descendants(matching: .any)
+                    .matching(identifier: "TaskBoard").firstMatch
+                projectFound = taskBoard.waitForExistence(timeout: 5)
+            }
+        }
+
+        guard projectFound else {
             throw TestError.failedPrecondition("トリガーテストプロジェクトに移動できませんでした")
         }
 
@@ -555,84 +872,6 @@ final class InternalAuditTests: InternalAuditUITestCase {
         )
     }
 
-    // MARK: - Helper Methods
-
-    /// Internal Auditsナビゲーションに移動
-    @discardableResult
-    private func navigateToInternalAudits() -> Bool {
-        let auditsNavItem = app.staticTexts["Internal Audits"]
-        if auditsNavItem.waitForExistence(timeout: 5) {
-            auditsNavItem.click()
-            Thread.sleep(forTimeInterval: 0.5)
-            return true
-        }
-        return false
-    }
-
-    /// Internal Audit詳細画面に移動
-    @discardableResult
-    private func navigateToAuditDetail() -> Bool {
-        guard navigateToInternalAudits() else { return false }
-
-        let auditRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'InternalAuditRow_'"))
-            .firstMatch
-
-        guard auditRow.waitForExistence(timeout: 5) else { return false }
-        auditRow.click()
-        Thread.sleep(forTimeInterval: 1.0)
-
-        // Wait for detail view to load
-        let detailView = app.descendants(matching: .any)
-            .matching(identifier: "InternalAuditDetailView").firstMatch
-        return detailView.waitForExistence(timeout: 5)
-    }
-
-    /// Audit Rule編集画面を開く
-    @discardableResult
-    private func openAuditRuleEditView() -> Bool {
-        guard navigateToAuditDetail() else { return false }
-
-        let newRuleButton = app.buttons["NewAuditRuleButton"]
-        if newRuleButton.waitForExistence(timeout: 3) {
-            newRuleButton.click()
-            Thread.sleep(forTimeInterval: 0.5)
-            return true
-        }
-        return false
-    }
-
-    /// トリガーテストプロジェクトに移動
-    @discardableResult
-    private func navigateToTriggerTestProject() -> Bool {
-        // サイドバーでプロジェクトリストを探す
-        let projectNav = app.staticTexts["トリガーテストPJ"]
-        if projectNav.waitForExistence(timeout: 5) {
-            projectNav.click()
-            Thread.sleep(forTimeInterval: 0.5)
-
-            // タスクボードが表示されるまで待機（識別子は "TaskBoard"）
-            let taskBoard = app.descendants(matching: .any)
-                .matching(identifier: "TaskBoard").firstMatch
-            return taskBoard.waitForExistence(timeout: 5)
-        }
-
-        // プロジェクトリストから探す場合
-        let projectRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier == 'ProjectRow_uitest_trigger_project'"))
-            .firstMatch
-
-        if projectRow.waitForExistence(timeout: 5) {
-            projectRow.click()
-            Thread.sleep(forTimeInterval: 0.5)
-
-            let taskBoard = app.descendants(matching: .any)
-                .matching(identifier: "TaskBoard").firstMatch
-            return taskBoard.waitForExistence(timeout: 5)
-        }
-
-        return false
-    }
 }
 
 // MARK: - Audit Team Tests (Legacy - 後方互換性)

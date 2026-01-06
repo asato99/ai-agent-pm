@@ -12,8 +12,9 @@ import XCTest
 
 final class TaskDetailTests: BasicDataUITestCase {
 
-    /// ヘルパー: プロジェクトを選択してタスクを開く
-    private func openTaskDetail() throws {
+    /// TS-04-001: タスク詳細画面構成確認
+    /// 検証内容: タスク詳細ビュー（TaskDetailView）、Detailsセクション、ステータスバッジ、優先度バッジの存在確認
+    func testTaskDetailStructure() throws {
         // プロジェクト選択
         let projectRow = app.staticTexts["テストプロジェクト"]
         XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
@@ -24,11 +25,6 @@ final class TaskDetailTests: BasicDataUITestCase {
         let firstCard = taskCards.firstMatch
         XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
         firstCard.click()
-    }
-
-    /// TS-04-001: タスク詳細画面構成確認
-    func testTaskDetailStructure() throws {
-        try openTaskDetail()
 
         // タスク詳細ビューの存在確認
         let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
@@ -39,7 +35,6 @@ final class TaskDetailTests: BasicDataUITestCase {
         XCTAssertTrue(detailsHeader.exists, "Detailsセクションが表示されること")
 
         // ステータスバッジの確認 - ステータス名で検索
-        // SwiftUIのカスタムビュー内の識別子は公開されない場合があるため、テキストで確認
         // 要件: TaskStatusは backlog, todo, in_progress, blocked, done, cancelled のみ（inReviewは削除）
         let statusTexts = ["Backlog", "To Do", "In Progress", "Done", "Blocked", "Cancelled"]
         let hasStatusBadge = statusTexts.contains { app.staticTexts[$0].exists }
@@ -57,32 +52,50 @@ final class TaskDetailTests: BasicDataUITestCase {
         throw TestError.failedPrecondition("タブ形式UIは未実装 - 現在はスクロールビュー形式")
     }
 
-    /// TS-04-003: サブタスクセクション表示
-    /// 要件: TASKS.md - サブタスクは初期実装では不要
-    func testSubtaskSection() throws {
-        XCTFail("サブタスクは要件で「初期実装では不要」と定義されているためスキップ")
-        throw TestError.failedPrecondition("サブタスクは要件で「初期実装では不要」と定義されているためスキップ")
-    }
-
-    /// TS-04-004: コンテキスト追加機能
-    /// 期待結果: コンテキスト追加ボタンが存在する
+    /// TS-04-003: コンテキスト追加機能
+    /// 検証内容: コンテキストセクション（ContextSection）の表示と「Add Context」ボタンの存在確認
     func testContextAddButton() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
 
-        // まずコンテキストセクションを見つける（スクロールのため）
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
+
+        // コンテキストセクションを見つける
         let contextSection = app.descendants(matching: .any).matching(identifier: "ContextSection").firstMatch
         XCTAssertTrue(contextSection.waitForExistence(timeout: 5), "コンテキストセクションが表示されること")
 
-        // コンテキスト追加ボタンの存在確認（タイトルで検索）
+        // コンテキスト追加ボタンの存在確認
         let addContextButton = app.buttons["Add Context"]
         XCTAssertTrue(addContextButton.waitForExistence(timeout: 5), "コンテキスト追加ボタンが存在すること")
     }
 
-    /// TS-04-005: ハンドオフ作成機能
-    /// 注意: macOS SwiftUIのツールバーボタンはXCUITestに公開されないため、
-    ///       キーボードショートカット(⇧⌘H)で機能をテストする
+    /// TS-04-004: ハンドオフ作成機能
+    /// 検証内容: キーボードショートカット（⇧⌘H）でハンドオフシートが表示されることを確認
     func testHandoffCreateButton() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
 
         // キーボードショートカットでハンドオフシートを開く
         app.typeKey("h", modifierFlags: [.command, .shift])
@@ -92,11 +105,23 @@ final class TaskDetailTests: BasicDataUITestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "ハンドオフシートが表示されること（⇧⌘H経由）")
     }
 
-    /// TS-04-006: 編集ボタン存在確認
-    /// 注意: macOS SwiftUIのツールバーボタンはXCUITestに公開されないため、
-    ///       キーボードショートカット(⌘E)で機能をテストする
+    /// TS-04-005: 編集ボタン存在確認
+    /// 検証内容: キーボードショートカット（⌘E）で編集シートが表示されることを確認
     func testEditButtonExists() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
 
         // キーボードショートカットで編集シートを開く
         app.typeKey("e", modifierFlags: [.command])
@@ -106,14 +131,25 @@ final class TaskDetailTests: BasicDataUITestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "編集ショートカット(⌘E)が動作すること")
     }
 
-    /// TS-04-007: 編集モード画面（シート形式）
-    /// 期待結果: 編集シートにTask Informationセクション（Title, Description）と
-    ///           Detailsセクション（Priority, Assignee, Estimated Minutes）が表示される
+    /// TS-04-006: 編集モード画面
+    /// 検証内容: キーボードショートカット（⌘E）で編集シートを開き、「Task Information」セクション、「Details」セクション、Priority/Assigneeラベルの存在確認
     func testEditModeScreen() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
 
         // キーボードショートカットで編集シートを開く
-        // (macOS SwiftUIのツールバーボタンはXCUITestに公開されない)
         app.typeKey("e", modifierFlags: [.command])
 
         // シートが表示される
@@ -129,21 +165,34 @@ final class TaskDetailTests: BasicDataUITestCase {
         XCTAssertTrue(detailsSection.exists, "Detailsセクションが表示されること")
 
         // 編集フォームのフィールド存在確認
-        // Title, Priority, Assigneeのラベルがあればフォームは正しく表示されている
         let priorityLabel = app.staticTexts["Priority"]
         let assigneeLabel = app.staticTexts["Assignee"]
         XCTAssertTrue(priorityLabel.exists || assigneeLabel.exists, "編集フォームのフィールドが表示されること")
     }
 
-    /// TS-04-008: ステータス変更ピッカー
+    /// TS-04-007: ステータス変更ピッカー
+    /// 検証内容: Detailsセクション、Statusラベル、ステータスピッカー（popUpButton）の存在確認
     func testStatusChangePicker() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
 
         // 「Details」セクションが表示されることを確認
         let detailsSection = app.staticTexts["Details"]
         XCTAssertTrue(detailsSection.waitForExistence(timeout: 5), "Detailsセクションが表示されること")
 
-        // 「Status」ラベルの存在確認（LabeledContentのラベル）
+        // 「Status」ラベルの存在確認
         let statusLabel = app.staticTexts["Status"]
         XCTAssertTrue(statusLabel.waitForExistence(timeout: 3), "Statusラベルが存在すること")
 
@@ -158,10 +207,23 @@ final class TaskDetailTests: BasicDataUITestCase {
         XCTAssertTrue(hasAnyStatus || statusPicker.exists, "ステータスピッカーにステータスオプションが含まれること")
     }
 
-    /// TS-04-009: 履歴セクション
-    /// 期待結果: 履歴セクションが表示される
+    /// TS-04-008: 履歴セクション
+    /// 検証内容: 履歴セクション（HistorySection）と「History」ヘッダーの存在確認
     func testHistoryEventList() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
 
         // 履歴セクションの存在確認
         let historySection = app.descendants(matching: .any).matching(identifier: "HistorySection").firstMatch
@@ -172,15 +234,29 @@ final class TaskDetailTests: BasicDataUITestCase {
         XCTAssertTrue(historyHeader.exists, "履歴ヘッダーが表示されること")
     }
 
-    /// TS-04-010: 履歴フィルター（未実装）
+    /// TS-04-009: 履歴フィルター（未実装）
     func testHistoryFilter() throws {
         XCTFail("履歴フィルターは未実装")
         throw TestError.failedPrecondition("履歴フィルターは未実装")
     }
 
-    /// TS-04-011: コンテキスト一覧表示
+    /// TS-04-010: コンテキスト一覧表示
+    /// 検証内容: コンテキストセクション（ContextSection）の存在確認。コンテキストがない場合は「No context saved yet」メッセージの確認
     func testContextListDisplay() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
 
         // コンテキストセクションの存在確認
         let contextSection = app.descendants(matching: .any).matching(identifier: "ContextSection").firstMatch
@@ -188,16 +264,28 @@ final class TaskDetailTests: BasicDataUITestCase {
 
         // コンテキストがない場合のメッセージ確認
         let noContextMessage = app.descendants(matching: .any).matching(identifier: "NoContextMessage").firstMatch
-        // コンテキストがなければメッセージが表示される
         if noContextMessage.exists {
             XCTAssertTrue(true, "「No context saved yet」メッセージが表示されること")
         }
     }
 
-    /// TS-04-012: ハンドオフ一覧表示
-    /// 期待結果: ハンドオフセクションが表示される
+    /// TS-04-011: ハンドオフ一覧表示
+    /// 検証内容: ハンドオフセクション（HandoffsSection）と「Handoffs」ヘッダーの存在確認
     func testHandoffListDisplay() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
 
         // ハンドオフセクションの存在確認
         let handoffsSection = app.descendants(matching: .any).matching(identifier: "HandoffsSection").firstMatch
@@ -208,10 +296,23 @@ final class TaskDetailTests: BasicDataUITestCase {
         XCTAssertTrue(handoffsHeader.exists, "ハンドオフヘッダーが表示されること")
     }
 
-    /// TS-04-013: 依存関係表示
-    /// 期待結果: 依存関係セクションが表示される
+    /// TS-04-012: 依存関係表示
+    /// 検証内容: 依存関係セクション（DependenciesSection）と「Dependencies」ヘッダーの存在確認
     func testDependencyDisplay() throws {
-        try openTaskDetail()
+        // プロジェクト選択
+        let projectRow = app.staticTexts["テストプロジェクト"]
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        projectRow.click()
+
+        // タスクカード選択
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'TaskCard_'"))
+        let firstCard = taskCards.firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5), "タスクが存在すること")
+        firstCard.click()
+
+        // タスク詳細ビューの存在確認
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5), "タスク詳細ビューが表示されること")
 
         // 依存関係セクションの存在確認
         let dependenciesSection = app.descendants(matching: .any).matching(identifier: "DependenciesSection").firstMatch
