@@ -30,6 +30,7 @@ public final class DependencyContainer: ObservableObject {
     public let templateTaskRepository: TemplateTaskRepository
     public let internalAuditRepository: InternalAuditRepository
     public let auditRuleRepository: AuditRuleRepository
+    public let executionLogRepository: ExecutionLogRepository
 
     // MARK: - Event Recorder
 
@@ -324,6 +325,12 @@ public final class DependencyContainer: ObservableObject {
         GetLockedAgentsUseCase(agentRepository: agentRepository)
     }()
 
+    // MARK: - Use Cases (Execution Log)
+
+    public lazy var getExecutionLogsUseCase: GetExecutionLogsUseCase = {
+        GetExecutionLogsUseCase(executionLogRepository: executionLogRepository)
+    }()
+
     // MARK: - Use Cases (Audit Triggers)
 
     public lazy var fireAuditRuleUseCase: FireAuditRuleUseCase = {
@@ -358,6 +365,7 @@ public final class DependencyContainer: ObservableObject {
         self.templateTaskRepository = TemplateTaskRepository(database: database)
         self.internalAuditRepository = InternalAuditRepository(database: database)
         self.auditRuleRepository = AuditRuleRepository(database: database)
+        self.executionLogRepository = ExecutionLogRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
         self.kickService = ClaudeCodeKickService()
     }

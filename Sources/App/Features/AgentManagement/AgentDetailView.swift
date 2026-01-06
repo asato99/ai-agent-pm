@@ -15,7 +15,10 @@ struct AgentDetailView: View {
     @State private var agent: Agent?
     @State private var tasks: [Task] = []
     @State private var sessions: [Session] = []
+    @State private var executionLogs: [ExecutionLog] = []
     @State private var isLoading = false
+    @State private var isPasskeyVisible = false
+    @State private var showRegenerateConfirmation = false
 
     var body: some View {
         Group {
@@ -32,8 +35,18 @@ struct AgentDetailView: View {
 
                         Divider()
 
+                        // Passkey (Phase 3-4)
+                        passkeySection(agent)
+
+                        Divider()
+
                         // Assigned Tasks
                         tasksSection
+
+                        Divider()
+
+                        // Execution Logs (Phase 3-4)
+                        executionLogsSection
 
                         Divider()
 
@@ -153,6 +166,122 @@ struct AgentDetailView: View {
         }
     }
 
+    // MARK: - Passkey Section (Phase 3-4)
+
+    @ViewBuilder
+    private func passkeySection(_ agent: Agent) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Passkey")
+                .font(.headline)
+                .accessibilityIdentifier("PasskeyHeader")
+
+            if agent.authLevel == .level0 {
+                Text("This agent uses Level 0 authentication (no passkey required)")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("PasskeyNotRequired")
+            } else {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Auth Level: \(agent.authLevel.displayName)")
+                            .font(.subheadline)
+                            .accessibilityIdentifier("AuthLevelDisplay")
+
+                        if let passkey = agent.passkey {
+                            HStack {
+                                if isPasskeyVisible {
+                                    Text(passkey)
+                                        .font(.system(.body, design: .monospaced))
+                                        .textSelection(.enabled)
+                                } else {
+                                    Text(String(repeating: "•", count: min(passkey.count, 16)))
+                                        .font(.system(.body, design: .monospaced))
+                                }
+                            }
+                            .accessibilityIdentifier("PasskeyDisplay")
+                        } else {
+                            Text("No passkey set")
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("NoPasskeyMessage")
+                        }
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        Button {
+                            isPasskeyVisible.toggle()
+                        } label: {
+                            Image(systemName: isPasskeyVisible ? "eye.slash" : "eye")
+                        }
+                        .accessibilityIdentifier("ShowPasskeyButton")
+                        .help(isPasskeyVisible ? "Hide Passkey" : "Show Passkey")
+
+                        Button {
+                            showRegenerateConfirmation = true
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .accessibilityIdentifier("RegeneratePasskeyButton")
+                        .help("Regenerate Passkey")
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("PasskeySection")
+        .alert("Regenerate Passkey?", isPresented: $showRegenerateConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Regenerate", role: .destructive) {
+                regeneratePasskey()
+            }
+            .accessibilityIdentifier("ConfirmButton")
+        } message: {
+            Text("This will invalidate the current passkey. Any existing Runner configurations will need to be updated.")
+        }
+    }
+
+    private func regeneratePasskey() {
+        AsyncTask {
+            do {
+                // パスキーを再生成
+                let newPasskey = UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(32)
+                var updatedAgent = agent!
+                updatedAgent.passkey = String(newPasskey)
+                updatedAgent.updatedAt = Date()
+
+                try container.agentRepository.save(updatedAgent)
+                agent = updatedAgent
+
+                router.showAlert(.info(title: "Success", message: "Passkey updated"))
+            } catch {
+                router.showAlert(.error(message: error.localizedDescription))
+            }
+        }
+    }
+
+    // MARK: - Execution Logs Section (Phase 3-4)
+
+    private var executionLogsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Execution History")
+                .font(.headline)
+                .accessibilityIdentifier("ExecutionHistoryHeader")
+
+            if executionLogs.isEmpty {
+                Text("No execution logs yet")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("NoExecutionLogsMessage")
+            } else {
+                ForEach(executionLogs.prefix(10), id: \.id) { log in
+                    ExecutionLogRow(log: log)
+                        .accessibilityIdentifier("ExecutionLog_\(log.id.value)")
+                }
+            }
+        }
+        .accessibilityIdentifier("ExecutionLogsSection")
+    }
+
     private func loadData() async {
         isLoading = true
         defer { isLoading = false }
@@ -161,9 +290,79 @@ struct AgentDetailView: View {
             agent = try container.getAgentProfileUseCase.execute(agentId: agentId)
             tasks = try container.getTasksByAssigneeUseCase.execute(assigneeId: agentId)
             sessions = try container.getAgentSessionsUseCase.execute(agentId: agentId)
+            executionLogs = try container.getExecutionLogsUseCase.executeByAgentId(agentId)
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }
+    }
+}
+
+// MARK: - ExecutionLogRow (Phase 3-4)
+
+struct ExecutionLogRow: View {
+    let log: ExecutionLog
+
+    var statusColor: Color {
+        switch log.status {
+        case .running: return .orange
+        case .completed: return .green
+        case .failed: return .red
+        }
+    }
+
+    var statusIcon: String {
+        switch log.status {
+        case .running: return "arrow.triangle.2.circlepath"
+        case .completed: return "checkmark.circle.fill"
+        case .failed: return "xmark.circle.fill"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: statusIcon)
+                .foregroundStyle(statusColor)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text("Task: \(log.taskId.value)")
+                        .font(.subheadline)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text(log.status.rawValue.capitalized)
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(statusColor.opacity(0.15))
+                        .foregroundStyle(statusColor)
+                        .clipShape(Capsule())
+                }
+
+                HStack {
+                    Text(log.startedAt, style: .date)
+                    Text(log.startedAt, style: .time)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let duration = log.durationSeconds {
+                    Text("Duration: \(String(format: "%.1f", duration))s")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = log.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

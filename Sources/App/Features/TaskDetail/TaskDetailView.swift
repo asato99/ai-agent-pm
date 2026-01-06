@@ -24,6 +24,7 @@ struct TaskDetailView: View {
     @State private var dependentTasks: [Task] = []
     @State private var handoffs: [Handoff] = []
     @State private var historyEvents: [StateChangeEvent] = []
+    @State private var executionLogs: [ExecutionLog] = []
     @State private var assignee: Agent?
     @State private var isLoading = false
 
@@ -60,6 +61,11 @@ struct TaskDetailView: View {
 
                         // Handoffs
                         handoffsSection
+
+                        Divider()
+
+                        // Execution History (Phase 3-4)
+                        executionHistorySection
 
                         Divider()
 
@@ -376,6 +382,29 @@ struct TaskDetailView: View {
         .accessibilityIdentifier("HandoffsSection")
     }
 
+    // MARK: - Execution History Section (Phase 3-4)
+
+    private var executionHistorySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Execution History")
+                .font(.headline)
+                .accessibilityIdentifier("ExecutionHistoryHeader")
+
+            if executionLogs.isEmpty {
+                Text("No execution logs yet")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("NoExecutionLogsMessage")
+            } else {
+                ForEach(executionLogs, id: \.id) { log in
+                    TaskExecutionLogRow(log: log)
+                        .accessibilityIdentifier("ExecutionLog_\(log.id.value)")
+                }
+            }
+        }
+        .accessibilityIdentifier("ExecutionHistorySection")
+    }
+
     private var historySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("History")
@@ -453,6 +482,9 @@ struct TaskDetailView: View {
                 type: .task,
                 id: taskId.value
             )
+
+            // Load execution logs for this task (Phase 3-4)
+            executionLogs = try container.getExecutionLogsUseCase.executeByTaskId(taskId)
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }
@@ -691,5 +723,108 @@ struct HistoryEventRow: View {
             Spacer()
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - TaskExecutionLogRow (Phase 3-4)
+
+struct TaskExecutionLogRow: View {
+    let log: ExecutionLog
+
+    var statusColor: Color {
+        switch log.status {
+        case .running: return .orange
+        case .completed: return .green
+        case .failed: return .red
+        }
+    }
+
+    var statusIcon: String {
+        switch log.status {
+        case .running: return "arrow.triangle.2.circlepath"
+        case .completed: return "checkmark.circle.fill"
+        case .failed: return "xmark.circle.fill"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: statusIcon)
+                    .foregroundStyle(statusColor)
+                    .font(.title3)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("Agent: \(log.agentId.value)")
+                            .font(.subheadline)
+                            .lineLimit(1)
+
+                        Spacer()
+
+                        Text(log.status.rawValue.capitalized)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(statusColor.opacity(0.15))
+                            .foregroundStyle(statusColor)
+                            .clipShape(Capsule())
+                    }
+
+                    HStack {
+                        Text(log.startedAt, style: .date)
+                        Text(log.startedAt, style: .time)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            if let duration = log.durationSeconds {
+                HStack {
+                    Image(systemName: "clock")
+                        .foregroundStyle(.secondary)
+                    Text("Duration: \(String(format: "%.1f", duration))s")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let exitCode = log.exitCode {
+                HStack {
+                    Image(systemName: exitCode == 0 ? "checkmark.seal" : "xmark.seal")
+                        .foregroundStyle(exitCode == 0 ? .green : .red)
+                    Text("Exit Code: \(exitCode)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let logPath = log.logFilePath {
+                HStack {
+                    Image(systemName: "doc.text")
+                        .foregroundStyle(.secondary)
+                    Text(logPath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .accessibilityIdentifier("LogFilePath_\(log.id.value)")
+            }
+
+            if let error = log.errorMessage {
+                HStack(alignment: .top) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(3)
+                }
+            }
+        }
+        .padding()
+        .background(.background.secondary)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
