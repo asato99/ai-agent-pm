@@ -104,491 +104,554 @@ AI（Claude Code, Gemini等）や人間を区別なく扱う抽象概念。
 
 ---
 
-## 活動のキック
+## タスク実行アーキテクチャ
 
 ### 概要
-タスクのステータスが `in_progress` に変更されたタイミングで、
-アサインされたエージェントの実行を開始させる仕組み。
 
-### トリガー条件
-```
-タスクステータス変更: * → in_progress
-  ↓
-assigneeId が設定されている
-  ↓
-エージェントのキック（プロンプトにID情報を含める）
-```
+タスクの実行は **プル型** で設計されています。
 
-### キック時の情報共有
-
-**重要**: キック時のプロンプトに必要なID情報を含め、LLM（Claude Code）がMCPツール呼び出し時に引数として渡す。
+- **アプリの責務**: タスクのステータス管理のみ（CLI実行は行わない）
+- **Runner の責務**: MCP経由でタスクを検知し、CLI（Claude/Gemini等）を実行
 
 ```
-┌─────────────┐                    ┌──────────────┐                    ┌─────────────┐
-│  PMアプリ   │ ─プロンプトに─────▶│ Claude Code  │ ─引数として────────▶│ MCPサーバー │
-│             │  ID情報を含める    │   (LLM)      │  IDを渡す          │ (ステートレス)│
-└─────────────┘                    └──────────────┘                    └─────────────┘
+┌─────────────────────┐         ┌─────────────────────┐
+│       アプリ         │         │  Runner（外部）      │
+│                     │         │   ユーザーが実装     │
+│  Task → in_progress │         │                     │
+│         ↓           │         │    ┌─────────────┐  │
+│    DB に保存         │         │    │ ポーリング   │  │
+│                     │         │    │  ループ     │  │
+└─────────────────────┘         │    └──────┬──────┘  │
+                                │           │         │
+┌─────────────────────┐         │           ▼         │
+│    MCPサーバー       │◀────────│  get_pending_tasks  │
+│                     │         │           │         │
+│  認証 + タスク取得   │────────▶│    タスク取得        │
+│                     │         │           │         │
+└─────────────────────┘         │           ▼         │
+                                │    CLI実行          │
+                                │    (claude/gemini)  │
+                                │           │         │
+                                │           ▼         │
+                                │  update_task_status │
+                                └─────────────────────┘
 ```
 
-### キック時のプロンプト例
+### 設計原則
 
-```markdown
-# Task: 機能実装
+| 原則 | 説明 |
+|------|------|
+| 疎結合 | アプリと Runner は完全に分離 |
+| 外部化 | CLI実行ロジックはアプリに含まない |
+| 1 Runner = 1 Agent | Runner はエージェント単位で起動 |
+| MCP経由 | 通信は全て MCP ツール経由 |
+
+---
+
+## Runner アーキテクチャ
+
+### 概要
+
+Runner はユーザーが実装・管理する外部プログラムです。
+アプリはサンプル実装を提供しますが、実際の Runner はユーザーに委ねられます。
+
+### Runner の責務
+
+| 責務 | 説明 |
+|------|------|
+| 認証 | MCP経由で agent_id + passkey を使ってセッション取得 |
+| タスク監視 | 定期的に `get_pending_tasks` でポーリング |
+| CLI実行 | タスク検知時に Claude/Gemini 等を起動 |
+| ステータス更新 | 完了時に `update_task_status` を呼び出し |
+
+### 認証フロー
+
+```
+[Runner起動時]
+    │
+    └─ authenticate(agent_id, passkey)
+           │
+           ▼
+    [MCPサーバー]
+           │
+           ├─ Passkey検証（ハッシュ比較）
+           │
+           └─ セッショントークン発行（有効期限付き）
+                   │
+                   ▼
+              session_token（1時間有効）
+
+[タスク取得時]
+    │
+    └─ get_pending_tasks(session_token)
+           │
+           ├─ トークン検証
+           └─ そのエージェントに割り当てられたタスクのみ返却
+```
+
+### セッション管理
+
+```swift
+struct AgentSession {
+    let token: String              // UUID
+    let agentId: AgentID
+    let expiresAt: Date            // 1時間後
+    let createdAt: Date
+}
+```
+
+- セッショントークンは1時間で期限切れ
+- 期限切れ時は再認証が必要
+- Runner は `ensure_authenticated()` で自動再認証
+
+### Runner 設定
+
+```bash
+# 環境変数で認証情報を渡す
+export AGENT_ID="agt_xxx"
+export AGENT_PASSKEY="secret123"
+./runner
+```
+
+または設定ファイル:
+
+```yaml
+# runner_config.yaml
+agent_id: agt_xxx
+passkey: secret123
+polling_interval: 5  # 秒
+```
+
+### サンプル Runner（Python）
+
+```python
+#!/usr/bin/env python3
+# sample_runner.py
+
+import os
+import time
+import subprocess
+
+class AgentRunner:
+    def __init__(self):
+        self.agent_id = os.environ["AGENT_ID"]
+        self.passkey = os.environ["AGENT_PASSKEY"]
+        self.session_token = None
+        self.mcp_client = MCPClient()
+
+    def authenticate(self):
+        result = self.mcp_client.call("authenticate", {
+            "agent_id": self.agent_id,
+            "passkey": self.passkey
+        })
+        if result["success"]:
+            self.session_token = result["session_token"]
+        else:
+            raise Exception("Authentication failed")
+
+    def ensure_authenticated(self):
+        if self.session_token is None or self.is_expired():
+            self.authenticate()
+
+    def get_pending_tasks(self):
+        self.ensure_authenticated()
+        result = self.mcp_client.call("get_pending_tasks", {
+            "session_token": self.session_token
+        })
+        return result.get("tasks", [])
+
+    def execute_task(self, task):
+        prompt = self.build_prompt(task)
+        # Claude CLI を実行
+        subprocess.run([
+            "claude", "--dangerously-skip-permissions",
+            "-p", prompt
+        ], cwd=task["workingDirectory"])
+
+    def build_prompt(self, task):
+        return f"""# Task: {task["title"]}
 
 ## Identification
-- Task ID: task_abc123
-- Project ID: proj_xyz789
-- Agent ID: agt_dev001
-- Agent Name: frontend-dev
+- Task ID: {task["taskId"]}
+- Project ID: {task["projectId"]}
+- Agent ID: {self.agent_id}
 
 ## Description
-ログイン画面のUIを実装する
+{task["description"]}
 
 ## Working Directory
-Path: /Users/xxx/projects/myproject
-IMPORTANT: Create any output files within this directory.
+Path: {task["workingDirectory"]}
 
 ## Instructions
 1. Complete the task as described above
 2. When done, update the task status using:
-   update_task_status(task_id="task_abc123", status="done")
-3. If handing off to another agent, use:
-   create_handoff(task_id="task_abc123", from_agent_id="agt_dev001", ...)
+   update_task_status(task_id="{task["taskId"]}", status="done")
+"""
+
+    def run(self):
+        while True:
+            try:
+                tasks = self.get_pending_tasks()
+                for task in tasks:
+                    self.execute_task(task)
+            except Exception as e:
+                print(f"Error: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    runner = AgentRunner()
+    runner.run()
 ```
 
-### プロンプトに含める情報
+### サンプル Runner（Bash）
 
-| 情報 | 必須 | 用途 |
-|------|------|------|
-| Task ID | ○ | ステータス更新、コンテキスト保存で使用 |
-| Project ID | ○ | プロジェクト関連操作で使用 |
-| Agent ID | ○ | ハンドオフ作成、自己識別で使用 |
-| Agent Name | ○ | ログ、表示で使用 |
-| タスク詳細 | ○ | 作業内容の理解 |
-| Working Directory | △ | ファイル作成先の指示 |
+```bash
+#!/bin/bash
+# simple_runner.sh
 
-### 実装方式
+AGENT_ID="${AGENT_ID}"
+PASSKEY="${AGENT_PASSKEY}"
+POLL_INTERVAL=5
 
-| 方式 | 対象 | 実行コマンド例 |
-|------|------|---------------|
-| CLIヘッドレス起動 | Claude Code | `claude --dangerously-skip-permissions` + プロンプト |
-| CLIヘッドレス起動 | Gemini CLI | `gemini --yolo` + パイプでプロンプト |
-| カスタムコマンド | 任意 | エージェント設定で定義したコマンド |
-| 通知 | 人間 | メール/Slack/Webhook（将来） |
+# MCP認証（簡略版）
+authenticate() {
+    # 実際の実装では MCP クライアントを使用
+    SESSION_TOKEN=$(mcp-client authenticate "$AGENT_ID" "$PASSKEY")
+}
 
-**注意**: `--agent-id` のようなコマンドライン引数ではなく、プロンプト内にID情報を含める。
+# メインループ
+authenticate
+
+while true; do
+    TASKS=$(mcp-client get_pending_tasks "$SESSION_TOKEN")
+
+    for TASK in $TASKS; do
+        TASK_ID=$(echo "$TASK" | jq -r '.taskId')
+        PROMPT=$(mcp-client get_task_prompt "$TASK_ID")
+        WORKING_DIR=$(echo "$TASK" | jq -r '.workingDirectory')
+
+        cd "$WORKING_DIR"
+        echo "$PROMPT" | claude --dangerously-skip-permissions -p -
+    done
+
+    sleep $POLL_INTERVAL
+done
+```
 
 ---
 
-## AIエージェントの種別設定
+## アプリ側の設計
 
-### 概要
+### アプリの責務
 
-エージェントの種別（type）が「AI」の場合、追加でAI種別（aiType）を選択する。
-AI種別に応じて、適切なCLI起動処理が自動的に適用される。
+| やること | やらないこと |
+|---------|-------------|
+| エージェント作成・Passkey発行 | Runner の管理 |
+| タスクのステータス管理 | CLI の実行 |
+| MCP経由でタスク情報を提供 | Runner との直接通信 |
 
-### AI種別（aiType）
-
-| 種別 | 説明 | キック方式 |
-|------|------|-----------|
-| `claude` | Claude Code CLI | 自動設定（組み込み） |
-| `gemini` | Gemini CLI | 自動設定（組み込み） |
-| `custom` | カスタムコマンド | ユーザー定義 |
-
-### 種別ごとの動作
-
-#### Claude（組み込み）
-
-```bash
-# 自動生成されるコマンド
-source ~/.zshrc; source ~/.bashrc
-cd '{workingDirectory}'
-nohup claude --dangerously-skip-permissions \
-  [--system-prompt '{systemPrompt}'] \
-  -p "$(cat '{promptFile}')" \
-  > /tmp/uc001_claude_output.log 2>&1 &
-```
-
-| 設定項目 | 必須 | 説明 |
-|----------|------|------|
-| System Prompt | △ | Claude への追加指示 |
-
-#### Gemini（組み込み）
-
-```bash
-# 自動生成されるコマンド
-source ~/.zshrc; source ~/.bashrc
-cd '{workingDirectory}'
-cat '{promptFile}' | nohup gemini --yolo \
-  > /tmp/gemini_output.log 2>&1 &
-```
-
-| 設定項目 | 必須 | 説明 |
-|----------|------|------|
-| なし | - | 追加設定不要 |
-
-#### Custom（カスタム）
-
-ユーザーが任意のコマンドを定義。以下のプレースホルダーが使用可能：
-
-| プレースホルダー | 展開後の値 |
-|-----------------|-----------|
-| `$TASK_ID` / `${TASK_ID}` | タスクID |
-| `$PROJECT_ID` / `${PROJECT_ID}` | プロジェクトID |
-| `$AGENT_ID` / `${AGENT_ID}` | エージェントID |
-
-```bash
-# カスタムコマンド例
-cat /tmp/uc001_prompt_$TASK_ID.txt | my-custom-ai --execute
-```
-
-**注意**:
-- 作業ディレクトリへの `cd` は自動適用される
-- シェル設定（~/.zshrc等）は自動で読み込まれる
-- プロンプトファイルは `/tmp/uc001_prompt_{taskId}.txt` に自動作成される
-
-### UI設計
+### エージェント設定画面
 
 ```
-[エージェント作成/編集]
-│
+[エージェント設定]
 ├── 基本情報
 │   ├── 名前: [________]
-│   ├── 種別: [Human ▼] / [AI ▼]  ← AI選択時、下記が表示
+│   ├── 種別: [Human ▼] / [AI ▼]
 │   └── 役割: [Developer ▼]
 │
-├── AI設定 (種別=AI の場合のみ表示)
-│   ├── AI種別: [Claude ▼] / [Gemini ▼] / [Custom ▼]
-│   │
-│   ├── (Claude選択時)
-│   │   └── System Prompt: [________________]
-│   │                      (オプション)
-│   │
-│   ├── (Gemini選択時)
-│   │   └── (追加設定なし)
-│   │
-│   └── (Custom選択時)
-│       └── 実行コマンド: [________________]
-│                        プレースホルダー: $TASK_ID, $PROJECT_ID, $AGENT_ID
+├── 認証設定
+│   ├── エージェントID: agt_58d5015e-825（自動生成、表示のみ）
+│   ├── Passkey: ●●●●●●●● [表示] [再生成]
+│   └── ※ Passkey は Runner 設定に使用します
 │
 └── 詳細設定
     ├── 並列実行可能数: [1]
     └── ステータス: [Active ▼]
 ```
 
-### データモデル変更
+### データモデル
 
 ```swift
-// Agent エンティティの変更
 struct Agent {
-    // 既存フィールド
+    let id: AgentID
+    var name: String
     var type: AgentType           // .human / .ai
+    var hierarchyType: HierarchyType
+    var roleType: RoleType?
+    var role: String?
+    var status: AgentStatus
+    var maxConcurrentTasks: Int
 
-    // 新規フィールド（typeが.aiの場合のみ使用）
-    var aiType: AIType?           // .claude / .gemini / .custom
-
-    // 既存フィールド（aiTypeが.customの場合のみ使用）
-    var kickCommand: String?      // カスタムコマンド
-
-    // 既存フィールド（aiTypeが.claudeの場合に使用）
-    var systemPrompt: String?     // Claudeへのシステムプロンプト
+    // 認証関連
+    var passkeyHash: String?      // bcrypt でハッシュ化
 }
 
-enum AIType: String, Codable {
-    case claude = "claude"
-    case gemini = "gemini"
-    case custom = "custom"
+struct AgentCredential {
+    let agentId: AgentID
+    let passkeyHash: String        // bcrypt
+    let createdAt: Date
+    let lastUsedAt: Date?
 }
-```
-
-### マイグレーション
-
-既存データの移行ルール：
-
-| 既存の状態 | 移行後 |
-|-----------|--------|
-| kickMethod=cli, kickCommand=空 | aiType=claude |
-| kickMethod=cli, kickCommand=設定あり | aiType=custom |
-| kickMethod=none | aiType=nil（人間または未設定） |
-
-### エージェント管理画面での設定（更新）
-
-```
-[エージェント設定]
-├── 基本情報
-│   ├── 名前
-│   ├── 種別 (Human/AI)
-│   └── 役割
-├── AI設定 (AI選択時のみ)
-│   ├── AI種別 (Claude/Gemini/Custom)
-│   ├── System Prompt (Claude時)
-│   └── 実行コマンド (Custom時)
-├── 詳細設定
-│   ├── 並列実行可能数
-│   └── ステータス
-└── 認証設定
-    ├── エージェントID（自動生成）
-    └── パスキー（オプション）
 ```
 
 ---
 
-## キックサービスアーキテクチャ
+## MCP ツール（Runner 向け）
+
+### 認証
+
+```python
+# セッション開始
+authenticate(
+    agent_id: str,
+    passkey: str
+) -> {
+    "success": True,
+    "session_token": "sess_xxxxx",
+    "expires_in": 3600  # 秒
+}
+
+# 認証失敗時
+{
+    "success": False,
+    "error": "Invalid agent_id or passkey"
+}
+
+# セッション終了
+logout(
+    session_token: str
+) -> {
+    "success": True
+}
+```
+
+### タスク取得
+
+```python
+# 実行待ちタスクを取得
+get_pending_tasks(
+    session_token: str
+) -> {
+    "success": True,
+    "tasks": [
+        {
+            "taskId": "tsk_xxx",
+            "projectId": "prj_xxx",
+            "title": "機能実装",
+            "description": "ログイン画面のUIを実装する",
+            "priority": "high",
+            "workingDirectory": "/path/to/project"
+        }
+    ]
+}
+```
+
+### スコープ制限
+
+各エージェントは自分に関連する操作のみ可能：
+
+```python
+permissions = {
+    "get_pending_tasks": "own_tasks_only",
+    "update_task_status": "assigned_tasks_only",
+    "save_context": "own_tasks_only",
+    "create_handoff": "from_self_only"
+}
+```
+
+---
+
+## セキュリティ
+
+### 認証レベル
+
+| レベル | 認証方式 | 用途 |
+|--------|----------|------|
+| Level 0 | agent_id のみ | 開発/テスト環境 |
+| Level 1 | agent_id + passkey + session | 本番環境（推奨） |
+| Level 2 | + IP制限 + 監査ログ | セキュア環境（将来） |
+
+### セキュリティ対策
+
+| 対策 | 説明 | 優先度 |
+|------|------|--------|
+| Passkey ハッシュ保存 | bcrypt/argon2 で保存 | 必須 |
+| セッション有効期限 | 1時間で期限切れ | 必須 |
+| レート制限 | 認証失敗5回でロック | 推奨 |
+| 監査ログ | 全操作を記録 | 推奨 |
+| IP制限 | localhost のみ許可 | オプション |
+
+### 監査ログ
+
+```json
+{
+  "timestamp": "2025-01-06T10:30:00Z",
+  "agent_id": "agt_xxx",
+  "session_token": "sess_xxx",
+  "action": "get_pending_tasks",
+  "ip": "127.0.0.1",
+  "success": true
+}
+```
+
+---
+
+## 実行ログ管理
 
 ### 概要
 
-エージェントのキック（起動）処理は、AI種別に応じて適切な起動方式を選択するストラテジーパターンで実装する。
+タスク実行のログはアプリで管理します。
+Runner が MCP 経由でログファイルのパスを報告し、アプリがファイルを読み込んで表示します。
 
-### クラス構造
+### 設計方針
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    AgentKickServiceProtocol                         │
-│  ─ kick(agent:task:project:) -> AgentKickResult                    │
-└─────────────────────────────────────────────────────────────────────┘
-                                  △
-                                  │ implements
-┌─────────────────────────────────────────────────────────────────────┐
-│                      AIAgentKickService                             │
-│  ─ Main orchestrator for agent kicks                               │
-│  ─ Routes to appropriate strategy based on aiType                  │
-│  ─ Handles common logic (prompt building, validation)              │
-├─────────────────────────────────────────────────────────────────────┤
-│  + kick(agent:task:project:) -> AgentKickResult                    │
-│  - buildPrompt(task:agent:project:) -> String                      │
-│  - selectStrategy(for aiType:) -> KickStrategyProtocol             │
-└─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  │ uses
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      KickStrategyProtocol                           │
-│  ─ Strategy interface for CLI launching                            │
-├─────────────────────────────────────────────────────────────────────┤
-│  + launch(workingDir:promptFile:agent:) async throws -> Int        │
-│  + cliName: String { get }                                         │
-└─────────────────────────────────────────────────────────────────────┘
-          △                       △                       △
-          │                       │                       │
-┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-│ ClaudeKickStrategy│   │ GeminiKickStrategy│   │ CustomKickStrategy│
-├─────────────────┤   ├─────────────────┤   ├─────────────────┤
-│ cliName: "claude" │   │ cliName: "gemini" │   │ cliName: "custom" │
-│                 │   │                 │   │                 │
-│ ─ findCLI()     │   │ ─ findCLI()     │   │ ─ expandCommand()│
-│ ─ buildCommand()│   │ ─ buildCommand()│   │                 │
-└─────────────────┘   └─────────────────┘   └─────────────────┘
-```
-
-### ファイル構成
+| 項目 | 保存先 | 理由 |
+|------|--------|------|
+| メタデータ | DB | 小さい、検索可能、一覧表示用 |
+| ログ内容 | ファイル | 大きい（数KB〜数MB）、DB 肥大化を防ぐ |
 
 ```
-Sources/
-├── Domain/
-│   └── Services/
-│       ├── AgentKickServiceProtocol.swift  # プロトコル定義（既存）
-│       ├── KickStrategyProtocol.swift      # ストラテジープロトコル（新規）
-│       └── KickLogger.swift                 # ロギング（既存）
+[DB]
+  └─ execution_logs テーブル
+      ├─ id, task_id, agent_id
+      ├─ started_at, completed_at
+      ├─ exit_code, status
+      └─ log_file_path  ← ファイルパスのみ
+
+[ファイルシステム]
+  └─ ~/Library/Application Support/AIAgentPM/logs/
+      └─ tsk_xxx/
+          └─ exec_20250106_103000.log  ← 実際のログ内容
+```
+
+### Runner の責務
+
+```python
+import os
+import subprocess
+from datetime import datetime
+
+# ログディレクトリ
+LOG_BASE = os.path.expanduser(
+    "~/Library/Application Support/AIAgentPM/logs"
+)
+
+def execute_task(task, session_token):
+    task_id = task["taskId"]
+
+    # ログファイルパス
+    log_dir = f"{LOG_BASE}/{task_id}"
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = f"{log_dir}/exec_{timestamp}.log"
+
+    # 実行開始を報告
+    start_result = mcp.call("report_execution_start", {
+        "session_token": session_token,
+        "task_id": task_id
+    })
+    execution_id = start_result["execution_id"]
+
+    # CLI 実行（出力をファイルにリダイレクト）
+    start_time = datetime.now()
+    with open(log_file, "w") as log:
+        result = subprocess.run(
+            ["claude", "--dangerously-skip-permissions", "-p", prompt],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            cwd=task["workingDirectory"]
+        )
+    end_time = datetime.now()
+
+    # 実行完了を報告
+    mcp.call("report_execution_complete", {
+        "session_token": session_token,
+        "execution_id": execution_id,
+        "exit_code": result.returncode,
+        "duration_seconds": (end_time - start_time).total_seconds(),
+        "log_file_path": log_file
+    })
+```
+
+### データモデル
+
+```swift
+struct ExecutionLog {
+    let id: ExecutionLogID
+    let taskId: TaskID
+    let agentId: AgentID
+    let executionId: String         // exec_xxx
+
+    // タイムスタンプ
+    var startedAt: Date
+    var completedAt: Date?
+
+    // 結果
+    var exitCode: Int?
+    var durationSeconds: Double?
+    var status: ExecutionStatus     // running / completed / failed
+
+    // ログファイル（内容は保存しない、パスのみ）
+    var logFilePath: String?
+}
+
+enum ExecutionStatus: String, Codable {
+    case running = "running"
+    case completed = "completed"
+    case failed = "failed"
+}
+```
+
+### MCP ツール
+
+```python
+# 実行開始を報告
+report_execution_start(
+    session_token: str,
+    task_id: str
+) -> {
+    "success": True,
+    "execution_id": "exec_xxx"
+}
+
+# 実行完了を報告
+report_execution_complete(
+    session_token: str,
+    execution_id: str,
+    exit_code: int,
+    duration_seconds: float,
+    log_file_path: str
+) -> {
+    "success": True
+}
+```
+
+### アプリ UI
+
+```
+[タスク詳細画面]
+├── 基本情報
+├── ステータス: in_progress
 │
-└── Infrastructure/
-    └── Services/
-        ├── AIAgentKickService.swift         # メインサービス（リネーム）
-        └── KickStrategies/
-            ├── ClaudeKickStrategy.swift     # Claude起動ロジック（新規）
-            ├── GeminiKickStrategy.swift     # Gemini起動ロジック（新規）
-            └── CustomKickStrategy.swift     # カスタム起動ロジック（新規）
+└── 実行履歴
+    ├── #1 [2025-01-06 10:30:00] 完了 (exit: 0, 5分)
+    │   └── [ログを表示] ← クリックでログ内容表示
+    ├── #2 [2025-01-06 11:00:00] 失敗 (exit: 1, 2分)
+    │   └── [ログを表示]
+    └── #3 [2025-01-06 11:30:00] 実行中...
 ```
 
-### 各コンポーネントの責務
+### ログローテーション（将来）
 
-#### AIAgentKickService（旧 ClaudeCodeKickService）
+| ポリシー | 設定 |
+|---------|------|
+| 保持期間 | 30日で自動削除 |
+| 最大サイズ | タスクあたり 50MB |
+| 圧縮 | 完了後 7日で gzip |
 
-メインのオーケストレーターとして以下を担当：
+---
 
-| 責務 | 説明 |
-|------|------|
-| バリデーション | 作業ディレクトリ確認、キックメソッド確認 |
-| プロンプト構築 | タスク情報からプロンプトを生成 |
-| プロンプトファイル作成 | `/tmp/uc001_prompt_{taskId}.txt` に書き出し |
-| ストラテジー選択 | `aiType` に基づき適切なストラテジーを選択 |
-| 環境変数設定 | TASK_ID, PROJECT_ID 等を設定 |
-| 結果返却 | `AgentKickResult` を構築して返却 |
-
-```swift
-public final class AIAgentKickService: AgentKickServiceProtocol {
-    private let claudeStrategy: KickStrategyProtocol
-    private let geminiStrategy: KickStrategyProtocol
-    private let customStrategy: KickStrategyProtocol
-
-    public func kick(agent: Agent, task: Task, project: Project) async throws -> AgentKickResult {
-        // 1. バリデーション
-        // 2. プロンプト構築
-        // 3. プロンプトファイル作成
-        // 4. ストラテジー選択 & 実行
-        let strategy = selectStrategy(for: agent.aiType)
-        let processId = try await strategy.launch(...)
-        // 5. 結果返却
-    }
-
-    private func selectStrategy(for aiType: AIType?) -> KickStrategyProtocol {
-        switch aiType {
-        case .claude, .none:  // デフォルトはClaude
-            return claudeStrategy
-        case .gemini:
-            return geminiStrategy
-        case .custom:
-            return customStrategy
-        }
-    }
-}
-```
-
-#### KickStrategyProtocol
-
-各AI種別の起動ロジックを抽象化：
-
-```swift
-public protocol KickStrategyProtocol: Sendable {
-    /// CLI名（ログ出力用）
-    var cliName: String { get }
-
-    /// CLIを起動
-    func launch(
-        workingDirectory: String,
-        promptFile: String,
-        agent: Agent,
-        environment: [String: String]
-    ) async throws -> Int
-}
-```
-
-#### ClaudeKickStrategy
-
-Claude Code CLI専用の起動ロジック：
-
-```swift
-public struct ClaudeKickStrategy: KickStrategyProtocol {
-    public var cliName: String { "claude" }
-
-    public func launch(...) async throws -> Int {
-        let claudePath = try findClaudeCLI()
-
-        var command = "source ~/.zshrc 2>/dev/null; source ~/.bashrc 2>/dev/null; "
-        command += "cd '\(workingDirectory)' && "
-        command += "nohup '\(claudePath)' --dangerously-skip-permissions"
-
-        if let systemPrompt = agent.systemPrompt, !systemPrompt.isEmpty {
-            command += " --system-prompt '\(escaped(systemPrompt))'"
-        }
-
-        command += " -p \"$(cat '\(promptFile)')\""
-        command += " > /tmp/uc001_claude_output.log 2>&1 &"
-
-        return try await executeShellCommand(command, environment: environment)
-    }
-
-    private func findClaudeCLI() throws -> String {
-        // CLAUDE_CLI_PATH 環境変数
-        // /opt/homebrew/bin/claude
-        // /usr/local/bin/claude
-        // which claude
-    }
-}
-```
-
-#### GeminiKickStrategy
-
-Gemini CLI専用の起動ロジック：
-
-```swift
-public struct GeminiKickStrategy: KickStrategyProtocol {
-    public var cliName: String { "gemini" }
-
-    public func launch(...) async throws -> Int {
-        let geminiPath = try findGeminiCLI()
-
-        // Gemini は stdin からプロンプトを受け取る
-        var command = "source ~/.zshrc 2>/dev/null; source ~/.bashrc 2>/dev/null; "
-        command += "cd '\(workingDirectory)' && "
-        command += "cat '\(promptFile)' | nohup '\(geminiPath)' --yolo"
-        command += " > /tmp/gemini_output.log 2>&1 &"
-
-        return try await executeShellCommand(command, environment: environment)
-    }
-
-    private func findGeminiCLI() throws -> String {
-        // GEMINI_CLI_PATH 環境変数
-        // /opt/homebrew/bin/gemini
-        // /usr/local/bin/gemini
-        // which gemini
-    }
-}
-```
-
-#### CustomKickStrategy
-
-ユーザー定義コマンド用のロジック：
-
-```swift
-public struct CustomKickStrategy: KickStrategyProtocol {
-    public var cliName: String { "custom" }
-
-    public func launch(...) async throws -> Int {
-        guard let kickCommand = agent.kickCommand, !kickCommand.isEmpty else {
-            throw AgentKickError.kickCommandNotSet(agent.id)
-        }
-
-        // プレースホルダー展開
-        let expandedCommand = expandPlaceholders(kickCommand, agent: agent, environment: environment)
-
-        var command = "source ~/.zshrc 2>/dev/null; source ~/.bashrc 2>/dev/null; "
-        command += "cd '\(workingDirectory)' && "
-        command += expandedCommand
-
-        return try await executeShellCommand(command, environment: environment)
-    }
-
-    private func expandPlaceholders(_ command: String, ...) -> String {
-        // $TASK_ID, ${TASK_ID} → 実際の値
-        // $PROJECT_ID, ${PROJECT_ID} → 実際の値
-        // $AGENT_ID, ${AGENT_ID} → 実際の値
-    }
-}
-```
-
-### エラーハンドリング
-
-```swift
-public enum AgentKickError: Error {
-    // 既存
-    case agentNotFound(AgentID)
-    case projectNotFound(ProjectID)
-    case workingDirectoryNotSet(ProjectID)
-    case workingDirectoryNotFound(String)
-    case kickMethodNotSupported(KickMethod)
-    case kickCommandNotSet(AgentID)
-    case executionFailed(String)
-    case taskNotAssigned(TaskID)
-
-    // リネーム
-    case claudeCLINotFound      // → cliNotFound(String)
-
-    // 新規
-    case geminiCLINotFound      // → cliNotFound("gemini") に統合
-    case cliNotFound(String)    // 汎用CLI未検出エラー
-}
-```
-
-### 設定可能項目（将来）
-
-| 項目 | 説明 | デフォルト |
-|------|------|-----------|
-| タイムアウト | 起動待機時間 | 30秒 |
-| リトライ回数 | 起動失敗時の再試行 | 0 |
-| ログ出力先 | 各CLIの出力ファイル | `/tmp/` |
-| 環境変数追加 | カスタム環境変数 | なし |
-
-### 状態確認
+## 状態確認
 - 上位エージェント自身がMCP経由で下位の状態を確認可能
 - 下位からの能動的な報告は必須ではない
 
