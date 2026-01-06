@@ -41,6 +41,7 @@ AI Agent Project Managerの実装計画。2フェーズに分割して段階的�
 |---------|------|-----------|-------------|
 | **Phase 1** | MCP連携が動作することを最短で確認 | MCPサーバー + 最小DB | [PHASE1_MCP_VERIFICATION.md](./PHASE1_MCP_VERIFICATION.md) |
 | **Phase 2** | 本番利用可能なアプリを完成 | 完全なMacアプリ + MCP | [PHASE2_FULL_IMPLEMENTATION.md](./PHASE2_FULL_IMPLEMENTATION.md) |
+| **Phase 3** | プル型アーキテクチャへ移行 | 認証 + Runner連携 + 実行ログ | [PHASE3_PULL_ARCHITECTURE.md](./PHASE3_PULL_ARCHITECTURE.md) |
 
 ---
 
@@ -92,6 +93,30 @@ Claude Code で以下が動作すること:
 4. 全操作がイベントとして記録される
 5. UIがリアルタイムで更新される
 ```
+
+---
+
+## Phase 3: プル型アーキテクチャ
+
+**目標**: タスク実行をプル型アーキテクチャに移行し、外部Runnerからのタスク実行を可能にする
+
+**スコープ**:
+- 認証基盤（AgentCredential, AgentSession）
+- Runner向けMCPツール（authenticate, get_pending_tasks）
+- 実行ログ管理（ExecutionLog）
+- エージェント設定UI（Passkey管理）
+- 実行ログUI
+
+**成功基準**:
+```
+1. Runner が authenticate でセッションを取得できる
+2. Runner が get_pending_tasks で自分のタスクを取得できる
+3. Runner が report_execution_start/complete で実行ログを報告できる
+4. アプリでエージェントのPasskeyを管理できる
+5. アプリで実行ログを閲覧できる
+```
+
+**開発方針**: TDD（テスト駆動開発）で各コンポーネントを実装
 
 ---
 
@@ -166,3 +191,4 @@ AIAgentPM/
 | 日付 | バージョン | 変更内容 |
 |------|-----------|----------|
 | 2024-12-30 | 1.0.0 | 初版作成 |
+| 2026-01-06 | 1.1.0 | Phase 3（プル型アーキテクチャ）を追加 |
