@@ -56,25 +56,50 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
     /// プロジェクトを選択してタスクをin_progressに変更
     private func changeTaskStatusToInProgress(projectName: String, taskTitle: String) throws {
         // #1: プロジェクト選択
+        print("  🔍 プロジェクト「\(projectName)」を検索中...")
         let projectRow = app.staticTexts[projectName]
         guard projectRow.waitForExistence(timeout: 10) else {
+            // デバッグ: 利用可能なstaticTextsを出力
+            let allTexts = app.staticTexts.allElementsBoundByIndex.prefix(20).map { $0.label }
+            print("  ⚠️ 利用可能なstaticTexts: \(allTexts)")
             XCTFail("❌ SETUP: プロジェクト「\(projectName)」が見つからない")
             return
         }
+        print("  ✅ プロジェクト「\(projectName)」が見つかりました")
         projectRow.click()
-        Thread.sleep(forTimeInterval: 0.5)
+        Thread.sleep(forTimeInterval: 1.0)
 
         // #2: タスクボードの表示を確認
         let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
         XCTAssertTrue(taskBoard.waitForExistence(timeout: 5),
                       "❌ SETUP: タスクボードが表示されない")
 
+        // Refreshボタンをクリックしてタスクボードを更新
+        let refreshButton = app.buttons.matching(identifier: "RefreshButton").firstMatch
+        if refreshButton.waitForExistence(timeout: 2) {
+            print("  🔄 Refreshボタンをクリック")
+            refreshButton.click()
+            Thread.sleep(forTimeInterval: 2.0)
+        } else {
+            // タスクボードの内容が更新されるのを待つ
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+
         // #3: タスクを探す
+        print("  🔍 タスク「\(taskTitle)」を検索中...")
+
+        // デバッグ: 利用可能な要素を出力
+        let allButtons = app.buttons.allElementsBoundByIndex.prefix(20).map { $0.label }
+        let allTexts = app.staticTexts.allElementsBoundByIndex.prefix(30).map { $0.label }
+        print("  📋 利用可能なbuttons: \(allButtons)")
+        print("  📋 利用可能なstaticTexts: \(allTexts)")
+
         let taskCard = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", taskTitle)).firstMatch
         guard taskCard.waitForExistence(timeout: 5) else {
             XCTFail("❌ STEP1: タスク「\(taskTitle)」が見つからない")
             return
         }
+        print("  ✅ タスク「\(taskTitle)」が見つかりました")
 
         // #4: タスク詳細を開く
         taskCard.click()
@@ -145,6 +170,14 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
 
         // #9: 詳細画面を閉じる
         app.typeKey(.escape, modifierFlags: [])
-        Thread.sleep(forTimeInterval: 0.5)
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 詳細画面が閉じたことを確認
+        let detailViewClosed = !detailView.exists || detailView.waitForNonExistence(timeout: 3)
+        if !detailViewClosed {
+            print("  ⚠️ 詳細画面がまだ表示されている、再度Escapeを試行")
+            app.typeKey(.escape, modifierFlags: [])
+            Thread.sleep(forTimeInterval: 1.0)
+        }
     }
 }
