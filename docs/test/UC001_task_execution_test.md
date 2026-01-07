@@ -2,7 +2,79 @@
 
 **対応ユースケース**: `docs/usecase/UC001_TaskExecutionByAgent.md`
 **テストクラス**: `UC001_TaskExecutionByAgentTests`
-**最終更新**: 2026-01-05
+**最終更新**: 2026-01-07
+
+---
+
+## テスト実行方法
+
+**bashスクリプトから実行される統合テスト**
+
+### 利用可能なスクリプト
+
+| スクリプト | 説明 | 用途 |
+|-----------|------|------|
+| `scripts/tests/test_uc001_app_integration.sh` | **アプリ統合テスト（推奨）** | App→XCUITest→MCP→Runner→CLI の真のE2E |
+| `scripts/tests/test_uc001_e2e.sh` | 単純E2Eテスト | Claude CLI単体でファイル作成確認 |
+| `scripts/tests/test_uc001_runner_integration.sh` | Runner統合テスト | DB直接投入→Runner→CLI（アプリなし） |
+
+### 実行コマンド
+
+```bash
+# アプリ統合テスト（推奨: 真のE2E）
+./scripts/tests/test_uc001_app_integration.sh
+
+# テストディレクトリを保持する場合
+./scripts/tests/test_uc001_app_integration.sh --keep
+
+# E2Eテスト（Claude CLIのみ）
+./scripts/tests/test_uc001_e2e.sh
+
+# Runner統合テスト（アプリなし）
+./scripts/tests/test_uc001_runner_integration.sh
+```
+
+### アプリ統合テストの流れ（`test_uc001_app_integration.sh`）【推奨】
+
+```
+1. テスト環境準備（/tmp/uc001_app_integration_test）
+2. ビルド（MCP Server + App）
+3. Runner準備確認
+4. XCUITest実行
+   ├── アプリ起動（-UITesting -UITestScenario:UC001）
+   ├── TestDataSeederによるシードデータ投入（backlog状態）
+   └── UI操作でステータス変更（backlog → todo → in_progress）
+5. DB状態確認（in_progressタスク検出）
+6. MCPデーモン起動（XCUITestと同一DB使用）
+7. Runner起動
+8. タスク実行待機
+9. ファイル作成検証
+```
+
+**ポイント**:
+- アプリが実際にUIから操作される真の統合テスト
+- XCUITestとMCPデーモンが同一DBを共有（`/private/var/folders/.../AIAgentPM_UITest.db`）
+- XCUITestが先に実行され、MCPデーモンは後から同一DBを読み取る
+
+### Runner統合テストの流れ（`test_uc001_runner_integration.sh`）
+
+```
+1. テスト環境準備（/tmp/uc001_runner_integration_test）
+2. MCPデーモン起動
+3. テストデータをDBに直接投入（sqlite3）
+4. Runner起動
+5. Runnerがin_progressタスクを検出
+6. Claude CLIがファイル作成
+7. 結果検証
+```
+
+**注意**: このテストはアプリを起動せず、DBにデータを直接投入するため、UI操作フローは検証しません。
+
+### 前提条件
+
+- Claude CLI インストール済み（`npm install -g @anthropic/claude-code`）
+- Python仮想環境または`aiagent_runner`インストール済み
+- Xcodeビルド環境
 
 ---
 
@@ -392,6 +464,7 @@ let resourceTestTask = Task(
 | 2026-01-05 | アサーション強化: 全フェーズに状態変化の包括的アサーションを追加 |
 | 2026-01-05 | アサーション修正: XCUITest APIに合わせた正確なアサーション記述に修正 |
 | 2026-01-05 | 目的明確化: テスト実装の真の目的と過去の教訓を追加 |
+| 2026-01-07 | アプリ統合テスト追加: `test_uc001_app_integration.sh`を追加（真のE2Eテスト） |
 
 ### 2026-01-05 アサーション修正の詳細
 
