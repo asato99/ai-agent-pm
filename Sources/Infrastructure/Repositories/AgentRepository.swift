@@ -16,6 +16,7 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
     var name: String
     var role: String
     var type: String
+    var aiType: String?
     var hierarchyType: String
     var roleType: String
     var parentAgentId: String?
@@ -39,6 +40,7 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
         case name
         case role
         case type
+        case aiType = "ai_type"
         case hierarchyType = "hierarchy_type"
         case roleType = "role_type"
         case parentAgentId = "parent_agent_id"
@@ -70,6 +72,7 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             name: name,
             role: role,
             type: AgentType(rawValue: type) ?? .ai,
+            aiType: aiType.flatMap { AIType(rawValue: $0) },
             hierarchyType: AgentHierarchyType(rawValue: hierarchyType) ?? .worker,
             roleType: AgentRoleType(rawValue: roleType) ?? .developer,
             parentAgentId: parentAgentId.map { AgentID(value: $0) },
@@ -101,6 +104,7 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             name: agent.name,
             role: agent.role,
             type: agent.type.rawValue,
+            aiType: agent.aiType?.rawValue,
             hierarchyType: agent.hierarchyType.rawValue,
             roleType: agent.roleType.rawValue,
             parentAgentId: agent.parentAgentId?.value,

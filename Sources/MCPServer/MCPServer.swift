@@ -946,15 +946,16 @@ final class MCPServer {
     }
 
     /// should_start - エージェントを起動すべきかどうかを返す
-    /// Coordinatorはタスクの詳細を知らない。bool のみ返す。
+    /// Coordinatorはタスクの詳細を知らない。bool と ai_type を返す。
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// 参照: docs/plan/MULTI_AGENT_USE_CASES.md - AIタイプ
     private func shouldStart(agentId: String) throws -> [String: Any] {
         Self.log("[MCP] shouldStart called for agent: '\(agentId)'")
 
         let id = AgentID(value: agentId)
 
         // エージェントの存在確認
-        guard try agentRepository.findById(id) != nil else {
+        guard let agent = try agentRepository.findById(id) else {
             Self.log("[MCP] shouldStart: Agent '\(agentId)' not found")
             throw MCPError.agentNotFound(agentId)
         }
@@ -977,9 +978,15 @@ final class MCPServer {
 
         Self.log("[MCP] shouldStart for '\(agentId)': \(hasInProgressTask)")
 
-        return [
+        // ai_type を返す（CoordinatorがCLIコマンドを選択するため）
+        var result: [String: Any] = [
             "should_start": hasInProgressTask
         ]
+
+        // ai_type があれば追加（デフォルトは claude）
+        result["ai_type"] = agent.aiType?.rawValue ?? "claude"
+
+        return result
     }
 
     // MARK: Phase 4: Agent API
@@ -1168,7 +1175,7 @@ final class MCPServer {
 
         if result.success {
             Self.log("[MCP] Authentication successful for agent: \(result.agentName ?? agentId)")
-            return [
+            var response: [String: Any] = [
                 "success": true,
                 "session_token": result.sessionToken ?? "",
                 "expires_in": result.expiresIn ?? 0,
@@ -1176,6 +1183,12 @@ final class MCPServer {
                 // Phase 4: 次のアクション指示を追加
                 "instruction": "get_my_task を呼び出してタスク詳細を取得してください"
             ]
+            // system_prompt があれば追加（エージェントの役割を定義）
+            // 参照: docs/plan/MULTI_AGENT_USE_CASES.md
+            if let systemPrompt = result.systemPrompt {
+                response["system_prompt"] = systemPrompt
+            }
+            return response
         } else {
             Self.log("[MCP] Authentication failed for agent: \(agentId) - \(result.error ?? "Unknown error")")
             return [
@@ -1661,7 +1674,7 @@ final class MCPServer {
     // MARK: - Helper Methods
 
     private func agentToDict(_ agent: Agent) -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "id": agent.id.value,
             "name": agent.name,
             "role": agent.role,
@@ -1671,6 +1684,13 @@ final class MCPServer {
             "status": agent.status.rawValue,
             "created_at": ISO8601DateFormatter().string(from: agent.createdAt)
         ]
+
+        // AIタイプがあれば追加
+        if let aiType = agent.aiType {
+            dict["ai_type"] = aiType.rawValue
+        }
+
+        return dict
     }
 
     private func projectToDict(_ project: Project) -> [String: Any] {

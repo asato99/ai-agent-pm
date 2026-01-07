@@ -612,13 +612,32 @@ final class AuthenticateToolTests: XCTestCase {
         let result = AuthenticateResult.success(
             token: "sess_abc123",
             expiresIn: 3600,
-            agentName: "Test Agent"
+            agentName: "Test Agent",
+            systemPrompt: "You are a developer agent."
         )
 
         XCTAssertTrue(result.success)
         XCTAssertEqual(result.sessionToken, "sess_abc123")
         XCTAssertEqual(result.expiresIn, 3600)
         XCTAssertEqual(result.agentName, "Test Agent")
+        XCTAssertEqual(result.systemPrompt, "You are a developer agent.")
+        XCTAssertNil(result.error)
+    }
+
+    /// 認証成功結果（systemPrompt なし）の生成テスト
+    func testAuthenticateResultSuccessWithoutSystemPrompt() {
+        let result = AuthenticateResult.success(
+            token: "sess_abc123",
+            expiresIn: 3600,
+            agentName: "Test Agent",
+            systemPrompt: nil
+        )
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.sessionToken, "sess_abc123")
+        XCTAssertEqual(result.expiresIn, 3600)
+        XCTAssertEqual(result.agentName, "Test Agent")
+        XCTAssertNil(result.systemPrompt)
         XCTAssertNil(result.error)
     }
 

@@ -1,4 +1,6 @@
-# マルチエージェント ユースケース
+# マルチエージェント アーキテクチャ設計
+
+> ユースケースは docs/usecase/UC002_MultiAgentCollaboration.md を参照
 
 ## 前提
 

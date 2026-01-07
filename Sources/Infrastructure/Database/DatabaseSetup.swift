@@ -505,6 +505,15 @@ public final class DatabaseSetup {
             try db.create(indexOn: "execution_logs", columns: ["status"])
         }
 
+        // v17: AIタイプ追加（マルチAIプロバイダー対応）
+        // 参照: docs/plan/MULTI_AGENT_USE_CASES.md - AIタイプ
+        migrator.registerMigration("v17_ai_type") { db in
+            // ai_type カラムを追加（claude, gemini, openai, other）
+            try db.alter(table: "agents") { t in
+                t.add(column: "ai_type", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

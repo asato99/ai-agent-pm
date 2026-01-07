@@ -11,6 +11,7 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var name: String
     public var role: String
     public var type: AgentType
+    public var aiType: AIType?                    // AIプロバイダー種別（AI agentの場合）
     public var hierarchyType: AgentHierarchyType  // 階層タイプ（Manager/Worker）
     public var roleType: AgentRoleType
     public var parentAgentId: AgentID?      // 階層構造（親エージェント）
@@ -39,6 +40,7 @@ public struct Agent: Identifiable, Equatable, Sendable {
         name: String,
         role: String,
         type: AgentType = .ai,
+        aiType: AIType? = nil,
         hierarchyType: AgentHierarchyType = .worker,
         roleType: AgentRoleType = .developer,
         parentAgentId: AgentID? = nil,
@@ -60,6 +62,7 @@ public struct Agent: Identifiable, Equatable, Sendable {
         self.name = name
         self.role = role
         self.type = type
+        self.aiType = aiType
         self.hierarchyType = hierarchyType
         self.roleType = roleType
         self.parentAgentId = parentAgentId
@@ -133,6 +136,26 @@ public enum AgentType: String, Codable, Sendable, CaseIterable {
         switch self {
         case .human: return "Human"
         case .ai: return "AI"
+        }
+    }
+}
+
+// MARK: - AIType
+
+/// AIエージェントのプロバイダー種別
+/// 参照: docs/plan/MULTI_AGENT_USE_CASES.md - AIタイプ
+public enum AIType: String, Codable, Sendable, CaseIterable {
+    case claude = "claude"
+    case gemini = "gemini"
+    case openai = "openai"
+    case other = "other"
+
+    public var displayName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .gemini: return "Gemini"
+        case .openai: return "OpenAI"
+        case .other: return "Other"
         }
     }
 }

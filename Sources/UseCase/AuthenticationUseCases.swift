@@ -8,19 +8,22 @@ import Domain
 // MARK: - AuthenticateResult
 
 /// 認証結果
+/// 参照: docs/plan/MULTI_AGENT_USE_CASES.md - 認証フロー
 public struct AuthenticateResult: Sendable {
     public let success: Bool
     public let sessionToken: String?
     public let expiresIn: Int?  // 秒数
     public let agentName: String?
+    public let systemPrompt: String?  // エージェントの役割を定義するプロンプト
     public let error: String?
 
-    public static func success(token: String, expiresIn: Int, agentName: String) -> AuthenticateResult {
+    public static func success(token: String, expiresIn: Int, agentName: String, systemPrompt: String?) -> AuthenticateResult {
         AuthenticateResult(
             success: true,
             sessionToken: token,
             expiresIn: expiresIn,
             agentName: agentName,
+            systemPrompt: systemPrompt,
             error: nil
         )
     }
@@ -31,6 +34,7 @@ public struct AuthenticateResult: Sendable {
             sessionToken: nil,
             expiresIn: nil,
             agentName: nil,
+            systemPrompt: nil,
             error: error
         )
     }
@@ -88,7 +92,8 @@ public struct AuthenticateUseCase: Sendable {
         return .success(
             token: session.token,
             expiresIn: session.remainingSeconds,
-            agentName: agent.name
+            agentName: agent.name,
+            systemPrompt: agent.systemPrompt
         )
     }
 }
