@@ -178,3 +178,23 @@ public protocol ExecutionLogRepositoryProtocol: Sendable {
     func save(_ log: ExecutionLog) throws
     func delete(_ id: ExecutionLogID) throws
 }
+
+// MARK: - ProjectAgentAssignmentRepositoryProtocol
+
+/// プロジェクト×エージェント割り当てリポジトリのプロトコル
+/// 参照: docs/requirements/PROJECTS.md - エージェント割り当て
+/// 参照: docs/usecase/UC004_MultiProjectSameAgent.md
+public protocol ProjectAgentAssignmentRepositoryProtocol: Sendable {
+    /// エージェントをプロジェクトに割り当てる（既に割り当て済みの場合は既存を返す）
+    func assign(projectId: ProjectID, agentId: AgentID) throws -> ProjectAgentAssignment
+    /// プロジェクトからエージェントの割り当てを解除
+    func remove(projectId: ProjectID, agentId: AgentID) throws
+    /// プロジェクトに割り当てられたエージェント一覧を取得
+    func findAgentsByProject(_ projectId: ProjectID) throws -> [Agent]
+    /// エージェントが割り当てられたプロジェクト一覧を取得
+    func findProjectsByAgent(_ agentId: AgentID) throws -> [Project]
+    /// エージェントがプロジェクトに割り当てられているか確認
+    func isAgentAssignedToProject(agentId: AgentID, projectId: ProjectID) throws -> Bool
+    /// 全割り当て一覧を取得
+    func findAll() throws -> [ProjectAgentAssignment]
+}

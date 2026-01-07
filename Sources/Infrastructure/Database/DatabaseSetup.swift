@@ -514,6 +514,23 @@ public final class DatabaseSetup {
             }
         }
 
+        // v18: プロジェクト×エージェント割り当てテーブル
+        // 参照: docs/requirements/PROJECTS.md - エージェント割り当て
+        // 参照: docs/usecase/UC004_MultiProjectSameAgent.md
+        migrator.registerMigration("v18_project_agents") { db in
+            // project_agents テーブル（多対多関係）
+            try db.create(table: "project_agents", ifNotExists: true) { t in
+                t.column("project_id", .text).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("assigned_at", .datetime).notNull()
+                t.primaryKey(["project_id", "agent_id"])
+            }
+            try db.create(indexOn: "project_agents", columns: ["project_id"])
+            try db.create(indexOn: "project_agents", columns: ["agent_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

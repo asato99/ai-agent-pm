@@ -1,85 +1,71 @@
-# AI Agent PM Runner
+# AI Agent PM オーケストレーションデーモン
 
-Runner for AI Agent PM - executes tasks via MCP protocol and CLI tools.
+特定のエージェントとしてタスク実行を監視・実行する常駐プロセス。
 
-## Overview
+---
 
-The Runner is a Python application that:
-1. Authenticates with the AI Agent PM MCP server
-2. Polls for pending tasks assigned to the agent
-3. Executes tasks using CLI tools (claude, gemini, etc.)
-4. Reports execution results back to the server
+## 起動方法
 
-## Installation
+**1エージェント = 1デーモン** で起動する。
 
 ```bash
+cd runner
 pip install -e .
+aiagent-runner --agent-id <AGENT_ID> --passkey <PASSKEY> --working-directory <PROJECT_DIR>
 ```
 
-## Configuration
-
-Configuration can be provided via:
-
-### Environment Variables
+### 例
 
 ```bash
-export AGENT_ID="your-agent-id"
-export AGENT_PASSKEY="your-passkey"
-export POLLING_INTERVAL=5
-export CLI_COMMAND=claude
+# エージェント agt_backend_dev として起動
+aiagent-runner --agent-id agt_backend_dev --passkey secret123 --working-directory /projects/backend
 ```
 
-### YAML File
+### 設定ファイルを使う場合
 
 ```yaml
-agent_id: your-agent-id
-passkey: your-passkey
+# backend_dev.yaml
+agent_id: agt_backend_dev
+passkey: secret123
+working_directory: /projects/backend
 polling_interval: 5
 cli_command: claude
-cli_args: --dangerously-skip-permissions
+cli_args:
+  - "--dangerously-skip-permissions"
 ```
 
-### CLI Arguments
-
 ```bash
-aiagent-runner --agent-id your-agent-id --passkey your-passkey
+aiagent-runner -c backend_dev.yaml
 ```
 
-## Usage
+### バックグラウンド実行
 
 ```bash
-# Using environment variables
-aiagent-runner
-
-# Using config file
-aiagent-runner -c config.yaml
-
-# With CLI arguments
-aiagent-runner --agent-id agent-001 --passkey secret --verbose
+nohup aiagent-runner -c backend_dev.yaml > backend_dev.log 2>&1 &
 ```
 
-## Development
+---
+
+## 前提条件
+
+- MCP Serverが起動していること
+- エージェントがアプリで登録済みで、passkeyが設定されていること
+- 該当エージェントにタスクが割り当てられていること
+
+---
+
+## 動作
+
+1. 指定された`agent_id`でMCPサーバーに認証
+2. そのエージェントに割り当てられたin_progressタスクをポーリング
+3. タスク検出時、Claude CLI等を起動して実行
+4. 完了報告後、待機して2に戻る
+
+---
+
+## 開発
 
 ```bash
-# Install with dev dependencies
 pip install -e ".[dev]"
-
-# Run tests
 pytest
-
-# Run tests with coverage
-pytest --cov=aiagent_runner
 ```
-
-## Architecture
-
-- `config.py` - Configuration management
-- `mcp_client.py` - MCP server communication
-- `prompt_builder.py` - Prompt construction for CLI
-- `executor.py` - CLI execution
-- `runner.py` - Main polling loop
-- `__main__.py` - Entry point
-
-## Reference
-
-See `docs/plan/PHASE3_PULL_ARCHITECTURE.md` for the full architecture design.

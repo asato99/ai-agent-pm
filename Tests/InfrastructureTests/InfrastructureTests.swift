@@ -25,6 +25,7 @@ final class InfrastructureTests: XCTestCase {
     var agentCredentialRepo: AgentCredentialRepository!
     var agentSessionRepo: AgentSessionRepository!
     var executionLogRepo: ExecutionLogRepository!
+    var projectAgentAssignmentRepo: ProjectAgentAssignmentRepository!
 
     override func setUpWithError() throws {
         // インメモリデータベースを使用
@@ -46,6 +47,7 @@ final class InfrastructureTests: XCTestCase {
         agentCredentialRepo = AgentCredentialRepository(database: db)
         agentSessionRepo = AgentSessionRepository(database: db)
         executionLogRepo = ExecutionLogRepository(database: db)
+        projectAgentAssignmentRepo = ProjectAgentAssignmentRepository(database: db)
     }
 
     override func tearDownWithError() throws {
@@ -1589,6 +1591,195 @@ final class InfrastructureTests: XCTestCase {
         try db.read { db in
             XCTAssertTrue(try db.tableExists("execution_logs"))
         }
+    }
+
+    // MARK: - ProjectAgentAssignmentRepository Tests (UC004: 複数プロジェクト×同一エージェント)
+    // 参照: docs/requirements/PROJECTS.md - エージェント割り当て
+
+    func testProjectAgentsTableExists() throws {
+        // project_agents テーブルが存在することを確認
+        try db.read { db in
+            XCTAssertTrue(try db.tableExists("project_agents"))
+        }
+    }
+
+    func testProjectAgentAssignmentRepositoryAssign() throws {
+        // PRD: プロジェクトへのエージェント割り当て
+        let project = Project(id: ProjectID.generate(), name: "TestProject", workingDirectory: "/tmp/test")
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        // When: エージェントをプロジェクトに割り当て
+        let assignment = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: agent.id)
+
+        // Then: 割り当てが正しく保存される
+        XCTAssertEqual(assignment.projectId, project.id)
+        XCTAssertEqual(assignment.agentId, agent.id)
+        XCTAssertNotNil(assignment.assignedAt)
+    }
+
+    func testProjectAgentAssignmentRepositoryFindByProject() throws {
+        // PRD: プロジェクト別エージェント取得
+        let project = Project(id: ProjectID.generate(), name: "TestProject", workingDirectory: "/tmp/test")
+        try projectRepo.save(project)
+
+        let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Developer")
+        let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Designer")
+        try agentRepo.save(agent1)
+        try agentRepo.save(agent2)
+
+        // 2つのエージェントを割り当て
+        _ = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: agent1.id)
+        _ = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: agent2.id)
+
+        // When: プロジェクトに割り当てられたエージェントを取得
+        let agents = try projectAgentAssignmentRepo.findAgentsByProject(project.id)
+
+        // Then: 2つのエージェントが返される
+        XCTAssertEqual(agents.count, 2)
+        XCTAssertTrue(agents.contains { $0.id == agent1.id })
+        XCTAssertTrue(agents.contains { $0.id == agent2.id })
+    }
+
+    func testProjectAgentAssignmentRepositoryFindByAgent() throws {
+        // PRD: エージェント別プロジェクト取得（同一エージェントが複数プロジェクトに参加）
+        let project1 = Project(id: ProjectID.generate(), name: "Project1", workingDirectory: "/tmp/test1")
+        let project2 = Project(id: ProjectID.generate(), name: "Project2", workingDirectory: "/tmp/test2")
+        try projectRepo.save(project1)
+        try projectRepo.save(project2)
+
+        let agent = Agent(id: AgentID.generate(), name: "SharedAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        // 同一エージェントを2つのプロジェクトに割り当て
+        _ = try projectAgentAssignmentRepo.assign(projectId: project1.id, agentId: agent.id)
+        _ = try projectAgentAssignmentRepo.assign(projectId: project2.id, agentId: agent.id)
+
+        // When: エージェントが参加するプロジェクトを取得
+        let projects = try projectAgentAssignmentRepo.findProjectsByAgent(agent.id)
+
+        // Then: 2つのプロジェクトが返される
+        XCTAssertEqual(projects.count, 2)
+        XCTAssertTrue(projects.contains { $0.id == project1.id })
+        XCTAssertTrue(projects.contains { $0.id == project2.id })
+    }
+
+    func testProjectAgentAssignmentRepositoryIsAssigned() throws {
+        // PRD: 割り当て確認
+        let project = Project(id: ProjectID.generate(), name: "TestProject", workingDirectory: "/tmp/test")
+        try projectRepo.save(project)
+
+        let assignedAgent = Agent(id: AgentID.generate(), name: "AssignedAgent", role: "Developer")
+        let unassignedAgent = Agent(id: AgentID.generate(), name: "UnassignedAgent", role: "Designer")
+        try agentRepo.save(assignedAgent)
+        try agentRepo.save(unassignedAgent)
+
+        // assignedAgentのみ割り当て
+        _ = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: assignedAgent.id)
+
+        // When/Then: 割り当て済みエージェントはtrue
+        XCTAssertTrue(try projectAgentAssignmentRepo.isAgentAssignedToProject(agentId: assignedAgent.id, projectId: project.id))
+
+        // When/Then: 未割り当てエージェントはfalse
+        XCTAssertFalse(try projectAgentAssignmentRepo.isAgentAssignedToProject(agentId: unassignedAgent.id, projectId: project.id))
+    }
+
+    func testProjectAgentAssignmentRepositoryRemove() throws {
+        // PRD: 割り当て解除
+        let project = Project(id: ProjectID.generate(), name: "TestProject", workingDirectory: "/tmp/test")
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        // 割り当て
+        _ = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: agent.id)
+        XCTAssertTrue(try projectAgentAssignmentRepo.isAgentAssignedToProject(agentId: agent.id, projectId: project.id))
+
+        // When: 割り当て解除
+        try projectAgentAssignmentRepo.remove(projectId: project.id, agentId: agent.id)
+
+        // Then: 割り当てが解除される
+        XCTAssertFalse(try projectAgentAssignmentRepo.isAgentAssignedToProject(agentId: agent.id, projectId: project.id))
+    }
+
+    func testProjectAgentAssignmentRepositoryDuplicateAssignment() throws {
+        // PRD: 重複割り当ての防止（同じ組み合わせを2回割り当てても問題ない）
+        let project = Project(id: ProjectID.generate(), name: "TestProject", workingDirectory: "/tmp/test")
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        // 2回割り当て
+        _ = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: agent.id)
+        _ = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: agent.id)
+
+        // Then: エージェントは1つのみ
+        let agents = try projectAgentAssignmentRepo.findAgentsByProject(project.id)
+        XCTAssertEqual(agents.count, 1)
+    }
+
+    func testProjectAgentAssignmentCascadeDeleteOnProjectDelete() throws {
+        // PRD: プロジェクト削除時のカスケード削除
+        let project = Project(id: ProjectID.generate(), name: "TestProject", workingDirectory: "/tmp/test")
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        _ = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: agent.id)
+
+        // When: プロジェクト削除
+        try projectRepo.delete(project.id)
+
+        // Then: 割り当ても削除される
+        let projects = try projectAgentAssignmentRepo.findProjectsByAgent(agent.id)
+        XCTAssertEqual(projects.count, 0)
+    }
+
+    func testProjectAgentAssignmentCascadeDeleteOnAgentDelete() throws {
+        // PRD: エージェント削除時のカスケード削除
+        let project = Project(id: ProjectID.generate(), name: "TestProject", workingDirectory: "/tmp/test")
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        _ = try projectAgentAssignmentRepo.assign(projectId: project.id, agentId: agent.id)
+
+        // When: エージェント削除
+        try agentRepo.delete(agent.id)
+
+        // Then: 割り当ても削除される
+        let agents = try projectAgentAssignmentRepo.findAgentsByProject(project.id)
+        XCTAssertEqual(agents.count, 0)
+    }
+
+    func testProjectAgentAssignmentRepositoryFindAllAssignments() throws {
+        // PRD: 全割り当て取得（list_active_projects_with_agents用）
+        let project1 = Project(id: ProjectID.generate(), name: "Project1", workingDirectory: "/tmp/test1")
+        let project2 = Project(id: ProjectID.generate(), name: "Project2", workingDirectory: "/tmp/test2")
+        try projectRepo.save(project1)
+        try projectRepo.save(project2)
+
+        let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Developer")
+        let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Designer")
+        try agentRepo.save(agent1)
+        try agentRepo.save(agent2)
+
+        // 割り当て
+        _ = try projectAgentAssignmentRepo.assign(projectId: project1.id, agentId: agent1.id)
+        _ = try projectAgentAssignmentRepo.assign(projectId: project1.id, agentId: agent2.id)
+        _ = try projectAgentAssignmentRepo.assign(projectId: project2.id, agentId: agent1.id)
+
+        // When: 全割り当てを取得
+        let assignments = try projectAgentAssignmentRepo.findAll()
+
+        // Then: 3つの割り当てが返される
+        XCTAssertEqual(assignments.count, 3)
     }
 
 }
