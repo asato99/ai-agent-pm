@@ -14,27 +14,45 @@
 
 | スクリプト | 説明 | 用途 |
 |-----------|------|------|
-| `scripts/tests/test_uc002_multi_agent.sh` | マルチエージェント統合テスト | system_promptの振る舞い検証 |
+| `scripts/tests/test_uc002_app_integration.sh` | **真の統合テスト（推奨）** | アプリ+MCP+Runner E2E |
+| `scripts/tests/test_uc002_multi_agent.sh` | DB直接投入版 | 簡易検証用 |
 
 ### 実行コマンド
 
 ```bash
-# UC002統合テストを実行
-./scripts/tests/test_uc002_multi_agent.sh
+# UC002アプリ統合テストを実行（推奨）
+./scripts/tests/test_uc002_app_integration.sh
 
 # テストディレクトリを保持する場合
-./scripts/tests/test_uc002_multi_agent.sh --keep
+./scripts/tests/test_uc002_app_integration.sh --keep
+
+# DB直接投入版（簡易検証）
+./scripts/tests/test_uc002_multi_agent.sh
 ```
 
-### 統合テストの流れ
+### アプリ統合テストの流れ（推奨）
 
 ```
+test_uc002_app_integration.sh
+1. テスト環境準備（2つの作業ディレクトリ）
+2. MCPサーバービルド + アプリビルド
+3. XCUITest実行（アプリ起動→シードデータ投入→UI操作でステータス変更）
+4. MCPデーモン起動（XCUITestが作成した共有DBを使用）
+5. 両Runner起動（詳細ライター用、簡潔ライター用）
+6. タスク実行待機
+7. 出力ファイル検証（文字数比較）
+```
+
+### DB直接投入版の流れ（簡易検証）
+
+```
+test_uc002_multi_agent.sh
 1. テスト環境準備
 2. MCPデーモン起動
-3. テストデータ投入（詳細ライター/簡潔ライターエージェント）
-4. 両Runner起動（両方claude CLI）
+3. テストデータ投入（DB直接書き込み）
+4. 両Runner起動
 5. タスク実行待機
-6. 出力ファイル検証（文字数比較）
+6. 出力ファイル検証
 ```
 
 **注**: ai_typeの切り替え検証はUC003で実施
@@ -67,10 +85,12 @@
 
 | 項目 | UC001 | UC002 |
 |------|-------|-------|
-| テスト種別 | E2E UIテスト | ユースケース統合テスト |
-| 実行方法 | xcodebuild (アプリ起動) | swift test (スクリプト) |
-| テストファイル | `UITests/USECASE/` | `Tests/UseCaseTests/` |
-| 依存 | シードデータ、UI要素 | モックリポジトリ |
+| テスト種別 | E2E UIテスト | E2E UIテスト |
+| 実行方法 | xcodebuild (アプリ起動) | xcodebuild (アプリ起動) |
+| テストファイル | `UITests/USECASE/UC001_*.swift` | `UITests/USECASE/UC002_*.swift` |
+| エージェント数 | 1 | 2（詳細/簡潔ライター） |
+| Runner数 | 1 | 2（各エージェント用） |
+| 検証対象 | ファイル作成の成功 | ファイル内容の差異（文字数比較） |
 
 ---
 
@@ -110,21 +130,39 @@ Agent(
 
 ## テストフロー
 
+### アプリ統合テスト（推奨）
+
+```
+test_uc002_app_integration.sh
+├── Step 1: テスト環境準備（2ディレクトリ作成）
+├── Step 2: MCPサーバービルド
+├── Step 3: アプリビルド
+├── Step 4: Runnerセットアップ確認
+├── Step 5: XCUITest実行
+│   ├── アプリ起動（-UITesting -UITestScenario:UC002）
+│   ├── シードデータ投入（seedUC002Data()）
+│   └── UI操作でステータス変更（両タスク → in_progress）
+├── Step 6: DB状態確認（動的パス検出）
+├── Step 7: MCPデーモン起動（共有DB使用）
+├── Step 8: Runner起動（詳細+簡潔の2つ）
+├── Step 9: タスク実行待機（max 180s）
+└── Step 10: 出力検証
+    ├── 詳細版: > 300文字 または「背景」を含む
+    └── 簡潔版: 詳細版より短い
+```
+
+### DB直接投入版
+
 ```
 test_uc002_multi_agent.sh
 ├── Step 1: テスト環境準備
 ├── Step 2: MCPサーバービルド
 ├── Step 3: Runnerセットアップ確認
 ├── Step 4: MCPデーモン起動
-├── Step 5: テストデータ投入
-│   ├── 詳細ライター（system_prompt=詳細版）
-│   └── 簡潔ライター（system_prompt=簡潔版）
-├── Step 6: Runner起動（詳細ライター）
-├── Step 7: Runner起動（簡潔ライター）
-├── Step 8: タスク実行待機（max 180s）
+├── Step 5: テストデータ投入（DB直接）
+├── Step 6-7: Runner起動（詳細+簡潔）
+├── Step 8: タスク実行待機
 └── Step 9: 出力検証
-    ├── 詳細版: > 300文字 または「背景」を含む
-    └── 簡潔版: 詳細版より短い
 ```
 
 ---
@@ -205,24 +243,48 @@ Verified:
 |------|------|
 | 2026-01-07 | 初版作成: UC002テストシナリオ設計 |
 | 2026-01-07 | 統合テスト実装: 両エージェントclaudeに変更、ai_type検証はUC003へ分離 |
-| 2026-01-07 | UC001アプリ統合テスト完成: `test_uc001_app_integration.sh`がリファレンス実装として利用可能 |
+| 2026-01-07 | UC001アプリ統合テスト完成: `test_uc001_app_integration.sh`がリファレンス実装 |
+| 2026-01-07 | **UC002アプリ統合テスト実装**: `test_uc002_app_integration.sh`完成 |
 
 ---
 
 ## 技術メモ
 
-### UC001との差異
+### 実装ファイル
 
-UC001では `test_uc001_app_integration.sh` でアプリ統合テストを実現：
-- XCUITest → アプリ起動 + シードデータ + UI操作でステータス変更
-- MCPデーモン → 同一DB使用
-- Runner → タスク検出 + CLI実行
+| ファイル | 役割 |
+|----------|------|
+| `Sources/App/AIAgentPMApp.swift` | TestScenario.uc002、seedUC002Data() |
+| `UITests/Base/UITestBase.swift` | UC002UITestCase基底クラス |
+| `UITests/USECASE/UC002_MultiAgentCollaborationTests.swift` | UC002 UITest |
+| `scripts/tests/test_uc002_app_integration.sh` | アプリ統合テストスクリプト |
 
-UC002をアプリ統合にする場合の考慮点：
-- **2つのエージェント**が必要（詳細ライター、簡潔ライター）
-- **2つのRunner**が必要（各エージェント用）
-- **2つのタスク**のステータス変更が必要
-- XCUITestで2つのタスクを順次in_progressに変更する必要あり
+### シードデータ詳細
 
-現状の `test_uc002_multi_agent.sh` はDB直接投入方式で動作確認済み。
-アプリ統合版は将来の拡張として検討可能。
+```swift
+// seedUC002Data()で作成されるデータ
+
+// プロジェクト（2つ - 各ライターに対応）
+Project(id: "prj_uc002_detailed", workingDirectory: "/tmp/uc002_detailed")
+Project(id: "prj_uc002_concise", workingDirectory: "/tmp/uc002_concise")
+
+// エージェント（2つ - 異なるsystem_prompt）
+Agent(id: "agt_detailed_writer", systemPrompt: "詳細で包括的に...")
+Agent(id: "agt_concise_writer", systemPrompt: "簡潔に要点のみ...")
+
+// タスク（2つ - backlog → UIテストでin_progressに）
+Task(id: "tsk_uc002_detailed", assigneeId: "agt_detailed_writer")
+Task(id: "tsk_uc002_concise", assigneeId: "agt_concise_writer")
+
+// 認証情報
+AgentCredential(agentId: "agt_detailed_writer", passkey: "test_passkey_detailed")
+AgentCredential(agentId: "agt_concise_writer", passkey: "test_passkey_concise")
+```
+
+### DB共有の仕組み
+
+UC001と同じアーキテクチャ:
+1. XCUITestアプリが `NSTemporaryDirectory()` にDBを作成
+2. 実際のパスは `/private/var/folders/.../T/AIAgentPM_UITest.db`
+3. 統合テストスクリプトが `find` コマンドでパスを動的検出
+4. MCPデーモンは `AIAGENTPM_DB_PATH` 環境変数でDBパスを指定

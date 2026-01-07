@@ -55,6 +55,7 @@ struct AIAgentPMApp: App {
         case basic = "Basic"           // 基本データ（プロジェクト+エージェント+タスク）
         case multiProject = "MultiProject"  // 複数プロジェクト
         case uc001 = "UC001"           // UC001: エージェントキック用（workingDirectory設定済み）
+        case uc002 = "UC002"           // UC002: マルチエージェント協調（system_prompt差異検証）
         case noWD = "NoWD"             // NoWD: workingDirectory未設定エラーテスト用
         case internalAudit = "InternalAudit" // Internal Audit機能テスト用
         case workflowTemplate = "WorkflowTemplate" // ワークフローテンプレート機能テスト用
@@ -219,6 +220,8 @@ struct AIAgentPMApp: App {
                 try await seeder.seedMultipleProjects()
             case .uc001:
                 try await seeder.seedUC001Data()
+            case .uc002:
+                try await seeder.seedUC002Data()
             case .noWD:
                 try await seeder.seedNoWDData()
             case .internalAudit:
@@ -676,6 +679,171 @@ private final class TestDataSeeder {
             completedAt: nil
         )
         try await taskRepository.save(dependentTask)
+    }
+
+    /// UC002用のテストデータを生成（マルチエージェント協調テスト用）
+    /// - 2つのエージェント（詳細ライター、簡潔ライター）
+    /// - 両方ともclaude、異なるsystem_promptで出力差異を検証
+    /// - 出力ファイル: PROJECT_SUMMARY.md
+    ///
+    /// 環境変数または引数:
+    /// - UC002_DETAILED_DIR / -UC002DetailedDir: 詳細ライター用作業ディレクトリ
+    /// - UC002_CONCISE_DIR / -UC002ConciseDir: 簡潔ライター用作業ディレクトリ
+    func seedUC002Data() async throws {
+        // 引数から設定を取得
+        var detailedDirArg: String?
+        var conciseDirArg: String?
+
+        for arg in CommandLine.arguments {
+            if arg.hasPrefix("-UC002DetailedDir:") {
+                detailedDirArg = String(arg.dropFirst("-UC002DetailedDir:".count))
+            } else if arg.hasPrefix("-UC002ConciseDir:") {
+                conciseDirArg = String(arg.dropFirst("-UC002ConciseDir:".count))
+            }
+        }
+
+        // 引数になければ環境変数から取得、それもなければデフォルト値
+        let detailedDir = detailedDirArg ?? ProcessInfo.processInfo.environment["UC002_DETAILED_DIR"] ?? "/tmp/uc002_detailed"
+        let conciseDir = conciseDirArg ?? ProcessInfo.processInfo.environment["UC002_CONCISE_DIR"] ?? "/tmp/uc002_concise"
+
+        // デバッグ出力
+        print("=== UC002 Test Data Configuration ===")
+        print("Detailed Writer Dir: \(detailedDir)")
+        print("Concise Writer Dir: \(conciseDir)")
+
+        // 作業ディレクトリを作成
+        let fileManager = FileManager.default
+        for dir in [detailedDir, conciseDir] {
+            if !fileManager.fileExists(atPath: dir) {
+                try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            }
+        }
+
+        // UC002用プロジェクト（詳細ライター用）
+        let detailedProject = Project(
+            id: ProjectID(value: "prj_uc002_detailed"),
+            name: "UC002詳細ライターPJ",
+            description: "マルチエージェント協調テスト用プロジェクト（詳細ライター）",
+            status: .active,
+            workingDirectory: detailedDir,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(detailedProject)
+
+        // UC002用プロジェクト（簡潔ライター用）
+        let conciseProject = Project(
+            id: ProjectID(value: "prj_uc002_concise"),
+            name: "UC002簡潔ライターPJ",
+            description: "マルチエージェント協調テスト用プロジェクト（簡潔ライター）",
+            status: .active,
+            workingDirectory: conciseDir,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(conciseProject)
+
+        // 詳細ライターエージェント（Claude / 詳細system_prompt）
+        let detailedAgentId = AgentID(value: "agt_detailed_writer")
+        let detailedAgent = Agent(
+            id: detailedAgentId,
+            name: "詳細ライター",
+            role: "詳細なドキュメント作成",
+            type: .ai,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 1,
+            capabilities: ["Documentation", "Writing"],
+            systemPrompt: "詳細で包括的なドキュメントを作成してください。背景、目的、使用例を必ず含めてください。",
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(detailedAgent)
+
+        // 簡潔ライターエージェント（Claude / 簡潔system_prompt）
+        let conciseAgentId = AgentID(value: "agt_concise_writer")
+        let conciseAgent = Agent(
+            id: conciseAgentId,
+            name: "簡潔ライター",
+            role: "簡潔なドキュメント作成",
+            type: .ai,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 1,
+            capabilities: ["Documentation", "Writing"],
+            systemPrompt: "簡潔に要点のみ記載してください。箇条書きで3項目以内にまとめてください。",
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(conciseAgent)
+
+        // Runner認証用クレデンシャル
+        if let credentialRepository = credentialRepository {
+            let detailedCredential = AgentCredential(
+                agentId: detailedAgentId,
+                rawPasskey: "test_passkey_detailed"
+            )
+            try credentialRepository.save(detailedCredential)
+
+            let conciseCredential = AgentCredential(
+                agentId: conciseAgentId,
+                rawPasskey: "test_passkey_concise"
+            )
+            try credentialRepository.save(conciseCredential)
+            print("✅ UC002: Runner credentials created")
+        }
+
+        // 詳細ライター用タスク（backlog状態 → UIテストでin_progressに変更）
+        let detailedTask = Task(
+            id: TaskID(value: "tsk_uc002_detailed"),
+            projectId: detailedProject.id,
+            title: "詳細プロジェクトサマリー作成",
+            description: """
+                UC002マルチエージェント協調テスト用タスク（詳細ライター）。
+
+                【指示】
+                ファイル名: PROJECT_SUMMARY.md
+                内容: プロジェクトのサマリードキュメントを作成してください。
+                あなたのsystem_promptに従って、詳細で包括的な内容を記載してください。
+                """,
+            status: .backlog,
+            priority: .high,
+            assigneeId: detailedAgentId,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(detailedTask)
+        print("✅ UC002: Detailed writer task created - id=\(detailedTask.id.value)")
+
+        // 簡潔ライター用タスク（backlog状態 → UIテストでin_progressに変更）
+        let conciseTask = Task(
+            id: TaskID(value: "tsk_uc002_concise"),
+            projectId: conciseProject.id,
+            title: "簡潔プロジェクトサマリー作成",
+            description: """
+                UC002マルチエージェント協調テスト用タスク（簡潔ライター）。
+
+                【指示】
+                ファイル名: PROJECT_SUMMARY.md
+                内容: プロジェクトのサマリードキュメントを作成してください。
+                あなたのsystem_promptに従って、簡潔に要点のみ記載してください。
+                """,
+            status: .backlog,
+            priority: .high,
+            assigneeId: conciseAgentId,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(conciseTask)
+        print("✅ UC002: Concise writer task created - id=\(conciseTask.id.value)")
+
+        print("✅ UC002: All test data seeded successfully")
     }
 
     /// 複数プロジェクトをシード
