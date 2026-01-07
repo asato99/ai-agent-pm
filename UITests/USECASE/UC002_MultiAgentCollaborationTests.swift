@@ -2,50 +2,54 @@
 // UC002: マルチエージェント協調テスト - Runner統合
 //
 // このテストは Runner との統合テスト用です。
-// 2つのエージェント（詳細ライター、簡潔ライター）のタスクを
-// 順番に in_progress に変更し、Runner がそれを検出して
-// Claude CLI を実行することを確認します。
+// 設計A: 1プロジェクト + 2タスク（同一内容、異なるエージェント）
+// - 同じタスク指示で異なるsystem_promptによる出力差異を検証
+// - 両タスクを in_progress に変更し、Runner がそれを検出して
+//   Claude CLI を実行することを確認します。
 
 import XCTest
 
 /// UC002: マルチエージェント協調テスト
 ///
 /// シードデータ（UC002シナリオ）:
+/// - プロジェクト: UC002マルチエージェントテストPJ (prj_uc002_test)
 /// - 詳細ライターエージェント: agt_detailed_writer
 /// - 簡潔ライターエージェント: agt_concise_writer
-/// - 詳細ライター用タスク: tsk_uc002_detailed (backlog状態)
-/// - 簡潔ライター用タスク: tsk_uc002_concise (backlog状態)
+/// - タスク1: プロジェクトサマリー作成 (tsk_uc002_detailed) → 詳細ライターにアサイン
+/// - タスク2: プロジェクトサマリー作成 (tsk_uc002_concise) → 簡潔ライターにアサイン
 /// - 認証情報: passkey=test_passkey_detailed, test_passkey_concise
 final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
 
-    /// UC002統合テスト: 両タスクをin_progressに変更
+    /// UC002統合テスト: 同一プロジェクト内の両タスクをin_progressに変更
     ///
     /// このテストは以下を行います:
-    /// 1. 詳細ライターPJを選択
-    /// 2. 詳細ライタータスクをin_progressに変更
-    /// 3. 簡潔ライターPJを選択
-    /// 4. 簡潔ライタータスクをin_progressに変更
+    /// 1. UC002マルチエージェントテストPJを選択
+    /// 2. 詳細ライター担当タスクをin_progressに変更
+    /// 3. 簡潔ライター担当タスクをin_progressに変更
     ///
-    /// その後、バックグラウンドの2つのRunnerがタスクを検出してCLIを実行します。
+    /// 両タスクは同一のタイトル・指示内容を持ち、異なるエージェントにアサインされている。
+    /// これにより「同じタスク指示でも、system_promptによって成果物が異なる」ことを検証。
     func testMultiAgentIntegration_ChangeBothTasksToInProgress() throws {
+        let projectName = "UC002マルチエージェントテストPJ"
+
         // ========================================
-        // Phase 1: 詳細ライタータスクをin_progressに変更
+        // プロジェクト選択
         // ========================================
-        print("🔍 Phase 1: 詳細ライタータスクをin_progressに変更")
-        try changeTaskStatusToInProgress(
-            projectName: "UC002詳細ライターPJ",
-            taskTitle: "詳細プロジェクトサマリー作成"
-        )
+        print("🔍 プロジェクト「\(projectName)」を選択")
+        try selectProject(projectName)
+
+        // ========================================
+        // Phase 1: 詳細ライター担当タスクをin_progressに変更
+        // ========================================
+        print("🔍 Phase 1: 詳細ライター担当タスクをin_progressに変更")
+        try changeTaskStatusToInProgress(assigneeName: "詳細ライター")
         print("✅ Phase 1完了: 詳細ライタータスクがin_progress")
 
         // ========================================
-        // Phase 2: 簡潔ライタータスクをin_progressに変更
+        // Phase 2: 簡潔ライター担当タスクをin_progressに変更
         // ========================================
-        print("🔍 Phase 2: 簡潔ライタータスクをin_progressに変更")
-        try changeTaskStatusToInProgress(
-            projectName: "UC002簡潔ライターPJ",
-            taskTitle: "簡潔プロジェクトサマリー作成"
-        )
+        print("🔍 Phase 2: 簡潔ライター担当タスクをin_progressに変更")
+        try changeTaskStatusToInProgress(assigneeName: "簡潔ライター")
         print("✅ Phase 2完了: 簡潔ライタータスクがin_progress")
 
         print("🎯 UC002 マルチエージェント統合テスト: 両タスクがin_progress状態になりました")
@@ -53,13 +57,11 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
 
     // MARK: - Helper Methods
 
-    /// プロジェクトを選択してタスクをin_progressに変更
-    private func changeTaskStatusToInProgress(projectName: String, taskTitle: String) throws {
-        // #1: プロジェクト選択
+    /// プロジェクトを選択
+    private func selectProject(_ projectName: String) throws {
         print("  🔍 プロジェクト「\(projectName)」を検索中...")
         let projectRow = app.staticTexts[projectName]
         guard projectRow.waitForExistence(timeout: 10) else {
-            // デバッグ: 利用可能なstaticTextsを出力
             let allTexts = app.staticTexts.allElementsBoundByIndex.prefix(20).map { $0.label }
             print("  ⚠️ 利用可能なstaticTexts: \(allTexts)")
             XCTFail("❌ SETUP: プロジェクト「\(projectName)」が見つからない")
@@ -69,7 +71,7 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
         projectRow.click()
         Thread.sleep(forTimeInterval: 1.0)
 
-        // #2: タスクボードの表示を確認
+        // タスクボードの表示を確認
         let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
         XCTAssertTrue(taskBoard.waitForExistence(timeout: 5),
                       "❌ SETUP: タスクボードが表示されない")
@@ -81,27 +83,28 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
             refreshButton.click()
             Thread.sleep(forTimeInterval: 2.0)
         } else {
-            // タスクボードの内容が更新されるのを待つ
             Thread.sleep(forTimeInterval: 2.0)
         }
+    }
 
-        // #3: タスクを探す
-        print("  🔍 タスク「\(taskTitle)」を検索中...")
+    /// 指定されたassignee名を持つタスクをin_progressに変更
+    private func changeTaskStatusToInProgress(assigneeName: String) throws {
+        // タスクカードはラベルに "assigned to [エージェント名]" を含む
+        print("  🔍 「\(assigneeName)」担当タスクを検索中...")
 
         // デバッグ: 利用可能な要素を出力
-        let allButtons = app.buttons.allElementsBoundByIndex.prefix(20).map { $0.label }
-        let allTexts = app.staticTexts.allElementsBoundByIndex.prefix(30).map { $0.label }
+        let allButtons = app.buttons.allElementsBoundByIndex.prefix(25).map { $0.label }
         print("  📋 利用可能なbuttons: \(allButtons)")
-        print("  📋 利用可能なstaticTexts: \(allTexts)")
 
-        let taskCard = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", taskTitle)).firstMatch
+        // タスクカードを探す（assignee名で検索）
+        let taskCard = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", assigneeName)).firstMatch
         guard taskCard.waitForExistence(timeout: 5) else {
-            XCTFail("❌ STEP1: タスク「\(taskTitle)」が見つからない")
+            XCTFail("❌ STEP1: 「\(assigneeName)」担当タスクが見つからない")
             return
         }
-        print("  ✅ タスク「\(taskTitle)」が見つかりました")
+        print("  ✅ 「\(assigneeName)」担当タスクが見つかりました: \(taskCard.label)")
 
-        // #4: タスク詳細を開く
+        // タスク詳細を開く
         taskCard.click()
         Thread.sleep(forTimeInterval: 0.5)
 
@@ -109,7 +112,7 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
         XCTAssertTrue(detailView.waitForExistence(timeout: 5),
                       "❌ STEP2: タスク詳細画面が開かない")
 
-        // #5: ステータスピッカーを確認
+        // ステータスピッカーを確認
         let statusPicker = app.popUpButtons["StatusPicker"]
         XCTAssertTrue(statusPicker.waitForExistence(timeout: 3),
                       "❌ STEP3: StatusPickerが見つからない")
@@ -117,7 +120,7 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
         let beforeValue = statusPicker.value as? String ?? ""
         print("  変更前ステータス: \(beforeValue)")
 
-        // #6: backlog → todo → in_progress と順番に変更
+        // backlog → todo → in_progress と順番に変更
         if beforeValue == "Backlog" {
             // Backlog → To Do
             statusPicker.click()
@@ -142,7 +145,7 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
             Thread.sleep(forTimeInterval: 0.5)
         }
 
-        // #7: To Do → In Progress
+        // To Do → In Progress
         statusPicker.click()
         Thread.sleep(forTimeInterval: 0.3)
 
@@ -161,14 +164,14 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
             return
         }
 
-        // #8: ステータス変更の確認
+        // ステータス変更の確認
         let afterValue = statusPicker.value as? String
         XCTAssertEqual(afterValue, "In Progress",
                        "❌ STEP6: ステータスがIn Progressになっていない（実際の値: \(afterValue ?? "nil")）")
 
         print("  ✅ ステータスをIn Progressに変更完了")
 
-        // #9: 詳細画面を閉じる
+        // 詳細画面を閉じる
         app.typeKey(.escape, modifierFlags: [])
         Thread.sleep(forTimeInterval: 1.0)
 
@@ -178,6 +181,13 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
             print("  ⚠️ 詳細画面がまだ表示されている、再度Escapeを試行")
             app.typeKey(.escape, modifierFlags: [])
             Thread.sleep(forTimeInterval: 1.0)
+        }
+
+        // タスクボードを再度Refreshして更新を反映（次のタスク検索のため）
+        let refreshButton = app.buttons.matching(identifier: "RefreshButton").firstMatch
+        if refreshButton.waitForExistence(timeout: 2) {
+            refreshButton.click()
+            Thread.sleep(forTimeInterval: 1.5)
         }
     }
 }

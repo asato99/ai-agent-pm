@@ -687,61 +687,29 @@ private final class TestDataSeeder {
     /// - 出力ファイル: PROJECT_SUMMARY.md
     ///
     /// 環境変数または引数:
-    /// - UC002_DETAILED_DIR / -UC002DetailedDir: 詳細ライター用作業ディレクトリ
-    /// - UC002_CONCISE_DIR / -UC002ConciseDir: 簡潔ライター用作業ディレクトリ
+    /// UC002: マルチエージェント協調テスト用シードデータ
+    ///
+    /// 設計A: 1プロジェクト + 2タスク（同一内容、異なるエージェント）
+    /// - 同じタスク指示で異なるsystem_promptによる出力差異を検証
+    /// - 各Runnerは異なる作業ディレクトリで実行（Runner config側で指定）
     func seedUC002Data() async throws {
-        // 引数から設定を取得
-        var detailedDirArg: String?
-        var conciseDirArg: String?
-
-        for arg in CommandLine.arguments {
-            if arg.hasPrefix("-UC002DetailedDir:") {
-                detailedDirArg = String(arg.dropFirst("-UC002DetailedDir:".count))
-            } else if arg.hasPrefix("-UC002ConciseDir:") {
-                conciseDirArg = String(arg.dropFirst("-UC002ConciseDir:".count))
-            }
-        }
-
-        // 引数になければ環境変数から取得、それもなければデフォルト値
-        let detailedDir = detailedDirArg ?? ProcessInfo.processInfo.environment["UC002_DETAILED_DIR"] ?? "/tmp/uc002_detailed"
-        let conciseDir = conciseDirArg ?? ProcessInfo.processInfo.environment["UC002_CONCISE_DIR"] ?? "/tmp/uc002_concise"
-
         // デバッグ出力
         print("=== UC002 Test Data Configuration ===")
-        print("Detailed Writer Dir: \(detailedDir)")
-        print("Concise Writer Dir: \(conciseDir)")
+        print("Design: Single project + 2 identical tasks with different agents")
 
-        // 作業ディレクトリを作成
-        let fileManager = FileManager.default
-        for dir in [detailedDir, conciseDir] {
-            if !fileManager.fileExists(atPath: dir) {
-                try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
-            }
-        }
-
-        // UC002用プロジェクト（詳細ライター用）
-        let detailedProject = Project(
-            id: ProjectID(value: "prj_uc002_detailed"),
-            name: "UC002詳細ライターPJ",
-            description: "マルチエージェント協調テスト用プロジェクト（詳細ライター）",
+        // UC002用プロジェクト（1つのみ）
+        let projectId = ProjectID(value: "prj_uc002_test")
+        let project = Project(
+            id: projectId,
+            name: "UC002マルチエージェントテストPJ",
+            description: "マルチエージェント協調テスト - 同一タスク指示で異なるsystem_promptによる出力差異を検証",
             status: .active,
-            workingDirectory: detailedDir,
+            workingDirectory: "/tmp/uc002_test",
             createdAt: Date(),
             updatedAt: Date()
         )
-        try await projectRepository.save(detailedProject)
-
-        // UC002用プロジェクト（簡潔ライター用）
-        let conciseProject = Project(
-            id: ProjectID(value: "prj_uc002_concise"),
-            name: "UC002簡潔ライターPJ",
-            description: "マルチエージェント協調テスト用プロジェクト（簡潔ライター）",
-            status: .active,
-            workingDirectory: conciseDir,
-            createdAt: Date(),
-            updatedAt: Date()
-        )
-        try await projectRepository.save(conciseProject)
+        try await projectRepository.save(project)
+        print("✅ UC002: Project created - \(project.name)")
 
         // 詳細ライターエージェント（Claude / 詳細system_prompt）
         let detailedAgentId = AgentID(value: "agt_detailed_writer")
@@ -782,6 +750,7 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await agentRepository.save(conciseAgent)
+        print("✅ UC002: Agents created - 詳細ライター, 簡潔ライター")
 
         // Runner認証用クレデンシャル
         if let credentialRepository = credentialRepository {
@@ -799,19 +768,21 @@ private final class TestDataSeeder {
             print("✅ UC002: Runner credentials created")
         }
 
-        // 詳細ライター用タスク（backlog状態 → UIテストでin_progressに変更）
+        // 共通のタスク指示（両タスクで同一）
+        let commonTaskDescription = """
+            【タスク指示】
+            ファイル名: PROJECT_SUMMARY.md
+            内容: プロジェクトのサマリードキュメントを作成してください。
+
+            あなたのsystem_promptに従って、適切なスタイルで記載してください。
+            """
+
+        // タスク1: 詳細ライター用（backlog状態 → UIテストでin_progressに変更）
         let detailedTask = Task(
             id: TaskID(value: "tsk_uc002_detailed"),
-            projectId: detailedProject.id,
-            title: "詳細プロジェクトサマリー作成",
-            description: """
-                UC002マルチエージェント協調テスト用タスク（詳細ライター）。
-
-                【指示】
-                ファイル名: PROJECT_SUMMARY.md
-                内容: プロジェクトのサマリードキュメントを作成してください。
-                あなたのsystem_promptに従って、詳細で包括的な内容を記載してください。
-                """,
+            projectId: projectId,
+            title: "プロジェクトサマリー作成",
+            description: commonTaskDescription,
             status: .backlog,
             priority: .high,
             assigneeId: detailedAgentId,
@@ -819,21 +790,14 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await taskRepository.save(detailedTask)
-        print("✅ UC002: Detailed writer task created - id=\(detailedTask.id.value)")
+        print("✅ UC002: Task 1 created - assigned to 詳細ライター")
 
-        // 簡潔ライター用タスク（backlog状態 → UIテストでin_progressに変更）
+        // タスク2: 簡潔ライター用（backlog状態 → UIテストでin_progressに変更）
         let conciseTask = Task(
             id: TaskID(value: "tsk_uc002_concise"),
-            projectId: conciseProject.id,
-            title: "簡潔プロジェクトサマリー作成",
-            description: """
-                UC002マルチエージェント協調テスト用タスク（簡潔ライター）。
-
-                【指示】
-                ファイル名: PROJECT_SUMMARY.md
-                内容: プロジェクトのサマリードキュメントを作成してください。
-                あなたのsystem_promptに従って、簡潔に要点のみ記載してください。
-                """,
+            projectId: projectId,
+            title: "プロジェクトサマリー作成",
+            description: commonTaskDescription,
             status: .backlog,
             priority: .high,
             assigneeId: conciseAgentId,
@@ -841,9 +805,9 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await taskRepository.save(conciseTask)
-        print("✅ UC002: Concise writer task created - id=\(conciseTask.id.value)")
+        print("✅ UC002: Task 2 created - assigned to 簡潔ライター")
 
-        print("✅ UC002: All test data seeded successfully")
+        print("✅ UC002: All test data seeded successfully (1 project, 2 identical tasks)")
     }
 
     /// 複数プロジェクトをシード

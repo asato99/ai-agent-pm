@@ -2,6 +2,9 @@
 # UC002 App Integration Test - Multi-Agent Collaboration E2E Test
 # マルチエージェント協調テスト（アプリ統合版）
 #
+# 設計A: 1プロジェクト + 2タスク（同一内容、異なるエージェント）
+# - 同じタスク指示で異なるsystem_promptによる出力差異を検証
+#
 # フロー:
 #   1. ビルド（MCP Server + App）
 #   2. XCUITest実行（アプリ起動→シードデータ投入→UI操作でステータス変更）
@@ -10,9 +13,10 @@
 #   5. ファイル作成検証（文字数比較）
 #
 # ポイント:
+#   - 1プロジェクト内に2つの同一タスク（異なるエージェントにアサイン）
 #   - XCUITestが先に実行され、DBにデータを投入し、両タスクをin_progressに変更
 #   - MCPデーモンは同一DBを読み取り、Runnerに提供
-#   - 2つのRunnerがそれぞれのタスクを検出してCLI実行
+#   - 2つのRunnerがそれぞれのタスクを検出してCLI実行（各Runnerの作業ディレクトリは別）
 #   - 詳細版は長く、簡潔版は短い出力になることを検証
 
 set -e
@@ -372,10 +376,10 @@ if [ "$DETAILED_CREATED" == "true" ] && [ "$CONCISE_CREATED" == "true" ]; then
 
     echo -e "${GREEN}UC002 App Integration Test: PASSED${NC}"
     echo ""
-    echo "Verified:"
-    echo "  - Detailed writer created comprehensive output ($DETAILED_CHARS chars)"
-    echo "  - Concise writer created brief output ($CONCISE_CHARS chars)"
-    echo "  - Different system_prompts produced different outputs"
+    echo "Verified (Design A: 1 project + 2 identical tasks with different agents):"
+    echo "  - Same task instructions → different outputs based on system_prompt"
+    echo "  - Detailed writer (system_prompt=詳細): $DETAILED_CHARS chars"
+    echo "  - Concise writer (system_prompt=簡潔): $CONCISE_CHARS chars"
     exit 0
 else
     echo -e "${RED}UC002 App Integration Test: FAILED${NC}"
