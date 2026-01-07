@@ -32,6 +32,7 @@ public final class DependencyContainer: ObservableObject {
     public let auditRuleRepository: AuditRuleRepository
     public let executionLogRepository: ExecutionLogRepository
     public let agentCredentialRepository: AgentCredentialRepository
+    public let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository
 
     // MARK: - Event Recorder
 
@@ -354,6 +355,7 @@ public final class DependencyContainer: ObservableObject {
         self.auditRuleRepository = AuditRuleRepository(database: database)
         self.executionLogRepository = ExecutionLogRepository(database: database)
         self.agentCredentialRepository = AgentCredentialRepository(database: database)
+        self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
     }
 

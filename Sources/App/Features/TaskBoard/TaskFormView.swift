@@ -103,12 +103,11 @@ struct TaskFormView: View {
 
     private func loadData() async {
         do {
-            // エージェントはプロジェクト非依存なので全件取得
-            agents = try container.getAgentsUseCase.execute()
+            let targetProjectId: ProjectID
 
             switch mode {
-            case .create:
-                break // エージェントリストは既に読み込み済み
+            case .create(let createProjectId):
+                targetProjectId = createProjectId
             case .edit(let taskId):
                 if let task = try container.taskRepository.findById(taskId) {
                     title = task.title
@@ -116,8 +115,16 @@ struct TaskFormView: View {
                     priority = task.priority
                     assigneeId = task.assigneeId
                     estimatedMinutes = task.estimatedMinutes
+                    targetProjectId = task.projectId
+                } else {
+                    // Task not found, cannot load agents
+                    return
                 }
             }
+
+            // プロジェクトに割り当てられたエージェントのみ取得
+            // 参照: docs/requirements/PROJECTS.md - エージェント割り当て
+            agents = try container.projectAgentAssignmentRepository.findAgentsByProject(targetProjectId)
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }

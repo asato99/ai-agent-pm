@@ -26,6 +26,7 @@ final class MCPServerTests: XCTestCase {
         // プロジェクト管理
         XCTAssertTrue(toolNames.contains("list_projects"), "list_projects should be defined")
         XCTAssertTrue(toolNames.contains("get_project"), "get_project should be defined")
+        XCTAssertTrue(toolNames.contains("list_active_projects_with_agents"), "list_active_projects_with_agents should be defined")
 
         // タスク管理
         XCTAssertTrue(toolNames.contains("list_tasks"), "list_tasks should be defined per MCP_DESIGN.md")
@@ -146,6 +147,20 @@ final class MCPServerTests: XCTestCase {
             XCTAssertEqual(schema["type"] as? String, "object")
             let required = schema["required"] as? [String] ?? []
             XCTAssertTrue(required.contains("project_id"), "get_project should require project_id")
+        }
+    }
+
+    /// list_active_projects_with_agentsツール定義（Phase 4: Coordinator用API）
+    func testListActiveProjectsWithAgentsToolDefinition() {
+        let tool = ToolDefinitions.listActiveProjectsWithAgents
+
+        XCTAssertEqual(tool["name"] as? String, "list_active_projects_with_agents")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.isEmpty, "list_active_projects_with_agents should have no required parameters")
         }
     }
 
@@ -464,6 +479,14 @@ final class MCPServerTests: XCTestCase {
         XCTAssertTrue(error.description.contains("Invalid resource URI"))
     }
 
+    /// MCPError.agentNotAssignedToProjectのテスト（Phase 4）
+    func testMCPErrorAgentNotAssignedToProject() {
+        let error = MCPError.agentNotAssignedToProject(agentId: "agt_dev", projectId: "prj_frontend")
+        XCTAssertTrue(error.description.contains("agt_dev"))
+        XCTAssertTrue(error.description.contains("prj_frontend"))
+        XCTAssertTrue(error.description.contains("not assigned"))
+    }
+
     // MARK: - Status Enum Tests
 
     /// ToolDefinitionsのstatus enumがPRD仕様と一致することを確認
@@ -494,15 +517,15 @@ final class MCPServerTests: XCTestCase {
         let tools = ToolDefinitions.all()
 
         // ステートレス設計版ツール: 19個
-        // Phase 4 Coordinator API: 3 (health_check, list_managed_agents, should_start)
+        // Phase 4 Coordinator API: 4 (health_check, list_managed_agents, should_start, list_active_projects_with_agents)
         // Phase 4 Agent API: 3 (authenticate, get_my_task, report_completed)
         // Agent: 3 (get_agent_profile, get_my_profile, list_agents)
-        // Project: 2 (list_projects, get_project)
+        // Project: 3 (list_projects, get_project, list_active_projects_with_agents)
         // Tasks: 6 (list_tasks, get_task, get_my_tasks, get_pending_tasks, update_task_status, assign_task)
         // Context: 2 (save_context, get_task_context)
         // Handoff: 3 (create_handoff, accept_handoff, get_pending_handoffs)
         // Execution Log (Phase 3-3, Phase 4で非推奨): 2 (report_execution_start, report_execution_complete)
-        XCTAssertEqual(tools.count, 24, "Should have 24 tools defined (including Phase 4 Coordinator/Agent APIs)")
+        XCTAssertEqual(tools.count, 25, "Should have 25 tools defined (including Phase 4 Coordinator/Agent APIs)")
     }
 }
 
@@ -529,6 +552,7 @@ final class MCPPRDComplianceTests: XCTestCase {
             // プロジェクト管理
             "list_projects",
             "get_project",
+            "list_active_projects_with_agents", // Phase 4: Coordinator用API
 
             // タスク管理
             "list_tasks",
@@ -559,8 +583,8 @@ final class MCPPRDComplianceTests: XCTestCase {
             }
         }
 
-        // ステートレス設計版 + 認証 + Phase 3-2 + Phase 3-3: 19個のツールが実装されている
-        XCTAssertEqual(implementedCount, 19, "Should have 19 tools implemented (including Phase 3-1, 3-2, 3-3 tools)")
+        // ステートレス設計版 + 認証 + Phase 3-2 + Phase 3-3 + Phase 4: 20個のツールが実装されている
+        XCTAssertEqual(implementedCount, 20, "Should have 20 tools implemented (including Phase 3 & Phase 4 tools)")
 
         // ステートレス設計で削除されたツール
         let removedTools = ["start_session", "end_session", "get_my_sessions", "create_task", "update_task"]

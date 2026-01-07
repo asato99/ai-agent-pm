@@ -14,6 +14,7 @@ enum ToolDefinitions {
             // Phase 4: Coordinator API
             healthCheck,
             listManagedAgents,
+            listActiveProjectsWithAgents,
             shouldStart,
 
             // Phase 4: Agent API
@@ -74,6 +75,19 @@ enum ToolDefinitions {
     static let listManagedAgents: [String: Any] = [
         "name": "list_managed_agents",
         "description": "Coordinatorの管理対象となるAIエージェントのID一覧を取得します。エージェントの詳細は隠蔽されます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [:] as [String: Any],
+            "required": [] as [String]
+        ]
+    ]
+
+    /// list_active_projects_with_agents - アクティブなプロジェクトと割り当てエージェント一覧を取得
+    /// 参照: docs/requirements/PROJECTS.md - MCP API
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    static let listActiveProjectsWithAgents: [String: Any] = [
+        "name": "list_active_projects_with_agents",
+        "description": "アクティブなプロジェクト一覧と、各プロジェクトに割り当てられたエージェントを取得します。Coordinatorがポーリング対象を決定するために使用します。",
         "inputSchema": [
             "type": "object",
             "properties": [:] as [String: Any],

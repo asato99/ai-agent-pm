@@ -22,6 +22,8 @@ struct ProjectFormView: View {
     @State private var description: String = ""
     @State private var workingDirectory: String = ""
     @State private var isSaving = false
+    @State private var allAgents: [Agent] = []
+    @State private var assignedAgentIds: Set<AgentID> = []
 
     var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -53,6 +55,39 @@ struct ProjectFormView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Section("Assigned Agents") {
+                    if allAgents.isEmpty {
+                        Text("No agents available")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(allAgents, id: \.id) { agent in
+                            Toggle(isOn: Binding(
+                                get: { assignedAgentIds.contains(agent.id) },
+                                set: { isOn in
+                                    if isOn {
+                                        assignedAgentIds.insert(agent.id)
+                                    } else {
+                                        assignedAgentIds.remove(agent.id)
+                                    }
+                                }
+                            )) {
+                                HStack {
+                                    Text(agent.name)
+                                    Spacer()
+                                    Text(agent.type.rawValue)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .accessibilityIdentifier("AgentToggle_\(agent.id.value)")
+                        }
+                    }
+
+                    Text("Only assigned agents can be assigned to tasks in this project")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .formStyle(.grouped)
             .navigationTitle(title)
@@ -70,6 +105,7 @@ struct ProjectFormView: View {
                 }
             }
             .task {
+                await loadAgents()
                 if case .edit(let projectId) = mode {
                     await loadProject(projectId)
                 }
@@ -78,12 +114,24 @@ struct ProjectFormView: View {
         .frame(minWidth: 400, minHeight: 200)
     }
 
+    private func loadAgents() async {
+        do {
+            allAgents = try container.agentRepository.findAll()
+        } catch {
+            router.showAlert(.error(message: error.localizedDescription))
+        }
+    }
+
     private func loadProject(_ projectId: ProjectID) async {
         do {
             if let project = try container.projectRepository.findById(projectId) {
                 name = project.name
                 description = project.description
                 workingDirectory = project.workingDirectory ?? ""
+
+                // Load assigned agents
+                let assignedAgents = try container.projectAgentAssignmentRepository.findAgentsByProject(projectId)
+                assignedAgentIds = Set(assignedAgents.map { $0.id })
             }
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
@@ -95,25 +143,52 @@ struct ProjectFormView: View {
 
         AsyncTask {
             do {
+                let projectId: ProjectID
                 switch mode {
                 case .create:
-                    _ = try container.createProjectUseCase.execute(
+                    let newProject = try container.createProjectUseCase.execute(
                         name: name,
                         description: description.isEmpty ? nil : description,
                         workingDirectory: workingDirectory.isEmpty ? nil : workingDirectory
                     )
-                case .edit(let projectId):
-                    if var project = try container.projectRepository.findById(projectId) {
+                    projectId = newProject.id
+                case .edit(let editProjectId):
+                    if var project = try container.projectRepository.findById(editProjectId) {
                         project.name = name
                         project.description = description
                         project.workingDirectory = workingDirectory.isEmpty ? nil : workingDirectory
                         try container.projectRepository.save(project)
                     }
+                    projectId = editProjectId
                 }
+
+                // Update agent assignments
+                try await updateAgentAssignments(for: projectId)
+
                 dismiss()
             } catch {
                 isSaving = false
                 router.showAlert(.error(message: error.localizedDescription))
+            }
+        }
+    }
+
+    private func updateAgentAssignments(for projectId: ProjectID) async throws {
+        // Get current assignments
+        let currentAssignments = try container.projectAgentAssignmentRepository.findAgentsByProject(projectId)
+        let currentAssignedIds = Set(currentAssignments.map { $0.id })
+
+        // Remove agents that are no longer assigned
+        for agentId in currentAssignedIds {
+            if !assignedAgentIds.contains(agentId) {
+                try container.projectAgentAssignmentRepository.remove(projectId: projectId, agentId: agentId)
+            }
+        }
+
+        // Add newly assigned agents
+        for agentId in assignedAgentIds {
+            if !currentAssignedIds.contains(agentId) {
+                _ = try container.projectAgentAssignmentRepository.assign(projectId: projectId, agentId: agentId)
             }
         }
     }

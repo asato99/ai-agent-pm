@@ -32,6 +32,9 @@ final class MCPServer {
     // Phase 3-3: Execution Log Repository
     private let executionLogRepository: ExecutionLogRepository
 
+    // Phase 4: Project-Agent Assignment Repository
+    private let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository
+
     private let debugMode: Bool
 
     /// ステートレス設計: DBパスのみで初期化（stdio用）
@@ -54,6 +57,8 @@ final class MCPServer {
         self.agentSessionRepository = AgentSessionRepository(database: database)
         // Phase 3-3: Execution Log Repository
         self.executionLogRepository = ExecutionLogRepository(database: database)
+        // Phase 4: Project-Agent Assignment Repository
+        self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
 
         // 起動時ログ（常に出力）- ファイルとstderrの両方に出力
@@ -280,6 +285,9 @@ final class MCPServer {
                 throw MCPError.missingArguments(["project_id"])
             }
             return try getProject(projectId: projectId)
+        case "list_active_projects_with_agents":
+            // Phase 4: Coordinator用API - アクティブプロジェクトと割り当てエージェント一覧
+            return try listActiveProjectsWithAgents()
 
         // Tasks
         case "list_tasks":
@@ -1236,6 +1244,34 @@ final class MCPServer {
         return projectToDict(project)
     }
 
+    /// list_active_projects_with_agents - アクティブプロジェクトと割り当てエージェント一覧
+    /// 参照: docs/requirements/PROJECTS.md - MCP API
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// Coordinatorがポーリング対象を決定するために使用
+    private func listActiveProjectsWithAgents() throws -> [String: Any] {
+        // アクティブなプロジェクトのみ取得
+        let allProjects = try projectRepository.findAll()
+        let activeProjects = allProjects.filter { $0.status == .active }
+
+        var projectsWithAgents: [[String: Any]] = []
+
+        for project in activeProjects {
+            // 各プロジェクトに割り当てられたエージェントを取得
+            let agents = try projectAgentAssignmentRepository.findAgentsByProject(project.id)
+            let agentIds = agents.map { $0.id.value }
+
+            let projectEntry: [String: Any] = [
+                "project_id": project.id.value,
+                "project_name": project.name,
+                "working_directory": project.workingDirectory ?? "",
+                "agents": agentIds
+            ]
+            projectsWithAgents.append(projectEntry)
+        }
+
+        return ["projects": projectsWithAgents]
+    }
+
     /// list_tasks - タスク一覧を取得（フィルタ可能）
     /// ステートレス設計: project_idは不要、全プロジェクトのタスクを返す
     private func listTasks(status: String?, assigneeId: String?) throws -> [[String: Any]] {
@@ -1356,6 +1392,17 @@ final class MCPServer {
                 let allAgents = try? agentRepository.findAll()
                 Self.log("[MCP] assignTask: Agent '\(assigneeIdStr)' not found. Available: \(allAgents?.map { $0.id.value } ?? [])")
                 throw MCPError.agentNotFound(assigneeIdStr)
+            }
+
+            // Validate agent is assigned to the project
+            // 参照: docs/requirements/PROJECTS.md - エージェント割り当て制約
+            let isAssigned = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+                agentId: targetAgentId,
+                projectId: task.projectId
+            )
+            if !isAssigned {
+                Self.log("[MCP] assignTask: Agent '\(assigneeIdStr)' is not assigned to project '\(task.projectId.value)'")
+                throw MCPError.agentNotAssignedToProject(agentId: assigneeIdStr, projectId: task.projectId.value)
             }
         }
 
@@ -1860,6 +1907,7 @@ enum MCPError: Error, CustomStringConvertible {
     case sessionTokenInvalid  // Phase 3-4: セッショントークン無効
     case sessionTokenExpired  // Phase 3-4: セッショントークン期限切れ
     case sessionAgentMismatch(expected: String, actual: String)  // Phase 3-4: エージェントID不一致
+    case agentNotAssignedToProject(agentId: String, projectId: String)  // Phase 4: エージェント未割り当て
 
     var description: String {
         switch self {
@@ -1903,6 +1951,8 @@ enum MCPError: Error, CustomStringConvertible {
             return "Session token has expired. Please re-authenticate."
         case .sessionAgentMismatch(let expected, let actual):
             return "Session belongs to agent '\(actual)' but operation requested for agent '\(expected)'"
+        case .agentNotAssignedToProject(let agentId, let projectId):
+            return "Agent '\(agentId)' is not assigned to project '\(projectId)'. Assign the agent to the project first."
         }
     }
 }

@@ -20,6 +20,7 @@ enum UITestScenario: String {
     case internalAudit = "InternalAudit" // Internal Audit機能テスト用
     case uc001 = "UC001"           // UC001: エージェントによるタスク実行（Runner統合テスト用）
     case uc002 = "UC002"           // UC002: マルチエージェント協調（system_prompt差異検証）
+    case uc004 = "UC004"           // UC004: 複数プロジェクト×同一エージェント
 }
 
 // MARK: - Base Test Class
@@ -101,4 +102,9 @@ class UC001UITestCase: AIAgentPMUITestCase {
 /// UC002テスト用ベースクラス（マルチエージェント協調テスト用）
 class UC002UITestCase: AIAgentPMUITestCase {
     override var testScenario: UITestScenario { .uc002 }
+}
+
+/// UC004テスト用ベースクラス（複数プロジェクト×同一エージェントテスト用）
+class UC004UITestCase: AIAgentPMUITestCase {
+    override var testScenario: UITestScenario { .uc004 }
 }
