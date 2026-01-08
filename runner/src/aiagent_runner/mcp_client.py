@@ -49,7 +49,10 @@ class ProjectWithAgents:
 class ShouldStartResult:
     """Result of should_start check."""
     should_start: bool
-    ai_type: Optional[str] = None
+    provider: Optional[str] = None       # "claude", "gemini", "openai", "other"
+    model: Optional[str] = None          # "claude-sonnet-4-5", "gemini-2.0-flash", etc.
+    kick_command: Optional[str] = None   # Custom CLI command (takes priority if set)
+    ai_type: Optional[str] = None        # Deprecated: use provider/model instead
 
 
 # Phase 3/4: Agent API data classes
@@ -217,7 +220,7 @@ class MCPClient:
             project_id: Project ID
 
         Returns:
-            ShouldStartResult with should_start flag and ai_type
+            ShouldStartResult with should_start flag, provider, model, and kick_command
 
         Raises:
             MCPError: If request fails
@@ -229,7 +232,10 @@ class MCPClient:
 
         return ShouldStartResult(
             should_start=result.get("should_start", False),
-            ai_type=result.get("ai_type")
+            provider=result.get("provider"),
+            model=result.get("model"),
+            kick_command=result.get("kick_command"),
+            ai_type=result.get("ai_type")  # Deprecated, kept for backwards compatibility
         )
 
     # ==========================================================================

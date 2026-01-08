@@ -39,7 +39,8 @@ class AgentInstanceInfo:
     key: AgentInstanceKey
     process: subprocess.Popen
     working_directory: str
-    ai_type: str
+    provider: str                              # "claude", "gemini", "openai", "other"
+    model: Optional[str]                       # "claude-sonnet-4-5", "gemini-2.0-flash", etc.
     started_at: datetime
     log_file_handle: Optional["TextIO"] = None  # Keep file handle open during process lifetime
 
@@ -186,15 +187,21 @@ class Coordinator:
                 logger.debug(f"Calling should_start({agent_id}, {project_id})")
                 try:
                     result = await self.mcp_client.should_start(agent_id, project_id)
-                    logger.debug(f"should_start result: {result.should_start}, ai_type: {result.ai_type}")
+                    logger.debug(
+                        f"should_start result: {result.should_start}, "
+                        f"provider: {result.provider}, model: {result.model}, "
+                        f"kick_command: {result.kick_command}"
+                    )
                     if result.should_start:
-                        ai_type = result.ai_type or "claude"
+                        provider = result.provider or "claude"
                         self._spawn_instance(
                             agent_id=agent_id,
                             project_id=project_id,
                             passkey=passkey,
                             working_dir=working_dir,
-                            ai_type=ai_type
+                            provider=provider,
+                            model=result.model,
+                            kick_command=result.kick_command
                         )
                     else:
                         logger.debug(f"should_start returned False for {agent_id}/{project_id}")
@@ -227,7 +234,9 @@ class Coordinator:
         project_id: str,
         passkey: str,
         working_dir: str,
-        ai_type: str
+        provider: str,
+        model: Optional[str] = None,
+        kick_command: Optional[str] = None
     ) -> None:
         """Spawn an Agent Instance process.
 
@@ -243,11 +252,22 @@ class Coordinator:
             project_id: Project ID
             passkey: Agent passkey
             working_dir: Working directory for the task
-            ai_type: AI type (claude, gemini, etc.)
+            provider: AI provider (claude, gemini, openai, other)
+            model: Specific model (claude-sonnet-4-5, gemini-2.0-flash, etc.)
+            kick_command: Custom CLI command (takes priority if set)
         """
-        provider = self.config.get_provider(ai_type)
-        cli_command = provider.cli_command
-        cli_args = provider.cli_args
+        # kick_command takes priority over provider-based selection
+        if kick_command:
+            # Parse kick_command into command and args
+            parts = kick_command.split()
+            cli_command = parts[0]
+            cli_args = parts[1:] if len(parts) > 1 else []
+            logger.info(f"Using kick_command: {kick_command}")
+        else:
+            # Use provider-based CLI selection
+            provider_config = self.config.get_provider(provider)
+            cli_command = provider_config.cli_command
+            cli_args = provider_config.cli_args
 
         # Build prompt for the Agent Instance
         prompt = self._build_agent_prompt(agent_id, project_id, passkey)
@@ -295,8 +315,9 @@ class Coordinator:
             "-p", prompt
         ]
 
+        model_desc = f"{provider}/{model}" if model else provider
         logger.info(
-            f"Spawning {ai_type} instance for {agent_id}/{project_id} "
+            f"Spawning {model_desc} instance for {agent_id}/{project_id} "
             f"at {working_dir}"
         )
         logger.debug(f"MCP server command: {mcp_server_command}")
@@ -328,7 +349,8 @@ class Coordinator:
             key=key,
             process=process,
             working_directory=working_dir,
-            ai_type=ai_type,
+            provider=provider,
+            model=model,
             started_at=datetime.now(),
             log_file_handle=log_f
         )

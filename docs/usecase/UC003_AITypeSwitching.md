@@ -1,8 +1,8 @@
-# UC003: AIタイプ切り替え
+# UC003: AIモデル切り替え
 
 ## 概要
 
-異なるAIタイプ（claude, gemini, openai）のエージェントが、それぞれ適切なCLIコマンドで実行されることを検証するシナリオ。
+異なるAIモデル（Claude Sonnet 4.5, Claude Opus 4, Gemini 2.0 Flash等）のエージェントが、それぞれ適切なCLIコマンドとモデル指定で実行されることを検証するシナリオ。
 
 ---
 
@@ -10,14 +10,14 @@
 
 ### 検証したいこと
 
-1. **ai_type伝播**: エージェントのai_typeがshould_start APIで正しく返される
-2. **kickCommand優先**: kickCommandが設定されている場合、ai_typeより優先される
-3. **CLI選択**: Coordinatorがai_typeに基づいて適切なCLIを選択する（将来）
+1. **モデル情報伝播**: エージェントのaiType（モデル指定）がshould_start APIで正しく返される
+2. **kickCommand優先**: kickCommandが設定されている場合、aiTypeより優先される
+3. **CLI選択**: Coordinatorがモデル情報に基づいて適切なCLIとモデル引数を選択する
 
 ### ビジネス価値
 
-- 複数のAIプロバイダーを同一システムで統合管理
-- プロジェクトやタスクの特性に応じたAI選択
+- 複数のAIモデルを同一システムで統合管理
+- タスクの複雑さに応じたモデル選択（簡単なタスクはSonnet、複雑なタスクはOpus）
 - カスタムCLIコマンドによる柔軟な拡張
 
 ---
@@ -28,9 +28,9 @@
 
 | 機能 | 状態 | 説明 |
 |------|------|------|
-| Agent.aiType | 実装済み | claude, gemini, openai, other |
+| Agent.aiType | 実装済み | モデル指定（claudeSonnet4_5, claudeOpus4, gemini2Flash等） |
 | Agent.kickCommand | 実装済み | カスタムCLIコマンド |
-| should_start API | 実装済み | ai_typeを返す |
+| should_start API | 実装済み | ai_type（モデル情報）を返す |
 
 ### MCP API
 
@@ -46,33 +46,33 @@
 
 ```
 エージェント:
-  - agt_claude: Claudeエージェント（aiType: claude）
-  - agt_custom: カスタムコマンドエージェント（aiType: claude, kickCommand: "echo"）
+  - agt_uc003_sonnet: Sonnetエージェント（aiType: claudeSonnet4_5, kickCommand: nil）
+  - agt_uc003_opus: Opusエージェント（aiType: claudeOpus4, kickCommand: "claude --model opus"）
 
 プロジェクト:
   - prj_uc003: UC003テストプロジェクト（working_dir: /tmp/uc003）
 
 タスク:
-  - tsk_claude: Claudeタスク（agt_claude）
-  - tsk_custom: カスタムタスク（agt_custom）
+  - tsk_uc003_sonnet: Sonnetタスク（agt_uc003_sonnet）
+  - tsk_uc003_opus: Opusタスク（agt_uc003_opus）
 ```
 
 ### 期待される動作
 
 ```
-1. should_start("agt_claude") → { should_start: true, ai_type: "claude" }
-   → Runnerは "claude" コマンドを使用
+1. should_start("agt_uc003_sonnet") → { should_start: true, ai_type: "claude-sonnet-4-5" }
+   → Runnerは "claude" コマンド + Sonnet 4.5モデルを使用
 
-2. should_start("agt_custom") → { should_start: true, ai_type: "claude", kick_command: "echo" }
-   → Runnerは "echo" コマンドを使用（kickCommand優先）
+2. should_start("agt_uc003_opus") → { should_start: true, ai_type: "claude-opus-4", kick_command: "claude --model opus" }
+   → Runnerは kickCommand を使用（kickCommand優先）
 ```
 
 ### 成功条件
 
 ```
-1. agt_claudeのshould_start APIが ai_type: "claude" を返す
-2. agt_customのshould_start APIが kick_command: "echo" を返す
-3. 各Runnerが適切なCLIコマンドで実行される
+1. agt_uc003_sonnetのshould_start APIが ai_type: "claude-sonnet-4-5" を返す
+2. agt_uc003_opusのshould_start APIが kick_command: "claude --model opus" を返す
+3. 各Runnerが適切なCLIコマンド/モデルで実行される
 ```
 
 ---
@@ -81,41 +81,56 @@
 
 ### UIテスト（XCUITest）
 
-UIテストではAPIレスポンスの検証が主な目的：
+UIテストではモデル設定とステータス変更の検証が主な目的：
 
 ```swift
 // シードデータ
-Agent(id: "agt_uc003_claude", name: "UC003 Claude", aiType: .claude, kickCommand: nil)
-Agent(id: "agt_uc003_custom", name: "UC003 Custom", aiType: .claude, kickCommand: "echo")
+Agent(id: "agt_uc003_sonnet", name: "UC003 Sonnet Agent", aiType: .claudeSonnet4_5, kickCommand: nil)
+Agent(id: "agt_uc003_opus", name: "UC003 Opus Agent", aiType: .claudeOpus4, kickCommand: "claude --model opus")
 
-Task(id: "tsk_uc003_claude", projectId: "prj_uc003", assigneeId: "agt_uc003_claude")
-Task(id: "tsk_uc003_custom", projectId: "prj_uc003", assigneeId: "agt_uc003_custom")
+Task(id: "tsk_uc003_sonnet", projectId: "prj_uc003", assigneeId: "agt_uc003_sonnet")
+Task(id: "tsk_uc003_opus", projectId: "prj_uc003", assigneeId: "agt_uc003_opus")
 ```
 
 ### 検証項目
 
 | # | 検証内容 | 期待結果 |
 |---|----------|----------|
-| 1 | should_start(agt_claude)のai_type | "claude" |
-| 2 | should_start(agt_custom)のkick_command | "echo" |
-| 3 | エージェント詳細画面でai_typeが表示される | "Claude" |
-| 4 | エージェント詳細画面でkickCommandが表示される | "echo" |
+| 1 | should_start(agt_uc003_sonnet)のai_type | "claude-sonnet-4-5" |
+| 2 | should_start(agt_uc003_opus)のkick_command | "claude --model opus" |
+| 3 | エージェント詳細画面でモデルが表示される | "Claude Sonnet 4.5" / "Claude Opus 4" |
+| 4 | エージェント詳細画面でkickCommandが表示される | "claude --model opus" |
 
 ---
 
 ## 実装フェーズ
 
-### Phase 1: UIテスト（本テスト）
+### Phase 1: UIテスト
 
 - XCUITestでシードデータ投入
 - エージェント詳細画面でai_type/kickCommandの表示確認
-- MCP APIレスポンスの検証（統合テストスクリプト）
+- タスクのステータス変更確認
 
-### Phase 2: 統合テスト（将来）
+### Phase 2: 統合テスト（実装済み）
 
-- 実際のRunner起動
-- echoコマンドでの実行検証
+- **テストスクリプト**: `scripts/tests/test_uc003_app_integration.sh`
+- **XCUITest**: `testE2E_UC003_AITypeSwitching_Integration`
+- 実際のCoordinator/Runner起動
+- Coordinatorがai_type/kickCommandに基づいてCLI選択
 - 出力ファイルの内容確認
+
+#### 統合テストアーキテクチャ（Phase 4 Coordinator）
+
+```
+1. Coordinator起動（MCPソケット待機）
+2. アプリ起動（MCP Daemon自動起動）
+3. XCUITestでシードデータ投入 + ステータス変更
+4. Coordinatorがshould_start()でタスク検出
+5. エージェントごとにCLIコマンド選択:
+   - agt_uc003_claude: ai_type=claude → "claude" コマンド
+   - agt_uc003_custom: kickCommand="echo..." → "echo" コマンド
+6. Agent Instanceがタスク完了 → Done状態に
+```
 
 ---
 
@@ -138,10 +153,28 @@ Task(id: "tsk_uc003_custom", projectId: "prj_uc003", assigneeId: "agt_uc003_cust
 
 ```swift
 public enum AIType: String, Codable, Sendable, CaseIterable {
-    case claude = "claude"
-    case gemini = "gemini"
-    case openai = "openai"
+    // Claude models
+    case claudeOpus4 = "claude-opus-4"
+    case claudeSonnet4_5 = "claude-sonnet-4-5"
+    case claudeSonnet4 = "claude-sonnet-4"
+
+    // Gemini models
+    case gemini2Flash = "gemini-2.0-flash"
+    case gemini2Pro = "gemini-2.0-pro"
+
+    // OpenAI models
+    case gpt4o = "gpt-4o"
+    case gpt4oMini = "gpt-4o-mini"
+
+    // Other/Custom
     case other = "other"
+
+    // プロバイダー名（Coordinator設定用）
+    var provider: String { /* claude, gemini, openai, other */ }
+    // CLIコマンド名（Runner用）
+    var cliCommand: String { /* claude, gemini, openai */ }
+    // モデルID（API呼び出し用）
+    var modelId: String { /* claude-opus-4-20250514 等 */ }
 }
 ```
 
@@ -150,26 +183,50 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
 ```json
 {
   "should_start": true,
-  "ai_type": "claude",
-  "kick_command": "echo"  // kickCommandが設定されている場合のみ
+  "provider": "claude",                    // プロバイダー（claude, gemini, openai, other）
+  "model": "claude-sonnet-4-5",            // 具体的なモデル
+  "kick_command": "claude --model opus",   // kickCommandが設定されている場合のみ
+  "ai_type": "claude-sonnet-4-5"           // 後方互換性のため維持（非推奨）
 }
 ```
 
-### Runner CLI選択ロジック（将来実装）
+### Runner CLI選択ロジック
 
 ```python
-# coordinator.py（概念）
-def select_cli_command(agent_info):
-    if agent_info.get("kick_command"):
-        return agent_info["kick_command"]
+# coordinator.py - _spawn_instance()
+def spawn_instance(provider, model, kick_command, ...):
+    # kick_commandが設定されていれば優先
+    if kick_command:
+        parts = kick_command.split()
+        cli_command = parts[0]
+        cli_args = parts[1:] if len(parts) > 1 else []
+    else:
+        # providerベースでCLI選択（ai_typeからの解析は不要）
+        provider_config = config.get_provider(provider)
+        cli_command = provider_config.cli_command
+        cli_args = provider_config.cli_args
+```
 
-    ai_type = agent_info.get("ai_type", "claude")
-    return {
-        "claude": "claude",
-        "gemini": "gemini",
-        "openai": "openai-cli",
-        "other": "claude"  # fallback
-    }.get(ai_type, "claude")
+### データ構造
+
+```
+App (Agent.aiType)
+    ↓
+    AIType enum:
+    - rawValue: "claude-sonnet-4-5" (model)
+    - provider: "claude"
+    ↓
+MCP API (should_start response)
+    ↓
+    {
+      "provider": "claude",
+      "model": "claude-sonnet-4-5"
+    }
+    ↓
+Coordinator
+    ↓
+    provider → CLI command
+    model → ログ/環境変数に使用
 ```
 
 ---
@@ -179,3 +236,5 @@ def select_cli_command(agent_info):
 | 日付 | 内容 |
 |------|------|
 | 2026-01-07 | 初版作成 |
+| 2026-01-08 | Phase 2統合テスト実装（Coordinator連携） |
+| 2026-01-08 | provider/model構造に変更（ai_typeを分離） |

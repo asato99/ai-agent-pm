@@ -10,10 +10,10 @@
 //
 // シードデータ:
 // - プロジェクト: UC003 AIType Test (prj_uc003, wd=/tmp/uc003)
-// - エージェント1: UC003 Claude Agent (agt_uc003_claude, aiType=claude, kickCommand=nil)
-// - エージェント2: UC003 Custom Agent (agt_uc003_custom, aiType=claude, kickCommand="echo")
-// - タスク1: Claude Task (tsk_uc003_claude)
-// - タスク2: Custom Task (tsk_uc003_custom)
+// - エージェント1: UC003 Sonnet Agent (agt_uc003_sonnet, aiType=claudeSonnet4_5, kickCommand=nil)
+// - エージェント2: UC003 Opus Agent (agt_uc003_opus, aiType=claudeOpus4, kickCommand="claude --model opus")
+// - タスク1: Sonnet Task (tsk_uc003_sonnet)
+// - タスク2: Opus Task (tsk_uc003_opus)
 // ========================================
 
 import XCTest
@@ -22,11 +22,11 @@ import XCTest
 ///
 /// 検証内容:
 /// 1. 両エージェントがプロジェクトに存在する
-/// 2. 各エージェントのai_type/kickCommandが正しく設定されている
+/// 2. 各エージェントのモデル（Sonnet/Opus）が正しく設定されている
 /// 3. 両タスクをin_progressに変更可能
 final class UC003_AITypeSwitchingTests: UC003UITestCase {
 
-    /// UC003 完全E2Eテスト
+    /// UC003 UIテスト（ステータス変更のみ）
     ///
     /// 1回のアプリ起動で以下の全フローを検証:
     /// 1. プロジェクトの存在確認
@@ -41,18 +41,18 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
         print("✅ Phase 1完了: プロジェクトが存在")
 
         // ========================================
-        // Phase 2: Claudeエージェントタスク操作
+        // Phase 2: Sonnetエージェントタスク操作
         // ========================================
-        print("🔍 Phase 2: Claudeエージェントタスク操作")
-        try verifyPhase2_ClaudeAgentTask()
-        print("✅ Phase 2完了: Claudeタスクがin_progress")
+        print("🔍 Phase 2: Sonnetエージェントタスク操作")
+        try verifyPhase2_SonnetAgentTask()
+        print("✅ Phase 2完了: Sonnetタスクがin_progress")
 
         // ========================================
-        // Phase 3: Customエージェントタスク操作
+        // Phase 3: Opusエージェントタスク操作
         // ========================================
-        print("🔍 Phase 3: Customエージェントタスク操作")
-        try verifyPhase3_CustomAgentTask()
-        print("✅ Phase 3完了: Customタスクがin_progress")
+        print("🔍 Phase 3: Opusエージェントタスク操作")
+        try verifyPhase3_OpusAgentTask()
+        print("✅ Phase 3完了: Opusタスクがin_progress")
 
         // ========================================
         // 完了
@@ -72,12 +72,12 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
                       "❌ PHASE1: UC003 AIType Testプロジェクトが見つからない")
     }
 
-    // MARK: - Phase 2: Claudeエージェントタスク操作
+    // MARK: - Phase 2: Sonnetエージェントタスク操作
 
-    private func verifyPhase2_ClaudeAgentTask() throws {
+    private func verifyPhase2_SonnetAgentTask() throws {
         let projectName = "UC003 AIType Test"
-        let taskTitle = "Claude Task"
-        let agentName = "UC003 Claude Agent"
+        let taskTitle = "Sonnet Task"
+        let agentName = "UC003 Sonnet Agent"
 
         // プロジェクト選択
         try selectProject(projectName)
@@ -113,11 +113,11 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
         Thread.sleep(forTimeInterval: 0.5)
     }
 
-    // MARK: - Phase 3: Customエージェントタスク操作
+    // MARK: - Phase 3: Opusエージェントタスク操作
 
-    private func verifyPhase3_CustomAgentTask() throws {
-        let taskTitle = "Custom Task"
-        let agentName = "UC003 Custom Agent"
+    private func verifyPhase3_OpusAgentTask() throws {
+        let taskTitle = "Opus Task"
+        let agentName = "UC003 Opus Agent"
 
         // Refreshボタンをクリックしてタスクボードを更新
         let refreshButton = app.buttons.matching(identifier: "RefreshButton").firstMatch
@@ -243,5 +243,161 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
                        "❌ STATUS: ステータスがIn Progressになっていない（実際の値: \(afterValue ?? "nil")）")
 
         print("  ✅ ステータスをIn Progressに変更完了")
+    }
+
+    // MARK: - Integration Test (with Coordinator)
+
+    /// UC003 統合テスト（Coordinator連携）
+    ///
+    /// test_uc003_app_integration.sh から呼び出される統合テスト
+    /// 1. 両エージェントのタスクをin_progressに変更
+    /// 2. Coordinatorがエージェントを起動してタスクを完了させる
+    /// 3. タスクがDoneになることを確認
+    func testE2E_UC003_AITypeSwitching_Integration() throws {
+        let workDir = "/tmp/uc003"
+        let sonnetOutput = "SONNET_OUTPUT.md"
+        let opusOutput = "OPUS_OUTPUT.md"
+
+        // ========================================
+        // Phase 1: Sonnetエージェントタスクをin_progressに変更
+        // ========================================
+        print("🔍 Phase 1: Sonnetエージェントタスクをin_progressに変更")
+        try verifyPhase1_ProjectExists()
+        try verifyPhase2_SonnetAgentTask()
+        print("✅ Phase 1完了: Sonnetタスクがin_progress")
+
+        // ========================================
+        // Phase 2: Opusエージェントタスクをin_progressに変更
+        // ========================================
+        print("🔍 Phase 2: Opusエージェントタスクをin_progressに変更")
+        try verifyPhase3_OpusAgentTask()
+        print("✅ Phase 2完了: Opusタスクがin_progress")
+
+        print("🎯 UC003: 両タスクがin_progress状態になりました")
+
+        // ========================================
+        // Phase 3: UIでタスクステータスがDoneになることを確認
+        // ========================================
+        print("⏳ Phase 3: タスクステータスがDoneになるのを待機中（最大180秒）...")
+
+        var sonnetDone = false
+        var opusDone = false
+
+        // 最大180秒（5秒間隔で36回）待機
+        for i in 1...36 {
+            // Sonnetタスクのステータス確認
+            if !sonnetDone {
+                if try checkTaskStatusIsDone(taskId: "tsk_uc003_sonnet", taskTitle: "Sonnet Task") {
+                    print("✅ Sonnet タスクがDoneになりました")
+                    sonnetDone = true
+                }
+            }
+
+            // Opusタスクのステータス確認
+            if !opusDone {
+                if try checkTaskStatusIsDone(taskId: "tsk_uc003_opus", taskTitle: "Opus Task") {
+                    print("✅ Opus タスクがDoneになりました")
+                    opusDone = true
+                }
+            }
+
+            if sonnetDone && opusDone {
+                break
+            }
+
+            if i % 6 == 0 {
+                print("  ⏳ 待機中... (\(i * 5)秒)")
+            }
+
+            Thread.sleep(forTimeInterval: 5.0)
+        }
+
+        // ========================================
+        // 結果検証: UIでステータスがDoneになったか
+        // ========================================
+        XCTAssertTrue(sonnetDone, "❌ Sonnet タスクがDoneになりませんでした")
+        XCTAssertTrue(opusDone, "❌ Opus タスクがDoneになりませんでした")
+
+        // ========================================
+        // Phase 4: ファイル作成確認（おまけ）
+        // ========================================
+        let fileManager = FileManager.default
+        let sonnetPath = "\(workDir)/\(sonnetOutput)"
+        let opusPath = "\(workDir)/\(opusOutput)"
+
+        let sonnetFileExists = fileManager.fileExists(atPath: sonnetPath)
+        let opusFileExists = fileManager.fileExists(atPath: opusPath)
+
+        if sonnetFileExists && opusFileExists {
+            let contentSonnet = try? String(contentsOfFile: sonnetPath, encoding: .utf8)
+            let contentOpus = try? String(contentsOfFile: opusPath, encoding: .utf8)
+            let charsSonnet = contentSonnet?.count ?? 0
+            let charsOpus = contentOpus?.count ?? 0
+
+            print("🎯 UC003 モデル切り替え統合テスト: 成功")
+            print("  - Sonnet タスク: Done ✅")
+            print("  - Opus タスク: Done ✅")
+            print("  - \(sonnetOutput): \(charsSonnet) 文字")
+            print("  - \(opusOutput): \(charsOpus) 文字")
+        } else {
+            print("⚠️ ファイル作成確認:")
+            print("  - \(sonnetOutput): \(sonnetFileExists ? "✅" : "❌")")
+            print("  - \(opusOutput): \(opusFileExists ? "✅" : "❌")")
+        }
+    }
+
+    /// タスクステータスがDoneかどうかを確認
+    private func checkTaskStatusIsDone(taskId: String, taskTitle: String) throws -> Bool {
+        // プロジェクトを選択（UC003は1プロジェクト）
+        let projectName = "UC003 AIType Test"
+        let projectRow = app.staticTexts[projectName]
+        if projectRow.waitForExistence(timeout: 2) {
+            if projectRow.isHittable {
+                projectRow.click()
+            } else {
+                projectRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+
+        // Doneカラムにスワイプしてタスクを探す
+        let scrollView = app.scrollViews.firstMatch
+        if scrollView.exists {
+            scrollView.swipeLeft()
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+
+        // Doneカラムを取得
+        let doneColumns = app.staticTexts.matching(NSPredicate(format: "label == %@", "Done"))
+
+        // タスクIDで直接検索（最も確実な方法）
+        let taskCardId = "TaskCard_\(taskId)"
+        let taskCard = app.descendants(matching: .any).matching(identifier: taskCardId).firstMatch
+        if taskCard.exists {
+            // Doneカラムの位置を取得
+            for i in 0..<doneColumns.count {
+                let col = doneColumns.element(boundBy: i)
+                if col.frame.width > 100 {
+                    let doneFrame = col.frame
+                    let taskFrame = taskCard.frame
+                    // タスクがDoneカラム内にあるか確認（マージン付き）
+                    if taskFrame.origin.x >= doneFrame.origin.x - 50 &&
+                       taskFrame.origin.x < doneFrame.origin.x + doneFrame.width + 50 {
+                        return true
+                    }
+                }
+            }
+        }
+
+        // フォールバック: Doneカラム内のTaskCardを列挙して確認
+        let doneColumnGroup = app.groups.matching(NSPredicate(format: "identifier == %@", "DoneColumn")).firstMatch
+        if doneColumnGroup.exists {
+            let taskCards = doneColumnGroup.buttons.matching(NSPredicate(format: "label CONTAINS %@", taskTitle))
+            if taskCards.count > 0 {
+                return true
+            }
+        }
+
+        return false
     }
 }

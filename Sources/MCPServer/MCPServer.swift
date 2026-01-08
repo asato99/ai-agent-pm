@@ -1014,19 +1014,28 @@ final class MCPServer {
 
         Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': \(hasInProgressTask)")
 
-        // ai_type を返す（RunnerがCLIコマンドを選択するため）
+        // provider/model を返す（RunnerがCLIコマンドを選択するため）
         // kickCommand があればそれを優先
         var result: [String: Any] = [
             "should_start": hasInProgressTask
         ]
 
-        // kickCommand があれば ai_type より優先
+        // kickCommand があれば provider/model より優先
         if let kickCommand = agent.kickCommand, !kickCommand.isEmpty {
             result["kick_command"] = kickCommand
         }
 
-        // ai_type があれば追加（デフォルトは claude）
-        result["ai_type"] = agent.aiType?.rawValue ?? "claude"
+        // provider と model を構造的に返す
+        if let aiType = agent.aiType {
+            result["provider"] = aiType.provider       // "claude", "gemini", "openai", "other"
+            result["model"] = aiType.rawValue          // "claude-sonnet-4-5", "gemini-2.0-flash", etc.
+        } else {
+            result["provider"] = "claude"              // デフォルト
+            result["model"] = "claude-sonnet-4-5"      // デフォルト
+        }
+
+        // 後方互換性のため ai_type も維持（非推奨）
+        result["ai_type"] = agent.aiType?.rawValue ?? "claude-sonnet-4-5"
 
         return result
     }

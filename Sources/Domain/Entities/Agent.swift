@@ -142,20 +142,78 @@ public enum AgentType: String, Codable, Sendable, CaseIterable {
 
 // MARK: - AIType
 
-/// AIエージェントのプロバイダー種別
+/// AIエージェントのモデル種別
 /// 参照: docs/plan/MULTI_AGENT_USE_CASES.md - AIタイプ
 public enum AIType: String, Codable, Sendable, CaseIterable {
-    case claude = "claude"
-    case gemini = "gemini"
-    case openai = "openai"
+    // Claude models
+    case claudeOpus4 = "claude-opus-4"
+    case claudeSonnet4_5 = "claude-sonnet-4-5"
+    case claudeSonnet4 = "claude-sonnet-4"
+
+    // Gemini models
+    case gemini2Flash = "gemini-2.0-flash"
+    case gemini2Pro = "gemini-2.0-pro"
+
+    // OpenAI models
+    case gpt4o = "gpt-4o"
+    case gpt4oMini = "gpt-4o-mini"
+
+    // Other/Custom
     case other = "other"
 
+    /// 表示名
     public var displayName: String {
         switch self {
-        case .claude: return "Claude"
-        case .gemini: return "Gemini"
-        case .openai: return "OpenAI"
+        case .claudeOpus4: return "Claude Opus 4"
+        case .claudeSonnet4_5: return "Claude Sonnet 4.5"
+        case .claudeSonnet4: return "Claude Sonnet 4"
+        case .gemini2Flash: return "Gemini 2.0 Flash"
+        case .gemini2Pro: return "Gemini 2.0 Pro"
+        case .gpt4o: return "GPT-4o"
+        case .gpt4oMini: return "GPT-4o Mini"
         case .other: return "Other"
+        }
+    }
+
+    /// プロバイダー名（Coordinator設定用）
+    public var provider: String {
+        switch self {
+        case .claudeOpus4, .claudeSonnet4_5, .claudeSonnet4:
+            return "claude"
+        case .gemini2Flash, .gemini2Pro:
+            return "gemini"
+        case .gpt4o, .gpt4oMini:
+            return "openai"
+        case .other:
+            return "other"
+        }
+    }
+
+    /// CLIコマンド名（Runner用）
+    public var cliCommand: String {
+        switch self {
+        case .claudeOpus4, .claudeSonnet4_5, .claudeSonnet4:
+            return "claude"
+        case .gemini2Flash, .gemini2Pro:
+            return "gemini"  // TODO: 実際のCLIコマンド名を確認
+        case .gpt4o, .gpt4oMini:
+            return "openai"  // TODO: 実際のCLIコマンド名を確認
+        case .other:
+            return "claude"  // fallback
+        }
+    }
+
+    /// モデルID（API呼び出し用）
+    public var modelId: String {
+        switch self {
+        case .claudeOpus4: return "claude-opus-4-20250514"
+        case .claudeSonnet4_5: return "claude-sonnet-4-5-20250514"
+        case .claudeSonnet4: return "claude-sonnet-4-20250514"
+        case .gemini2Flash: return "gemini-2.0-flash"
+        case .gemini2Pro: return "gemini-2.0-pro"
+        case .gpt4o: return "gpt-4o"
+        case .gpt4oMini: return "gpt-4o-mini"
+        case .other: return "unknown"
         }
     }
 }
