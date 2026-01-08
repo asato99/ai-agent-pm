@@ -422,16 +422,35 @@ class Coordinator:
 
 2. **Get your role**: The authenticate response will include your `system_prompt` which defines your role. Follow that role.
 
-3. **Get your task**: Call `get_my_task` with your session_token to get task details.
+3. **Get your task**: Call `get_my_task` with your session_token to get the main task details.
 
-4. **Execute the task**: Complete the task as described. You are working in the project directory.
-
-5. **Report completion**: When done, call `report_completed` with:
+4. **Decompose into sub-tasks**: Analyze the main task and break it down into 2-5 concrete, actionable sub-tasks.
+   For each sub-task, call `create_task` with:
    - session_token: (from authenticate)
-   - result: "success" | "failed" | "blocked"
-   - summary: (brief description of what you did)
+   - title: (sub-task title, e.g., "Step 1: Design API structure")
+   - description: (detailed description of what to do)
+   - priority: "medium" (or appropriate priority)
+   - parent_task_id: (the main task ID from get_my_task)
 
-6. **Exit**: After reporting, your work is done.
+5. **Execute sub-tasks sequentially**: For each sub-task you created:
+   a. Call `update_task_status` to set the sub-task to "in_progress"
+   b. Execute the work described in the sub-task
+   c. Call `update_task_status` to set the sub-task to "done"
+   d. Optionally call `save_context` to record progress
+
+6. **Complete the main task**: After all sub-tasks are done:
+   - Call `report_completed` with:
+     - session_token: (from authenticate)
+     - result: "success" | "failed" | "blocked"
+     - summary: (brief description of what you accomplished)
+
+7. **Exit**: After reporting, your work is done.
+
+## Important Notes
+- The main task stays in "in_progress" while you work on sub-tasks
+- Each sub-task should be a concrete, verifiable step
+- Sub-tasks are automatically assigned to you and linked to the main task
+- You are working in the project directory
 
 Begin by calling `authenticate`.
 """

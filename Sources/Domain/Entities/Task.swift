@@ -14,6 +14,7 @@ public struct Task: Identifiable, Equatable, Sendable {
     public var priority: TaskPriority
     public var assigneeId: AgentID?
     public var dependencies: [TaskID]
+    public var parentTaskId: TaskID?
     public var estimatedMinutes: Int?
     public var actualMinutes: Int?
     public let createdAt: Date
@@ -38,6 +39,7 @@ public struct Task: Identifiable, Equatable, Sendable {
         priority: TaskPriority = .medium,
         assigneeId: AgentID? = nil,
         dependencies: [TaskID] = [],
+        parentTaskId: TaskID? = nil,
         estimatedMinutes: Int? = nil,
         actualMinutes: Int? = nil,
         createdAt: Date = Date(),
@@ -55,6 +57,7 @@ public struct Task: Identifiable, Equatable, Sendable {
         self.priority = priority
         self.assigneeId = assigneeId
         self.dependencies = dependencies
+        self.parentTaskId = parentTaskId
         self.estimatedMinutes = estimatedMinutes
         self.actualMinutes = actualMinutes
         self.createdAt = createdAt

@@ -36,6 +36,7 @@ enum ToolDefinitions {
             getMyTasks,  // 後方互換性のため維持（非推奨）
             getPendingTasks,  // Phase 3-2: 作業中タスク取得（Phase 4で非推奨）
             getTask,
+            createTask,
             updateTaskStatus,
             assignTask,
 
@@ -346,6 +347,40 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["task_id"]
+        ]
+    ]
+
+    /// create_task - 新規タスク作成（サブタスク作成用）
+    /// Agent Instanceがメインタスクをサブタスクに分解する際に使用
+    static let createTask: [String: Any] = [
+        "name": "create_task",
+        "description": "新しいタスクを作成します。セッショントークンで認証されたエージェントがサブタスクを作成する際に使用します。作成されたタスクは自動的に現在のプロジェクトに紐づき、作成者に割り当てられます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "title": [
+                    "type": "string",
+                    "description": "タスクタイトル"
+                ],
+                "description": [
+                    "type": "string",
+                    "description": "タスク詳細"
+                ],
+                "priority": [
+                    "type": "string",
+                    "description": "優先度",
+                    "enum": ["low", "medium", "high", "urgent"]
+                ],
+                "parent_task_id": [
+                    "type": "string",
+                    "description": "親タスクID（サブタスク作成時に指定）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "title", "description"]
         ]
     ]
 

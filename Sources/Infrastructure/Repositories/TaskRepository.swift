@@ -19,6 +19,7 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
     var priority: String
     var assigneeId: String?
     var dependencies: String?
+    var parentTaskId: String?
     var estimatedMinutes: Int?
     var actualMinutes: Int?
     var createdAt: Date
@@ -38,6 +39,7 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
         case priority
         case assigneeId = "assignee_id"
         case dependencies
+        case parentTaskId = "parent_task_id"
         case estimatedMinutes = "estimated_minutes"
         case actualMinutes = "actual_minutes"
         case createdAt = "created_at"
@@ -65,6 +67,7 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             priority: TaskPriority(rawValue: priority) ?? .medium,
             assigneeId: assigneeId.map { AgentID(value: $0) },
             dependencies: deps,
+            parentTaskId: parentTaskId.map { TaskID(value: $0) },
             estimatedMinutes: estimatedMinutes,
             actualMinutes: actualMinutes,
             createdAt: createdAt,
@@ -94,6 +97,7 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             priority: task.priority.rawValue,
             assigneeId: task.assigneeId?.value,
             dependencies: depsJson,
+            parentTaskId: task.parentTaskId?.value,
             estimatedMinutes: task.estimatedMinutes,
             actualMinutes: task.actualMinutes,
             createdAt: task.createdAt,

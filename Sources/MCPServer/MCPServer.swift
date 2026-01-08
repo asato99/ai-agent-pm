@@ -346,6 +346,25 @@ final class MCPServer {
                 throw MCPError.missingArguments(["task_id"])
             }
             return try getTask(taskId: taskId)
+        case "create_task":
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let title = arguments["title"] as? String,
+                  let description = arguments["description"] as? String else {
+                throw MCPError.missingArguments(["title", "description"])
+            }
+            let priority = arguments["priority"] as? String
+            let parentTaskId = arguments["parent_task_id"] as? String
+            let session = try validateSession(token: sessionToken)
+            return try createTask(
+                agentId: session.agentId,
+                projectId: session.projectId,
+                title: title,
+                description: description,
+                priority: priority,
+                parentTaskId: parentTaskId
+            )
         case "update_task_status":
             guard let taskId = arguments["task_id"] as? String,
                   let status = arguments["status"] as? String else {
@@ -1445,6 +1464,65 @@ final class MCPServer {
         }
 
         return result
+    }
+
+    /// create_task - 新規タスク作成（サブタスク作成用）
+    /// Agent Instanceがメインタスクをサブタスクに分解する際に使用
+    private func createTask(
+        agentId: AgentID,
+        projectId: ProjectID,
+        title: String,
+        description: String,
+        priority: String?,
+        parentTaskId: String?
+    ) throws -> [String: Any] {
+        // 優先度のパース
+        let taskPriority: TaskPriority
+        if let priorityStr = priority, let parsed = TaskPriority(rawValue: priorityStr) {
+            taskPriority = parsed
+        } else {
+            taskPriority = .medium
+        }
+
+        // 親タスクIDの検証
+        var parentId: TaskID?
+        if let parentTaskIdStr = parentTaskId {
+            parentId = TaskID(value: parentTaskIdStr)
+            guard try taskRepository.findById(parentId!) != nil else {
+                throw MCPError.taskNotFound(parentTaskIdStr)
+            }
+        }
+
+        // 新しいタスクを作成
+        let newTask = Task(
+            id: TaskID.generate(),
+            projectId: projectId,
+            title: title,
+            description: description,
+            status: .todo,
+            priority: taskPriority,
+            assigneeId: agentId,
+            dependencies: [],
+            parentTaskId: parentId
+        )
+
+        try taskRepository.save(newTask)
+
+        Self.log("[MCP] Task created: \(newTask.id.value) (parent: \(parentTaskId ?? "none"))")
+
+        return [
+            "success": true,
+            "task": [
+                "id": newTask.id.value,
+                "title": newTask.title,
+                "description": newTask.description,
+                "status": newTask.status.rawValue,
+                "priority": newTask.priority.rawValue,
+                "assignee_id": agentId.value,
+                "parent_task_id": parentTaskId as Any
+            ],
+            "instruction": "サブタスクが作成されました。update_task_statusでステータスをin_progressに変更してから作業を開始してください。"
+        ]
     }
 
     /// update_task_status - タスクのステータスを更新

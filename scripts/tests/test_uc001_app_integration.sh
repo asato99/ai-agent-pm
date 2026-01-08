@@ -266,6 +266,19 @@ echo "=== Tasks in DB ==="
 sqlite3 "$ACTUAL_DB_PATH" "SELECT id, title, status, assignee_id FROM tasks;" 2>/dev/null || echo "(query error)"
 echo ""
 
+# Check sub-tasks (tasks with parent_task_id)
+echo "=== Sub-tasks in DB ==="
+SUBTASK_COUNT=$(sqlite3 "$ACTUAL_DB_PATH" "SELECT COUNT(*) FROM tasks WHERE parent_task_id IS NOT NULL;" 2>/dev/null || echo "0")
+echo "Sub-task records: $SUBTASK_COUNT"
+
+if [ "$SUBTASK_COUNT" -gt "0" ]; then
+    echo -e "${GREEN}✓ Sub-tasks created${NC}"
+    sqlite3 "$ACTUAL_DB_PATH" "SELECT id, title, status, parent_task_id FROM tasks WHERE parent_task_id IS NOT NULL;" 2>/dev/null
+else
+    echo -e "${YELLOW}No sub-tasks found (Agent may have executed directly)${NC}"
+fi
+echo ""
+
 # Step 9: Coordinator ログ表示
 echo -e "${YELLOW}Step 9: Coordinator log (last 30 lines)${NC}"
 tail -30 /tmp/uc001_coordinator.log 2>/dev/null || echo "(no log)"
@@ -296,6 +309,9 @@ if [ "$FILE_CREATED" == "true" ] && [ "$EXEC_LOG_COUNT" -gt "0" ]; then
     echo "  ✓ Agent Instance spawned and executed"
     echo "  ✓ File created in working directory"
     echo "  ✓ Execution log recorded in DB ($EXEC_LOG_COUNT records)"
+    if [ "$SUBTASK_COUNT" -gt "0" ]; then
+        echo "  ✓ Sub-tasks created ($SUBTASK_COUNT records)"
+    fi
     exit 0
 elif [ "$FILE_CREATED" == "true" ]; then
     echo -e "${YELLOW}UC001 App Integration Test: PARTIAL${NC}"
