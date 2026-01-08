@@ -822,13 +822,15 @@ private final class TestDataSeeder {
         }
 
         // タスク1: 詳細ライター用（backlog状態 → UIテストでin_progressに変更）
-        // 出力ファイル名: OUTPUT_A.md
+        // Note: タスク指示は「内容」のみ同一。ファイル名は各タスクで異なる。
+        // system_promptの違いで出力スタイルが変わることを検証。
         let detailedTaskDescription = """
-            【タスク指示】
-            ファイル名: OUTPUT_A.md
-            内容: プロジェクトのサマリードキュメントを作成してください。
+            OUTPUT_A.md にプロジェクトサマリードキュメントを作成してください。
 
-            あなたのsystem_promptに従って、適切なスタイルで記載してください。
+            【対象トピック】
+            - プロジェクトの目的
+            - 主要な機能
+            - 今後の展望
             """
         let detailedTask = Task(
             id: TaskID(value: "tsk_uc002_detailed"),
@@ -845,13 +847,14 @@ private final class TestDataSeeder {
         print("✅ UC002: Task 1 created - assigned to 詳細ライター (OUTPUT_A.md)")
 
         // タスク2: 簡潔ライター用（backlog状態 → UIテストでin_progressに変更）
-        // 出力ファイル名: OUTPUT_B.md
+        // Note: タスク指示は「内容」のみ同一。ファイル名は各タスクで異なる。
         let conciseTaskDescription = """
-            【タスク指示】
-            ファイル名: OUTPUT_B.md
-            内容: プロジェクトのサマリードキュメントを作成してください。
+            OUTPUT_B.md にプロジェクトサマリードキュメントを作成してください。
 
-            あなたのsystem_promptに従って、適切なスタイルで記載してください。
+            【対象トピック】
+            - プロジェクトの目的
+            - 主要な機能
+            - 今後の展望
             """
         let conciseTask = Task(
             id: TaskID(value: "tsk_uc002_concise"),
