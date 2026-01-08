@@ -254,6 +254,25 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
     private func changeTaskStatusToInProgress(taskId: String, taskTitle: String) throws {
         print("  🔍 タスク「\(taskTitle)」(ID: \(taskId)) を検索中...")
 
+        // TaskBoardを取得
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        guard taskBoard.waitForExistence(timeout: 5) else {
+            XCTFail("❌ TaskBoardが見つかりません")
+            return
+        }
+
+        // Backlogカラムを表示するため、TaskBoardを右にスワイプ（左端へスクロール）
+        print("  📜 TaskBoardを左端にスクロール...")
+        taskBoard.swipeRight()
+        taskBoard.swipeRight()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // スクロール後の状態を確認するスクリーンショット
+        let scrollScreenshot = app.screenshot()
+        let scrollPath = "/tmp/uc004_after_scroll_\(taskId).png"
+        try? scrollScreenshot.pngRepresentation.write(to: URL(fileURLWithPath: scrollPath))
+        print("  📸 スクロール後スクリーンショット: \(scrollPath)")
+
         // アクセシビリティ識別子でタスクカードを検索（より確実）
         let taskCardIdentifier = "TaskCard_\(taskId)"
         var taskCard = app.descendants(matching: .any).matching(identifier: taskCardIdentifier).firstMatch
@@ -275,13 +294,41 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
             print("  ✅ タスク「\(taskTitle)」が見つかりました（識別子: \(taskCardIdentifier)）")
         }
 
+        // タスクカードがクリック可能か確認
+        print("  📍 タスクカード位置: frame=\(taskCard.frame), isHittable=\(taskCard.isHittable)")
+
+        guard taskCard.isHittable else {
+            // スクリーンショットを保存
+            let screenshot = app.screenshot()
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = "TaskCard_NotHittable_\(taskId)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+
+            // ファイルにも保存
+            let path = "/tmp/uc004_screenshot_\(taskId)_not_hittable.png"
+            try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: path))
+            print("  📸 スクリーンショット保存: \(path)")
+
+            XCTFail("❌ STEP1.5: タスクカードが見つかりましたが、クリック不可能です（スクロールが必要な可能性）。isHittable=false, frame=\(taskCard.frame)")
+            return
+        }
+
         // タスク詳細を開く
         taskCard.click()
         Thread.sleep(forTimeInterval: 0.5)
 
         let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
-        XCTAssertTrue(detailView.waitForExistence(timeout: 5),
-                      "❌ STEP2: タスク詳細画面が開かない")
+        if !detailView.waitForExistence(timeout: 5) {
+            // スクリーンショットを保存
+            let screenshot = app.screenshot()
+            let path = "/tmp/uc004_screenshot_\(taskId)_detail_not_opened.png"
+            try? screenshot.pngRepresentation.write(to: URL(fileURLWithPath: path))
+            print("  📸 スクリーンショット保存: \(path)")
+
+            XCTFail("❌ STEP2: タスク詳細画面が開かない（クリック後）")
+            return
+        }
 
         // ステータスピッカーを確認
         let statusPicker = app.popUpButtons["StatusPicker"]
@@ -363,8 +410,8 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
 
         // Doneカラムが見えるように右にスクロール
         // TaskBoardを使ってスクロール
-        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
-        XCTAssertTrue(taskBoard.waitForExistence(timeout: 2), "❌ TaskBoardが見つかりません")
+        let taskBoardForScroll = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        XCTAssertTrue(taskBoardForScroll.waitForExistence(timeout: 2), "❌ TaskBoardが見つかりません")
 
         // デバッグ: 全てのColumnHeaderを列挙
         let allStaticTexts = app.staticTexts.allElementsBoundByIndex
