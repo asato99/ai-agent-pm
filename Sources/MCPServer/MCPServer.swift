@@ -425,6 +425,15 @@ final class MCPServer {
                 validatedAgentId: session.agentId.value
             )
 
+        // Phase 4: Coordinator用（認証不要）
+        case "register_execution_log_file":
+            guard let agentId = arguments["agent_id"] as? String,
+                  let taskId = arguments["task_id"] as? String,
+                  let logFilePath = arguments["log_file_path"] as? String else {
+                throw MCPError.missingArguments(["agent_id", "task_id", "log_file_path"])
+            }
+            return try registerExecutionLogFile(agentId: agentId, taskId: taskId, logFilePath: logFilePath)
+
         default:
             throw MCPError.unknownTool(name)
         }
@@ -1008,9 +1017,10 @@ final class MCPServer {
 
         // 該当プロジェクトで該当エージェントにアサインされた in_progress タスクがあるか確認
         let tasks = try taskRepository.findByAssignee(id)
-        let hasInProgressTask = tasks.contains { task in
+        let inProgressTask = tasks.first { task in
             task.status == .inProgress && task.projectId == projId
         }
+        let hasInProgressTask = inProgressTask != nil
 
         Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': \(hasInProgressTask)")
 
@@ -1019,6 +1029,11 @@ final class MCPServer {
         var result: [String: Any] = [
             "should_start": hasInProgressTask
         ]
+
+        // task_id を返す（Coordinatorがログファイルパスを登録するため）
+        if let task = inProgressTask {
+            result["task_id"] = task.id.value
+        }
 
         // kickCommand があれば provider/model より優先
         if let kickCommand = agent.kickCommand, !kickCommand.isEmpty {
@@ -1084,6 +1099,15 @@ final class MCPServer {
             if let handoff = latestHandoff {
                 taskDict["handoff"] = handoffToDict(handoff)
             }
+
+            // Phase 4: 実行ログを自動作成（report_execution_startの代替）
+            let executionLog = ExecutionLog(
+                taskId: task.id,
+                agentId: id,
+                startedAt: Date()
+            )
+            try executionLogRepository.save(executionLog)
+            Self.log("[MCP] ExecutionLog auto-created: \(executionLog.id.value)")
 
             Self.log("[MCP] getMyTask returning task: \(task.id.value)")
 
@@ -1190,6 +1214,22 @@ final class MCPServer {
         // Phase 4: セッションを無効化（削除）
         try agentSessionRepository.deleteByToken(sessionToken)
         Self.log("[MCP] reportCompleted: Session invalidated for agent '\(agentId)'")
+
+        // Phase 4: 実行ログを完了（report_execution_completeの代替）
+        // 最新の実行ログを取得して完了状態に更新
+        if var executionLog = try executionLogRepository.findLatestByAgentAndTask(agentId: id, taskId: task.id) {
+            let exitCode = result == "success" ? 0 : 1
+            let duration = Date().timeIntervalSince(executionLog.startedAt)
+            let errorMessage = result != "success" ? summary : nil
+            executionLog.complete(
+                exitCode: exitCode,
+                durationSeconds: duration,
+                logFilePath: nil,  // Coordinatorが後で登録
+                errorMessage: errorMessage
+            )
+            try executionLogRepository.save(executionLog)
+            Self.log("[MCP] ExecutionLog auto-completed: \(executionLog.id.value), status=\(executionLog.status.rawValue)")
+        }
 
         Self.log("[MCP] reportCompleted: Task \(task.id.value) status changed to \(newStatus.rawValue)")
 
@@ -1800,6 +1840,41 @@ final class MCPServer {
         }
 
         return result
+    }
+
+    // MARK: - Phase 4: Coordinator API（認証不要）
+
+    /// register_execution_log_file - 実行ログにログファイルパスを登録
+    /// Coordinatorがプロセス完了後にログファイルパスを登録する際に使用
+    /// 認証不要: Coordinatorは認証せずに直接呼び出す
+    private func registerExecutionLogFile(agentId: String, taskId: String, logFilePath: String) throws -> [String: Any] {
+        Self.log("[MCP] registerExecutionLogFile called: agentId='\(agentId)', taskId='\(taskId)', logFilePath='\(logFilePath)'")
+
+        let agId = AgentID(value: agentId)
+        let tId = TaskID(value: taskId)
+
+        // 最新の実行ログを取得
+        guard var log = try executionLogRepository.findLatestByAgentAndTask(agentId: agId, taskId: tId) else {
+            Self.log("[MCP] No execution log found for agent '\(agentId)' and task '\(taskId)'")
+            return [
+                "success": false,
+                "error": "execution_log_not_found"
+            ]
+        }
+
+        // ログファイルパスを設定して保存
+        log.setLogFilePath(logFilePath)
+        try executionLogRepository.save(log)
+
+        Self.log("[MCP] ExecutionLog updated with log file path: \(log.id.value)")
+
+        return [
+            "success": true,
+            "execution_log_id": log.id.value,
+            "task_id": log.taskId.value,
+            "agent_id": log.agentId.value,
+            "log_file_path": logFilePath
+        ]
     }
 
     // MARK: - Helper Methods

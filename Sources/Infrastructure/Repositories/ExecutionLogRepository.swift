@@ -116,6 +116,17 @@ public final class ExecutionLogRepository: ExecutionLogRepositoryProtocol, Senda
         }
     }
 
+    public func findLatestByAgentAndTask(agentId: AgentID, taskId: TaskID) throws -> ExecutionLog? {
+        try db.read { db in
+            try ExecutionLogRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("task_id") == taskId.value)
+                .order(Column("started_at").desc)
+                .fetchOne(db)?
+                .toDomain()
+        }
+    }
+
     public func save(_ log: ExecutionLog) throws {
         try db.write { db in
             try ExecutionLogRecord.fromDomain(log).save(db)

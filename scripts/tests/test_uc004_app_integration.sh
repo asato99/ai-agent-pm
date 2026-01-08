@@ -276,6 +276,23 @@ else
 fi
 echo ""
 
+# Step 7.5: 実行ログ検証
+echo -e "${YELLOW}Step 7.5: Verifying execution logs${NC}"
+if [ -f "$SHARED_DB_PATH" ]; then
+    EXEC_LOG_COUNT=$(sqlite3 "$SHARED_DB_PATH" "SELECT COUNT(*) FROM execution_logs;" 2>/dev/null || echo "0")
+    echo "Execution log records: $EXEC_LOG_COUNT"
+    if [ "$EXEC_LOG_COUNT" -gt "0" ]; then
+        echo -e "${GREEN}✓ Execution logs created${NC}"
+        sqlite3 "$SHARED_DB_PATH" "SELECT id, task_id, agent_id, status FROM execution_logs;" 2>/dev/null
+    else
+        echo -e "${RED}✗ No execution logs found${NC}"
+    fi
+else
+    echo -e "${YELLOW}DB not found at $SHARED_DB_PATH${NC}"
+    EXEC_LOG_COUNT=0
+fi
+echo ""
+
 # Coordinator ログ表示
 echo -e "${YELLOW}Coordinator log (last 30 lines):${NC}"
 tail -30 /tmp/uc004_coordinator.log 2>/dev/null || echo "(no log)"
@@ -293,19 +310,26 @@ if [ -f "$BACKEND_WORK_DIR/$OUTPUT_FILE" ]; then
     BACKEND_CREATED=true
 fi
 
-if [ "$FRONTEND_CREATED" == "true" ] && [ "$BACKEND_CREATED" == "true" ]; then
+if [ "$FRONTEND_CREATED" == "true" ] && [ "$BACKEND_CREATED" == "true" ] && [ "$EXEC_LOG_COUNT" -gt "0" ]; then
     echo -e "${GREEN}UC004 App Integration Test: PASSED${NC}"
     echo ""
     echo "Verified (Phase 4 Coordinator Architecture):"
-    echo "  - Coordinator started FIRST and waited for MCP socket"
-    echo "  - App started MCP daemon, Coordinator connected"
-    echo "  - Single Coordinator manages all (agent_id, project_id) pairs"
-    echo "  - Same agent (agt_uc004_dev) assigned to both projects"
-    echo "  - Coordinator spawned Agent Instances for each pair"
-    echo "  - working_directory per task from Project (via MCP)"
-    echo "  - Frontend project: $FRONTEND_WORK_DIR ($FRONTEND_CHARS chars)"
-    echo "  - Backend project: $BACKEND_WORK_DIR ($BACKEND_CHARS chars)"
+    echo "  ✓ Coordinator started FIRST and waited for MCP socket"
+    echo "  ✓ App started MCP daemon, Coordinator connected"
+    echo "  ✓ Single Coordinator manages all (agent_id, project_id) pairs"
+    echo "  ✓ Same agent (agt_uc004_dev) assigned to both projects"
+    echo "  ✓ Coordinator spawned Agent Instances for each pair"
+    echo "  ✓ working_directory per task from Project (via MCP)"
+    echo "  ✓ Execution logs recorded in DB ($EXEC_LOG_COUNT records)"
+    echo "  ✓ Frontend project: $FRONTEND_WORK_DIR ($FRONTEND_CHARS chars)"
+    echo "  ✓ Backend project: $BACKEND_WORK_DIR ($BACKEND_CHARS chars)"
     exit 0
+elif [ "$FRONTEND_CREATED" == "true" ] && [ "$BACKEND_CREATED" == "true" ]; then
+    echo -e "${YELLOW}UC004 App Integration Test: PARTIAL${NC}"
+    echo ""
+    echo "Files created but execution logs missing ($EXEC_LOG_COUNT records)."
+    echo "This indicates get_my_task/report_completed not creating logs."
+    exit 1
 else
     echo -e "${RED}UC004 App Integration Test: FAILED${NC}"
     echo ""

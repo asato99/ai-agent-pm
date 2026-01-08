@@ -50,7 +50,10 @@ enum ToolDefinitions {
 
             // Execution Log (Phase 3-3, Phase 4で非推奨)
             reportExecutionStart,
-            reportExecutionComplete
+            reportExecutionComplete,
+
+            // Phase 4: Coordinator用（認証不要）
+            registerExecutionLogFile
         ]
     }
 
@@ -590,6 +593,35 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "execution_log_id", "exit_code", "duration_seconds"]
+        ]
+    ]
+
+    // MARK: - Phase 4: Coordinator用（認証不要）
+
+    /// register_execution_log_file - 実行ログにログファイルパスを登録
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// Coordinatorがプロセス完了後にログファイルパスを登録する際に使用
+    /// 認証不要: Coordinatorは認証せずに直接呼び出す
+    static let registerExecutionLogFile: [String: Any] = [
+        "name": "register_execution_log_file",
+        "description": "実行ログにログファイルパスを登録します。Coordinatorがプロセス完了後に呼び出します。認証不要。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID"
+                ],
+                "task_id": [
+                    "type": "string",
+                    "description": "タスクID"
+                ],
+                "log_file_path": [
+                    "type": "string",
+                    "description": "ログファイルの絶対パス"
+                ]
+            ] as [String: Any],
+            "required": ["agent_id", "task_id", "log_file_path"]
         ]
     ]
 }

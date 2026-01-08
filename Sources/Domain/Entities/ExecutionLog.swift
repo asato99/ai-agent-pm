@@ -83,4 +83,10 @@ public struct ExecutionLog: Identifiable, Equatable, Sendable {
         self.errorMessage = errorMessage
         self.status = exitCode == 0 ? .completed : .failed
     }
+
+    /// ログファイルパスを設定（Coordinator用）
+    /// 実行完了後にCoordinatorがログファイルパスを登録する際に使用
+    public mutating func setLogFilePath(_ path: String) {
+        self.logFilePath = path
+    }
 }

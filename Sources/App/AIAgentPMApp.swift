@@ -577,6 +577,13 @@ private final class TestDataSeeder {
             print("✅ UC001: Runner credential created for agent \(runnerAgentId.value)")
         }
 
+        // Phase 4 Coordinator: エージェントをプロジェクトに割り当て
+        // list_active_projects_with_agents で検出されるために必要
+        if let projectAgentAssignmentRepository = projectAgentAssignmentRepository {
+            _ = try projectAgentAssignmentRepository.assign(projectId: uc001Project.id, agentId: runnerAgentId)
+            print("✅ UC001: Agent assigned to project")
+        }
+
         // Runner統合テスト用タスク（runnerAgentにアサイン、backlog状態）
         // UIテストでin_progressに変更後、Runnerが検出して実行する
         let runnerTestTask = Task(

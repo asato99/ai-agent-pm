@@ -53,6 +53,7 @@ class ShouldStartResult:
     model: Optional[str] = None          # "claude-sonnet-4-5", "gemini-2.0-flash", etc.
     kick_command: Optional[str] = None   # Custom CLI command (takes priority if set)
     ai_type: Optional[str] = None        # Deprecated: use provider/model instead
+    task_id: Optional[str] = None        # Phase 4: タスクID（ログファイル登録用）
 
 
 # Phase 3/4: Agent API data classes
@@ -235,8 +236,36 @@ class MCPClient:
             provider=result.get("provider"),
             model=result.get("model"),
             kick_command=result.get("kick_command"),
-            ai_type=result.get("ai_type")  # Deprecated, kept for backwards compatibility
+            ai_type=result.get("ai_type"),  # Deprecated, kept for backwards compatibility
+            task_id=result.get("task_id")  # Phase 4: Coordinatorがログファイルパス登録に使用
         )
+
+    async def register_execution_log_file(
+        self, agent_id: str, task_id: str, log_file_path: str
+    ) -> bool:
+        """Register log file path for an execution log.
+
+        Called by Coordinator after Agent Instance process completes.
+        No authentication required.
+
+        Args:
+            agent_id: Agent ID
+            task_id: Task ID
+            log_file_path: Absolute path to the log file
+
+        Returns:
+            True if successful, False otherwise
+
+        Raises:
+            MCPError: If request fails
+        """
+        result = await self._call_tool("register_execution_log_file", {
+            "agent_id": agent_id,
+            "task_id": task_id,
+            "log_file_path": log_file_path
+        })
+
+        return result.get("success", False)
 
     # ==========================================================================
     # Phase 3/4: Agent Instance API

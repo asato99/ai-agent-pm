@@ -43,6 +43,8 @@ class AgentInstanceInfo:
     model: Optional[str]                       # "claude-sonnet-4-5", "gemini-2.0-flash", etc.
     started_at: datetime
     log_file_handle: Optional["TextIO"] = None  # Keep file handle open during process lifetime
+    task_id: Optional[str] = None              # Phase 4: ログファイルパス登録用
+    log_file_path: Optional[str] = None        # Phase 4: ログファイルパス
 
 
 class Coordinator:
@@ -152,8 +154,29 @@ class Coordinator:
                 f"working_dir={project.working_directory}"
             )
 
-        # Step 3: Clean up finished processes
-        self._cleanup_finished()
+        # Step 3: Clean up finished processes and register log file paths
+        finished_instances = self._cleanup_finished()
+        for key, info in finished_instances:
+            if info.task_id and info.log_file_path:
+                try:
+                    success = await self.mcp_client.register_execution_log_file(
+                        agent_id=key.agent_id,
+                        task_id=info.task_id,
+                        log_file_path=info.log_file_path
+                    )
+                    if success:
+                        logger.info(
+                            f"Registered log file for {key.agent_id}/{key.project_id}: "
+                            f"{info.log_file_path}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Failed to register log file for {key.agent_id}/{key.project_id}"
+                        )
+                except MCPError as e:
+                    logger.error(
+                        f"Error registering log file for {key.agent_id}/{key.project_id}: {e}"
+                    )
 
         # Step 4: For each (agent_id, project_id), check if should start
         for project in projects:
@@ -190,7 +213,7 @@ class Coordinator:
                     logger.debug(
                         f"should_start result: {result.should_start}, "
                         f"provider: {result.provider}, model: {result.model}, "
-                        f"kick_command: {result.kick_command}"
+                        f"kick_command: {result.kick_command}, task_id: {result.task_id}"
                     )
                     if result.should_start:
                         provider = result.provider or "claude"
@@ -201,16 +224,22 @@ class Coordinator:
                             working_dir=working_dir,
                             provider=provider,
                             model=result.model,
-                            kick_command=result.kick_command
+                            kick_command=result.kick_command,
+                            task_id=result.task_id
                         )
                     else:
                         logger.debug(f"should_start returned False for {agent_id}/{project_id}")
                 except MCPError as e:
                     logger.error(f"Failed to check should_start for {agent_id}/{project_id}: {e}")
 
-    def _cleanup_finished(self) -> None:
-        """Clean up finished Agent Instance processes."""
-        finished = []
+    def _cleanup_finished(self) -> list[tuple[AgentInstanceKey, AgentInstanceInfo]]:
+        """Clean up finished Agent Instance processes.
+
+        Returns:
+            List of (key, info) tuples for finished instances
+            that need log file path registration.
+        """
+        finished: list[tuple[AgentInstanceKey, AgentInstanceInfo]] = []
         for key, info in self._instances.items():
             retcode = info.process.poll()
             if retcode is not None:
@@ -223,10 +252,12 @@ class Coordinator:
                         info.log_file_handle.close()
                     except Exception:
                         pass
-                finished.append(key)
+                finished.append((key, info))
 
-        for key in finished:
+        for key, _ in finished:
             del self._instances[key]
+
+        return finished
 
     def _spawn_instance(
         self,
@@ -236,7 +267,8 @@ class Coordinator:
         working_dir: str,
         provider: str,
         model: Optional[str] = None,
-        kick_command: Optional[str] = None
+        kick_command: Optional[str] = None,
+        task_id: Optional[str] = None
     ) -> None:
         """Spawn an Agent Instance process.
 
@@ -255,6 +287,7 @@ class Coordinator:
             provider: AI provider (claude, gemini, openai, other)
             model: Specific model (claude-sonnet-4-5, gemini-2.0-flash, etc.)
             kick_command: Custom CLI command (takes priority if set)
+            task_id: Task ID (for log file path registration)
         """
         # kick_command takes priority over provider-based selection
         if kick_command:
@@ -352,7 +385,9 @@ class Coordinator:
             provider=provider,
             model=model,
             started_at=datetime.now(),
-            log_file_handle=log_f
+            log_file_handle=log_f,
+            task_id=task_id,
+            log_file_path=str(log_file)
         )
 
         logger.info(f"Spawned instance {agent_id}/{project_id} (PID: {process.pid})")
