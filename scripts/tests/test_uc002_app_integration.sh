@@ -6,12 +6,13 @@
 # - 同じタスク指示で異なるsystem_promptによる出力差異を検証
 #
 # フロー:
-#   1. アプリビルド
-#   2. MCPサーバービルド
-#   3. Runner確認
-#   4. Coordinator起動（ソケット待機状態で起動）
-#   5. XCUITest実行（アプリ起動→MCP自動起動→Coordinator接続→ステータス変更→ファイル作成待機）
-#   6. 結果検証
+#   1. テスト環境準備
+#   2. アプリビルド
+#   3. MCPサーバービルド
+#   4. Runner確認
+#   5. Coordinator起動（ソケット待機状態で起動）
+#   6. XCUITest実行（アプリ起動→MCP自動起動→Coordinator接続→ステータス変更→ファイル作成待機）
+#   7. 結果検証
 #
 # アーキテクチャ（Phase 4 Coordinator）:
 #   - 単一のCoordinatorが全ての(agent_id, project_id)ペアを管理
@@ -21,8 +22,8 @@
 #   - Agent Instanceがauthenticate → get_my_task → execute → report_completed
 #
 # ポイント:
-#   - Coordinatorが先に起動してソケット待機
-#   - アプリがMCPデーモンを自動起動
+#   - アプリがMCPデーモンを自動起動（applicationDidFinishLaunching）
+#   - Coordinatorはソケット作成を待機してから接続
 #   - XCUITestでDBにデータを投入
 #   - XCUITest内でファイル作成を待機（アプリが起動している間）
 
@@ -59,10 +60,11 @@ cleanup() {
         kill "$COORDINATOR_PID" 2>/dev/null || true
         echo "Coordinator stopped"
     fi
-    # Note: MCP Daemon is managed by the app (terminates when app terminates)
+    # Note: MCP Daemon is managed by the app, not by this script
     if [ "$1" != "--keep" ]; then
         rm -rf "$PROJECT_WORKING_DIR"
         rm -f /tmp/uc002_coordinator.log
+        rm -f /tmp/uc002_daemon.log
         rm -f /tmp/uc002_uitest.log
         rm -f /tmp/coordinator_uc002_config.yaml
         rm -rf /tmp/coordinator_logs_uc002
@@ -146,13 +148,13 @@ fi
 echo "Runner is ready"
 echo ""
 
-# Step 5: Coordinator起動（ソケット待機状態）
-# Phase 4アーキテクチャ: Coordinatorが先に起動し、ソケットが作成されるまで待機
-echo -e "${YELLOW}Step 5: Starting Coordinator (waits for MCP socket)${NC}"
+# Step 5: Coordinator起動
+# Note: MCP Daemon is started by the app in applicationDidFinishLaunching
+# The Coordinator will wait for the socket to become available
+echo -e "${YELLOW}Step 5: Starting Coordinator${NC}"
 echo "  Architecture: Phase 4 Coordinator"
-echo "  - Coordinator starts FIRST and waits for MCP socket"
-echo "  - App will start daemon, Coordinator will connect"
-echo "  - Single Coordinator polls list_active_projects_with_agents()"
+echo "  - MCP Daemon will be started by the app"
+echo "  - Coordinator polls list_active_projects_with_agents()"
 echo "  - Calls should_start(agent_id, project_id) for each pair"
 echo "  - Spawns Agent Instances (Claude Code) as needed"
 echo "  Agents: agt_detailed_writer, agt_concise_writer (passkeys in Coordinator config)"
@@ -207,11 +209,11 @@ fi
 echo -e "${GREEN}✓ Coordinator is running and waiting for MCP socket${NC}"
 echo ""
 
-# Step 6: XCUITest実行（アプリ起動 + MCP自動起動 + シードデータ投入 + ステータス変更 + ファイル待機）
-echo -e "${YELLOW}Step 6: Running XCUITest (app + MCP auto-start + seed data + wait for files)${NC}"
+# Step 6: XCUITest実行（アプリ起動 + シードデータ投入 + ステータス変更 + ファイル待機）
+echo -e "${YELLOW}Step 6: Running XCUITest (app + seed data + wait for files)${NC}"
 echo "  This will:"
 echo "    1. Launch app with -UITesting -UITestScenario:UC002"
-echo "    2. App auto-starts MCP daemon (Coordinator will connect)"
+echo "    2. App starts MCP daemon automatically"
 echo "    3. Seed test data (detailed + concise writers)"
 echo "    4. Change both task statuses: backlog → todo → in_progress via UI"
 echo "    5. Wait for Coordinator to spawn Agent Instances and create files (max 180s)"
