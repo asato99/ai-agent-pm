@@ -298,7 +298,8 @@ if [ -n "$OUTPUT_FILES" ]; then
 fi
 
 # 結果判定
-if [ "$FILE_CREATED" == "true" ] && [ "$EXEC_LOG_COUNT" -gt "0" ]; then
+# 必須条件: ファイル作成、実行ログ、サブタスク作成
+if [ "$FILE_CREATED" == "true" ] && [ "$EXEC_LOG_COUNT" -gt "0" ] && [ "$SUBTASK_COUNT" -gt "0" ]; then
     echo -e "${GREEN}UC001 App Integration Test: PASSED${NC}"
     echo ""
     echo "Verified (Phase 4 Coordinator Architecture):"
@@ -307,14 +308,22 @@ if [ "$FILE_CREATED" == "true" ] && [ "$EXEC_LOG_COUNT" -gt "0" ]; then
     echo "  ✓ Task status changed via UI"
     echo "  ✓ Coordinator detected in_progress task"
     echo "  ✓ Agent Instance spawned and executed"
+    echo "  ✓ Sub-tasks created ($SUBTASK_COUNT records)"
     echo "  ✓ File created in working directory"
     echo "  ✓ Execution log recorded in DB ($EXEC_LOG_COUNT records)"
-    if [ "$SUBTASK_COUNT" -gt "0" ]; then
-        echo "  ✓ Sub-tasks created ($SUBTASK_COUNT records)"
-    fi
     exit 0
+elif [ "$FILE_CREATED" == "true" ] && [ "$EXEC_LOG_COUNT" -gt "0" ]; then
+    echo -e "${RED}UC001 App Integration Test: FAILED${NC}"
+    echo ""
+    echo "File created and execution logs exist, but NO SUB-TASKS created."
+    echo "Agent must create sub-tasks before executing work."
+    echo ""
+    echo "Debug info:"
+    echo "  - Coordinator log: /tmp/uc001_coordinator.log"
+    echo "  - Agent logs: /tmp/coordinator_logs_uc001/"
+    exit 1
 elif [ "$FILE_CREATED" == "true" ]; then
-    echo -e "${YELLOW}UC001 App Integration Test: PARTIAL${NC}"
+    echo -e "${RED}UC001 App Integration Test: FAILED${NC}"
     echo ""
     echo "File created but execution logs missing."
     echo "This indicates get_my_task/report_completed not creating logs."

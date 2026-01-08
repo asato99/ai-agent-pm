@@ -591,11 +591,19 @@ private final class TestDataSeeder {
             projectId: uc001Project.id,
             title: "Runner統合テストタスク",
             description: """
-                Runner統合テスト用タスク。
+                プロジェクトのドキュメント基盤を構築する。
 
-                【指示】
-                ファイル名: \(outputFile)
-                内容: テスト用のMarkdownファイルを作成してください。内容には'integration test content'という文字列を含めること。
+                【目標】
+                作業ディレクトリにMarkdownドキュメントを作成し、プロジェクトの基本情報を記録する。
+
+                【成果物要件】
+                - 出力ディレクトリ: 作業ディレクトリ直下
+                - ファイル名: \(outputFile)
+                - 必須コンテンツ: 'integration test content' という文字列を含めること
+
+                【注意】
+                このタスクはサブタスクに分解してから実行してください。
+                get_next_action ツールの指示に従ってください。
                 """,
             status: .backlog,
             priority: .high,

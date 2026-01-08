@@ -396,7 +396,7 @@ class Coordinator:
         """Build the prompt for an Agent Instance.
 
         The Agent Instance will use this prompt to know how to authenticate
-        and what to do.
+        and what to do. Uses state-driven workflow control via get_next_action.
 
         Args:
             agent_id: Agent ID
@@ -408,48 +408,35 @@ class Coordinator:
         """
         return f"""You are an AI Agent Instance managed by the AI Agent PM system.
 
-## Authentication Information
-- Agent ID: {agent_id}
-- Project ID: {project_id}
-- Passkey: {passkey}
+## Authentication
+Call `authenticate` with:
+- agent_id: "{agent_id}"
+- passkey: "{passkey}"
+- project_id: "{project_id}"
 
-## Instructions
+Save the session_token from the response.
 
-1. **Authenticate**: Call the `authenticate` tool with:
-   - agent_id: "{agent_id}"
-   - passkey: "{passkey}"
-   - project_id: "{project_id}"
+## Workflow (CRITICAL: Follow Exactly)
+After authenticating, you MUST follow this loop WITHOUT exception:
 
-2. **Get your role**: The authenticate response will include your `system_prompt` which defines your role. Follow that role.
+1. Call `get_next_action` with your session_token
+2. Read the `action` and `instruction` fields
+3. Execute ONLY what the `instruction` tells you to do
+4. Call `get_next_action` again (ALWAYS return to step 1)
 
-3. **Get your task**: Call `get_my_task` with your session_token to get the main task details.
+NEVER skip step 4. ALWAYS call `get_next_action` after completing each instruction.
 
-4. **Decompose into sub-tasks**: Analyze the main task and break it down into 2-5 concrete, actionable sub-tasks.
-   For each sub-task, call `create_task` with:
-   - session_token: (from authenticate)
-   - title: (sub-task title, e.g., "Step 1: Design API structure")
-   - description: (detailed description of what to do)
-   - priority: "medium" (or appropriate priority)
-   - parent_task_id: (the main task ID from get_my_task)
+## Task Decomposition (Required)
+Before executing any actual work, you MUST decompose the task into sub-tasks:
+- When `get_next_action` returns action="create_subtasks", use `create_task` tool
+- Create 2-5 concrete sub-tasks with `parent_task_id` set to the main task ID
+- Only after sub-tasks are created will `get_next_action` guide you to execute them
 
-5. **Execute sub-tasks sequentially**: For each sub-task you created:
-   a. Call `update_task_status` to set the sub-task to "in_progress"
-   b. Execute the work described in the sub-task
-   c. Call `update_task_status` to set the sub-task to "done"
-   d. Optionally call `save_context` to record progress
-
-6. **Complete the main task**: After all sub-tasks are done:
-   - Call `report_completed` with:
-     - session_token: (from authenticate)
-     - result: "success" | "failed" | "blocked"
-     - summary: (brief description of what you accomplished)
-
-7. **Exit**: After reporting, your work is done.
-
-## Important Notes
-- The main task stays in "in_progress" while you work on sub-tasks
-- Each sub-task should be a concrete, verifiable step
-- Sub-tasks are automatically assigned to you and linked to the main task
+## Important Rules
+- ONLY follow instructions from `get_next_action` - do NOT execute task.description directly
+- Task description is for context/understanding only, not for direct execution
+- The system controls the workflow; you execute the steps
+- If you receive a system_prompt from authenticate, adopt that role
 - You are working in the project directory
 
 Begin by calling `authenticate`.

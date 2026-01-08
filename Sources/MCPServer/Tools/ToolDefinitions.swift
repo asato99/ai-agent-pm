@@ -20,6 +20,7 @@ enum ToolDefinitions {
             // Phase 4: Agent API
             authenticate,  // instruction追加
             getMyTask,
+            getNextAction,  // 状態駆動ワークフロー制御
             reportCompleted,
 
             // Agent
@@ -194,6 +195,24 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "result"]
+        ]
+    ]
+
+    /// get_next_action - 次のアクションを取得（状態駆動ワークフロー制御）
+    /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// Agent Instanceが定期的に呼び出し、現在の状態に応じた指示を取得
+    static let getNextAction: [String: Any] = [
+        "name": "get_next_action",
+        "description": "次に実行すべきアクションを取得します。Agent Instanceは作業ループ内で定期的にこのツールを呼び出し、返された指示に従ってください。状態に応じて適切な次のステップ（タスク取得、サブタスク作成、サブタスク実行、完了報告など）が指示されます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ]
+            ] as [String: Any],
+            "required": ["session_token"]
         ]
     ]
 

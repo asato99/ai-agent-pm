@@ -341,6 +341,16 @@ final class MCPServer {
                 summary: summary,
                 nextSteps: nextSteps
             )
+
+        case "get_next_action":
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
+            }
+            let session = try validateSession(token: sessionToken)
+            return try getNextAction(
+                agentId: session.agentId,
+                projectId: session.projectId
+            )
         case "get_task":
             guard let taskId = arguments["task_id"] as? String else {
                 throw MCPError.missingArguments(["task_id"])
@@ -1103,8 +1113,9 @@ final class MCPServer {
 
             var taskDict: [String: Any] = [
                 "task_id": task.id.value,
-                "title": task.title,
-                "description": task.description
+                "title": task.title
+                // Note: description は get_next_action で提供される（サブタスク作成時）
+                // Agent が description を直接実行しないようにするため、ここでは返さない
             ]
 
             if let workDir = workingDirectory {
@@ -1128,13 +1139,29 @@ final class MCPServer {
             try executionLogRepository.save(executionLog)
             Self.log("[MCP] ExecutionLog auto-created: \(executionLog.id.value)")
 
+            // ワークフローフェーズを記録（get_next_action用）
+            // 参照: docs/plan/STATE_DRIVEN_WORKFLOW.md
+            let workflowContext = Context(
+                id: ContextID.generate(),
+                taskId: task.id,
+                sessionId: SessionID.generate(),
+                agentId: id,
+                progress: "workflow:task_fetched"
+            )
+            try contextRepository.save(workflowContext)
+            Self.log("[MCP] Workflow phase recorded: task_fetched")
+
             Self.log("[MCP] getMyTask returning task: \(task.id.value)")
 
             return [
                 "success": true,
                 "has_task": true,
                 "task": taskDict,
-                "instruction": "タスクを完了したら report_completed を呼び出してください"
+                "instruction": """
+                    タスクが割り当てられています。
+                    get_next_action を呼び出してください。
+                    システムが次の作業を指示します。
+                    """
             ]
         } else {
             Self.log("[MCP] getMyTask: No in_progress task for agent '\(agentId)' in project '\(projectId)'")
@@ -1172,6 +1199,31 @@ final class MCPServer {
                 "success": false,
                 "error": "No in_progress task found for this agent"
             ]
+        }
+
+        // サブタスク作成を強制: メインタスク（parentTaskId=nil）の場合、サブタスクが必要
+        if task.parentTaskId == nil {
+            let allTasks = try taskRepository.findByProject(projId, status: nil)
+            let subTasks = allTasks.filter { $0.parentTaskId == task.id }
+            if subTasks.isEmpty {
+                Self.log("[MCP] reportCompleted: Subtasks required for main task. Task: \(task.id.value)")
+                return [
+                    "success": false,
+                    "error": "サブタスクを作成してから完了報告してください。get_next_action を呼び出して指示に従ってください。",
+                    "instruction": "get_next_action を呼び出してください。システムがサブタスク作成を指示します。"
+                ]
+            }
+
+            // 全サブタスクが完了していることを確認
+            let incompleteSubTasks = subTasks.filter { $0.status != TaskStatus.done && $0.status != TaskStatus.cancelled }
+            if !incompleteSubTasks.isEmpty {
+                Self.log("[MCP] reportCompleted: Incomplete subtasks exist. Count: \(incompleteSubTasks.count)")
+                return [
+                    "success": false,
+                    "error": "未完了のサブタスクがあります。全てのサブタスクを完了してから報告してください。",
+                    "incomplete_subtasks": incompleteSubTasks.map { ["id": $0.id.value, "title": $0.title, "status": $0.status.rawValue] }
+                ]
+            }
         }
 
         // 結果に基づいてステータスを更新
@@ -1255,6 +1307,347 @@ final class MCPServer {
         return [
             "success": true,
             "instruction": "タスクが完了しました。セッションを終了しました。"
+        ]
+    }
+
+    // MARK: Phase 4: State-Driven Workflow Control
+
+    /// get_next_action - 状態駆動ワークフロー制御
+    /// 参照: docs/plan/STATE_DRIVEN_WORKFLOW.md
+    /// Agent の hierarchy_type と Context のワークフローフェーズに基づいて次のアクションを判断
+    private func getNextAction(agentId: AgentID, projectId: ProjectID) throws -> [String: Any] {
+        Self.log("[MCP] getNextAction called for agent: '\(agentId.value)', project: '\(projectId.value)'")
+
+        // 1. エージェント情報を取得（hierarchy_type 判断用）
+        guard let agent = try agentRepository.findById(agentId) else {
+            Self.log("[MCP] getNextAction: Agent not found: \(agentId.value)")
+            return [
+                "action": "error",
+                "instruction": "エージェントが見つかりません。",
+                "error": "agent_not_found"
+            ]
+        }
+
+        // 2. メインタスク（in_progress 状態、parentTaskId = nil）を取得
+        let allTasks = try taskRepository.findByAssignee(agentId)
+        let inProgressTasks = allTasks.filter { $0.status == .inProgress && $0.projectId == projectId }
+        let mainTask = inProgressTasks.first { $0.parentTaskId == nil }
+
+        guard let main = mainTask else {
+            // メインタスクがない = get_my_task をまだ呼んでいない
+            // Coordinator は in_progress タスクがある場合のみ起動するので、
+            // ここに来るのは get_my_task 呼び出し前のみ
+            return [
+                "action": "get_task",
+                "instruction": """
+                    get_my_task を呼び出してタスク詳細を取得してください。
+                    取得後、get_next_action を呼び出して次の指示を受けてください。
+                    タスクの description を直接実行しないでください。
+                    """,
+                "state": "needs_task"
+            ]
+        }
+
+        // 3. Context から最新のワークフローフェーズを取得
+        let latestContext = try contextRepository.findLatest(taskId: main.id)
+        let phase = latestContext?.progress ?? ""
+
+        Self.log("[MCP] getNextAction: hierarchy=\(agent.hierarchyType.rawValue), phase=\(phase)")
+
+        // 4. 階層タイプに応じた処理を分岐
+        switch agent.hierarchyType {
+        case .worker:
+            return try getWorkerNextAction(mainTask: main, phase: phase, allTasks: allTasks)
+        case .manager:
+            return try getManagerNextAction(mainTask: main, phase: phase, allTasks: allTasks)
+        }
+    }
+
+    /// Worker のワークフロー制御
+    /// 参照: docs/plan/STATE_DRIVEN_WORKFLOW.md - Worker のワークフロー
+    /// Worker はサブタスクを作成し、自分で順番に実行する
+    private func getWorkerNextAction(mainTask: Task, phase: String, allTasks: [Task]) throws -> [String: Any] {
+        Self.log("[MCP] getWorkerNextAction: task=\(mainTask.id.value), phase=\(phase)")
+
+        // サブタスク（parentTaskId = mainTask.id）を取得
+        let subTasks = allTasks.filter { $0.parentTaskId == mainTask.id }
+        let pendingSubTasks = subTasks.filter { $0.status == .todo || $0.status == .backlog }
+        let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
+        let completedSubTasks = subTasks.filter { $0.status == .done }
+
+        Self.log("[MCP] getWorkerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count)")
+
+        // 1. サブタスク未作成 → サブタスク作成フェーズへ
+        if phase == "workflow:task_fetched" && subTasks.isEmpty {
+            // サブタスク作成フェーズを記録
+            let context = Context(
+                id: ContextID.generate(),
+                taskId: mainTask.id,
+                sessionId: SessionID.generate(),
+                agentId: mainTask.assigneeId!,
+                progress: "workflow:creating_subtasks"
+            )
+            try contextRepository.save(context)
+
+            return [
+                "action": "create_subtasks",
+                "instruction": """
+                    タスクを2〜5個のサブタスクに分解してください。
+                    create_task ツールを使用して、具体的で実行可能なサブタスクを作成してください。
+                    各サブタスクには parent_task_id として '\(mainTask.id.value)' を指定してください。
+                    サブタスク作成後、get_next_action を呼び出してください。
+                    """,
+                "state": "needs_subtask_creation",
+                "task": [
+                    "id": mainTask.id.value,
+                    "title": mainTask.title,
+                    "description": mainTask.description
+                ]
+            ]
+        }
+
+        // 2. サブタスクが存在する場合 → 順番に実行
+        if !subTasks.isEmpty {
+            // 全サブタスク完了 → メインタスク完了報告
+            if completedSubTasks.count == subTasks.count {
+                return [
+                    "action": "report_completion",
+                    "instruction": """
+                        全てのサブタスクが完了しました。
+                        report_completed を呼び出してメインタスクを完了してください。
+                        result には 'success' を指定し、作業内容を summary に記載してください。
+                        """,
+                    "state": "needs_completion",
+                    "task": [
+                        "id": mainTask.id.value,
+                        "title": mainTask.title
+                    ],
+                    "completed_subtasks": completedSubTasks.count
+                ]
+            }
+
+            // 実行中のサブタスクがある → 続けて実行
+            if let currentSubTask = inProgressSubTasks.first {
+                return [
+                    "action": "execute_subtask",
+                    "instruction": """
+                        現在のサブタスクを実行してください。
+                        完了したら update_task_status で status を 'done' に変更し、
+                        get_next_action を呼び出してください。
+                        """,
+                    "state": "executing_subtask",
+                    "current_subtask": [
+                        "id": currentSubTask.id.value,
+                        "title": currentSubTask.title,
+                        "description": currentSubTask.description
+                    ],
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "total": subTasks.count
+                    ]
+                ]
+            }
+
+            // 次のサブタスクを開始
+            if let nextSubTask = pendingSubTasks.first {
+                return [
+                    "action": "start_subtask",
+                    "instruction": """
+                        次のサブタスクを開始してください。
+                        update_task_status で '\(nextSubTask.id.value)' のステータスを 'in_progress' に変更し、
+                        作業を実行してください。
+                        """,
+                    "state": "start_next_subtask",
+                    "next_subtask": [
+                        "id": nextSubTask.id.value,
+                        "title": nextSubTask.title,
+                        "description": nextSubTask.description
+                    ],
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "total": subTasks.count
+                    ]
+                ]
+            }
+        }
+
+        // 3. サブタスク作成中フェーズ → 作成完了後の処理
+        if phase == "workflow:creating_subtasks" && !subTasks.isEmpty {
+            // サブタスク作成完了を記録
+            let context = Context(
+                id: ContextID.generate(),
+                taskId: mainTask.id,
+                sessionId: SessionID.generate(),
+                agentId: mainTask.assigneeId!,
+                progress: "workflow:subtasks_created"
+            )
+            try contextRepository.save(context)
+
+            // 最初のサブタスクを開始
+            if let firstSubTask = pendingSubTasks.first {
+                return [
+                    "action": "start_subtask",
+                    "instruction": """
+                        サブタスクの実行を開始してください。
+                        update_task_status で '\(firstSubTask.id.value)' のステータスを 'in_progress' に変更し、
+                        作業を実行してください。
+                        """,
+                    "state": "start_next_subtask",
+                    "next_subtask": [
+                        "id": firstSubTask.id.value,
+                        "title": firstSubTask.title,
+                        "description": firstSubTask.description
+                    ]
+                ]
+            }
+        }
+
+        // フォールバック
+        return [
+            "action": "get_task",
+            "instruction": "get_my_task を呼び出してタスク詳細を取得してください。",
+            "state": "needs_task"
+        ]
+    }
+
+    /// Manager のワークフロー制御
+    /// 参照: docs/plan/STATE_DRIVEN_WORKFLOW.md - Manager のワークフロー
+    /// Manager はサブタスクを作成して Worker に割り当て（自分では実行しない）
+    private func getManagerNextAction(mainTask: Task, phase: String, allTasks: [Task]) throws -> [String: Any] {
+        Self.log("[MCP] getManagerNextAction: task=\(mainTask.id.value), phase=\(phase)")
+
+        // サブタスク（parentTaskId = mainTask.id）を取得
+        let subTasks = allTasks.filter { $0.parentTaskId == mainTask.id }
+        let pendingSubTasks = subTasks.filter { $0.status == .todo || $0.status == .backlog }
+        let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
+        let completedSubTasks = subTasks.filter { $0.status == .done }
+
+        Self.log("[MCP] getManagerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count)")
+
+        // サブタスクがまだ作成されていない
+        if phase == "workflow:task_fetched" && subTasks.isEmpty {
+            // サブタスク作成フェーズを記録
+            let context = Context(
+                id: ContextID.generate(),
+                taskId: mainTask.id,
+                sessionId: SessionID.generate(),
+                agentId: mainTask.assigneeId!,
+                progress: "workflow:creating_subtasks"
+            )
+            try contextRepository.save(context)
+
+            return [
+                "action": "create_subtasks",
+                "instruction": """
+                    タスクを2〜5個のサブタスクに分解してください。
+                    create_task ツールを使用して、具体的で実行可能なサブタスクを作成してください。
+                    各サブタスクには parent_task_id として '\(mainTask.id.value)' を指定してください。
+                    サブタスク作成後、get_next_action を呼び出してください。
+                    """,
+                "state": "needs_subtask_creation",
+                "task": [
+                    "id": mainTask.id.value,
+                    "title": mainTask.title,
+                    "description": mainTask.description
+                ]
+            ]
+        }
+
+        // サブタスクが存在する場合の処理
+        if !subTasks.isEmpty {
+            // 全サブタスクが完了
+            if completedSubTasks.count == subTasks.count {
+                return [
+                    "action": "report_completion",
+                    "instruction": """
+                        全てのサブタスクが完了しました。
+                        report_completed を呼び出してメインタスクを完了してください。
+                        result には 'success' を指定し、作業内容を summary に記載してください。
+                        """,
+                    "state": "needs_completion",
+                    "task": [
+                        "id": mainTask.id.value,
+                        "title": mainTask.title
+                    ],
+                    "completed_subtasks": completedSubTasks.count
+                ]
+            }
+
+            // 実行中のサブタスクがある → Worker の完了を待つ
+            if !inProgressSubTasks.isEmpty {
+                return [
+                    "action": "wait",
+                    "instruction": """
+                        サブタスクが Worker によって実行中です。
+                        完了を待ってから get_next_action を再度呼び出してください。
+                        """,
+                    "state": "waiting_for_workers",
+                    "in_progress_subtasks": inProgressSubTasks.map { [
+                        "id": $0.id.value,
+                        "title": $0.title,
+                        "assignee_id": $0.assigneeId?.value ?? "unassigned"
+                    ] as [String: Any] },
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "total": subTasks.count
+                    ]
+                ]
+            }
+
+            // 未割り当てのサブタスクがある → Worker に委譲
+            if let nextSubTask = pendingSubTasks.first {
+                return [
+                    "action": "delegate",
+                    "instruction": """
+                        次のサブタスクを Worker に割り当ててください。
+                        update_task_assignee または適切なツールを使用してください。
+                        割り当て後、get_next_action を呼び出してください。
+                        """,
+                    "state": "needs_delegation",
+                    "next_subtask": [
+                        "id": nextSubTask.id.value,
+                        "title": nextSubTask.title,
+                        "description": nextSubTask.description
+                    ],
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "total": subTasks.count
+                    ]
+                ]
+            }
+        }
+
+        // サブタスク作成中フェーズ
+        if phase == "workflow:creating_subtasks" {
+            // サブタスク作成フェーズを記録
+            let context = Context(
+                id: ContextID.generate(),
+                taskId: mainTask.id,
+                sessionId: SessionID.generate(),
+                agentId: mainTask.assigneeId!,
+                progress: "workflow:subtasks_created"
+            )
+            try contextRepository.save(context)
+
+            return [
+                "action": "delegate",
+                "instruction": """
+                    サブタスクを Worker に割り当ててください。
+                    割り当て後、get_next_action を呼び出してください。
+                    """,
+                "state": "needs_delegation",
+                "subtasks": subTasks.map { [
+                    "id": $0.id.value,
+                    "title": $0.title
+                ] as [String: Any] }
+            ]
+        }
+
+        // フォールバック
+        return [
+            "action": "get_task",
+            "instruction": "get_my_task を呼び出してタスク詳細を取得してください。",
+            "state": "needs_task"
         ]
     }
 
