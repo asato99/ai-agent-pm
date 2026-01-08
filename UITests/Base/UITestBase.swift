@@ -20,6 +20,7 @@ enum UITestScenario: String {
     case internalAudit = "InternalAudit" // Internal Audit機能テスト用
     case uc001 = "UC001"           // UC001: エージェントによるタスク実行（Runner統合テスト用）
     case uc002 = "UC002"           // UC002: マルチエージェント協調（system_prompt差異検証）
+    case uc003 = "UC003"           // UC003: AIタイプ切り替え（kickCommand検証）
     case uc004 = "UC004"           // UC004: 複数プロジェクト×同一エージェント
 }
 
@@ -53,23 +54,66 @@ class AIAgentPMUITestCase: XCTestCase {
             "XCUI_ENABLE_ACCESSIBILITY": "1"
         ]
 
-        // アプリを起動
-        app.launch()
+        // システムダイアログの自動ハンドリングを設定
+        // macOSの通知許可ダイアログ等がXCUITestを阻害する問題を回避
+        addUIInterruptionMonitor(withDescription: "System Dialog") { alert -> Bool in
+            print("⚠️ System dialog detected, attempting to dismiss...")
+            // "許可しない" や "Don't Allow" などのボタンを探して押す
+            for buttonLabel in ["許可しない", "Don't Allow", "OK", "閉じる", "Close", "Cancel", "キャンセル"] {
+                let button = alert.buttons[buttonLabel]
+                if button.exists {
+                    print("  Clicking '\(buttonLabel)' button")
+                    button.click()
+                    return true
+                }
+            }
+            // ボタンが見つからない場合、最初のボタンを押す
+            if alert.buttons.count > 0 {
+                print("  Clicking first button")
+                alert.buttons.firstMatch.click()
+                return true
+            }
+            return false
+        }
 
-        // アプリの起動完了を待つ（waitForExistenceを使用）
+        // アプリを起動
+        print("🚀 Launching app...")
+        app.launch()
+        print("✅ App launched, state: \(app.state.rawValue)")
+
+        // アプリの起動完了を待つ
+        print("⏳ Waiting for window...")
         let window = app.windows.firstMatch
-        if window.waitForExistence(timeout: 10) {
+        if window.waitForExistence(timeout: 15) {
+            print("✅ Window found, waiting for UI to stabilize...")
             // ウィンドウが見つかった場合、データシードの完了を待つ
-            Thread.sleep(forTimeInterval: 2.0)
+            Thread.sleep(forTimeInterval: 3.0)
+            // ウィンドウを最前面に
+            app.activate()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            // カラム幅を220pxに設定したため、5カラム（1100px）がデフォルトウィンドウに収まる
+            Thread.sleep(forTimeInterval: 0.5)
         } else {
-            // ウィンドウが見つからない場合でも続行（テスト側で適切にハンドリング）
+            // ウィンドウが見つからない場合
+            print("⚠️ Window not found after 15 seconds")
+            print("App state: \(app.state.rawValue)")
+            print("Windows count: \(app.windows.count)")
             Thread.sleep(forTimeInterval: 3.0)
             app.activate()
-            Thread.sleep(forTimeInterval: 1.0)
+            Thread.sleep(forTimeInterval: 2.0)
         }
+        print("🏁 Setup complete")
     }
 
     override func tearDownWithError() throws {
+        // MCPデーモンがバックグラウンドで動作しているため、
+        // 明示的にアプリを終了させてデーモン停止を待つ
+        if app != nil {
+            app.terminate()
+            // デーモン停止のための猶予時間
+            Thread.sleep(forTimeInterval: 2.0)
+        }
         app = nil
     }
 }
@@ -102,6 +146,11 @@ class UC001UITestCase: AIAgentPMUITestCase {
 /// UC002テスト用ベースクラス（マルチエージェント協調テスト用）
 class UC002UITestCase: AIAgentPMUITestCase {
     override var testScenario: UITestScenario { .uc002 }
+}
+
+/// UC003テスト用ベースクラス（AIタイプ切り替えテスト用）
+class UC003UITestCase: AIAgentPMUITestCase {
+    override var testScenario: UITestScenario { .uc003 }
 }
 
 /// UC004テスト用ベースクラス（複数プロジェクト×同一エージェントテスト用）

@@ -1,5 +1,6 @@
 // Sources/Infrastructure/Repositories/AgentSessionRepository.swift
 // 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-1 認証基盤
+// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md - (agent_id, project_id) 単位のセッション管理
 
 import Foundation
 import GRDB
@@ -8,12 +9,15 @@ import Domain
 // MARK: - AgentSessionRecord
 
 /// GRDB用のAgentSessionレコード
+/// Phase 4: project_id を追加して (agent_id, project_id) 単位でセッション管理
 struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "agent_sessions"
 
     var id: String
     var token: String
     var agentId: String
+    /// Phase 4: セッションが紐づくプロジェクトID
+    var projectId: String
     var expiresAt: Date
     var createdAt: Date
 
@@ -21,6 +25,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case id
         case token
         case agentId = "agent_id"
+        case projectId = "project_id"
         case expiresAt = "expires_at"
         case createdAt = "created_at"
     }
@@ -30,6 +35,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             id: AgentSessionID(value: id),
             token: token,
             agentId: AgentID(value: agentId),
+            projectId: ProjectID(value: projectId),
             expiresAt: expiresAt,
             createdAt: createdAt
         )
@@ -40,6 +46,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             id: session.id.value,
             token: session.token,
             agentId: session.agentId.value,
+            projectId: session.projectId.value,
             expiresAt: session.expiresAt,
             createdAt: session.createdAt
         )
@@ -80,6 +87,18 @@ public final class AgentSessionRepository: AgentSessionRepositoryProtocol, Senda
         try db.read { db in
             try AgentSessionRecord
                 .filter(Column("agent_id") == agentId.value)
+                .order(Column("created_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
+    /// Phase 4: (agent_id, project_id) 単位でセッションを検索
+    public func findByAgentIdAndProjectId(_ agentId: AgentID, projectId: ProjectID) throws -> [AgentSession] {
+        try db.read { db in
+            try AgentSessionRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("project_id") == projectId.value)
                 .order(Column("created_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }

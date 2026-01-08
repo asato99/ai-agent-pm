@@ -173,6 +173,7 @@ struct TaskBoardView: View {
                 }
                 .padding()
             }
+            .accessibilityIdentifier("TaskBoardScrollView")
         }
         .accessibilityIdentifier("TaskBoard")
         .navigationTitle("Task Board")
@@ -395,7 +396,7 @@ struct TemplatesPopoverView: View {
                 .frame(maxHeight: 300)
             }
         }
-        .frame(width: 280)
+        .frame(width: 220)
     }
 }
 
@@ -451,7 +452,7 @@ struct TaskColumnView: View {
                         } preview: {
                             DebugLog.write("🔵 [onDrag] preview for task: \(task.id.value)")
                             return TaskCardView(task: task, agents: agents)
-                                .frame(width: 260)
+                                .frame(width: 200)
                                 .background(Color(.controlBackgroundColor))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
@@ -460,7 +461,7 @@ struct TaskColumnView: View {
                 .padding(.horizontal, 4)
             }
         }
-        .frame(width: 280)
+        .frame(width: 220)
         .background(isDropTargeted ? Color.accentColor.opacity(0.1) : Color.clear)
         .background(.background.secondary)
         .clipShape(RoundedRectangle(cornerRadius: 12))

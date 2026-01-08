@@ -21,7 +21,7 @@
   - 簡潔ライター（Gemini）: 簡潔で要点のみのドキュメントを作成
 - 各エージェントに異なる `ai_type` と `system_prompt` が設定済み
 - プロジェクトが存在（working_directory 設定済み）
-- Coordinatorが起動中
+- Runnerが起動中
 
 ---
 
@@ -61,10 +61,10 @@
   - ステータス: in_progress
 ```
 
-#### 1-2. Coordinatorが起動判断
+#### 1-2. Runnerが起動判断
 
 ```
-Coordinator → should_start(agt_detailed_writer)
+Runner → should_start(agt_detailed_writer, prj_xxx)
   ↓
 MCP Server → 応答
   {
@@ -72,13 +72,13 @@ MCP Server → 応答
     "ai_type": "claude"        ← Claude CLI を選択
   }
   ↓
-Coordinator → claude --dangerously-skip-permissions で起動
+Runner → claude --dangerously-skip-permissions で起動
 ```
 
 #### 1-3. 詳細ライターが認証
 
 ```
-詳細ライター → authenticate(agt_detailed_writer, passkey)
+詳細ライター → authenticate(agt_detailed_writer, passkey, prj_xxx)
   ↓
 MCP Server → 応答
   {
@@ -135,10 +135,10 @@ MCP Server → 応答
   - ステータス: in_progress
 ```
 
-#### 2-2. Coordinatorが起動判断
+#### 2-2. Runnerが起動判断
 
 ```
-Coordinator → should_start(agt_concise_writer)
+Runner → should_start(agt_concise_writer, prj_xxx)
   ↓
 MCP Server → 応答
   {
@@ -146,13 +146,13 @@ MCP Server → 応答
     "ai_type": "gemini"        ← Gemini CLI を選択
   }
   ↓
-Coordinator → gemini-cli --project xxx で起動
+Runner → gemini-cli --project xxx で起動
 ```
 
 #### 2-3. 簡潔ライターが認証
 
 ```
-簡潔ライター → authenticate(agt_concise_writer, passkey)
+簡潔ライター → authenticate(agt_concise_writer, passkey, prj_xxx)
   ↓
 MCP Server → 応答
   {

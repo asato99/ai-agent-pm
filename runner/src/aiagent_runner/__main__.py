@@ -1,6 +1,7 @@
 # src/aiagent_runner/__main__.py
-# Entry point for AI Agent PM Runner
-# Reference: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-5
+# Entry point for AI Agent PM Runner/Coordinator
+# Reference: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-5 (legacy Runner)
+# Reference: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md (Coordinator)
 
 import argparse
 import logging
@@ -8,6 +9,8 @@ import sys
 from pathlib import Path
 
 from aiagent_runner.config import RunnerConfig
+from aiagent_runner.coordinator import run_coordinator
+from aiagent_runner.coordinator_config import CoordinatorConfig
 from aiagent_runner.runner import run
 
 
@@ -33,9 +36,17 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         prog="aiagent-runner",
-        description="Runner for AI Agent PM - executes tasks via MCP and CLI"
+        description="Runner/Coordinator for AI Agent PM - executes tasks via MCP and CLI"
     )
 
+    # Mode selection
+    parser.add_argument(
+        "--coordinator",
+        action="store_true",
+        help="Run in Coordinator mode (Phase 4: single orchestrator for all agents)"
+    )
+
+    # Common arguments
     parser.add_argument(
         "-c", "--config",
         type=Path,
@@ -46,27 +57,33 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable verbose (debug) logging"
     )
+
+    # Legacy Runner arguments (deprecated, use Coordinator mode instead)
     parser.add_argument(
         "--agent-id",
-        help="Agent ID (overrides config/env)"
+        help="[Legacy Runner] Agent ID (overrides config/env)"
     )
     parser.add_argument(
         "--passkey",
-        help="Agent passkey (overrides config/env)"
+        help="[Legacy Runner] Agent passkey (overrides config/env)"
+    )
+    parser.add_argument(
+        "--project-id",
+        help="[Legacy Runner] Project ID (Phase 4 required)"
     )
     parser.add_argument(
         "--polling-interval",
         type=int,
-        help="Polling interval in seconds (default: 5)"
+        help="Polling interval in seconds (default: 5 for Runner, 10 for Coordinator)"
     )
     parser.add_argument(
         "--cli-command",
-        help="CLI command to use (default: claude)"
+        help="[Legacy Runner] CLI command to use (default: claude)"
     )
     parser.add_argument(
         "--working-directory",
         type=Path,
-        help="Working directory for CLI execution"
+        help="[Legacy Runner] Working directory for CLI execution"
     )
     parser.add_argument(
         "--log-directory",
@@ -77,8 +94,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_config(args: argparse.Namespace) -> RunnerConfig:
-    """Load configuration from file, env, and CLI args.
+def load_runner_config(args: argparse.Namespace) -> RunnerConfig:
+    """Load configuration for legacy Runner mode.
 
     Priority (highest to lowest):
     1. CLI arguments
@@ -99,10 +116,11 @@ def load_config(args: argparse.Namespace) -> RunnerConfig:
             config = RunnerConfig.from_env()
         except ValueError as e:
             # If no config file and env vars missing, check CLI args
-            if args.agent_id and args.passkey:
+            if args.agent_id and args.passkey and args.project_id:
                 config = RunnerConfig(
                     agent_id=args.agent_id,
-                    passkey=args.passkey
+                    passkey=args.passkey,
+                    project_id=args.project_id
                 )
             else:
                 raise e
@@ -112,12 +130,45 @@ def load_config(args: argparse.Namespace) -> RunnerConfig:
         config.agent_id = args.agent_id
     if args.passkey:
         config.passkey = args.passkey
+    if args.project_id:
+        config.project_id = args.project_id
     if args.polling_interval:
         config.polling_interval = args.polling_interval
     if args.cli_command:
         config.cli_command = args.cli_command
     if args.working_directory:
         config.working_directory = str(args.working_directory)
+    if args.log_directory:
+        config.log_directory = str(args.log_directory)
+
+    return config
+
+
+def load_coordinator_config(args: argparse.Namespace) -> CoordinatorConfig:
+    """Load configuration for Coordinator mode.
+
+    Args:
+        args: Parsed CLI arguments
+
+    Returns:
+        CoordinatorConfig instance
+    """
+    if not args.config or not args.config.exists():
+        raise ValueError(
+            "Coordinator mode requires a config file (-c/--config)\n"
+            "Example config:\n"
+            "  polling_interval: 10\n"
+            "  max_concurrent: 3\n"
+            "  agents:\n"
+            "    agt_developer:\n"
+            "      passkey: secret123\n"
+        )
+
+    config = CoordinatorConfig.from_yaml(args.config)
+
+    # Override with CLI arguments
+    if args.polling_interval:
+        config.polling_interval = args.polling_interval
     if args.log_directory:
         config.log_directory = str(args.log_directory)
 
@@ -135,32 +186,61 @@ def main() -> int:
 
     logger = logging.getLogger(__name__)
 
-    try:
-        config = load_config(args)
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
-        print(f"Error: {e}", file=sys.stderr)
-        print(
-            "\nProvide configuration via:\n"
-            "  1. YAML config file (-c/--config)\n"
-            "  2. Environment variables (AGENT_ID, AGENT_PASSKEY)\n"
-            "  3. CLI arguments (--agent-id, --passkey)",
-            file=sys.stderr
+    if args.coordinator:
+        # Phase 4: Coordinator mode
+        logger.info("Running in Coordinator mode (Phase 4)")
+        try:
+            config = load_coordinator_config(args)
+        except ValueError as e:
+            logger.error(f"Configuration error: {e}")
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+        logger.info(f"Configured agents: {list(config.agents.keys())}")
+        logger.info(f"Polling interval: {config.polling_interval}s")
+        logger.info(f"Max concurrent: {config.max_concurrent}")
+
+        try:
+            run_coordinator(config)
+        except KeyboardInterrupt:
+            logger.info("Coordinator stopped by user")
+            return 0
+        except Exception as e:
+            logger.exception(f"Coordinator failed: {e}")
+            return 1
+    else:
+        # Legacy Runner mode (deprecated)
+        logger.warning(
+            "Running in legacy Runner mode. "
+            "Consider using --coordinator mode for Phase 4 architecture."
         )
-        return 1
+        try:
+            config = load_runner_config(args)
+        except ValueError as e:
+            logger.error(f"Configuration error: {e}")
+            print(f"Error: {e}", file=sys.stderr)
+            print(
+                "\nProvide configuration via:\n"
+                "  1. YAML config file (-c/--config)\n"
+                "  2. Environment variables (AGENT_ID, AGENT_PASSKEY, PROJECT_ID)\n"
+                "  3. CLI arguments (--agent-id, --passkey, --project-id)",
+                file=sys.stderr
+            )
+            return 1
 
-    logger.info(f"Starting runner for agent: {config.agent_id}")
-    logger.info(f"CLI command: {config.cli_command}")
-    logger.info(f"Polling interval: {config.polling_interval}s")
+        logger.info(f"Starting runner for agent: {config.agent_id}")
+        logger.info(f"Project: {config.project_id}")
+        logger.info(f"CLI command: {config.cli_command}")
+        logger.info(f"Polling interval: {config.polling_interval}s")
 
-    try:
-        run(config)
-    except KeyboardInterrupt:
-        logger.info("Runner stopped by user")
-        return 0
-    except Exception as e:
-        logger.exception(f"Runner failed: {e}")
-        return 1
+        try:
+            run(config)
+        except KeyboardInterrupt:
+            logger.info("Runner stopped by user")
+            return 0
+        except Exception as e:
+            logger.exception(f"Runner failed: {e}")
+            return 1
 
     return 0
 

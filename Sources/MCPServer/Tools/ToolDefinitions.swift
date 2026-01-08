@@ -11,7 +11,7 @@ enum ToolDefinitions {
     /// 全Tool一覧
     static func all() -> [[String: Any]] {
         [
-            // Phase 4: Coordinator API
+            // Phase 4: Runner API
             healthCheck,
             listManagedAgents,
             listActiveProjectsWithAgents,
@@ -54,14 +54,14 @@ enum ToolDefinitions {
         ]
     }
 
-    // MARK: - Phase 4: Coordinator API
+    // MARK: - Phase 4: Runner API
 
     /// health_check - サーバー起動確認
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
-    /// Coordinatorが最初に呼び出す。サーバーが応答可能かを確認。
+    /// Runnerが最初に呼び出す。サーバーが応答可能かを確認。
     static let healthCheck: [String: Any] = [
         "name": "health_check",
-        "description": "MCPサーバーの起動状態を確認します。Coordinatorがポーリングの最初に呼び出します。",
+        "description": "MCPサーバーの起動状態を確認します。Runnerがポーリングの最初に呼び出します。",
         "inputSchema": [
             "type": "object",
             "properties": [:] as [String: Any],
@@ -71,10 +71,10 @@ enum ToolDefinitions {
 
     /// list_managed_agents - 管理対象エージェント一覧を取得
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
-    /// Coordinatorがポーリング対象のエージェントIDを取得。詳細は隠蔽。
+    /// Runnerがポーリング対象のエージェントIDを取得。詳細は隠蔽。
     static let listManagedAgents: [String: Any] = [
         "name": "list_managed_agents",
-        "description": "Coordinatorの管理対象となるAIエージェントのID一覧を取得します。エージェントの詳細は隠蔽されます。",
+        "description": "Runnerの管理対象となるAIエージェントのID一覧を取得します。エージェントの詳細は隠蔽されます。",
         "inputSchema": [
             "type": "object",
             "properties": [:] as [String: Any],
@@ -87,7 +87,7 @@ enum ToolDefinitions {
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     static let listActiveProjectsWithAgents: [String: Any] = [
         "name": "list_active_projects_with_agents",
-        "description": "アクティブなプロジェクト一覧と、各プロジェクトに割り当てられたエージェントを取得します。Coordinatorがポーリング対象を決定するために使用します。",
+        "description": "アクティブなプロジェクト一覧と、各プロジェクトに割り当てられたエージェントを取得します。Runnerがポーリング対象を決定するために使用します。",
         "inputSchema": [
             "type": "object",
             "properties": [:] as [String: Any],
@@ -97,19 +97,24 @@ enum ToolDefinitions {
 
     /// should_start - エージェントを起動すべきかどうかを返す
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
-    /// Coordinatorはタスクの詳細を知らない。boolのみ返す。
+    /// Runnerはタスクの詳細を知らない。boolのみ返す。
+    /// Phase 4: project_idを追加（(agent_id, project_id)単位で起動判断）
     static let shouldStart: [String: Any] = [
         "name": "should_start",
-        "description": "エージェントを起動すべきかどうかを判定します。Coordinatorが使用します。タスク詳細は返さず、起動判断のみを提供します。",
+        "description": "エージェントを起動すべきかどうかを判定します。Runnerが使用します。タスク詳細は返さず、起動判断のみを提供します。Phase 4では(agent_id, project_id)の組み合わせで判定します。",
         "inputSchema": [
             "type": "object",
             "properties": [
                 "agent_id": [
                     "type": "string",
                     "description": "エージェントID"
+                ],
+                "project_id": [
+                    "type": "string",
+                    "description": "プロジェクトID（Phase 4: 必須）"
                 ]
             ] as [String: Any],
-            "required": ["agent_id"]
+            "required": ["agent_id", "project_id"]
         ]
     ]
 
@@ -117,10 +122,10 @@ enum ToolDefinitions {
 
     /// authenticate - エージェント認証
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md, PHASE4_COORDINATOR_ARCHITECTURE.md
-    /// Phase 4: instruction フィールドを追加
+    /// Phase 4: project_id 必須、instruction フィールドを追加
     static let authenticate: [String: Any] = [
         "name": "authenticate",
-        "description": "エージェントIDとパスキーで認証し、セッショントークンとinstructionを取得します。Agentが起動後に最初に呼び出します。instructionに従って次のアクション（get_my_task）を実行してください。",
+        "description": "エージェントIDとパスキーとプロジェクトIDで認証し、セッショントークンとinstructionを取得します。Phase 4ではセッションは(agent_id, project_id)の組み合わせに紐づきます。Agentが起動後に最初に呼び出します。instructionに従って次のアクション（get_my_task）を実行してください。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -131,9 +136,13 @@ enum ToolDefinitions {
                 "passkey": [
                     "type": "string",
                     "description": "エージェントのパスキー"
+                ],
+                "project_id": [
+                    "type": "string",
+                    "description": "プロジェクトID（Phase 4: 必須）"
                 ]
             ] as [String: Any],
-            "required": ["agent_id", "passkey"]
+            "required": ["agent_id", "passkey", "project_id"]
         ]
     ]
 

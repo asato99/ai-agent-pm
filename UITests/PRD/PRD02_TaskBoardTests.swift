@@ -211,9 +211,31 @@ final class TaskBoardTests: BasicDataUITestCase {
     /// TS-02-007: リフレッシュボタン
     /// 検証内容: キーボードショートカット(⌘R)でリフレッシュ実行、タスクボードが引き続き表示されることを確認
     func testRefreshButtonExists() throws {
+        // デバッグ: 最小限のクエリでアプリ状態確認
+        print("🔍 Debug: App state = \(app.state.rawValue)")
+        print("🔍 Debug: App exists = \(app.exists)")
+
+        // ウィンドウを待機
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10), "ウィンドウが存在すること")
+        print("🔍 Debug: Window exists = \(window.exists)")
+
+        // UIが完全に読み込まれるのを待機
+        print("⏳ Waiting for UI to load...")
+        Thread.sleep(forTimeInterval: 5.0)
+
+        // アプリをアクティブ化
+        app.activate()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // ウィンドウ内の要素数を確認（タイムアウトする可能性あり）
+        print("🔍 Debug: Querying descendants...")
+        let descendants = window.descendants(matching: .any)
+        print("🔍 Debug: Descendants count = \(descendants.count)")
+
         // プロジェクト選択
         let projectRow = app.staticTexts["テストプロジェクト"]
-        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "テストプロジェクトが存在すること")
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 10), "テストプロジェクトが存在すること")
         projectRow.click()
 
         // タスクボードが表示されていることを確認

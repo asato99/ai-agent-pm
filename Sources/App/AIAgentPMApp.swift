@@ -18,10 +18,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
             }
         }
+
+        // Auto-start MCP daemon
+        // Passes database path to daemon via AIAGENTPM_DB_PATH environment variable
+        // This ensures the daemon uses the same database as the app (especially during UITest)
+        _Concurrency.Task { @MainActor in
+            guard let container = DependencyContainer.shared else {
+                NSLog("[AppDelegate] DependencyContainer.shared is nil, cannot start daemon")
+                return
+            }
+            do {
+                try await container.mcpDaemonManager.start(databasePath: container.databasePath)
+                NSLog("[AppDelegate] MCP daemon started successfully")
+            } catch {
+                NSLog("[AppDelegate] Failed to start MCP daemon: \(error)")
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Stop MCP daemon on app quit (skip during UITest to let Coordinator use the daemon)
+        if !CommandLine.arguments.contains("-UITesting") {
+            _Concurrency.Task { @MainActor in
+                await DependencyContainer.shared?.mcpDaemonManager.stop()
+                NSLog("[AppDelegate] MCP daemon stopped")
+            }
+        } else {
+            NSLog("[AppDelegate] UITesting mode - keeping daemon running for Coordinator")
+        }
     }
 }
 
@@ -67,8 +95,10 @@ struct AIAgentPMApp: App {
         let newContainer: DependencyContainer
         do {
             if Self.isUITesting {
-                // UIテスト用: 一時ディレクトリに専用DBを作成
-                let testDBPath = NSTemporaryDirectory() + "AIAgentPM_UITest.db"
+                // UIテスト用: /tmp に専用DBを作成（テストスクリプトと同じパスを使用）
+                // Note: NSTemporaryDirectory() returns /var/folders/... on macOS, not /tmp
+                // Test scripts expect /tmp/AIAgentPM_UITest.db for the database path
+                let testDBPath = "/tmp/AIAgentPM_UITest.db"
                 // 前回のテストDBとジャーナルファイルを削除してクリーンな状態で開始
                 try? FileManager.default.removeItem(atPath: testDBPath)
                 try? FileManager.default.removeItem(atPath: testDBPath + "-shm")
@@ -704,6 +734,10 @@ private final class TestDataSeeder {
         print("=== UC002 Test Data Configuration ===")
         print("Design: Single project + 2 identical tasks with different agents")
 
+        // Debug: Log to file for investigation
+        let debugPath = "/tmp/uc002_seed_debug.txt"
+        try? "UC002 seeding started at \(Date())\n".write(toFile: debugPath, atomically: true, encoding: .utf8)
+
         // UC002用プロジェクト（1つのみ）
         let projectId = ProjectID(value: "prj_uc002_test")
         let project = Project(
@@ -716,6 +750,7 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await projectRepository.save(project)
+        try? "Project saved: \(project.id.value)\n".appendToFile("/tmp/uc002_seed_debug.txt")
         print("✅ UC002: Project created - \(project.name)")
 
         // 詳細ライターエージェント（Claude / 詳細system_prompt）
@@ -757,6 +792,7 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await agentRepository.save(conciseAgent)
+        try? "Agents saved: \(detailedAgentId.value), \(conciseAgentId.value)\n".appendToFile("/tmp/uc002_seed_debug.txt")
         print("✅ UC002: Agents created - 詳細ライター, 簡潔ライター")
 
         // Runner認証用クレデンシャル
@@ -775,21 +811,27 @@ private final class TestDataSeeder {
             print("✅ UC002: Runner credentials created")
         }
 
-        // 共通のタスク指示（両タスクで同一）
-        let commonTaskDescription = """
+        // エージェントをプロジェクトに割り当て（Coordinator用）
+        if let projectAgentAssignmentRepository = projectAgentAssignmentRepository {
+            _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: detailedAgentId)
+            _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: conciseAgentId)
+            print("✅ UC002: Agents assigned to project")
+        }
+
+        // タスク1: 詳細ライター用（backlog状態 → UIテストでin_progressに変更）
+        // 出力ファイル名: OUTPUT_A.md
+        let detailedTaskDescription = """
             【タスク指示】
-            ファイル名: PROJECT_SUMMARY.md
+            ファイル名: OUTPUT_A.md
             内容: プロジェクトのサマリードキュメントを作成してください。
 
             あなたのsystem_promptに従って、適切なスタイルで記載してください。
             """
-
-        // タスク1: 詳細ライター用（backlog状態 → UIテストでin_progressに変更）
         let detailedTask = Task(
             id: TaskID(value: "tsk_uc002_detailed"),
             projectId: projectId,
             title: "プロジェクトサマリー作成",
-            description: commonTaskDescription,
+            description: detailedTaskDescription,
             status: .backlog,
             priority: .high,
             assigneeId: detailedAgentId,
@@ -797,14 +839,22 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await taskRepository.save(detailedTask)
-        print("✅ UC002: Task 1 created - assigned to 詳細ライター")
+        print("✅ UC002: Task 1 created - assigned to 詳細ライター (OUTPUT_A.md)")
 
         // タスク2: 簡潔ライター用（backlog状態 → UIテストでin_progressに変更）
+        // 出力ファイル名: OUTPUT_B.md
+        let conciseTaskDescription = """
+            【タスク指示】
+            ファイル名: OUTPUT_B.md
+            内容: プロジェクトのサマリードキュメントを作成してください。
+
+            あなたのsystem_promptに従って、適切なスタイルで記載してください。
+            """
         let conciseTask = Task(
             id: TaskID(value: "tsk_uc002_concise"),
             projectId: projectId,
             title: "プロジェクトサマリー作成",
-            description: commonTaskDescription,
+            description: conciseTaskDescription,
             status: .backlog,
             priority: .high,
             assigneeId: conciseAgentId,
@@ -812,9 +862,14 @@ private final class TestDataSeeder {
             updatedAt: Date()
         )
         try await taskRepository.save(conciseTask)
-        print("✅ UC002: Task 2 created - assigned to 簡潔ライター")
+        print("✅ UC002: Task 2 created - assigned to 簡潔ライター (OUTPUT_B.md)")
 
         print("✅ UC002: All test data seeded successfully (1 project, 2 identical tasks)")
+
+        // Debug: Verify data in database after seeding
+        let allProjects = try await projectRepository.findAll()
+        let allAgents = try await agentRepository.findAll()
+        try? "After seeding - Projects: \(allProjects.map { $0.id.value }), Agents: \(allAgents.map { $0.id.value })\n".appendToFile("/tmp/uc002_seed_debug.txt")
     }
 
     /// UC004用のテストデータを生成（複数プロジェクト×同一エージェント）

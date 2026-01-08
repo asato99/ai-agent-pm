@@ -104,122 +104,156 @@ AI（Claude Code, Gemini等）や人間を区別なく扱う抽象概念。
 
 ---
 
-## タスク実行アーキテクチャ
+## タスク実行アーキテクチャ（Phase 4: Runner + Agent Instance）
 
 ### 概要
 
-タスクの実行は **プル型** で設計されています。
+タスク実行は **Runner + Agent Instance** アーキテクチャで設計されています。
+
+> **Phase 4 での変更**: 既存の Runner に `project_id` 対応を追加。管理単位が `agent_id` から `(agent_id, project_id)` に拡張されました。
 
 - **アプリの責務**: タスクのステータス管理のみ（CLI実行は行わない）
-- **Runner の責務**: MCP経由でタスクを検知し、CLI（Claude/Gemini等）を実行
+- **Runner の責務**: MCPサーバーに問い合わせ、Agent Instance を起動
+- **Agent Instance の責務**: 認証後、タスクを取得・実行し、完了報告
+
+**重要**: Agent Instance の管理単位は `(agent_id, project_id)` の組み合わせ
 
 ```
-┌─────────────────────┐         ┌─────────────────────┐
-│       アプリ         │         │  Runner（外部）      │
-│                     │         │   ユーザーが実装     │
-│  Task → in_progress │         │                     │
-│         ↓           │         │    ┌─────────────┐  │
-│    DB に保存         │         │    │ ポーリング   │  │
-│                     │         │    │  ループ     │  │
-└─────────────────────┘         │    └──────┬──────┘  │
-                                │           │         │
-┌─────────────────────┐         │           ▼         │
-│    MCPサーバー       │◀────────│  get_pending_tasks  │
-│                     │         │           │         │
-│  認証 + タスク取得   │────────▶│    タスク取得        │
-│                     │         │           │         │
-└─────────────────────┘         │           ▼         │
-                                │    CLI実行          │
-                                │    (claude/gemini)  │
-                                │           │         │
-                                │           ▼         │
-                                │  update_task_status │
-                                └─────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            Runner                                        │
+│  - MCPサーバー起動確認 (health_check)                                    │
+│  - プロジェクト+エージェント一覧取得 (list_active_projects_with_agents)   │
+│  - 起動判断 (should_start(agent_id, project_id))                        │
+│  - Agent Instance起動 (working_directory指定)                           │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        MCPサーバー (ステートレス)                          │
+│                                                                          │
+│  Runner向けAPI:                                                          │
+│    - health_check() → { status }                                        │
+│    - list_active_projects_with_agents() → { projects }                  │
+│    - should_start(agent_id, project_id) → { should_start, ai_type }     │
+│                                                                          │
+│  Agent Instance向けAPI:                                                  │
+│    - authenticate(agent_id, passkey, project_id) → { token, ... }       │
+│    - get_my_task(token) → { task }                                      │
+│    - report_completed(token, result) → { success }                      │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               ▲
+                               │
+┌──────────────────────────────┴──────────────────────────────────────────┐
+│                       Agent Instance (Claude Code等)                     │
+│                                                                          │
+│  1. Runner起動 → 認証情報(agent_id, passkey, project_id)を受取          │
+│  2. authenticate() → system_prompt, instruction を取得                  │
+│  3. get_my_task() → タスク詳細を取得                                    │
+│  4. タスク実行（working_directory内で）                                  │
+│  5. report_completed() → 完了報告                                       │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 設計原則
 
 | 原則 | 説明 |
 |------|------|
-| 疎結合 | アプリと Runner は完全に分離 |
+| 疎結合 | アプリと Runner/Agent Instance は完全に分離 |
 | 外部化 | CLI実行ロジックはアプリに含まない |
-| 1 Runner = 1 Agent | Runner はエージェント単位で起動 |
+| 1 Instance = 1 (Agent, Project) | Agent Instance は (agent_id, project_id) 単位で起動 |
 | MCP経由 | 通信は全て MCP ツール経由 |
+| プロジェクト明示 | 全ての操作で project_id を明示 |
 
 ---
 
-## Runner アーキテクチャ
+## Runner + Agent Instance アーキテクチャ
 
 ### 概要
 
-Runner はユーザーが実装・管理する外部プログラムです。
-アプリはサンプル実装を提供しますが、実際の Runner はユーザーに委ねられます。
+Runner と Agent Instance はユーザーが実装・管理する外部プログラムです。
+アプリはサンプル実装を提供しますが、実際の実装はユーザーに委ねられます。
+
+> **Phase 4 での変更**: 既存の Runner に `project_id` 対応を追加（Coordinator 機能）。
 
 ### Runner の責務
 
 | 責務 | 説明 |
 |------|------|
-| 認証 | MCP経由で agent_id + passkey を使ってセッション取得 |
-| タスク監視 | 定期的に `get_pending_tasks` でポーリング |
-| CLI実行 | タスク検知時に Claude/Gemini 等を起動 |
-| ステータス更新 | 完了時に `update_task_status` を呼び出し |
+| MCPサーバー監視 | `health_check` で死活確認 |
+| プロジェクト一覧取得 | `list_active_projects_with_agents` でアクティブな (project, agent) ペア取得 |
+| 起動判断 | `should_start(agent_id, project_id)` で起動要否を判断 |
+| Agent Instance起動 | working_directory を指定して Agent Instance を起動 |
 
-### 認証フロー
+### Agent Instance の責務
+
+| 責務 | 説明 |
+|------|------|
+| 認証 | MCP経由で agent_id + passkey + project_id を使ってセッション取得 |
+| タスク取得 | `get_my_task(token)` でタスク取得 |
+| タスク実行 | Claude/Gemini 等を使ってタスク実行 |
+| 完了報告 | `report_completed(token, result)` で完了報告 |
+
+### 認証フロー（Phase 4）
 
 ```
-[Runner起動時]
+[Agent Instance起動時]
     │
-    └─ authenticate(agent_id, passkey)
+    └─ authenticate(agent_id, passkey, project_id)
            │
            ▼
     [MCPサーバー]
            │
            ├─ Passkey検証（ハッシュ比較）
+           ├─ project_agents テーブルで割り当て確認
            │
-           └─ セッショントークン発行（有効期限付き）
+           └─ セッショントークン + system_prompt + instruction 発行
                    │
                    ▼
-              session_token（1時間有効）
+              {
+                session_token: "sess_xxx",
+                system_prompt: "あなたは...",
+                instruction: "get_my_task を呼び出してください"
+              }
 
 [タスク取得時]
     │
-    └─ get_pending_tasks(session_token)
+    └─ get_my_task(session_token)
            │
-           ├─ トークン検証
-           └─ そのエージェントに割り当てられたタスクのみ返却
+           ├─ トークン検証（agent_id + project_id を特定）
+           └─ その (agent_id, project_id) に割り当てられたタスクを返却
 ```
 
-### セッション管理
+### セッション管理（Phase 4）
 
 ```swift
 struct AgentSession {
     let token: String              // UUID
     let agentId: AgentID
+    let projectId: ProjectID       // Phase 4 追加
     let expiresAt: Date            // 1時間後
     let createdAt: Date
 }
 ```
 
 - セッショントークンは1時間で期限切れ
-- 期限切れ時は再認証が必要
-- Runner は `ensure_authenticated()` で自動再認証
+- セッションは **(agent_id, project_id)** の組み合わせに紐づく
+- 同一エージェントでもプロジェクトが異なれば別セッション
 
 ### Runner 設定
 
-```bash
-# 環境変数で認証情報を渡す
-export AGENT_ID="agt_xxx"
-export AGENT_PASSKEY="secret123"
-./runner
-```
-
-または設定ファイル:
-
 ```yaml
 # runner_config.yaml
-agent_id: agt_xxx
-passkey: secret123
-polling_interval: 5  # 秒
+mcp_db_path: "/path/to/pm.db"
+polling_interval: 30  # 秒
+```
+
+### Agent Instance 起動パラメータ
+
+```bash
+# Runner から Agent Instance を起動する際のパラメータ
+claude --dangerously-skip-permissions \
+  -p "認証情報: agent_id=agt_xxx, passkey=secret123, project_id=prj_frontend"
+  --cwd "/path/to/frontend/project"  # working_directory
 ```
 
 ### サンプル Runner（Python）
@@ -227,115 +261,150 @@ polling_interval: 5  # 秒
 ```python
 #!/usr/bin/env python3
 # sample_runner.py
+"""
+Phase 4 Runner: (agent_id, project_id) ペアごとに Agent Instance を管理
+"""
 
-import os
 import time
 import subprocess
+from typing import Dict, Set
 
-class AgentRunner:
-    def __init__(self):
-        self.agent_id = os.environ["AGENT_ID"]
-        self.passkey = os.environ["AGENT_PASSKEY"]
-        self.session_token = None
-        self.mcp_client = MCPClient()
+class Runner:
+    def __init__(self, mcp_client):
+        self.mcp_client = mcp_client
+        self.running_instances: Set[tuple] = set()  # {(agent_id, project_id), ...}
 
-    def authenticate(self):
-        result = self.mcp_client.call("authenticate", {
-            "agent_id": self.agent_id,
-            "passkey": self.passkey
+    def health_check(self) -> bool:
+        result = self.mcp_client.call("health_check", {})
+        return result.get("status") == "ok"
+
+    def get_active_projects_with_agents(self):
+        result = self.mcp_client.call("list_active_projects_with_agents", {})
+        return result.get("projects", [])
+
+    def should_start(self, agent_id: str, project_id: str) -> dict:
+        result = self.mcp_client.call("should_start", {
+            "agent_id": agent_id,
+            "project_id": project_id
         })
-        if result["success"]:
-            self.session_token = result["session_token"]
-        else:
-            raise Exception("Authentication failed")
+        return result
 
-    def ensure_authenticated(self):
-        if self.session_token is None or self.is_expired():
-            self.authenticate()
+    def start_agent_instance(self, agent_id: str, project_id: str,
+                             working_directory: str, ai_type: str, passkey: str):
+        """Agent Instance を起動"""
+        key = (agent_id, project_id)
+        if key in self.running_instances:
+            return  # 既に起動中
 
-    def get_pending_tasks(self):
-        self.ensure_authenticated()
-        result = self.mcp_client.call("get_pending_tasks", {
-            "session_token": self.session_token
-        })
-        return result.get("tasks", [])
+        prompt = f"""# Agent Instance 起動
 
-    def execute_task(self, task):
-        prompt = self.build_prompt(task)
-        # Claude CLI を実行
-        subprocess.run([
+## 認証情報
+- Agent ID: {agent_id}
+- Project ID: {project_id}
+- Passkey: {passkey}
+
+## 指示
+1. authenticate(agent_id, passkey, project_id) を呼び出してセッションを取得
+2. 取得した system_prompt と instruction に従ってタスクを実行
+3. 完了したら report_completed(token, result) で報告
+"""
+        # Claude CLI を起動
+        subprocess.Popen([
             "claude", "--dangerously-skip-permissions",
             "-p", prompt
-        ], cwd=task["workingDirectory"])
+        ], cwd=working_directory)
 
-    def build_prompt(self, task):
-        return f"""# Task: {task["title"]}
-
-## Identification
-- Task ID: {task["taskId"]}
-- Project ID: {task["projectId"]}
-- Agent ID: {self.agent_id}
-
-## Description
-{task["description"]}
-
-## Working Directory
-Path: {task["workingDirectory"]}
-
-## Instructions
-1. Complete the task as described above
-2. When done, update the task status using:
-   update_task_status(task_id="{task["taskId"]}", status="done")
-"""
+        self.running_instances.add(key)
 
     def run(self):
         while True:
-            try:
-                tasks = self.get_pending_tasks()
-                for task in tasks:
-                    self.execute_task(task)
-            except Exception as e:
-                print(f"Error: {e}")
-            time.sleep(5)
+            if not self.health_check():
+                print("MCP server not available, retrying...")
+                time.sleep(10)
+                continue
 
-if __name__ == "__main__":
-    runner = AgentRunner()
-    runner.run()
+            projects = self.get_active_projects_with_agents()
+            for project in projects:
+                project_id = project["project_id"]
+                working_dir = project["working_directory"]
+
+                for agent_id in project["agents"]:
+                    check = self.should_start(agent_id, project_id)
+                    if check.get("should_start"):
+                        passkey = self.get_passkey(agent_id)  # 安全に取得
+                        self.start_agent_instance(
+                            agent_id, project_id, working_dir,
+                            check.get("ai_type", "claude"), passkey
+                        )
+
+            time.sleep(30)  # 30秒ごとにチェック
 ```
 
-### サンプル Runner（Bash）
+### サンプル Agent Instance 処理フロー
 
-```bash
-#!/bin/bash
-# simple_runner.sh
+```python
+#!/usr/bin/env python3
+# agent_instance_flow.py
+"""
+Phase 4 Agent Instance: 認証 → タスク取得 → 実行 → 完了報告
+"""
 
-AGENT_ID="${AGENT_ID}"
-PASSKEY="${AGENT_PASSKEY}"
-POLL_INTERVAL=5
+class AgentInstance:
+    def __init__(self, agent_id: str, passkey: str, project_id: str, mcp_client):
+        self.agent_id = agent_id
+        self.passkey = passkey
+        self.project_id = project_id
+        self.mcp_client = mcp_client
+        self.session_token = None
+        self.system_prompt = None
 
-# MCP認証（簡略版）
-authenticate() {
-    # 実際の実装では MCP クライアントを使用
-    SESSION_TOKEN=$(mcp-client authenticate "$AGENT_ID" "$PASSKEY")
-}
+    def authenticate(self):
+        """Phase 4: project_id も含めて認証"""
+        result = self.mcp_client.call("authenticate", {
+            "agent_id": self.agent_id,
+            "passkey": self.passkey,
+            "project_id": self.project_id
+        })
+        if result["success"]:
+            self.session_token = result["session_token"]
+            self.system_prompt = result.get("system_prompt")
+            return result.get("instruction")
+        else:
+            raise Exception("Authentication failed")
 
-# メインループ
-authenticate
+    def get_my_task(self):
+        """Phase 4: get_pending_tasks → get_my_task に変更"""
+        result = self.mcp_client.call("get_my_task", {
+            "token": self.session_token
+        })
+        return result.get("task")
 
-while true; do
-    TASKS=$(mcp-client get_pending_tasks "$SESSION_TOKEN")
+    def report_completed(self, result_summary: str):
+        """Phase 4: report_execution_complete → report_completed に変更"""
+        result = self.mcp_client.call("report_completed", {
+            "token": self.session_token,
+            "result": result_summary
+        })
+        return result.get("success")
 
-    for TASK in $TASKS; do
-        TASK_ID=$(echo "$TASK" | jq -r '.taskId')
-        PROMPT=$(mcp-client get_task_prompt "$TASK_ID")
-        WORKING_DIR=$(echo "$TASK" | jq -r '.workingDirectory')
+    def execute(self):
+        # 1. 認証
+        instruction = self.authenticate()
+        print(f"System Prompt: {self.system_prompt}")
+        print(f"Instruction: {instruction}")
 
-        cd "$WORKING_DIR"
-        echo "$PROMPT" | claude --dangerously-skip-permissions -p -
-    done
+        # 2. タスク取得
+        task = self.get_my_task()
+        if not task:
+            print("No task assigned")
+            return
 
-    sleep $POLL_INTERVAL
-done
+        # 3. タスク実行（ここで実際の作業を行う）
+        print(f"Executing task: {task['title']}")
+        # ... タスク実行ロジック ...
+
+        # 4. 完了報告
+        self.report_completed("タスク完了")
 ```
 
 ---
@@ -396,25 +465,82 @@ struct AgentCredential {
 
 ---
 
-## MCP ツール（Runner 向け）
+## MCP ツール（Phase 4: Runner / Agent Instance 向け）
 
-### 認証
+### Runner 向け API
 
 ```python
-# セッション開始
+# MCPサーバー死活確認
+health_check() -> {
+    "status": "ok"
+}
+
+# アクティブプロジェクト + 割当エージェント一覧
+list_active_projects_with_agents() -> {
+    "success": True,
+    "projects": [
+        {
+            "project_id": "prj_frontend",
+            "project_name": "Frontend App",
+            "working_directory": "/projects/frontend",
+            "agents": ["agt_developer", "agt_reviewer"]
+        }
+    ]
+}
+
+# 起動判断
+should_start(
+    agent_id: str,
+    project_id: str
+) -> {
+    "should_start": True,
+    "ai_type": "claude"
+}
+```
+
+### Agent Instance 向け API
+
+```python
+# 認証（Phase 4: project_id 必須）
 authenticate(
     agent_id: str,
-    passkey: str
+    passkey: str,
+    project_id: str
 ) -> {
     "success": True,
     "session_token": "sess_xxxxx",
-    "expires_in": 3600  # 秒
+    "expires_in": 3600,
+    "agent_name": "frontend-dev",
+    "project_name": "Frontend App",
+    "system_prompt": "あなたはフロントエンド開発者です...",
+    "instruction": "get_my_task を呼び出してタスク詳細を取得してください"
 }
 
 # 認証失敗時
 {
     "success": False,
-    "error": "Invalid agent_id or passkey"
+    "error": "Invalid credentials or not assigned to project"
+}
+
+# タスク取得（Phase 4: get_pending_tasks → get_my_task）
+get_my_task(
+    token: str
+) -> {
+    "success": True,
+    "task": {
+        "taskId": "tsk_xxx",
+        "title": "機能実装",
+        "description": "ログイン画面のUIを実装する",
+        "priority": "high"
+    }
+}
+
+# 完了報告（Phase 4: report_execution_complete → report_completed）
+report_completed(
+    token: str,
+    result: str
+) -> {
+    "success": True
 }
 
 # セッション終了
@@ -425,37 +551,17 @@ logout(
 }
 ```
 
-### タスク取得
-
-```python
-# 実行待ちタスクを取得
-get_pending_tasks(
-    session_token: str
-) -> {
-    "success": True,
-    "tasks": [
-        {
-            "taskId": "tsk_xxx",
-            "projectId": "prj_xxx",
-            "title": "機能実装",
-            "description": "ログイン画面のUIを実装する",
-            "priority": "high",
-            "workingDirectory": "/path/to/project"
-        }
-    ]
-}
-```
-
 ### スコープ制限
 
-各エージェントは自分に関連する操作のみ可能：
+各 Agent Instance は自分に関連する (agent_id, project_id) スコープのみ操作可能：
 
 ```python
 permissions = {
-    "get_pending_tasks": "own_tasks_only",
+    "get_my_task": "own_project_tasks_only",
     "update_task_status": "assigned_tasks_only",
     "save_context": "own_tasks_only",
-    "create_handoff": "from_self_only"
+    "create_handoff": "from_self_only",
+    "report_completed": "own_session_only"
 }
 ```
 
@@ -501,7 +607,7 @@ permissions = {
 ### 概要
 
 タスク実行のログはアプリで管理します。
-Runner が MCP 経由でログファイルのパスを報告し、アプリがファイルを読み込んで表示します。
+Agent Instance が MCP 経由でログファイルのパスを報告し、アプリがファイルを読み込んで表示します。
 
 ### 設計方針
 
@@ -513,18 +619,18 @@ Runner が MCP 経由でログファイルのパスを報告し、アプリが�
 ```
 [DB]
   └─ execution_logs テーブル
-      ├─ id, task_id, agent_id
+      ├─ id, task_id, agent_id, project_id  ← Phase 4: project_id 追加
       ├─ started_at, completed_at
       ├─ exit_code, status
       └─ log_file_path  ← ファイルパスのみ
 
 [ファイルシステム]
   └─ ~/Library/Application Support/AIAgentPM/logs/
-      └─ tsk_xxx/
+      └─ prj_xxx/tsk_xxx/  ← Phase 4: project_id でグループ化
           └─ exec_20250106_103000.log  ← 実際のログ内容
 ```
 
-### Runner の責務
+### Agent Instance の責務（Phase 4）
 
 ```python
 import os
@@ -536,40 +642,30 @@ LOG_BASE = os.path.expanduser(
     "~/Library/Application Support/AIAgentPM/logs"
 )
 
-def execute_task(task, session_token):
+def execute_task(task, session_token, project_id):
     task_id = task["taskId"]
 
-    # ログファイルパス
-    log_dir = f"{LOG_BASE}/{task_id}"
+    # ログファイルパス（Phase 4: project_id でグループ化）
+    log_dir = f"{LOG_BASE}/{project_id}/{task_id}"
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = f"{log_dir}/exec_{timestamp}.log"
 
-    # 実行開始を報告
-    start_result = mcp.call("report_execution_start", {
-        "session_token": session_token,
-        "task_id": task_id
-    })
-    execution_id = start_result["execution_id"]
-
-    # CLI 実行（出力をファイルにリダイレクト）
+    # タスク実行
     start_time = datetime.now()
     with open(log_file, "w") as log:
         result = subprocess.run(
             ["claude", "--dangerously-skip-permissions", "-p", prompt],
             stdout=log,
             stderr=subprocess.STDOUT,
-            cwd=task["workingDirectory"]
+            cwd=task.get("workingDirectory", ".")
         )
     end_time = datetime.now()
 
-    # 実行完了を報告
-    mcp.call("report_execution_complete", {
-        "session_token": session_token,
-        "execution_id": execution_id,
-        "exit_code": result.returncode,
-        "duration_seconds": (end_time - start_time).total_seconds(),
-        "log_file_path": log_file
+    # 完了報告（Phase 4: report_completed）
+    mcp.call("report_completed", {
+        "token": session_token,
+        "result": f"exit_code={result.returncode}, duration={(end_time - start_time).total_seconds()}s"
     })
 ```
 
@@ -580,6 +676,7 @@ struct ExecutionLog {
     let id: ExecutionLogID
     let taskId: TaskID
     let agentId: AgentID
+    let projectId: ProjectID        // Phase 4 追加
     let executionId: String         // exec_xxx
 
     // タイムスタンプ
@@ -602,28 +699,19 @@ enum ExecutionStatus: String, Codable {
 }
 ```
 
-### MCP ツール
+### MCP ツール（Phase 4）
 
 ```python
-# 実行開始を報告
-report_execution_start(
-    session_token: str,
-    task_id: str
-) -> {
-    "success": True,
-    "execution_id": "exec_xxx"
-}
-
-# 実行完了を報告
-report_execution_complete(
-    session_token: str,
-    execution_id: str,
-    exit_code: int,
-    duration_seconds: float,
-    log_file_path: str
+# 完了報告（Phase 4: シンプル化）
+report_completed(
+    token: str,
+    result: str  # 実行結果サマリー
 ) -> {
     "success": True
 }
+
+# 注: Phase 4 では report_execution_start/report_execution_complete は
+# report_completed に統合され、簡略化されています
 ```
 
 ### アプリ UI
@@ -657,74 +745,85 @@ report_execution_complete(
 
 ---
 
-## エージェント認証
+## エージェント認証（Phase 4）
 
 ### 目的
-エージェントがMCPツールを呼び出す際、正しいエージェントとして識別されることを保証する。
+Agent Instance が MCPツールを呼び出す際、正しい (agent_id, project_id) として識別されることを保証する。
 
-### ステートレス設計における認証
+### Phase 4 認証フロー
 
-MCPサーバーはステートレスに設計されているため、認証は**ツール呼び出し時の引数**で行う。
+Phase 4 では、**セッションベース認証**を採用。`authenticate` 時に `project_id` を含めることで、スコープを明確化。
 
 ```
-[キック時]
-  PMアプリがプロンプトにID情報を含める
+[Runner起動]
+  Runner が Agent Instance を起動（認証情報を渡す）
   ↓
-[LLM（Claude Code）]
-  プロンプトからID情報を読み取る
+[Agent Instance 起動]
+  認証情報 (agent_id, passkey, project_id) を受け取る
   ↓
-[MCPツール呼び出し時]
-  引数としてagent_idを渡す
-  - 例: create_handoff(task_id=..., from_agent_id="agt_dev001", ...)
+[authenticate 呼び出し]
+  authenticate(agent_id, passkey, project_id)
   ↓
 [MCPサーバー側で検証]
   - agent_id の存在確認
-  - passkey の一致確認（将来、必要に応じて）
+  - passkey のハッシュ比較
+  - project_agents テーブルで割り当て確認
   ↓
-認証成功 → ツール実行
+認証成功 → session_token + system_prompt + instruction 返却
 認証失敗 → エラー返却
+  ↓
+[タスク取得/実行]
+  get_my_task(token) → タスク取得
+  report_completed(token, result) → 完了報告
 ```
 
 ### 認証レベル
 
 | レベル | 認証方式 | 用途 |
 |--------|----------|------|
-| Level 0 | agent_id のみ | 開発/テスト環境（初期実装） |
-| Level 1 | agent_id + passkey | 本番環境（将来） |
-| Level 2 | agent_id + passkey + IP制限 | セキュア環境（将来） |
+| Level 0 | agent_id + project_id のみ | 開発/テスト環境 |
+| Level 1 | agent_id + passkey + project_id | 本番環境（推奨） |
+| Level 2 | + IP制限 + 監査ログ | セキュア環境（将来） |
 
 ### エージェント属性（認証関連）
 
 | 属性 | 説明 |
 |------|------|
-| passkey | 認証用の秘密鍵（ハッシュ保存、将来） |
+| passkey | 認証用の秘密鍵（ハッシュ保存） |
 | auth_level | 認証レベル (0/1/2) |
 | allowed_ips | 許可IPリスト（Level 2用、将来） |
 
-### 初期実装
+### Phase 4 での実装
 
-1. **Phase 1**: agent_id のみで認証（開発優先）
-   - ツール呼び出し時にagent_idの存在確認のみ
-   - LLMがプロンプトから読み取ったIDを信頼
-2. **Phase 2**: passkey 対応追加
-   - 特定のツールでpasskey検証を追加
-3. **Phase 3**: IP制限等のセキュリティ強化
+1. **Phase 4**: セッションベース認証 + project_id
+   - `authenticate(agent_id, passkey, project_id)` でセッション取得
+   - セッショントークンは (agent_id, project_id) に紐づく
+   - `project_agents` テーブルで割り当て確認
+2. **将来**: IP制限等のセキュリティ強化
 
-### ツール呼び出し時の認証例
+### 認証後のツール呼び出し例（Phase 4）
 
-```
+```python
+# 認証（Phase 4: project_id 必須）
+result = authenticate(
+  agent_id="agt_dev001",
+  passkey="secret123",
+  project_id="prj_frontend"
+)
+token = result["session_token"]
+
+# タスク取得（トークンでスコープ制限）
+task = get_my_task(token=token)
+
+# 完了報告（トークンでスコープ制限）
+report_completed(token=token, result="実装完了")
+
 # ハンドオフ作成時（from_agent_idを検証）
 create_handoff(
   task_id="task_abc123",
-  from_agent_id="agt_dev001",  ← 検証対象
+  from_agent_id="agt_dev001",  # セッションの agent_id と一致確認
   to_agent_id="agt_reviewer",
   summary="認証機能実装完了"
-)
-
-# ステータス更新時（task_idの権限を検証）
-update_task_status(
-  task_id="task_abc123",  ← 操作権限を検証
-  status="done"
 )
 ```
 
@@ -768,3 +867,12 @@ update_task_status(
 - タスクの重さ・種類による制御
 - 実際の処理状態（待ち/実行中）の反映
 - 稼働時間帯の設定（人間向け）
+
+---
+
+## 変更履歴
+
+| 日付 | バージョン | 変更内容 |
+|------|-----------|----------|
+| 2025-01-06 | 1.0.0 | 初版作成 |
+| 2026-01-07 | 4.0.0 | Phase 4 Runner + Agent Instance アーキテクチャに整合。Runner に project_id 対応を追加、管理単位を(agent_id, project_id)に変更、API名を更新（get_pending_tasks → get_my_task, report_execution_complete → report_completed）|

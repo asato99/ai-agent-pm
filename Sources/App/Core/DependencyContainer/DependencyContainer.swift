@@ -17,6 +17,11 @@ public final class DependencyContainer: ObservableObject {
     /// 注意: 通常は@EnvironmentObject経由でアクセスすべき
     public static var shared: DependencyContainer!
 
+    // MARK: - Database Path
+
+    /// 使用中のデータベースパス（MCPデーモン起動時に渡す）
+    public let databasePath: String
+
     // MARK: - Repositories
 
     public let projectRepository: ProjectRepository
@@ -37,6 +42,10 @@ public final class DependencyContainer: ObservableObject {
     // MARK: - Event Recorder
 
     public let eventRecorder: EventRecorder
+
+    // MARK: - Services
+
+    public let mcpDaemonManager: MCPDaemonManager
 
     // MARK: - Use Cases (Project)
 
@@ -342,6 +351,7 @@ public final class DependencyContainer: ObservableObject {
     public init(databasePath: String) throws {
         let database = try DatabaseSetup.createDatabase(at: databasePath)
 
+        self.databasePath = databasePath
         self.projectRepository = ProjectRepository(database: database)
         self.agentRepository = AgentRepository(database: database)
         self.taskRepository = TaskRepository(database: database)
@@ -357,6 +367,7 @@ public final class DependencyContainer: ObservableObject {
         self.agentCredentialRepository = AgentCredentialRepository(database: database)
         self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
+        self.mcpDaemonManager = MCPDaemonManager()
     }
 
     /// デフォルトのデータベースパスを使用して初期化

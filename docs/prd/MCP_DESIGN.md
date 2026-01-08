@@ -26,18 +26,20 @@ MCPサーバーは**ステートレス**に設計されています。
 
 ## MCPサーバーが提供するTools
 
-### Coordinator向けAPI（Phase 4）
+### Runner 向けAPI（Phase 4）
 
-Coordinatorは以下の3ステップでポーリングを行う：
+> **Phase 4 での変更**: 既存の Runner に `project_id` 対応を追加。管理単位が `(agent_id, project_id)` に拡張されました。
+
+Runner は以下の3ステップでポーリングを行う：
 1. `health_check` - サーバー起動確認
-2. `list_managed_agents` - エージェント一覧取得
-3. `should_start` - 各エージェントの起動判断
+2. `list_active_projects_with_agents` - アクティブプロジェクト+割り当てエージェント一覧取得
+3. `should_start` - 各(agent_id, project_id)の起動判断
 
 | Tool | 引数 | 説明 |
 |------|------|------|
 | `health_check` | なし | MCPサーバーの起動確認 |
-| `list_managed_agents` | なし | 管理対象エージェント一覧を取得 |
-| `should_start` | `agent_id` | エージェントを起動すべきかどうかを返す |
+| `list_active_projects_with_agents` | なし | アクティブプロジェクトと割り当てエージェント一覧を取得 |
+| `should_start` | `agent_id`, `project_id` | (agent, project)の組み合わせで起動すべきかどうかを返す |
 
 #### health_check
 
@@ -56,70 +58,92 @@ health_check() -> {
 - 接続テスト
 - バージョン確認（将来の互換性チェック用）
 
-#### list_managed_agents
+#### list_active_projects_with_agents
 
-Coordinatorが管理すべきエージェントの一覧を取得する。
+アクティブなプロジェクト一覧と、各プロジェクトに割り当てられたエージェントを取得する。
 
 ```python
-list_managed_agents() -> {
+list_active_projects_with_agents() -> {
     "success": True,
-    "agents": [
-        { "agent_id": "agt_frontend" },
-        { "agent_id": "agt_backend" },
-        { "agent_id": "agt_infra" }
+    "projects": [
+        {
+            "project_id": "prj_frontend",
+            "project_name": "Frontend App",
+            "working_directory": "/projects/frontend",
+            "agents": ["agt_developer", "agt_reviewer"]
+        },
+        {
+            "project_id": "prj_backend",
+            "project_name": "Backend API",
+            "working_directory": "/projects/backend",
+            "agents": ["agt_developer", "agt_infra"]
+        }
     ]
 }
 ```
 
 **実装ロジック（内部）**:
-- `active` 状態のエージェントのみ返す
-- passkey、role、typeなどの詳細は返さない（Coordinatorは知る必要がない）
+- `active` 状態のプロジェクトのみ返す
+- 各プロジェクトに割り当てられた `active` 状態のエージェントIDを返す
+- working_directoryはプロジェクトから取得
+
+**重要**:
+- 同一エージェントが複数プロジェクトに登場可能
+- Runner は各 (agent_id, project_id) の組み合わせを個別に管理
 
 #### should_start
 
-エージェントを起動すべきかどうかを返す。内部の詳細（タスクステータス等）は隠蔽。
+特定の(agent_id, project_id)の組み合わせでAgent Instanceを起動すべきかを返す。
 
 ```python
 should_start(
-    agent_id: str       # エージェントID
+    agent_id: str,      # エージェントID
+    project_id: str     # プロジェクトID
 ) -> {
-    "should_start": True  # or False
+    "should_start": True,     # or False
+    "ai_type": "claude"       # should_start が true の場合のみ
 }
 ```
 
 **実装ロジック（内部）**:
-1. エージェントが存在しない → `False`
-2. 既に実行中（アクティブセッションあり）→ `False`
-3. `in_progress` 状態のタスクがある → `True`
+1. エージェントまたはプロジェクトが存在しない → `False`
+2. 該当 (agent_id, project_id) で既に実行中（アクティブセッションあり）→ `False`
+3. 該当プロジェクトで該当エージェントにアサインされた `in_progress` タスクがある → `True` + `ai_type`
 4. それ以外 → `False`
 
-**重要**: 戻り値にタスク情報は含めない。Coordinatorはタスクの存在を知る必要がない。
+**重要**:
+- タスク情報は含めない（Runner はタスクの存在を知る必要がない）
+- `ai_type` はエージェント定義から取得し、Runner が適切なCLIを選択するために使用
+- 実行状態は (agent_id, project_id) 単位で管理
 
 ---
 
-### Agent向けAPI（Phase 4）
+### Agent Instance向けAPI（Phase 4）
 
 | Tool | 引数 | 説明 |
 |------|------|------|
-| `authenticate` | `agent_id`, `passkey` | セッショントークンとinstructionを取得 |
+| `authenticate` | `agent_id`, `passkey`, `project_id` | セッショントークン、system_prompt、instructionを取得 |
 | `logout` | `session_token` | セッションを終了 |
 | `get_my_task` | `session_token` | 現在のタスク詳細を取得 |
 | `report_completed` | `session_token`, `result`, `summary?`, `next_steps?` | タスク完了を報告 |
 
 #### authenticate
 
-認証後、次に何をすべきかの instruction を返す。
-認証成功時にエージェントは「実行中」状態になる（冪等性確保）。
+認証後、エージェントの役割（system_prompt）と次に何をすべきかの instruction を返す。
+project_idを含めることで、セッションが特定の(agent_id, project_id)に紐づく。
 
 ```python
 authenticate(
     agent_id: str,      # エージェントID
-    passkey: str        # パスキー
+    passkey: str,       # パスキー
+    project_id: str     # プロジェクトID
 ) -> {
     "success": True,
     "session_token": "sess_xxxxx",
     "expires_in": 3600,  # 秒（1時間）
     "agent_name": "frontend-dev",
+    "project_name": "Frontend App",
+    "system_prompt": "あなたはフロントエンド開発者です...",  # DBから取得
     "instruction": "get_my_task を呼び出してタスク詳細を取得してください"
 }
 
@@ -132,12 +156,18 @@ authenticate(
 # 既に実行中の場合（二重起動防止）
 {
     "success": False,
-    "error": "Agent already running"
+    "error": "Agent instance already running for this project"
 }
 ```
 
+**ポイント**:
+- `system_prompt` はアプリ側（DB）で管理され、認証時にエージェントに渡される
+- `project_id` によりセッションがプロジェクトに紐づく
+- 同一 (agent_id, project_id) の二重起動を防止
+- 同一エージェントでも異なるプロジェクトは別セッションとして許可
+
 **実行状態の遷移**:
-- 認証成功 → `running` フラグ ON
+- 認証成功 → (agent_id, project_id) の `running` フラグ ON
 - `report_completed` 呼び出し → `running` フラグ OFF
 - セッションタイムアウト → `running` フラグ OFF（自動リカバリー）
 
@@ -397,38 +427,61 @@ get_execution_log(
 
 ## タスク実行アーキテクチャ
 
-### Phase 4: Coordinator + Agent アーキテクチャ
+### Phase 4: Runner + Agent Instance アーキテクチャ
+
+> **Phase 4 での変更**: 既存の Runner に `project_id` 対応を追加。管理単位が `(agent_id, project_id)` に拡張されました。
 
 責務を明確に分離した設計：
 
-- **Coordinator**: 起動判断のみ（タスク詳細は知らない）
-- **Agent**: MCPとの全やりとり、タスク実行（Claude Code等）
+- **Runner**: 起動判断のみ（タスク詳細は知らない）
+- **Agent Instance**: MCPとの全やりとり、タスク実行（Claude Code等）
 - **MCPサーバー**: 状態管理、認証、APIゲートウェイ
+
+**重要**: Agent Instanceの管理単位は `(agent_id, project_id)` の組み合わせ
+
+```
+同一エージェント × 複数プロジェクト → 別々のAgent Instance
+
+Project A (working_dir: /proj_a)
+└── Agent X のタスク
+    → Agent Instance 1 (agent=X, project=A, cwd=/proj_a)
+
+Project B (working_dir: /proj_b)
+└── Agent X のタスク
+    → Agent Instance 2 (agent=X, project=B, cwd=/proj_b)
+```
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Coordinator                                  │
+│                            Runner                                    │
 │                                                                      │
 │  責務:                                                               │
-│  - 管理対象エージェント一覧の保持                                      │
-│  - 各エージェントの起動判断（should_start の呼び出し）                  │
-│  - エージェントプロセスの起動                                          │
+│  - MCPサーバーの起動確認（ヘルスチェック）                             │
+│  - アクティブプロジェクトと割り当てエージェントの取得                    │
+│  - 各(agent_id, project_id)の起動判断                                │
+│  - Agent Instanceプロセスの起動（working_directory指定）              │
 │                                                                      │
 │  知らないこと:                                                        │
-│  - タスクの内容、ステータス、プロジェクト                               │
+│  - タスクの内容、ステータス                                           │
 │  - MCPの内部構造                                                      │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
-                               │ should_start(agent_id) → bool
+                               │ 1. health_check()
+                               │ 2. list_active_projects_with_agents()
+                               │ 3. should_start(agent_id, project_id) × N
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          MCP Server                                  │
 │                                                                      │
-│  Coordinator向けAPI:                                                 │
-│  - should_start(agent_id) → bool                                    │
+│  Runner向けAPI:                                                      │
+│  - health_check() → { status }                                      │
+│  - list_active_projects_with_agents()                               │
+│      → { projects: [{project_id, working_directory, agents}, ...] } │
+│  - should_start(agent_id, project_id) → { should_start, ai_type }   │
 │                                                                      │
-│  Agent向けAPI:                                                       │
-│  - authenticate(agent_id, passkey) → {token, instruction}           │
+│  Agent Instance向けAPI:                                              │
+│  - authenticate(agent_id, passkey, project_id)                      │
+│      → {token, system_prompt, instruction}                          │
 │  - get_my_task(token) → task details                                │
 │  - report_completed(token, result)                                  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -436,13 +489,13 @@ get_execution_log(
                                │ 認証後、直接やりとり
                                │
 ┌──────────────────────────────┴──────────────────────────────────────┐
-│                            Agent                                     │
+│                       Agent Instance                                 │
 │                      (Claude Code等)                                 │
 │                                                                      │
-│  1. 起動される（agent_id, passkeyを受け取る）                          │
-│  2. authenticate() → instruction を受け取る                          │
+│  1. 起動される（agent_id, passkey, project_id, working_dir）          │
+│  2. authenticate(project_id含む) → system_prompt, instruction        │
 │  3. instruction に従い get_my_task() を呼ぶ                          │
-│  4. タスクを実行                                                      │
+│  4. タスクを実行（working_directory内で）                             │
 │  5. report_completed() で完了報告                                    │
 │  6. 終了                                                             │
 └─────────────────────────────────────────────────────────────────────┘
@@ -452,8 +505,8 @@ get_execution_log(
 
 | コンポーネント | 知っている | 知らない |
 |--------------|-----------|---------|
-| **Coordinator** | agent_id一覧、passkey、起動コマンド | タスク、ステータス、プロジェクト |
-| **Agent** | 自分のagent_id、認証情報、タスク詳細 | 他エージェントの情報、システム全体 |
+| **Runner** | MCPサーバーの状態、project一覧、各projectの割り当てagent、passkey | タスクの内容・ステータス |
+| **Agent Instance** | 自分のagent_id、project_id、認証情報、タスク詳細、working_directory | 他インスタンスの情報 |
 | **MCP Server** | すべて | - |
 
 ### 設計原則
@@ -461,6 +514,7 @@ get_execution_log(
 1. **責務の明確な分離**: 各コンポーネントは必要最小限の情報のみを持つ
 2. **カプセル化**: 内部ステータス（`in_progress`等）は外部に公開しない
 3. **汎用性**: Claude Code以外のMCP対応エージェントも利用可能
+4. **プロジェクト単位の実行分離**: 同一エージェントでもプロジェクトが異なれば別インスタンス
 
 ---
 
@@ -469,22 +523,48 @@ get_execution_log(
 ### タスク実行フロー（Phase 4）
 
 ```
-Coordinator                    MCP Server                    Agent (Claude Code)
+Runner                         MCP Server                    Agent Instance
      │                              │                              │
-     │  should_start(agt_xxx)       │                              │
+     │  health_check()              │                              │
      │─────────────────────────────►│                              │
-     │                              │                              │
-     │  { should_start: true }      │                              │
+     │  { status: "ok" }            │                              │
      │◄─────────────────────────────│                              │
      │                              │                              │
-     │  spawn_agent(agt_xxx)        │                              │
+     │  list_active_projects_with_agents()                         │
+     │─────────────────────────────►│                              │
+     │  { projects: [               │                              │
+     │      {prj_a, [agt_x, agt_y]},│                              │
+     │      {prj_b, [agt_x]}        │                              │
+     │  ]}                          │                              │
+     │◄─────────────────────────────│                              │
+     │                              │                              │
+     │  should_start(agt_x, prj_a)  │                              │
+     │─────────────────────────────►│                              │
+     │  { should_start: true,       │                              │
+     │    ai_type: "claude" }       │                              │
+     │◄─────────────────────────────│                              │
+     │                              │                              │
+     │  spawn(agt_x, prj_a, /proj_a)│                              │
      │──────────────────────────────────────────────────────────────►
      │                              │                              │
-     │                              │  authenticate(agt_xxx, key)  │
+     │                              │ authenticate(agt_x,key,prj_a)│
      │                              │◄─────────────────────────────│
      │                              │                              │
-     │                              │  { token, instruction }      │
+     │                              │ [session(agt_x,prj_a) ON]    │
+     │                              │                              │
+     │                              │ {token, system_prompt,       │
+     │                              │  instruction}                │
      │                              │─────────────────────────────►│
+     │                              │                              │
+     │  should_start(agt_x, prj_a)  │                              │
+     │─────────────────────────────►│                              │
+     │  { should_start: false }     │  ← (agt_x,prj_a)実行中       │
+     │◄─────────────────────────────│                              │
+     │                              │                              │
+     │  should_start(agt_x, prj_b)  │                              │
+     │─────────────────────────────►│                              │
+     │  { should_start: true }      │  ← (agt_x,prj_b)は別なのでOK │
+     │◄─────────────────────────────│                              │
      │                              │                              │
      │                              │  get_my_task(token)          │
      │                              │◄─────────────────────────────│
@@ -492,12 +572,14 @@ Coordinator                    MCP Server                    Agent (Claude Code)
      │                              │  { task details }            │
      │                              │─────────────────────────────►│
      │                              │                              │
-     │                              │         [タスク実行]          │
+     │                              │    [タスク実行 at /proj_a]    │
      │                              │                              │
      │                              │  report_completed(token)     │
      │                              │◄─────────────────────────────│
      │                              │                              │
-     │                              │  { success }                 │
+     │                              │ [session(agt_x,prj_a) OFF]   │
+     │                              │                              │
+     │                              │  { success, instruction }    │
      │                              │─────────────────────────────►│
      │                              │                              │
      │                              │         [プロセス終了]        │
@@ -609,4 +691,5 @@ Handoff {
 | 2025-01-04 | 2.0.0 | ステートレス設計に変更。agent-id/project-idを起動引数から削除し、各ツール呼び出し時に引数で渡す設計に変更 |
 | 2025-01-06 | 3.0.0 | プル型アーキテクチャに変更。認証ツール（authenticate, logout, get_pending_tasks）を追加。アプリからのキック処理を廃止し、外部Runner経由でのタスク実行に変更 |
 | 2025-01-06 | 3.1.0 | 実行ログ管理ツールを追加（report_execution_start, report_execution_complete, list_execution_logs, get_execution_log）。execution://リソースを追加 |
-| 2025-01-06 | 4.0.0 | Coordinator + Agent アーキテクチャに変更。should_start、get_my_task、report_completed APIを追加。authenticateにinstruction追加。旧API（get_pending_tasks, report_execution_start, report_execution_complete）を非推奨化。責務の明確な分離と内部ステータスのカプセル化を実現 |
+| 2025-01-06 | 4.0.0 | Runner + Agent Instance アーキテクチャに変更。Runner に project_id 対応追加。should_start、get_my_task、report_completed APIを追加。authenticateにinstruction追加。旧API（get_pending_tasks, report_execution_start, report_execution_complete）を非推奨化。責務の明確な分離と内部ステータスのカプセル化を実現 |
+| 2026-01-07 | 4.1.0 | Phase 4完全対応。(agent_id, project_id)単位の管理に変更。`list_managed_agents`→`list_active_projects_with_agents`、`should_start(agent_id)`→`should_start(agent_id, project_id)`、`authenticate`にproject_id追加。プロジェクトへのエージェント割り当て前提の設計に統一 |

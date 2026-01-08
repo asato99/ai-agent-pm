@@ -131,10 +131,11 @@ class Runner:
         if self._authenticated:
             return
 
-        logger.info(f"Authenticating agent {self.config.agent_id}")
+        logger.info(f"Authenticating agent {self.config.agent_id} for project {self.config.project_id}")
         result = await self.mcp_client.authenticate(
             self.config.agent_id,
-            self.config.passkey
+            self.config.passkey,
+            self.config.project_id
         )
         self._authenticated = True
         self._agent_name = result.agent_name

@@ -58,8 +58,10 @@ public struct AuthenticateUseCase: Sendable {
         self.agentRepository = agentRepository
     }
 
-    public func execute(agentId: String, passkey: String) throws -> AuthenticateResult {
+    /// Phase 4: projectId は必須
+    public func execute(agentId: String, passkey: String, projectId: String) throws -> AuthenticateResult {
         let agentID = AgentID(value: agentId)
+        let projID = ProjectID(value: projectId)
 
         // エージェントの存在確認
         guard let agent = try agentRepository.findById(agentID) else {
@@ -81,8 +83,8 @@ public struct AuthenticateUseCase: Sendable {
         // 既存のセッションを無効化（オプション：同時ログインを許可しない場合）
         // try sessionRepository.deleteByAgentId(agentID)
 
-        // 新しいセッションを作成
-        let session = AgentSession(agentId: agentID)
+        // Phase 4: 新しいセッションを作成（projectId を含む）
+        let session = AgentSession(agentId: agentID, projectId: projID)
         try sessionRepository.save(session)
 
         // 認証情報のlastUsedAtを更新

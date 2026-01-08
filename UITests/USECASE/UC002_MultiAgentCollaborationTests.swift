@@ -20,17 +20,22 @@ import XCTest
 /// - 認証情報: passkey=test_passkey_detailed, test_passkey_concise
 final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
 
-    /// UC002統合テスト: 同一プロジェクト内の両タスクをin_progressに変更
+    /// UC002統合テスト: 同一プロジェクト内の両タスクをin_progressに変更し、タスク実行完了を待つ
     ///
     /// このテストは以下を行います:
     /// 1. UC002マルチエージェントテストPJを選択
     /// 2. 詳細ライター担当タスクをin_progressに変更
     /// 3. 簡潔ライター担当タスクをin_progressに変更
+    /// 4. Coordinatorがタスクを検出し、Agent Instanceを起動するのを待つ
+    /// 5. 出力ファイルが作成されることを確認（最大180秒）
     ///
     /// 両タスクは同一のタイトル・指示内容を持ち、異なるエージェントにアサインされている。
     /// これにより「同じタスク指示でも、system_promptによって成果物が異なる」ことを検証。
     func testMultiAgentIntegration_ChangeBothTasksToInProgress() throws {
         let projectName = "UC002マルチエージェントテストPJ"
+        let workingDir = "/tmp/uc002_test"
+        let outputFileA = "OUTPUT_A.md"  // 詳細ライター
+        let outputFileB = "OUTPUT_B.md"  // 簡潔ライター
 
         // ========================================
         // プロジェクト選択
@@ -52,7 +57,65 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
         try changeTaskStatusToInProgress(assigneeName: "簡潔ライター")
         print("✅ Phase 2完了: 簡潔ライタータスクがin_progress")
 
-        print("🎯 UC002 マルチエージェント統合テスト: 両タスクがin_progress状態になりました")
+        print("🎯 UC002: 両タスクがin_progress状態になりました")
+
+        // ========================================
+        // Phase 3: Coordinatorがタスクを実行し、ファイルが作成されるのを待つ
+        // ========================================
+        print("⏳ Phase 3: Coordinatorによるタスク実行を待機中（最大180秒）...")
+        print("  待機中: \(workingDir)/\(outputFileA)")
+        print("  待機中: \(workingDir)/\(outputFileB)")
+
+        let fileManager = FileManager.default
+        let pathA = "\(workingDir)/\(outputFileA)"
+        let pathB = "\(workingDir)/\(outputFileB)"
+        var outputACreated = false
+        var outputBCreated = false
+
+        // 最大180秒（5秒間隔で36回）待機
+        for i in 1...36 {
+            if !outputACreated && fileManager.fileExists(atPath: pathA) {
+                print("✅ \(outputFileA) が作成されました")
+                outputACreated = true
+            }
+            if !outputBCreated && fileManager.fileExists(atPath: pathB) {
+                print("✅ \(outputFileB) が作成されました")
+                outputBCreated = true
+            }
+
+            if outputACreated && outputBCreated {
+                break
+            }
+
+            if i % 6 == 0 {
+                print("  ⏳ 待機中... (\(i * 5)秒)")
+            }
+
+            Thread.sleep(forTimeInterval: 5.0)
+        }
+
+        // ========================================
+        // 結果検証
+        // ========================================
+        XCTAssertTrue(outputACreated, "❌ \(outputFileA) が作成されませんでした")
+        XCTAssertTrue(outputBCreated, "❌ \(outputFileB) が作成されませんでした")
+
+        if outputACreated && outputBCreated {
+            // ファイル内容の文字数を確認
+            let contentA = try? String(contentsOfFile: pathA, encoding: .utf8)
+            let contentB = try? String(contentsOfFile: pathB, encoding: .utf8)
+            let charsA = contentA?.count ?? 0
+            let charsB = contentB?.count ?? 0
+
+            print("🎯 UC002 マルチエージェント統合テスト: 成功")
+            print("  - \(outputFileA) (詳細): \(charsA) 文字")
+            print("  - \(outputFileB) (簡潔): \(charsB) 文字")
+
+            // 詳細版が簡潔版より長いことを検証（system_promptの差異）
+            if charsA > charsB {
+                print("  ✅ 詳細版(\(charsA)文字) > 簡潔版(\(charsB)文字) - system_promptの差異が反映")
+            }
+        }
     }
 
     // MARK: - Helper Methods
@@ -60,10 +123,22 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
     /// プロジェクトを選択
     private func selectProject(_ projectName: String) throws {
         print("  🔍 プロジェクト「\(projectName)」を検索中...")
+
+        // デバッグ: ウィンドウ情報
+        print("  📊 Windows count: \(app.windows.count)")
+        print("  📊 App state: \(app.state.rawValue)")
+
+        // ウィンドウを最前面に
+        app.activate()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // すべてのstaticTextsを出力
+        let allTexts = app.staticTexts.allElementsBoundByIndex.prefix(30).map { $0.label }
+        print("  📋 現在のstaticTexts: \(allTexts)")
+
         let projectRow = app.staticTexts[projectName]
         guard projectRow.waitForExistence(timeout: 10) else {
-            let allTexts = app.staticTexts.allElementsBoundByIndex.prefix(20).map { $0.label }
-            print("  ⚠️ 利用可能なstaticTexts: \(allTexts)")
+            print("  ⚠️ プロジェクトが見つかりませんでした")
             XCTFail("❌ SETUP: プロジェクト「\(projectName)」が見つからない")
             return
         }

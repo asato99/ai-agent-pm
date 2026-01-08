@@ -531,6 +531,18 @@ public final class DatabaseSetup {
             try db.create(indexOn: "project_agents", columns: ["agent_id"])
         }
 
+        // v19: セッションにプロジェクトID追加
+        // 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md - (agent_id, project_id) 単位のセッション管理
+        migrator.registerMigration("v19_session_project_id") { db in
+            // project_id カラムを追加
+            // Note: 既存データのために NULL 許容、新規作成時は必須
+            try db.alter(table: "agent_sessions") { t in
+                t.add(column: "project_id", .text)
+            }
+            // (agent_id, project_id) の組み合わせでインデックスを作成
+            try db.create(indexOn: "agent_sessions", columns: ["agent_id", "project_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

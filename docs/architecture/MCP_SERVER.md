@@ -21,26 +21,47 @@ MCPサーバーは**ステートレス**に設計されています。
   → キック時にプロンプトでID情報を提供し、LLMが橋渡し
 ```
 
-### データフロー
+### データフロー（Phase 4: Runner + Agent Instance）
+
+> **Phase 4 での変更**: 既存の Runner に `project_id` 対応を追加。管理単位が `(agent_id, project_id)` に拡張されました。
 
 ```
-┌─────────────┐                    ┌──────────────┐                    ┌─────────────┐
-│  PMアプリ   │ ─プロンプトに─────▶│ Claude Code  │ ─引数として────────▶│ MCPサーバー │
-│             │  ID情報を含める    │   (LLM)      │  IDを渡す          │ (ステートレス)│
-└─────────────┘                    └──────────────┘                    └─────────────┘
-
-キック時のプロンプト例:
-  # Task: 機能実装
-  Task ID: task_abc123
-  Project ID: proj_xyz789
-  Agent ID: agt_dev001
-  Agent Name: frontend-dev
-  ...
-
-ツール呼び出し例:
-  update_task_status(task_id="task_abc123", status="done")
-  create_handoff(task_id="task_abc123", from_agent_id="agt_dev001", ...)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            Runner                                        │
+│  - MCPサーバー起動確認 (health_check)                                    │
+│  - プロジェクト+エージェント一覧取得 (list_active_projects_with_agents)   │
+│  - 起動判断 (should_start(agent_id, project_id))                        │
+│  - Agent Instance起動 (working_directory指定)                           │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        MCPサーバー (ステートレス)                          │
+│                                                                          │
+│  Runner向けAPI:                                                          │
+│    - health_check() → { status }                                        │
+│    - list_active_projects_with_agents() → { projects }                  │
+│    - should_start(agent_id, project_id) → { should_start, ai_type }     │
+│                                                                          │
+│  Agent Instance向けAPI:                                                  │
+│    - authenticate(agent_id, passkey, project_id) → { token, ... }       │
+│    - get_my_task(token) → { task }                                      │
+│    - report_completed(token, result) → { success }                      │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               ▲
+                               │
+┌──────────────────────────────┴──────────────────────────────────────────┐
+│                       Agent Instance (Claude Code等)                     │
+│                                                                          │
+│  1. Runner起動 → 認証情報(agent_id, passkey, project_id)を受取          │
+│  2. authenticate() → system_prompt, instruction を取得                  │
+│  3. get_my_task() → タスク詳細を取得                                    │
+│  4. タスク実行（working_directory内で）                                  │
+│  5. report_completed() → 完了報告                                       │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+**重要**: Agent Instanceの管理単位は `(agent_id, project_id)` の組み合わせ
 
 ---
 
@@ -133,15 +154,34 @@ func getAgentProfile(agentId: String) -> Agent {
 }
 ```
 
-### ツール定義
+### ツール定義（Phase 4: Runner + Agent Instance）
+
+#### Runner向けAPI
 
 | Tool | 引数 | 説明 |
 |------|------|------|
-| `get_agent_profile` | `agent_id` | エージェント情報を取得 |
-| `list_agents` | - | 全エージェント一覧 |
-| `list_tasks` | `project_id`, `status?`, `assignee_id?` | タスク一覧取得 |
-| `get_task` | `task_id` | タスク詳細取得 |
+| `health_check` | - | MCPサーバー死活確認 |
+| `list_active_projects_with_agents` | - | アクティブプロジェクト+割当エージェント一覧 |
+| `should_start` | `agent_id`, `project_id` | エージェント起動判断（タスク有無等） |
+
+#### Agent Instance向けAPI
+
+| Tool | 引数 | 説明 |
+|------|------|------|
+| `authenticate` | `agent_id`, `passkey`, `project_id` | 認証+セッショントークン取得 |
+| `get_my_task` | `token` | 自分に割り当てられたタスク取得 |
+| `get_my_profile` | - | 自分のエージェント情報取得 |
+| `list_tasks` | `status?` | プロジェクト内タスク一覧取得 |
 | `update_task_status` | `task_id`, `status` | ステータス更新 |
+| `report_completed` | `token`, `result` | タスク完了報告 |
+
+#### 共通API
+
+| Tool | 引数 | 説明 |
+|------|------|------|
+| `get_agent_profile` | `agent_id` | 指定エージェント情報を取得 |
+| `list_agents` | - | 全エージェント一覧 |
+| `get_task` | `task_id` | タスク詳細取得 |
 | `create_handoff` | `task_id`, `from_agent_id`, `to_agent_id?`, `summary` | ハンドオフ作成 |
 | `get_pending_handoffs` | `agent_id?` | 未処理ハンドオフ取得 |
 | `save_context` | `task_id`, `progress?`, `findings?`, ... | コンテキスト保存 |
@@ -308,3 +348,4 @@ enum MCPError: Error {
 |------|-----------|----------|
 | 2024-12-30 | 1.0.0 | 初版作成 |
 | 2025-01-04 | 2.0.0 | ステートレス設計に変更。agent-id/project-idを起動引数から削除し、各ツール呼び出し時に引数で渡す設計に変更 |
+| 2026-01-07 | 4.0.0 | Phase 4 Runner + Agent Instance アーキテクチャに整合。Runner に project_id 対応を追加、管理単位を(agent_id, project_id)に変更、Runner向け/Agent Instance向けAPIを明確化 |

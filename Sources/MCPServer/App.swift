@@ -45,6 +45,11 @@ struct Serve: ParsableCommand {
     func run() throws {
         let dbPath = AppConfig.databasePath
 
+        // Debug logging: Print environment variable and resolved path
+        let envValue = ProcessInfo.processInfo.environment["AIAGENTPM_DB_PATH"] ?? "(not set)"
+        FileHandle.standardError.write("[mcp-server-pm serve] AIAGENTPM_DB_PATH env = \(envValue)\n".data(using: .utf8)!)
+        FileHandle.standardError.write("[mcp-server-pm serve] Using database: \(dbPath)\n".data(using: .utf8)!)
+
         // 初回起動時は自動セットアップ
         if !FileManager.default.fileExists(atPath: dbPath) {
             try performAutoSetup(dbPath: dbPath)

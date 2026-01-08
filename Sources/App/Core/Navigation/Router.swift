@@ -28,6 +28,9 @@ public final class Router {
     /// Internal Audits一覧を表示中かどうか
     public var showingInternalAudits: Bool = false
 
+    /// MCP Server管理画面を表示中かどうか
+    public var showingMCPServer: Bool = false
+
     /// 詳細ビューのリフレッシュ用ID（選択のたびに変更してビューを再作成）
     public var detailRefreshId: UUID = UUID()
 
@@ -149,6 +152,7 @@ public final class Router {
         selectedTask = nil
         selectedAgent = nil
         showingInternalAudits = false
+        showingMCPServer = false
     }
 
     /// タスクを選択
@@ -183,6 +187,15 @@ public final class Router {
 
     /// Internal Audits表示を解除（プロジェクト選択時など）
     public func hideInternalAudits() {
+        showingInternalAudits = false
+    }
+
+    /// MCP Server管理画面を表示
+    public func showMCPServer() {
+        showingMCPServer = true
+        selectedProject = nil
+        selectedTask = nil
+        selectedAgent = nil
         showingInternalAudits = false
     }
 

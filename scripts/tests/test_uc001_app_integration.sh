@@ -2,16 +2,15 @@
 # UC001 App Integration Test - True E2E Test
 # アプリを含む真の統合テスト
 #
-# フロー（重要：順序が正しい）:
-#   1. ビルド（MCP Server + App）
-#   2. XCUITest実行（アプリ起動→シードデータ投入→UI操作でステータス変更）
-#   3. MCPデーモン起動（XCUITestが作成した共有DBを使用）
-#   4. Runner起動（MCPデーモンをポーリング）
-#   5. ファイル作成検証
+# フロー:
+#   1. アプリビルド
+#   2. XCUITest実行（アプリ起動→MCP自動起動→シードデータ投入→UI操作でステータス変更）
+#   3. Runner起動（アプリが起動したMCPデーモンをポーリング）
+#   4. ファイル作成検証
 #
 # ポイント:
-#   - XCUITestが先に実行され、DBにデータを投入し、ステータスをin_progressに変更
-#   - MCPデーモンは同一DBを読み取り、Runnerに提供
+#   - アプリ起動時にMCPデーモンが自動起動される
+#   - XCUITestがDBにデータを投入し、ステータスをin_progressに変更
 #   - Runnerがin_progressタスクを検出してCLI実行
 
 set -e

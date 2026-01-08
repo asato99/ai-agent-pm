@@ -240,7 +240,7 @@ final class MCPServer {
     /// ステートレス設計: 必要なIDは全て引数として受け取る
     private func executeTool(name: String, arguments: [String: Any]) throws -> Any {
         switch name {
-        // Phase 4: Coordinator API
+        // Phase 4: Runner API
         case "health_check":
             return try healthCheck()
 
@@ -248,18 +248,20 @@ final class MCPServer {
             return try listManagedAgents()
 
         case "should_start":
-            guard let agentId = arguments["agent_id"] as? String else {
-                throw MCPError.missingArguments(["agent_id"])
+            guard let agentId = arguments["agent_id"] as? String,
+                  let projectId = arguments["project_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id", "project_id"])
             }
-            return try shouldStart(agentId: agentId)
+            return try shouldStart(agentId: agentId, projectId: projectId)
 
-        // Authentication (Phase 3-1, Phase 4: instruction追加)
+        // Authentication (Phase 4: project_id 必須)
         case "authenticate":
             guard let agentId = arguments["agent_id"] as? String,
-                  let passkey = arguments["passkey"] as? String else {
-                throw MCPError.missingArguments(["agent_id", "passkey"])
+                  let passkey = arguments["passkey"] as? String,
+                  let projectId = arguments["project_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id", "passkey", "project_id"])
             }
-            return try authenticate(agentId: agentId, passkey: passkey)
+            return try authenticate(agentId: agentId, passkey: passkey, projectId: projectId)
 
         // Agent
         case "get_my_profile":
@@ -286,7 +288,7 @@ final class MCPServer {
             }
             return try getProject(projectId: projectId)
         case "list_active_projects_with_agents":
-            // Phase 4: Coordinator用API - アクティブプロジェクトと割り当てエージェント一覧
+            // Phase 4: Runner用API - アクティブプロジェクトと割り当てエージェント一覧
             return try listActiveProjectsWithAgents()
 
         // Tasks
@@ -308,16 +310,17 @@ final class MCPServer {
                 throw MCPError.sessionTokenRequired
             }
             // セッションからエージェントIDを取得（引数のagent_idは信頼しない）
-            let validatedAgentId = try validateSession(token: sessionToken)
-            return try getPendingTasks(agentId: validatedAgentId.value)
+            let session = try validateSession(token: sessionToken)
+            return try getPendingTasks(agentId: session.agentId.value)
 
         // Phase 4: Agent API
         case "get_my_task":
             guard let sessionToken = arguments["session_token"] as? String else {
                 throw MCPError.sessionTokenRequired
             }
-            let validatedAgentId = try validateSession(token: sessionToken)
-            return try getMyTask(agentId: validatedAgentId.value)
+            // Phase 4: セッションからprojectIdも取得してタスクをフィルタリング
+            let session = try validateSession(token: sessionToken)
+            return try getMyTask(agentId: session.agentId.value, projectId: session.projectId.value)
 
         case "report_completed":
             guard let sessionToken = arguments["session_token"] as? String else {
@@ -326,11 +329,13 @@ final class MCPServer {
             guard let result = arguments["result"] as? String else {
                 throw MCPError.missingArguments(["result"])
             }
-            let validatedAgentId = try validateSession(token: sessionToken)
+            // Phase 4: セッションからprojectIdも取得してタスクをフィルタリング
+            let session = try validateSession(token: sessionToken)
             let summary = arguments["summary"] as? String
             let nextSteps = arguments["next_steps"] as? String
             return try reportCompleted(
-                agentId: validatedAgentId.value,
+                agentId: session.agentId.value,
+                projectId: session.projectId.value,
                 sessionToken: sessionToken,
                 result: result,
                 summary: summary,
@@ -395,8 +400,8 @@ final class MCPServer {
                 throw MCPError.missingArguments(["task_id"])
             }
             // セッションからエージェントIDを取得（引数のagent_idは信頼しない）
-            let validatedAgentId = try validateSession(token: sessionToken)
-            return try reportExecutionStart(taskId: taskId, agentId: validatedAgentId.value)
+            let session = try validateSession(token: sessionToken)
+            return try reportExecutionStart(taskId: taskId, agentId: session.agentId.value)
         case "report_execution_complete":
             // Phase 3-4: セッション検証必須
             guard let sessionToken = arguments["session_token"] as? String else {
@@ -408,7 +413,7 @@ final class MCPServer {
                 throw MCPError.missingArguments(["execution_log_id", "exit_code", "duration_seconds"])
             }
             // セッションを検証（エージェントIDを取得）
-            let validatedAgentId = try validateSession(token: sessionToken)
+            let session = try validateSession(token: sessionToken)
             let logFilePath = arguments["log_file_path"] as? String
             let errorMessage = arguments["error_message"] as? String
             return try reportExecutionComplete(
@@ -417,7 +422,7 @@ final class MCPServer {
                 durationSeconds: durationSeconds,
                 logFilePath: logFilePath,
                 errorMessage: errorMessage,
-                validatedAgentId: validatedAgentId.value
+                validatedAgentId: session.agentId.value
             )
 
         default:
@@ -888,7 +893,8 @@ final class MCPServer {
 
     /// セッショントークンを検証し、関連するエージェントIDを返す
     /// 参照: セキュリティ改善 - セッショントークン検証の実装
-    private func validateSession(token: String) throws -> AgentID {
+    /// Phase 4: セッションを検証し、agentIdとprojectIdの両方を返す
+    private func validateSession(token: String) throws -> (agentId: AgentID, projectId: ProjectID) {
         guard let session = try agentSessionRepository.findByToken(token) else {
             // findByToken は期限切れセッションを除外するので、
             // トークンが見つからない = 無効または期限切れ
@@ -896,27 +902,27 @@ final class MCPServer {
             throw MCPError.sessionTokenInvalid
         }
 
-        Self.log("[MCP] Session validated for agent: \(session.agentId.value)")
-        return session.agentId
+        Self.log("[MCP] Session validated for agent: \(session.agentId.value), project: \(session.projectId.value)")
+        return (agentId: session.agentId, projectId: session.projectId)
     }
 
     /// セッショントークンを検証し、指定されたエージェントIDとの一致も確認
     private func validateSessionWithAgent(token: String, expectedAgentId: String) throws -> AgentID {
-        let sessionAgentId = try validateSession(token: token)
+        let session = try validateSession(token: token)
 
         // セッションに紐づくエージェントIDと、リクエストのエージェントIDが一致するか確認
-        if sessionAgentId.value != expectedAgentId {
-            Self.log("[MCP] Session agent mismatch: session=\(sessionAgentId.value), requested=\(expectedAgentId)")
-            throw MCPError.sessionAgentMismatch(expected: expectedAgentId, actual: sessionAgentId.value)
+        if session.agentId.value != expectedAgentId {
+            Self.log("[MCP] Session agent mismatch: session=\(session.agentId.value), requested=\(expectedAgentId)")
+            throw MCPError.sessionAgentMismatch(expected: expectedAgentId, actual: session.agentId.value)
         }
 
-        return sessionAgentId
+        return session.agentId
     }
 
-    // MARK: Phase 4: Coordinator API
+    // MARK: Phase 4: Runner API
 
     /// health_check - サーバー起動確認
-    /// Coordinatorが最初に呼び出す。サーバーが応答可能かを確認。
+    /// Runnerが最初に呼び出す。サーバーが応答可能かを確認。
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     private func healthCheck() throws -> [String: Any] {
         Self.log("[MCP] healthCheck called")
@@ -934,14 +940,14 @@ final class MCPServer {
     }
 
     /// list_managed_agents - 管理対象エージェント一覧を取得
-    /// Coordinatorがポーリング対象のエージェントIDを取得。詳細は隠蔽。
+    /// Runnerがポーリング対象のエージェントIDを取得。詳細は隠蔽。
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     private func listManagedAgents() throws -> [String: Any] {
         Self.log("[MCP] listManagedAgents called")
 
         let agents = try agentRepository.findAll()
 
-        // AIタイプのエージェントのみをCoordinatorの管理対象とする
+        // AIタイプのエージェントのみをRunnerの管理対象とする
         let aiAgents = agents.filter { $0.type == .ai }
         let agentIds = aiAgents.map { $0.id.value }
 
@@ -954,13 +960,15 @@ final class MCPServer {
     }
 
     /// should_start - エージェントを起動すべきかどうかを返す
-    /// Coordinatorはタスクの詳細を知らない。bool と ai_type を返す。
+    /// Runnerはタスクの詳細を知らない。bool と ai_type を返す。
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     /// 参照: docs/plan/MULTI_AGENT_USE_CASES.md - AIタイプ
-    private func shouldStart(agentId: String) throws -> [String: Any] {
-        Self.log("[MCP] shouldStart called for agent: '\(agentId)'")
+    /// Phase 4: (agent_id, project_id)単位で起動判断
+    private func shouldStart(agentId: String, projectId: String) throws -> [String: Any] {
+        Self.log("[MCP] shouldStart called for agent: '\(agentId)', project: '\(projectId)'")
 
         let id = AgentID(value: agentId)
+        let projId = ProjectID(value: projectId)
 
         // エージェントの存在確認
         guard let agent = try agentRepository.findById(id) else {
@@ -968,28 +976,54 @@ final class MCPServer {
             throw MCPError.agentNotFound(agentId)
         }
 
-        // Phase 4: アクティブセッションがある場合は起動しない（冪等性保証）
-        // findByAgentIdは全セッションを返すので、期限切れを除外
-        let allSessions = try agentSessionRepository.findByAgentId(id)
+        // プロジェクトの存在確認
+        guard try projectRepository.findById(projId) != nil else {
+            Self.log("[MCP] shouldStart: Project '\(projectId)' not found")
+            throw MCPError.projectNotFound(projectId)
+        }
+
+        // エージェントがプロジェクトに割り当てられているか確認
+        let isAssigned = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+            agentId: id,
+            projectId: projId
+        )
+        if !isAssigned {
+            Self.log("[MCP] shouldStart: Agent '\(agentId)' is not assigned to project '\(projectId)'")
+            return [
+                "should_start": false,
+                "reason": "agent_not_assigned"
+            ]
+        }
+
+        // Phase 4: (agent_id, project_id)単位でアクティブセッションをチェック
+        let allSessions = try agentSessionRepository.findByAgentIdAndProjectId(id, projectId: projId)
         let activeSessions = allSessions.filter { $0.expiresAt > Date() }
         if !activeSessions.isEmpty {
-            Self.log("[MCP] shouldStart for '\(agentId)': false (already running - active session exists)")
+            Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': false (already running - active session exists)")
             return [
                 "should_start": false,
                 "reason": "already_running"
             ]
         }
 
-        // in_progress 状態のタスクがあるか確認
+        // 該当プロジェクトで該当エージェントにアサインされた in_progress タスクがあるか確認
         let tasks = try taskRepository.findByAssignee(id)
-        let hasInProgressTask = tasks.contains { $0.status == .inProgress }
+        let hasInProgressTask = tasks.contains { task in
+            task.status == .inProgress && task.projectId == projId
+        }
 
-        Self.log("[MCP] shouldStart for '\(agentId)': \(hasInProgressTask)")
+        Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': \(hasInProgressTask)")
 
-        // ai_type を返す（CoordinatorがCLIコマンドを選択するため）
+        // ai_type を返す（RunnerがCLIコマンドを選択するため）
+        // kickCommand があればそれを優先
         var result: [String: Any] = [
             "should_start": hasInProgressTask
         ]
+
+        // kickCommand があれば ai_type より優先
+        if let kickCommand = agent.kickCommand, !kickCommand.isEmpty {
+            result["kick_command"] = kickCommand
+        }
 
         // ai_type があれば追加（デフォルトは claude）
         result["ai_type"] = agent.aiType?.rawValue ?? "claude"
@@ -1001,14 +1035,16 @@ final class MCPServer {
 
     /// get_my_task - 認証済みエージェントの現在のタスクを取得
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
-    private func getMyTask(agentId: String) throws -> [String: Any] {
-        Self.log("[MCP] getMyTask called for agent: '\(agentId)'")
+    /// Phase 4: projectId でフィルタリング（同一エージェントが複数プロジェクトで同時稼働可能）
+    private func getMyTask(agentId: String, projectId: String) throws -> [String: Any] {
+        Self.log("[MCP] getMyTask called for agent: '\(agentId)', project: '\(projectId)'")
 
         let id = AgentID(value: agentId)
+        let projId = ProjectID(value: projectId)
 
-        // in_progress 状態のタスクを取得（最初の1つのみ）
+        // Phase 4: in_progress 状態のタスクを該当プロジェクトでフィルタリング
         let tasks = try taskRepository.findByAssignee(id)
-        let inProgressTasks = tasks.filter { $0.status == .inProgress }
+        let inProgressTasks = tasks.filter { $0.status == .inProgress && $0.projectId == projId }
 
         if let task = inProgressTasks.first {
             // タスクのコンテキストを取得
@@ -1049,7 +1085,7 @@ final class MCPServer {
                 "instruction": "タスクを完了したら report_completed を呼び出してください"
             ]
         } else {
-            Self.log("[MCP] getMyTask: No in_progress task for agent '\(agentId)'")
+            Self.log("[MCP] getMyTask: No in_progress task for agent '\(agentId)' in project '\(projectId)'")
 
             return [
                 "success": true,
@@ -1062,21 +1098,24 @@ final class MCPServer {
     /// report_completed - タスク完了を報告
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     /// Phase 4: セッション終了処理を追加
+    /// Phase 4: projectId でタスクをフィルタリング（同一エージェントが複数プロジェクトで同時稼働可能）
     private func reportCompleted(
         agentId: String,
+        projectId: String,
         sessionToken: String,
         result: String,
         summary: String?,
         nextSteps: String?
     ) throws -> [String: Any] {
-        Self.log("[MCP] reportCompleted called for agent: '\(agentId)', result: '\(result)'")
+        Self.log("[MCP] reportCompleted called for agent: '\(agentId)', project: '\(projectId)', result: '\(result)'")
 
         let id = AgentID(value: agentId)
+        let projId = ProjectID(value: projectId)
 
-        // in_progress 状態のタスクを取得
+        // Phase 4: in_progress 状態のタスクを該当プロジェクトでフィルタリング
         let tasks = try taskRepository.findByAssignee(id)
-        guard var task = tasks.first(where: { $0.status == .inProgress }) else {
-            Self.log("[MCP] reportCompleted: No in_progress task for agent '\(agentId)'")
+        guard var task = tasks.first(where: { $0.status == .inProgress && $0.projectId == projId }) else {
+            Self.log("[MCP] reportCompleted: No in_progress task for agent '\(agentId)' in project '\(projectId)'")
             return [
                 "success": false,
                 "error": "No in_progress task found for this agent"
@@ -1151,24 +1190,47 @@ final class MCPServer {
         ]
     }
 
-    // MARK: Authentication (Phase 3-1)
+    // MARK: Authentication (Phase 4)
 
     /// authenticate - エージェント認証
-    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md
-    /// Phase 4: instruction フィールドを追加、二重起動防止
-    private func authenticate(agentId: String, passkey: String) throws -> [String: Any] {
-        Self.log("[MCP] authenticate called for agent: '\(agentId)'")
+    /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md, PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// Phase 4: project_id 必須、instruction フィールドを追加、二重起動防止
+    private func authenticate(agentId: String, passkey: String, projectId: String) throws -> [String: Any] {
+        Self.log("[MCP] authenticate called for agent: '\(agentId)', project: '\(projectId)'")
 
-        // Phase 4: 二重起動防止 - アクティブセッションがあればエラー
         let id = AgentID(value: agentId)
-        // findByAgentIdは全セッションを返すので、期限切れを除外
-        let allSessions = try agentSessionRepository.findByAgentId(id)
-        let activeSessions = allSessions.filter { $0.expiresAt > Date() }
-        if !activeSessions.isEmpty {
-            Self.log("[MCP] authenticate failed for agent: '\(agentId)' - Agent already running")
+        let projId = ProjectID(value: projectId)
+
+        // Phase 4: プロジェクト存在確認
+        guard try projectRepository.findById(projId) != nil else {
+            Self.log("[MCP] authenticate failed: Project '\(projectId)' not found")
             return [
                 "success": false,
-                "error": "Agent already running"
+                "error": "Project not found"
+            ]
+        }
+
+        // Phase 4: エージェントがプロジェクトに割り当てられているか確認
+        let isAssigned = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+            agentId: id,
+            projectId: projId
+        )
+        if !isAssigned {
+            Self.log("[MCP] authenticate failed: Agent '\(agentId)' not assigned to project '\(projectId)'")
+            return [
+                "success": false,
+                "error": "Agent not assigned to project"
+            ]
+        }
+
+        // Phase 4: 二重起動防止 - (agent_id, project_id)単位でアクティブセッションがあればエラー
+        let allSessions = try agentSessionRepository.findByAgentIdAndProjectId(id, projectId: projId)
+        let activeSessions = allSessions.filter { $0.expiresAt > Date() }
+        if !activeSessions.isEmpty {
+            Self.log("[MCP] authenticate failed for agent: '\(agentId)' on project '\(projectId)' - Agent already running")
+            return [
+                "success": false,
+                "error": "Agent already running on this project"
             ]
         }
 
@@ -1179,7 +1241,7 @@ final class MCPServer {
             agentRepository: agentRepository
         )
 
-        let result = try useCase.execute(agentId: agentId, passkey: passkey)
+        let result = try useCase.execute(agentId: agentId, passkey: passkey, projectId: projectId)
 
         if result.success {
             Self.log("[MCP] Authentication successful for agent: \(result.agentName ?? agentId)")
@@ -1247,7 +1309,7 @@ final class MCPServer {
     /// list_active_projects_with_agents - アクティブプロジェクトと割り当てエージェント一覧
     /// 参照: docs/requirements/PROJECTS.md - MCP API
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
-    /// Coordinatorがポーリング対象を決定するために使用
+    /// Runnerがポーリング対象を決定するために使用
     private func listActiveProjectsWithAgents() throws -> [String: Any] {
         // アクティブなプロジェクトのみ取得
         let allProjects = try projectRepository.findAll()
@@ -1300,9 +1362,22 @@ final class MCPServer {
     private func getPendingTasks(agentId: String) throws -> [String: Any] {
         let useCase = GetPendingTasksUseCase(taskRepository: taskRepository)
         let tasks = try useCase.execute(agentId: AgentID(value: agentId))
+
+        // タスクごとにプロジェクトのworking_directoryを取得して含める
+        let tasksWithWorkingDir = try tasks.map { task -> [String: Any] in
+            var dict = taskToDict(task)
+            // プロジェクトのworking_directoryを取得
+            if let project = try projectRepository.findById(task.projectId) {
+                if let workingDir = project.workingDirectory {
+                    dict["working_directory"] = workingDir
+                }
+            }
+            return dict
+        }
+
         return [
             "success": true,
-            "tasks": tasks.map { taskToDict($0) }
+            "tasks": tasksWithWorkingDir
         ]
     }
 

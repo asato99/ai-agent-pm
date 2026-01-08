@@ -1,11 +1,12 @@
 # src/aiagent_runner/mcp_client.py
 # MCP client for communication with AI Agent PM server
 # Reference: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-5
+# Reference: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
 
 import asyncio
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -25,12 +26,42 @@ class MCPError(Exception):
     pass
 
 
+# Phase 4: Coordinator API data classes
+
+@dataclass
+class HealthCheckResult:
+    """Result of health check."""
+    status: str
+    version: Optional[str] = None
+    timestamp: Optional[str] = None
+
+
+@dataclass
+class ProjectWithAgents:
+    """Project with its assigned agents."""
+    project_id: str
+    project_name: str
+    working_directory: str
+    agents: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ShouldStartResult:
+    """Result of should_start check."""
+    should_start: bool
+    ai_type: Optional[str] = None
+
+
+# Phase 3/4: Agent API data classes
+
 @dataclass
 class AuthResult:
     """Result of authentication."""
     session_token: str
     expires_in: int
     agent_name: Optional[str] = None
+    system_prompt: Optional[str] = None
+    instruction: Optional[str] = None
 
 
 @dataclass
@@ -125,12 +156,93 @@ class MCPClient:
             writer.close()
             await writer.wait_closed()
 
-    async def authenticate(self, agent_id: str, passkey: str) -> AuthResult:
+    # ==========================================================================
+    # Phase 4: Coordinator API
+    # Reference: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    # ==========================================================================
+
+    async def health_check(self) -> HealthCheckResult:
+        """Check MCP server health.
+
+        The Coordinator calls this first to verify the server is available.
+
+        Returns:
+            HealthCheckResult with server status
+
+        Raises:
+            MCPError: If server is not available
+        """
+        result = await self._call_tool("health_check", {})
+        return HealthCheckResult(
+            status=result.get("status", "ok"),
+            version=result.get("version"),
+            timestamp=result.get("timestamp")
+        )
+
+    async def list_active_projects_with_agents(self) -> list[ProjectWithAgents]:
+        """Get all active projects with their assigned agents.
+
+        The Coordinator calls this to discover what (agent_id, project_id)
+        combinations exist and need to be monitored.
+
+        Returns:
+            List of ProjectWithAgents
+
+        Raises:
+            MCPError: If request fails
+        """
+        result = await self._call_tool("list_active_projects_with_agents", {})
+
+        if not result.get("success", True):
+            raise MCPError(result.get("error", "Failed to list projects"))
+
+        projects = []
+        for p in result.get("projects", []):
+            projects.append(ProjectWithAgents(
+                project_id=p.get("project_id", p.get("projectId", "")),
+                project_name=p.get("project_name", p.get("projectName", p.get("name", ""))),
+                working_directory=p.get("working_directory", p.get("workingDirectory", "")),
+                agents=p.get("agents", [])
+            ))
+        return projects
+
+    async def should_start(self, agent_id: str, project_id: str) -> ShouldStartResult:
+        """Check if an Agent Instance should be started.
+
+        The Coordinator calls this for each (agent_id, project_id) pair
+        to determine if there's work to do.
+
+        Args:
+            agent_id: Agent ID
+            project_id: Project ID
+
+        Returns:
+            ShouldStartResult with should_start flag and ai_type
+
+        Raises:
+            MCPError: If request fails
+        """
+        result = await self._call_tool("should_start", {
+            "agent_id": agent_id,
+            "project_id": project_id
+        })
+
+        return ShouldStartResult(
+            should_start=result.get("should_start", False),
+            ai_type=result.get("ai_type")
+        )
+
+    # ==========================================================================
+    # Phase 3/4: Agent Instance API
+    # ==========================================================================
+
+    async def authenticate(self, agent_id: str, passkey: str, project_id: str) -> AuthResult:
         """Authenticate with the MCP server.
 
         Args:
             agent_id: Agent ID
             passkey: Agent passkey
+            project_id: Project ID (Phase 4: required for session management)
 
         Returns:
             AuthResult with session token
@@ -140,7 +252,8 @@ class MCPClient:
         """
         result = await self._call_tool("authenticate", {
             "agent_id": agent_id,
-            "passkey": passkey
+            "passkey": passkey,
+            "project_id": project_id
         })
 
         if not result.get("success"):
@@ -150,7 +263,9 @@ class MCPClient:
         return AuthResult(
             session_token=result["session_token"],
             expires_in=result.get("expires_in", 3600),
-            agent_name=result.get("agent_name")
+            agent_name=result.get("agent_name"),
+            system_prompt=result.get("system_prompt"),
+            instruction=result.get("instruction")
         )
 
     async def get_pending_tasks(self) -> list[TaskInfo]:
