@@ -253,6 +253,8 @@ public struct UpdateTaskStatusUseCase: Sendable {
 
     /// リソース可用性チェック: エージェントの並列上限を超えていないか
     /// 要件: アサイン先エージェントの並列実行可能数を超える場合、in_progress に移行不可
+    /// 注意: maxParallelTasksは「起動数」を表す。サブタスクはカウント対象外。
+    ///       親タスク（parentTaskId == nil）のみがカウントされる。
     private func checkResourceAvailability(for task: Task) throws {
         guard let assigneeId = task.assigneeId else {
             // アサインされていないタスクはリソースチェック不要
@@ -264,16 +266,23 @@ public struct UpdateTaskStatusUseCase: Sendable {
             throw UseCaseError.agentNotFound(assigneeId)
         }
 
-        // 現在そのエージェントがin_progressで持っているタスク数をカウント
-        let currentInProgressTasks = try taskRepository.findByAssignee(assigneeId)
-            .filter { $0.status == .inProgress }
+        // サブタスク（parentTaskIdあり）の場合はリソースチェックをスキップ
+        // サブタスクは親タスクの起動の一部として扱われる
+        if task.parentTaskId != nil {
+            return
+        }
+
+        // 現在そのエージェントがin_progressで持っている親タスク数をカウント
+        // サブタスク（parentTaskId != nil）は除外
+        let currentInProgressParentTasks = try taskRepository.findByAssignee(assigneeId)
+            .filter { $0.status == .inProgress && $0.parentTaskId == nil }
             .count
 
-        if currentInProgressTasks >= agent.maxParallelTasks {
+        if currentInProgressParentTasks >= agent.maxParallelTasks {
             throw UseCaseError.maxParallelTasksReached(
                 agentId: assigneeId,
                 maxParallel: agent.maxParallelTasks,
-                currentCount: currentInProgressTasks
+                currentCount: currentInProgressParentTasks
             )
         }
     }

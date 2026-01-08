@@ -180,7 +180,7 @@ ai_providers:
     cli_args:
       - "--dangerously-skip-permissions"
       - "--max-turns"
-      - "20"
+      - "50"
 
 # Agents - only passkey is needed (ai_type, system_prompt come from MCP)
 agents:

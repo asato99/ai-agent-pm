@@ -37,6 +37,7 @@ OUTPUT_FILE="test_output.md"
 SHARED_DB_PATH="/tmp/AIAgentPM_UITest.db"
 
 COORDINATOR_PID=""
+TEST_PASSED=false
 
 # クリーンアップ関数
 cleanup() {
@@ -48,13 +49,18 @@ cleanup() {
         echo "Coordinator stopped"
     fi
     # Note: MCP Daemon is managed by the app (terminates when app terminates)
-    if [ "$1" != "--keep" ]; then
+    # テスト失敗時はログを保持してデバッグを容易にする
+    if [ "$TEST_PASSED" == "true" ] && [ "$1" != "--keep" ]; then
         rm -rf "$TEST_DIR"
         rm -f /tmp/uc001_coordinator.log
         rm -f /tmp/uc001_uitest.log
         rm -f /tmp/coordinator_uc001_config.yaml
         rm -rf /tmp/coordinator_logs_uc001
         rm -f "$SHARED_DB_PATH" "$SHARED_DB_PATH-shm" "$SHARED_DB_PATH-wal"
+    else
+        echo "Logs preserved for debugging:"
+        echo "  - Coordinator: /tmp/uc001_coordinator.log"
+        echo "  - Agent logs: /tmp/coordinator_logs_uc001/"
     fi
 }
 
@@ -300,6 +306,7 @@ fi
 # 結果判定
 # 必須条件: ファイル作成、実行ログ、サブタスク作成
 if [ "$FILE_CREATED" == "true" ] && [ "$EXEC_LOG_COUNT" -gt "0" ] && [ "$SUBTASK_COUNT" -gt "0" ]; then
+    TEST_PASSED=true
     echo -e "${GREEN}UC001 App Integration Test: PASSED${NC}"
     echo ""
     echo "Verified (Phase 4 Coordinator Architecture):"

@@ -36,19 +36,8 @@ enum ToolDefinitions {
             listTasks,
             getMyTasks,  // 後方互換性のため維持（非推奨）
             getPendingTasks,  // Phase 3-2: 作業中タスク取得（Phase 4で非推奨）
-            getTask,
             createTask,
-            updateTaskStatus,
-            assignTask,
-
-            // Context
-            saveContext,
-            getTaskContext,
-
-            // Handoff
-            createHandoff,
-            acceptHandoff,
-            getPendingHandoffs,
+            updateTaskStatus,  // session_token必須
 
             // Execution Log (Phase 3-3, Phase 4で非推奨)
             reportExecutionStart,
@@ -56,6 +45,13 @@ enum ToolDefinitions {
 
             // Phase 4: Coordinator用（認証不要）
             registerExecutionLogFile
+
+            // 以下のツールはPhase 4で未使用のため除外:
+            // - getTask: get_my_task + get_next_action で代替
+            // - assignTask: Manager機能未実装
+            // - saveContext: ワークフロー状態で代替
+            // - getTaskContext: 同上
+            // - createHandoff, acceptHandoff, getPendingHandoffs: ハンドオフ機能未使用
         ]
     }
 
@@ -404,12 +400,17 @@ enum ToolDefinitions {
     ]
 
     /// update_task_status - タスクのステータスを更新
+    /// Phase 4: session_token必須（権限チェック）
     static let updateTaskStatus: [String: Any] = [
         "name": "update_task_status",
-        "description": "タスクのステータスを更新します。ステータス遷移ルールに従う必要があります。",
+        "description": "タスクのステータスを更新します。ステータス遷移ルールに従う必要があります。自分が担当するタスクまたはサブタスクのみ更新可能です。",
         "inputSchema": [
             "type": "object",
             "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "認証で取得したセッショントークン"
+                ],
                 "task_id": [
                     "type": "string",
                     "description": "更新するタスクのID"
@@ -424,7 +425,7 @@ enum ToolDefinitions {
                     "description": "変更理由（任意）"
                 ]
             ] as [String: Any],
-            "required": ["task_id", "status"]
+            "required": ["session_token", "task_id", "status"]
         ]
     ]
 

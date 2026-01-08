@@ -600,10 +600,6 @@ private final class TestDataSeeder {
                 - 出力ディレクトリ: 作業ディレクトリ直下
                 - ファイル名: \(outputFile)
                 - 必須コンテンツ: 'integration test content' という文字列を含めること
-
-                【注意】
-                このタスクはサブタスクに分解してから実行してください。
-                get_next_action ツールの指示に従ってください。
                 """,
             status: .backlog,
             priority: .high,

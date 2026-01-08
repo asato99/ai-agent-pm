@@ -376,49 +376,39 @@ final class MCPServer {
                 parentTaskId: parentTaskId
             )
         case "update_task_status":
+            // Phase 4: session_token必須（権限チェック）
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
+            }
             guard let taskId = arguments["task_id"] as? String,
                   let status = arguments["status"] as? String else {
                 throw MCPError.missingArguments(["task_id", "status"])
             }
+            let session = try validateSession(token: sessionToken)
+            // タスクへの書き込み権限を検証
+            _ = try validateTaskWriteAccess(taskId: TaskID(value: taskId), session: session)
             let reason = arguments["reason"] as? String
             return try updateTaskStatus(taskId: taskId, status: status, reason: reason)
-        case "assign_task":
-            guard let taskId = arguments["task_id"] as? String else {
-                throw MCPError.missingArguments(["task_id"])
-            }
-            let assigneeId = arguments["assignee_id"] as? String
-            return try assignTask(taskId: taskId, assigneeId: assigneeId)
 
-        // Context
+        // 以下のツールはPhase 4で未使用のため除外（ToolDefinitionsからも削除済み）
+        // case "assign_task", "save_context", "get_task_context",
+        // "create_handoff", "accept_handoff", "get_pending_handoffs", "get_task":
+
         case "save_context":
-            guard let taskId = arguments["task_id"] as? String else {
-                throw MCPError.missingArguments(["task_id"])
-            }
-            return try saveContext(taskId: taskId, arguments: arguments)
+            // レガシーツール: ToolDefinitionsから除外済みだがハンドラは残す（エラー用）
+            throw MCPError.unknownTool("save_context")
         case "get_task_context":
-            guard let taskId = arguments["task_id"] as? String else {
-                throw MCPError.missingArguments(["task_id"])
-            }
-            let includeHistory = arguments["include_history"] as? Bool ?? false
-            return try getTaskContext(taskId: taskId, includeHistory: includeHistory)
-
-        // Handoff
+            throw MCPError.unknownTool("get_task_context")
+        case "assign_task":
+            throw MCPError.unknownTool("assign_task")
+        case "get_task":
+            throw MCPError.unknownTool("get_task")
         case "create_handoff":
-            guard let taskId = arguments["task_id"] as? String,
-                  let fromAgentId = arguments["from_agent_id"] as? String,
-                  let summary = arguments["summary"] as? String else {
-                throw MCPError.missingArguments(["task_id", "from_agent_id", "summary"])
-            }
-            return try createHandoff(taskId: taskId, fromAgentId: fromAgentId, summary: summary, arguments: arguments)
+            throw MCPError.unknownTool("create_handoff")
         case "accept_handoff":
-            guard let handoffId = arguments["handoff_id"] as? String,
-                  let agentId = arguments["agent_id"] as? String else {
-                throw MCPError.missingArguments(["handoff_id", "agent_id"])
-            }
-            return try acceptHandoff(handoffId: handoffId, agentId: agentId)
+            throw MCPError.unknownTool("accept_handoff")
         case "get_pending_handoffs":
-            let agentId = arguments["agent_id"] as? String
-            return try getPendingHandoffs(agentId: agentId)
+            throw MCPError.unknownTool("get_pending_handoffs")
 
         // Execution Log (Phase 3-3, Phase 3-4: セッション検証必須)
         case "report_execution_start":
@@ -957,6 +947,67 @@ final class MCPServer {
         return session.agentId
     }
 
+    /// タスクへのアクセス権限を検証
+    /// エージェントが以下のいずれかの条件を満たす場合にアクセスを許可:
+    /// 1. タスクの assigneeId が一致
+    /// 2. タスクの parentTaskId を持つ親タスクの assigneeId が一致（サブタスク）
+    /// 3. タスクが同じプロジェクトに属する（プロジェクト内のタスク参照）
+    private func validateTaskAccess(taskId: TaskID, session: (agentId: AgentID, projectId: ProjectID)) throws -> Task {
+        guard let task = try taskRepository.findById(taskId) else {
+            throw MCPError.taskNotFound(taskId.value)
+        }
+
+        // 同じプロジェクトのタスクであることを確認
+        guard task.projectId == session.projectId else {
+            Self.log("[MCP] Task access denied: task project=\(task.projectId.value), session project=\(session.projectId.value)")
+            throw MCPError.taskAccessDenied(taskId.value)
+        }
+
+        // 直接の担当者、または親タスクの担当者であればアクセス許可
+        if task.assigneeId == session.agentId {
+            return task
+        }
+
+        // サブタスクの場合、親タスクの担当者かチェック
+        if let parentId = task.parentTaskId,
+           let parentTask = try taskRepository.findById(parentId),
+           parentTask.assigneeId == session.agentId {
+            return task
+        }
+
+        // 同じプロジェクト内であれば読み取りは許可（書き込みは別途チェック）
+        return task
+    }
+
+    /// タスクへの書き込み権限を検証（より厳格）
+    /// エージェントが担当者または親タスクの担当者である場合のみ許可
+    private func validateTaskWriteAccess(taskId: TaskID, session: (agentId: AgentID, projectId: ProjectID)) throws -> Task {
+        guard let task = try taskRepository.findById(taskId) else {
+            throw MCPError.taskNotFound(taskId.value)
+        }
+
+        // 同じプロジェクトのタスクであることを確認
+        guard task.projectId == session.projectId else {
+            Self.log("[MCP] Task write access denied: task project=\(task.projectId.value), session project=\(session.projectId.value)")
+            throw MCPError.taskAccessDenied(taskId.value)
+        }
+
+        // 直接の担当者であればアクセス許可
+        if task.assigneeId == session.agentId {
+            return task
+        }
+
+        // サブタスクの場合、親タスクの担当者かチェック
+        if let parentId = task.parentTaskId,
+           let parentTask = try taskRepository.findById(parentId),
+           parentTask.assigneeId == session.agentId {
+            return task
+        }
+
+        Self.log("[MCP] Task write access denied: agent=\(session.agentId.value), task assignee=\(task.assigneeId?.value ?? "nil")")
+        throw MCPError.taskAccessDenied(taskId.value)
+    }
+
     // MARK: Phase 4: Runner API
 
     /// health_check - サーバー起動確認
@@ -1113,10 +1164,16 @@ final class MCPServer {
 
             var taskDict: [String: Any] = [
                 "task_id": task.id.value,
-                "title": task.title
-                // Note: description は get_next_action で提供される（サブタスク作成時）
-                // Agent が description を直接実行しないようにするため、ここでは返さない
+                "title": task.title,
+                "description": task.description ?? ""
             ]
+
+            // ワークフロー指示を追加（Agent が description を直接実行せず、get_next_action に従うよう誘導）
+            taskDict["workflow_instruction"] = """
+                このタスク情報はコンテキスト理解用です。実際の作業を開始する前に、
+                必ず get_next_action を呼び出して、システムからの指示に従ってください。
+                タスクはサブタスクに分解してから実行する必要があります。
+                """
 
             if let workDir = workingDirectory {
                 taskDict["working_directory"] = workDir
@@ -1141,10 +1198,22 @@ final class MCPServer {
 
             // ワークフローフェーズを記録（get_next_action用）
             // 参照: docs/plan/STATE_DRIVEN_WORKFLOW.md
+            // Note: Context.sessionId は sessions テーブルを参照するため、
+            // 先に Session を作成してからその ID を使用する
+            let workflowSession = Session(
+                id: SessionID.generate(),
+                projectId: projId,
+                agentId: id,
+                startedAt: Date(),
+                status: .active
+            )
+            try sessionRepository.save(workflowSession)
+            Self.log("[MCP] Workflow session created: \(workflowSession.id.value)")
+
             let workflowContext = Context(
                 id: ContextID.generate(),
                 taskId: task.id,
-                sessionId: SessionID.generate(),
+                sessionId: workflowSession.id,
                 agentId: id,
                 progress: "workflow:task_fetched"
             )
@@ -1380,10 +1449,21 @@ final class MCPServer {
         // 1. サブタスク未作成 → サブタスク作成フェーズへ
         if phase == "workflow:task_fetched" && subTasks.isEmpty {
             // サブタスク作成フェーズを記録
+            // Note: Context.sessionId は sessions テーブルを参照するため、
+            // 先に Session を作成してからその ID を使用する
+            let workflowSession = Session(
+                id: SessionID.generate(),
+                projectId: mainTask.projectId,
+                agentId: mainTask.assigneeId!,
+                startedAt: Date(),
+                status: .active
+            )
+            try sessionRepository.save(workflowSession)
+
             let context = Context(
                 id: ContextID.generate(),
                 taskId: mainTask.id,
-                sessionId: SessionID.generate(),
+                sessionId: workflowSession.id,
                 agentId: mainTask.assigneeId!,
                 progress: "workflow:creating_subtasks"
             )
@@ -1474,10 +1554,21 @@ final class MCPServer {
         // 3. サブタスク作成中フェーズ → 作成完了後の処理
         if phase == "workflow:creating_subtasks" && !subTasks.isEmpty {
             // サブタスク作成完了を記録
+            // Note: Context.sessionId は sessions テーブルを参照するため、
+            // 先に Session を作成してからその ID を使用する
+            let workflowSession = Session(
+                id: SessionID.generate(),
+                projectId: mainTask.projectId,
+                agentId: mainTask.assigneeId!,
+                startedAt: Date(),
+                status: .active
+            )
+            try sessionRepository.save(workflowSession)
+
             let context = Context(
                 id: ContextID.generate(),
                 taskId: mainTask.id,
-                sessionId: SessionID.generate(),
+                sessionId: workflowSession.id,
                 agentId: mainTask.assigneeId!,
                 progress: "workflow:subtasks_created"
             )
@@ -1527,10 +1618,21 @@ final class MCPServer {
         // サブタスクがまだ作成されていない
         if phase == "workflow:task_fetched" && subTasks.isEmpty {
             // サブタスク作成フェーズを記録
+            // Note: Context.sessionId は sessions テーブルを参照するため、
+            // 先に Session を作成してからその ID を使用する
+            let workflowSession = Session(
+                id: SessionID.generate(),
+                projectId: mainTask.projectId,
+                agentId: mainTask.assigneeId!,
+                startedAt: Date(),
+                status: .active
+            )
+            try sessionRepository.save(workflowSession)
+
             let context = Context(
                 id: ContextID.generate(),
                 taskId: mainTask.id,
-                sessionId: SessionID.generate(),
+                sessionId: workflowSession.id,
                 agentId: mainTask.assigneeId!,
                 progress: "workflow:creating_subtasks"
             )
@@ -1619,11 +1721,22 @@ final class MCPServer {
 
         // サブタスク作成中フェーズ
         if phase == "workflow:creating_subtasks" {
-            // サブタスク作成フェーズを記録
+            // サブタスク作成完了を記録
+            // Note: Context.sessionId は sessions テーブルを参照するため、
+            // 先に Session を作成してからその ID を使用する
+            let workflowSession = Session(
+                id: SessionID.generate(),
+                projectId: mainTask.projectId,
+                agentId: mainTask.assigneeId!,
+                startedAt: Date(),
+                status: .active
+            )
+            try sessionRepository.save(workflowSession)
+
             let context = Context(
                 id: ContextID.generate(),
                 taskId: mainTask.id,
-                sessionId: SessionID.generate(),
+                sessionId: workflowSession.id,
                 agentId: mainTask.assigneeId!,
                 progress: "workflow:subtasks_created"
             )
@@ -2538,6 +2651,7 @@ enum MCPError: Error, CustomStringConvertible {
     case sessionTokenExpired  // Phase 3-4: セッショントークン期限切れ
     case sessionAgentMismatch(expected: String, actual: String)  // Phase 3-4: エージェントID不一致
     case agentNotAssignedToProject(agentId: String, projectId: String)  // Phase 4: エージェント未割り当て
+    case taskAccessDenied(String)  // Phase 4: タスクアクセス権限なし
 
     var description: String {
         switch self {
@@ -2583,6 +2697,8 @@ enum MCPError: Error, CustomStringConvertible {
             return "Session belongs to agent '\(actual)' but operation requested for agent '\(expected)'"
         case .agentNotAssignedToProject(let agentId, let projectId):
             return "Agent '\(agentId)' is not assigned to project '\(projectId)'. Assign the agent to the project first."
+        case .taskAccessDenied(let taskId):
+            return "Access denied: You don't have permission to modify task '\(taskId)'. Only the assignee or parent task assignee can modify this task."
         }
     }
 }
