@@ -127,6 +127,16 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
 
     /// プロジェクトのタスクステータスがDoneかどうかを確認
     private func checkTaskStatusIsDone(projectName: String, taskTitle: String) throws -> Bool {
+        // タスクIDをタイトルから推定（UC004のタスクID命名規則）
+        let taskId: String
+        if taskTitle.contains("Frontend") {
+            taskId = "tsk_uc004_fe"
+        } else if taskTitle.contains("Backend") {
+            taskId = "tsk_uc004_be"
+        } else {
+            taskId = ""
+        }
+
         // プロジェクトを選択
         app.activate()
         let projectRow = app.staticTexts[projectName]
@@ -135,72 +145,161 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
             return false
         }
         projectRow.click()
-        Thread.sleep(forTimeInterval: 1.0)  // プロジェクト切り替えの待ち時間を増加
+        Thread.sleep(forTimeInterval: 1.0)
 
-        // TaskBoardを先に待つ（プロジェクト切り替え後のロードを待つ）
+        // TaskBoardを待つ
         let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
         guard taskBoard.waitForExistence(timeout: 5) else {
             print("  ❌ TaskBoardが見つかりません")
             return false
         }
-        Thread.sleep(forTimeInterval: 0.5)  // TaskBoard表示後の安定化待ち
+        Thread.sleep(forTimeInterval: 0.5)
 
         // Refreshボタンをクリック（データベースから再読み込み）
         let refreshButton = app.buttons.matching(identifier: "RefreshButton").firstMatch
         if refreshButton.waitForExistence(timeout: 2) {
             refreshButton.click()
-            Thread.sleep(forTimeInterval: 2.0)  // Refresh待ち時間を増加
+            Thread.sleep(forTimeInterval: 2.0)
         }
 
-        // Doneカラムの表示名で確認（ColumnHeader_doneではなく"Done"で検索）
-        let doneColumnHeader = app.staticTexts["Done"]
+        // Doneカラムを表示するため左にスワイプ
+        print("  📜 Doneカラムを表示するため左にスワイプ...")
+        taskBoard.swipeLeft()
+        taskBoard.swipeLeft()
+        Thread.sleep(forTimeInterval: 0.5)
 
-        if !doneColumnHeader.exists {
-            print("  ⚠️ Doneカラムヘッダが見つかりません、スクロールなしで続行")
-            // 220px幅の5カラムなので、スクロールなしで見えるはず
-        }
+        // タスクIDで直接検索（最も確実な方法）
+        if !taskId.isEmpty {
+            let taskCardId = "TaskCard_\(taskId)"
+            let taskCard = app.descendants(matching: .any).matching(identifier: taskCardId).firstMatch
+            if taskCard.exists {
+                print("  📊 TaskCard found: \(taskCardId), frame=\(taskCard.frame)")
 
-        // デバッグ: 全カラムのタスク状況を確認
-        let columnStatuses = ["backlog", "todo", "in_progress", "done"]
-        for status in columnStatuses {
-            let column = app.descendants(matching: .any).matching(identifier: "TaskColumn_\(status)").firstMatch
-            if column.exists {
-                // ボタンを探す
-                let buttons = column.buttons.allElementsBoundByIndex
-                // TaskCard_で始まる識別子を持つ要素を探す
-                let taskCards = column.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "TaskCard_")).allElementsBoundByIndex
-                print("  📊 \(status)カラム: \(buttons.count) buttons, \(taskCards.count) TaskCards")
-                for (i, card) in taskCards.prefix(3).enumerated() {
-                    print("      TaskCard[\(i)]: id=\"\(card.identifier)\", label=\"\(card.label)\"")
+                // Doneカラムの位置を取得（幅220pxのコンテナを選択）
+                let doneColumns = app.descendants(matching: .any).matching(identifier: "TaskColumn_done").allElementsBoundByIndex
+                for col in doneColumns where col.frame.width > 100 {
+                    let doneFrame = col.frame
+                    let taskFrame = taskCard.frame
+                    print("  📊 Doneカラム: x=\(doneFrame.origin.x)-\(doneFrame.origin.x + doneFrame.width)")
+                    print("  📊 タスク位置: x=\(taskFrame.origin.x)")
+
+                    // タスクがDoneカラム内にあるか確認
+                    if taskFrame.origin.x >= doneFrame.origin.x - 50 &&
+                       taskFrame.origin.x < doneFrame.origin.x + doneFrame.width + 50 {
+                        print("  ✅ タスク「\(taskTitle)」がDoneカラム内で見つかりました")
+                        return true
+                    }
                 }
             } else {
-                print("  📊 \(status)カラム: NOT FOUND")
+                print("  ❌ TaskCard \(taskCardId) が見つかりません")
             }
         }
 
-        // Doneカラムでタスクを探す（識別子はTaskColumn_done）
-        let doneColumn = app.descendants(matching: .any).matching(identifier: "TaskColumn_done").firstMatch
-        if doneColumn.waitForExistence(timeout: 2) {
-            // まずボタンを探す
-            let taskInDone = doneColumn.buttons.matching(NSPredicate(format: "label CONTAINS %@", taskTitle)).firstMatch
-            if taskInDone.exists {
-                print("  ✅ タスク「\(taskTitle)」がDoneカラムで見つかりました (button)")
-                return true
-            }
-            // 次にTaskCard識別子で探す
-            let taskCards = doneColumn.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "TaskCard_")).allElementsBoundByIndex
+        // フォールバック: Doneカラム内のタスクカード数を確認
+        let doneColumns = app.descendants(matching: .any).matching(identifier: "TaskColumn_done").allElementsBoundByIndex
+        for col in doneColumns where col.frame.width > 100 {
+            let taskCards = col.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "TaskCard_")).allElementsBoundByIndex
+            print("  📊 Doneカラム内のTaskCard数: \(taskCards.count)")
             for card in taskCards {
-                if card.label.contains(taskTitle) {
-                    print("  ✅ タスク「\(taskTitle)」がDoneカラムで見つかりました (TaskCard)")
+                print("      TaskCard: id=\"\(card.identifier)\", label=\"\(card.label)\"")
+                if card.identifier == "TaskCard_\(taskId)" || card.label.contains(taskTitle) {
+                    print("  ✅ タスク「\(taskTitle)」がDoneカラムで見つかりました")
                     return true
                 }
             }
-            print("  ❌ タスク「\(taskTitle)」がDoneカラムにありません")
-        } else {
-            print("  ❌ TaskColumn_doneが見つかりません")
         }
 
+        print("  ❌ タスク「\(taskTitle)」がDoneカラムにありません")
         return false
+    }
+
+    // MARK: - Debug Test
+
+    /// Done検出のみのデバッグテスト（DB手動更新後に実行）
+    func testDoneDetectionOnly() throws {
+        // プロジェクト選択
+        app.activate()
+        let projectRow = app.staticTexts["UC004 Frontend"]
+        guard projectRow.waitForExistence(timeout: 10) else {
+            XCTFail("プロジェクトが見つかりません")
+            return
+        }
+        projectRow.click()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // TaskBoard取得
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        guard taskBoard.waitForExistence(timeout: 5) else {
+            XCTFail("TaskBoardが見つかりません")
+            return
+        }
+
+        // Refresh
+        let refreshButton = app.buttons.matching(identifier: "RefreshButton").firstMatch
+        if refreshButton.waitForExistence(timeout: 2) {
+            refreshButton.click()
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+
+        // スクロール前のスクリーンショット
+        let before = app.screenshot()
+        let beforeAttach = XCTAttachment(screenshot: before)
+        beforeAttach.name = "before_scroll"
+        beforeAttach.lifetime = .keepAlways
+        add(beforeAttach)
+
+        // swipeLeft
+        taskBoard.swipeLeft()
+        taskBoard.swipeLeft()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // スクロール後のスクリーンショット
+        let after = app.screenshot()
+        let afterAttach = XCTAttachment(screenshot: after)
+        afterAttach.name = "after_scroll"
+        afterAttach.lifetime = .keepAlways
+        add(afterAttach)
+
+        // 全ボタンを列挙
+        let allButtons = app.buttons.allElementsBoundByIndex
+        print("=== 全ボタン (\(allButtons.count)件) ===")
+        for (i, button) in allButtons.prefix(20).enumerated() {
+            print("  [\(i)]: id=\"\(button.identifier)\", label=\"\(button.label)\", frame=\(button.frame)")
+        }
+
+        // TaskCard_を検索
+        let taskCards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "TaskCard_")).allElementsBoundByIndex
+        print("=== TaskCard (\(taskCards.count)件) ===")
+        for card in taskCards {
+            print("  id=\"\(card.identifier)\", label=\"\(card.label)\", frame=\(card.frame)")
+        }
+
+        // Done column - 全ての一致する要素を確認
+        let doneColumns = app.descendants(matching: .any).matching(identifier: "TaskColumn_done").allElementsBoundByIndex
+        print("=== TaskColumn_done 一致数: \(doneColumns.count) ===")
+        for (i, col) in doneColumns.enumerated() {
+            print("  [\(i)]: elementType=\(col.elementType.rawValue), frame=\(col.frame)")
+        }
+
+        // groups (VStack等)を検索
+        let doneGroups = app.groups.matching(identifier: "TaskColumn_done").allElementsBoundByIndex
+        print("=== TaskColumn_done (groups): \(doneGroups.count) ===")
+        for (i, g) in doneGroups.enumerated() {
+            print("  [\(i)]: frame=\(g.frame)")
+            let cardsInGroup = g.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "TaskCard_")).allElementsBoundByIndex
+            print("    TaskCards: \(cardsInGroup.count)")
+        }
+
+        // otherを検索
+        let doneOthers = app.otherElements.matching(identifier: "TaskColumn_done").allElementsBoundByIndex
+        print("=== TaskColumn_done (otherElements): \(doneOthers.count) ===")
+        for (i, o) in doneOthers.enumerated() {
+            print("  [\(i)]: frame=\(o.frame)")
+            let cardsInOther = o.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "TaskCard_")).allElementsBoundByIndex
+            print("    TaskCards: \(cardsInOther.count)")
+        }
+
+        XCTFail("デバッグ終了。xcresulttoolでスクリーンショットを確認。")
     }
 
     // MARK: - Helper Methods
@@ -266,12 +365,6 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
         taskBoard.swipeRight()
         taskBoard.swipeRight()
         Thread.sleep(forTimeInterval: 0.5)
-
-        // スクロール後の状態を確認するスクリーンショット
-        let scrollScreenshot = app.screenshot()
-        let scrollPath = "/tmp/uc004_after_scroll_\(taskId).png"
-        try? scrollScreenshot.pngRepresentation.write(to: URL(fileURLWithPath: scrollPath))
-        print("  📸 スクロール後スクリーンショット: \(scrollPath)")
 
         // アクセシビリティ識別子でタスクカードを検索（より確実）
         let taskCardIdentifier = "TaskCard_\(taskId)"
@@ -441,4 +534,5 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
         // この時点ではまだIn Progressなので、Doneカラムにタスクは存在しない
         // → ファイル作成確認フェーズで、タスクがDoneになっていることを確認する
     }
+
 }
