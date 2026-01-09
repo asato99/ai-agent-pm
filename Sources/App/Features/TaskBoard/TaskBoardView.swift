@@ -98,6 +98,7 @@ struct TaskBoardView: View {
     @State private var project: Project?
     @State private var isLoading = false
     @State private var showingTemplates = false
+    @State private var pollingTimer: Timer?
 
     private let columns: [TaskStatus] = [.backlog, .todo, .inProgress, .blocked, .done]
 
@@ -222,6 +223,24 @@ struct TaskBoardView: View {
             if oldValue != nil && newValue == nil {
                 AsyncTask { await loadData() }
             }
+        }
+        .onAppear {
+            // UIテスト時は外部DB更新を検出するためにポーリング
+            if AIAgentPMApp.isUITesting {
+                pollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+                    DebugLog.write("[TaskBoardView] Polling timer fired, calling loadTasks")
+                    AsyncTask { @MainActor in
+                        await taskStore.loadTasks()
+                        let statuses = taskStore.tasks.map { "\($0.id.value):\($0.status.rawValue)" }.joined(separator: ", ")
+                        DebugLog.write("[TaskBoardView] loadTasks completed: \(statuses)")
+                    }
+                }
+                DebugLog.write("[TaskBoardView] UITesting polling started")
+            }
+        }
+        .onDisappear {
+            pollingTimer?.invalidate()
+            pollingTimer = nil
         }
     }
 

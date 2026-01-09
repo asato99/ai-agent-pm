@@ -348,9 +348,24 @@ final class MCPServer {
             }
             let session = try validateSession(token: sessionToken)
             return try getNextAction(
-                agentId: session.agentId,
-                projectId: session.projectId
+                session: session
             )
+
+        case "report_model":
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let provider = arguments["provider"] as? String,
+                  let modelId = arguments["model_id"] as? String else {
+                throw MCPError.missingArguments(["provider", "model_id"])
+            }
+            let session = try validateSession(token: sessionToken)
+            return try reportModel(
+                session: session,
+                provider: provider,
+                modelId: modelId
+            )
+
         case "get_task":
             guard let taskId = arguments["task_id"] as? String else {
                 throw MCPError.missingArguments(["task_id"])
@@ -452,6 +467,13 @@ final class MCPServer {
                 throw MCPError.missingArguments(["agent_id", "task_id", "log_file_path"])
             }
             return try registerExecutionLogFile(agentId: agentId, taskId: taskId, logFilePath: logFilePath)
+
+        case "invalidate_session":
+            guard let agentId = arguments["agent_id"] as? String,
+                  let projectId = arguments["project_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id", "project_id"])
+            }
+            return try invalidateSession(agentId: agentId, projectId: projectId)
 
         default:
             throw MCPError.unknownTool(name)
@@ -919,10 +941,10 @@ final class MCPServer {
 
     // MARK: Session Validation (Phase 3-4)
 
-    /// セッショントークンを検証し、関連するエージェントIDを返す
+    /// セッショントークンを検証し、AgentSessionを返す
     /// 参照: セキュリティ改善 - セッショントークン検証の実装
-    /// Phase 4: セッションを検証し、agentIdとprojectIdの両方を返す
-    private func validateSession(token: String) throws -> (agentId: AgentID, projectId: ProjectID) {
+    /// Phase 4: セッションを検証し、完全なAgentSessionオブジェクトを返す（モデル検証用）
+    private func validateSession(token: String) throws -> AgentSession {
         guard let session = try agentSessionRepository.findByToken(token) else {
             // findByToken は期限切れセッションを除外するので、
             // トークンが見つからない = 無効または期限切れ
@@ -931,7 +953,7 @@ final class MCPServer {
         }
 
         Self.log("[MCP] Session validated for agent: \(session.agentId.value), project: \(session.projectId.value)")
-        return (agentId: session.agentId, projectId: session.projectId)
+        return session
     }
 
     /// セッショントークンを検証し、指定されたエージェントIDとの一致も確認
@@ -952,7 +974,7 @@ final class MCPServer {
     /// 1. タスクの assigneeId が一致
     /// 2. タスクの parentTaskId を持つ親タスクの assigneeId が一致（サブタスク）
     /// 3. タスクが同じプロジェクトに属する（プロジェクト内のタスク参照）
-    private func validateTaskAccess(taskId: TaskID, session: (agentId: AgentID, projectId: ProjectID)) throws -> Task {
+    private func validateTaskAccess(taskId: TaskID, session: AgentSession) throws -> Task {
         guard let task = try taskRepository.findById(taskId) else {
             throw MCPError.taskNotFound(taskId.value)
         }
@@ -981,7 +1003,7 @@ final class MCPServer {
 
     /// タスクへの書き込み権限を検証（より厳格）
     /// エージェントが担当者または親タスクの担当者である場合のみ許可
-    private func validateTaskWriteAccess(taskId: TaskID, session: (agentId: AgentID, projectId: ProjectID)) throws -> Task {
+    private func validateTaskWriteAccess(taskId: TaskID, session: AgentSession) throws -> Task {
         guard let task = try taskRepository.findById(taskId) else {
             throw MCPError.taskNotFound(taskId.value)
         }
@@ -1097,12 +1119,22 @@ final class MCPServer {
 
         // 該当プロジェクトで該当エージェントにアサインされた in_progress タスクがあるか確認
         let tasks = try taskRepository.findByAssignee(id)
+
+        // Debug: log all tasks found for this agent with full details
+        Self.log("[MCP] shouldStart: Agent '\(agentId)' checking for in_progress tasks in project '\(projectId)'")
+        Self.log("[MCP] shouldStart: Found \(tasks.count) total assigned task(s)")
+        for task in tasks {
+            let matchesProject = task.projectId == projId
+            let isInProgress = task.status == .inProgress
+            Self.log("[MCP] shouldStart:   - Task '\(task.id.value)': status=\(task.status.rawValue), projectId=\(task.projectId.value), matchesProject=\(matchesProject), isInProgress=\(isInProgress)")
+        }
+
         let inProgressTask = tasks.first { task in
             task.status == .inProgress && task.projectId == projId
         }
         let hasInProgressTask = inProgressTask != nil
 
-        Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': \(hasInProgressTask)")
+        Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': \(hasInProgressTask) (in_progress task: \(inProgressTask?.id.value ?? "none"))")
 
         // provider/model を返す（RunnerがCLIコマンドを選択するため）
         // kickCommand があればそれを優先
@@ -1241,6 +1273,87 @@ final class MCPServer {
                 "instruction": "現在割り当てられたタスクはありません"
             ]
         }
+    }
+
+    /// report_model - Agent Instanceのモデル情報を申告・検証
+    /// Agent Instanceが申告した provider/model_id をエージェント設定と照合し、
+    /// 検証結果をセッションに記録する
+    private func reportModel(
+        session: AgentSession,
+        provider: String,
+        modelId: String
+    ) throws -> [String: Any] {
+        Self.log("[MCP] reportModel called: provider='\(provider)', model_id='\(modelId)'")
+
+        // エージェント情報を取得（aiType との照合用）
+        guard let agent = try agentRepository.findById(session.agentId) else {
+            Self.log("[MCP] reportModel: Agent not found: \(session.agentId.value)")
+            return [
+                "success": false,
+                "error": "agent_not_found",
+                "message": "エージェントが見つかりません"
+            ]
+        }
+
+        // 期待値との照合
+        var verified = false
+        var verificationMessage = ""
+
+        if let expectedAiType = agent.aiType {
+            // エージェントにAIType設定がある場合、照合
+            let expectedProvider = expectedAiType.provider
+            let expectedModelId = expectedAiType.modelId
+
+            if provider == expectedProvider && modelId == expectedModelId {
+                verified = true
+                verificationMessage = "モデル検証成功: 期待通りのモデルが使用されています"
+            } else if provider == expectedProvider {
+                // プロバイダーは一致、モデルIDが異なる
+                verified = false
+                verificationMessage = "モデル不一致: プロバイダーは一致しますが、モデルIDが異なります（期待: \(expectedModelId), 申告: \(modelId)）"
+            } else {
+                verified = false
+                verificationMessage = "モデル不一致: プロバイダーが異なります（期待: \(expectedProvider), 申告: \(provider)）"
+            }
+        } else {
+            // AIType設定がない場合（custom または未設定）
+            // 申告を受け入れ、記録のみ行う
+            verified = true
+            verificationMessage = "モデル申告記録: エージェントにAIType設定がないため、申告を記録しました"
+        }
+
+        // セッションを更新
+        var updatedSession = session
+        updatedSession.reportedProvider = provider
+        updatedSession.reportedModel = modelId
+        updatedSession.modelVerified = verified
+        updatedSession.modelVerifiedAt = Date()
+
+        try agentSessionRepository.save(updatedSession)
+        Self.log("[MCP] reportModel: Session updated with verification result: verified=\(verified)")
+
+        // 実行中のExecutionLogにもモデル情報を記録
+        // in_progress タスクを取得し、対応するExecutionLogを更新
+        let tasks = try taskRepository.findByAssignee(session.agentId)
+        if let inProgressTask = tasks.first(where: { $0.status == .inProgress && $0.projectId == session.projectId }) {
+            if var executionLog = try executionLogRepository.findLatestByAgentAndTask(
+                agentId: session.agentId,
+                taskId: inProgressTask.id
+            ) {
+                executionLog.setModelInfo(provider: provider, model: modelId, verified: verified)
+                try executionLogRepository.save(executionLog)
+                Self.log("[MCP] reportModel: ExecutionLog updated with model info: \(executionLog.id.value)")
+            }
+        }
+
+        return [
+            "success": true,
+            "verified": verified,
+            "message": verificationMessage,
+            "instruction": verified
+                ? "モデル検証が完了しました。get_next_action を呼び出して次の指示を受けてください。"
+                : "モデルが期待と異なりますが、処理を続行できます。get_next_action を呼び出して次の指示を受けてください。"
+        ]
     }
 
     /// report_completed - タスク完了を報告
@@ -1384,7 +1497,10 @@ final class MCPServer {
     /// get_next_action - 状態駆動ワークフロー制御
     /// 参照: docs/plan/STATE_DRIVEN_WORKFLOW.md
     /// Agent の hierarchy_type と Context のワークフローフェーズに基づいて次のアクションを判断
-    private func getNextAction(agentId: AgentID, projectId: ProjectID) throws -> [String: Any] {
+    /// モデル検証が未完了の場合は report_model アクションを返す
+    private func getNextAction(session: AgentSession) throws -> [String: Any] {
+        let agentId = session.agentId
+        let projectId = session.projectId
         Self.log("[MCP] getNextAction called for agent: '\(agentId.value)', project: '\(projectId.value)'")
 
         // 1. エージェント情報を取得（hierarchy_type 判断用）
@@ -1394,6 +1510,20 @@ final class MCPServer {
                 "action": "error",
                 "instruction": "エージェントが見つかりません。",
                 "error": "agent_not_found"
+            ]
+        }
+
+        // 1.5. モデル検証チェック - 未検証の場合は report_model を要求
+        if session.modelVerified == nil {
+            Self.log("[MCP] getNextAction: Model not verified yet, requesting report_model")
+            return [
+                "action": "report_model",
+                "instruction": """
+                    モデル情報を申告してください。
+                    report_model ツールを呼び出し、現在使用中の provider と model_id を申告してください。
+                    申告後、get_next_action を再度呼び出してください。
+                    """,
+                "state": "needs_model_verification"
             ]
         }
 
@@ -2458,6 +2588,34 @@ final class MCPServer {
             "task_id": log.taskId.value,
             "agent_id": log.agentId.value,
             "log_file_path": logFilePath
+        ]
+    }
+
+    /// セッションを無効化（Coordinator用）
+    /// エージェントプロセス終了時に呼び出され、shouldStartが再度trueを返せるようにする
+    private func invalidateSession(agentId: String, projectId: String) throws -> [String: Any] {
+        Self.log("[MCP] invalidateSession called: agentId='\(agentId)', projectId='\(projectId)'")
+
+        let agId = AgentID(value: agentId)
+        let projId = ProjectID(value: projectId)
+
+        // 該当する全セッションを取得して削除
+        let sessions = try agentSessionRepository.findByAgentIdAndProjectId(agId, projectId: projId)
+        var deletedCount = 0
+
+        for session in sessions {
+            try agentSessionRepository.delete(session.id)
+            deletedCount += 1
+            Self.log("[MCP] Deleted session: \(session.id.value)")
+        }
+
+        Self.log("[MCP] invalidateSession completed: deleted \(deletedCount) session(s)")
+
+        return [
+            "success": true,
+            "agent_id": agentId,
+            "project_id": projectId,
+            "deleted_count": deletedCount
         ]
     }
 

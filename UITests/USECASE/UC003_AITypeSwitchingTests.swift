@@ -255,8 +255,8 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
     /// 3. タスクがDoneになることを確認
     func testE2E_UC003_AITypeSwitching_Integration() throws {
         let workDir = "/tmp/uc003"
-        let sonnetOutput = "SONNET_OUTPUT.md"
-        let opusOutput = "OPUS_OUTPUT.md"
+        let sonnetOutput = "OUTPUT_1.md"
+        let opusOutput = "OUTPUT_2.md"
 
         // ========================================
         // Phase 1: Sonnetエージェントタスクをin_progressに変更
@@ -278,13 +278,13 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
         // ========================================
         // Phase 3: UIでタスクステータスがDoneになることを確認
         // ========================================
-        print("⏳ Phase 3: タスクステータスがDoneになるのを待機中（最大180秒）...")
+        print("⏳ Phase 3: タスクステータスがDoneになるのを待機中（最大60秒）...")
 
         var sonnetDone = false
         var opusDone = false
 
-        // 最大180秒（5秒間隔で36回）待機
-        for i in 1...36 {
+        // 最大60秒（5秒間隔で12回）待機
+        for i in 1...12 {
             // Sonnetタスクのステータス確認
             if !sonnetDone {
                 if try checkTaskStatusIsDone(taskId: "tsk_uc003_sonnet", taskTitle: "Sonnet Task") {
@@ -305,7 +305,7 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
                 break
             }
 
-            if i % 6 == 0 {
+            if i % 4 == 0 {
                 print("  ⏳ 待機中... (\(i * 5)秒)")
             }
 
@@ -347,57 +347,51 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
     }
 
     /// タスクステータスがDoneかどうかを確認
+    ///
+    /// Note: 位置ベースの確認は ScrollView の状態に依存して不安定なため、
+    /// タスク詳細画面を開いてステータスを直接確認する方式に変更。
     private func checkTaskStatusIsDone(taskId: String, taskTitle: String) throws -> Bool {
-        // プロジェクトを選択（UC003は1プロジェクト）
-        let projectName = "UC003 AIType Test"
-        let projectRow = app.staticTexts[projectName]
-        if projectRow.waitForExistence(timeout: 2) {
-            if projectRow.isHittable {
-                projectRow.click()
-            } else {
-                projectRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
-            }
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-
-        // Doneカラムにスワイプしてタスクを探す
-        let scrollView = app.scrollViews.firstMatch
-        if scrollView.exists {
-            scrollView.swipeLeft()
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-
-        // Doneカラムを取得
-        let doneColumns = app.staticTexts.matching(NSPredicate(format: "label == %@", "Done"))
-
-        // タスクIDで直接検索（最も確実な方法）
         let taskCardId = "TaskCard_\(taskId)"
+
+        // タスクカードを検索
         let taskCard = app.descendants(matching: .any).matching(identifier: taskCardId).firstMatch
-        if taskCard.exists {
-            // Doneカラムの位置を取得
-            for i in 0..<doneColumns.count {
-                let col = doneColumns.element(boundBy: i)
-                if col.frame.width > 100 {
-                    let doneFrame = col.frame
-                    let taskFrame = taskCard.frame
-                    // タスクがDoneカラム内にあるか確認（マージン付き）
-                    if taskFrame.origin.x >= doneFrame.origin.x - 50 &&
-                       taskFrame.origin.x < doneFrame.origin.x + doneFrame.width + 50 {
-                        return true
-                    }
-                }
-            }
+        guard taskCard.exists else {
+            print("  ⚠️ Task card \(taskCardId) not found")
+            return false
         }
 
-        // フォールバック: Doneカラム内のTaskCardを列挙して確認
-        let doneColumnGroup = app.groups.matching(NSPredicate(format: "identifier == %@", "DoneColumn")).firstMatch
-        if doneColumnGroup.exists {
-            let taskCards = doneColumnGroup.buttons.matching(NSPredicate(format: "label CONTAINS %@", taskTitle))
-            if taskCards.count > 0 {
-                return true
-            }
+        // タスクカードをクリックして詳細画面を開く
+        taskCard.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        guard detailView.waitForExistence(timeout: 3) else {
+            print("  ⚠️ TaskDetailView not found for \(taskTitle)")
+            app.typeKey(.escape, modifierFlags: [])
+            return false
         }
 
-        return false
+        // ステータスピッカーの値を確認
+        let statusPicker = app.popUpButtons["StatusPicker"]
+        guard statusPicker.exists else {
+            print("  ⚠️ StatusPicker not found for \(taskTitle)")
+            app.typeKey(.escape, modifierFlags: [])
+            return false
+        }
+
+        let currentStatus = statusPicker.value as? String ?? ""
+        print("  📊 \(taskTitle) status: \(currentStatus)")
+
+        // 詳細画面を閉じる
+        app.typeKey(.escape, modifierFlags: [])
+        Thread.sleep(forTimeInterval: 0.3)
+
+        if currentStatus == "Done" {
+            print("  ✅ \(taskTitle) is Done")
+            return true
+        } else {
+            print("  ❌ \(taskTitle) is not Done (status: \(currentStatus))")
+            return false
+        }
     }
 }

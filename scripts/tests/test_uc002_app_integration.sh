@@ -170,13 +170,15 @@ max_concurrent: 3
 mcp_socket_path: $HOME/Library/Application Support/AIAgentPM/mcp.sock
 
 # AI providers - how to launch each AI type
+# Note: max-turns increased to 50 for complex workflow
+# (authenticate → report_model → get_task → create_subtasks → execute → complete)
 ai_providers:
   claude:
     cli_command: claude
     cli_args:
       - "--dangerously-skip-permissions"
       - "--max-turns"
-      - "20"
+      - "50"
 
 # Agents - only passkey is needed (ai_type, system_prompt come from MCP)
 agents:

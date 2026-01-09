@@ -333,7 +333,10 @@ class Coordinator:
         # Agent Instance connects to the SAME MCP daemon that the app started
         # This ensures all components share the same database and state
         socket_path = self.config.mcp_socket_path
-        if not socket_path:
+        if socket_path:
+            # Always expand tilde in socket path
+            socket_path = os.path.expanduser(socket_path)
+        else:
             socket_path = os.path.expanduser(
                 "~/Library/Application Support/AIAgentPM/mcp.sock"
             )
@@ -358,8 +361,14 @@ class Coordinator:
             cli_command,
             *cli_args,
             "--mcp-config", mcp_config,
-            "-p", prompt
         ]
+
+        # Add verbose flag for debugging if enabled
+        if self.config.debug_mode:
+            cmd.append("--verbose")
+
+        # Add prompt
+        cmd.extend(["-p", prompt])
 
         model_desc = f"{provider}/{model}" if model else provider
         logger.info(

@@ -100,7 +100,11 @@ class MCPClient:
         Args:
             socket_path: Path to MCP Unix socket. Defaults to standard location.
         """
-        self.socket_path = socket_path or self._default_socket_path()
+        # Always expand tilde in socket path
+        if socket_path:
+            self.socket_path = os.path.expanduser(socket_path)
+        else:
+            self.socket_path = self._default_socket_path()
         self._session_token: Optional[str] = None
 
     def _default_socket_path(self) -> str:
@@ -263,6 +267,30 @@ class MCPClient:
             "agent_id": agent_id,
             "task_id": task_id,
             "log_file_path": log_file_path
+        })
+
+        return result.get("success", False)
+
+    async def invalidate_session(self, agent_id: str, project_id: str) -> bool:
+        """Invalidate session for an agent-project pair.
+
+        Called by Coordinator when Agent Instance process exits.
+        This allows shouldStart to return True again for the next instance.
+        No authentication required.
+
+        Args:
+            agent_id: Agent ID
+            project_id: Project ID
+
+        Returns:
+            True if successful, False otherwise
+
+        Raises:
+            MCPError: If request fails
+        """
+        result = await self._call_tool("invalidate_session", {
+            "agent_id": agent_id,
+            "project_id": project_id
         })
 
         return result.get("success", False)

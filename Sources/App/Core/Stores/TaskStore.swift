@@ -27,13 +27,33 @@ public final class TaskStore: ObservableObject {
 
     /// タスク一覧を読み込む
     public func loadTasks() async {
-        guard let container = container else { return }
+        guard let container = container else {
+            // ファイルベースログ（XCUITest環境でも確認可能）
+            let msg = "[TaskStore] loadTasks: container is nil"
+            NSLog("%@", msg)
+            if let data = (msg + "\n").data(using: .utf8) {
+                let logFile = "/tmp/aiagentpm_debug.log"
+                if FileManager.default.fileExists(atPath: logFile),
+                   let handle = FileHandle(forWritingAtPath: logFile) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            }
+            return
+        }
 
         isLoading = true
         defer { isLoading = false }
 
         do {
-            tasks = try container.getTasksUseCase.execute(projectId: projectId, status: nil)
+            let loadedTasks = try container.getTasksUseCase.execute(projectId: projectId, status: nil)
+            // UITest時のみデバッグログを出力
+            if CommandLine.arguments.contains("-UITesting") {
+                let statusSummary = loadedTasks.map { "\($0.id.value):\($0.status.rawValue)" }.joined(separator: ", ")
+                NSLog("[TaskStore] loadTasks: loaded \(loadedTasks.count) tasks: \(statusSummary)")
+            }
+            tasks = loadedTasks
         } catch {
             // エラーは呼び出し元で処理
             print("[TaskStore] Failed to load tasks: \(error.localizedDescription)")

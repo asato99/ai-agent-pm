@@ -52,6 +52,9 @@ class CoordinatorConfig:
     # Logging
     log_directory: Optional[str] = None
 
+    # Debug mode (adds --verbose to CLI commands)
+    debug_mode: bool = True
+
     def __post_init__(self):
         """Validate configuration after initialization."""
         if self.polling_interval <= 0:
@@ -134,6 +137,7 @@ class CoordinatorConfig:
             ai_providers=ai_providers,
             agents=agents,
             log_directory=data.get("log_directory"),
+            debug_mode=data.get("debug_mode", True),
         )
 
     def get_provider(self, ai_type: str) -> AIProviderConfig:

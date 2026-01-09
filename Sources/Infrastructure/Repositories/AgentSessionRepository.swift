@@ -20,6 +20,11 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var projectId: String
     var expiresAt: Date
     var createdAt: Date
+    // Model verification fields
+    var reportedProvider: String?
+    var reportedModel: String?
+    var modelVerified: Bool?
+    var modelVerifiedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -28,6 +33,10 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case projectId = "project_id"
         case expiresAt = "expires_at"
         case createdAt = "created_at"
+        case reportedProvider = "reported_provider"
+        case reportedModel = "reported_model"
+        case modelVerified = "model_verified"
+        case modelVerifiedAt = "model_verified_at"
     }
 
     func toDomain() -> AgentSession {
@@ -37,7 +46,11 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             agentId: AgentID(value: agentId),
             projectId: ProjectID(value: projectId),
             expiresAt: expiresAt,
-            createdAt: createdAt
+            createdAt: createdAt,
+            reportedProvider: reportedProvider,
+            reportedModel: reportedModel,
+            modelVerified: modelVerified,
+            modelVerifiedAt: modelVerifiedAt
         )
     }
 
@@ -48,7 +61,11 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             agentId: session.agentId.value,
             projectId: session.projectId.value,
             expiresAt: session.expiresAt,
-            createdAt: session.createdAt
+            createdAt: session.createdAt,
+            reportedProvider: session.reportedProvider,
+            reportedModel: session.reportedModel,
+            modelVerified: session.modelVerified,
+            modelVerifiedAt: session.modelVerifiedAt
         )
     }
 }

@@ -354,6 +354,10 @@ final class MockAgentSessionRepository: AgentSessionRepositoryProtocol {
         sessions.values.filter { $0.agentId == agentId }
     }
 
+    func findByAgentIdAndProjectId(_ agentId: AgentID, projectId: ProjectID) throws -> [AgentSession] {
+        sessions.values.filter { $0.agentId == agentId && $0.projectId == projectId }
+    }
+
     func save(_ session: AgentSession) throws {
         sessions[session.id] = session
     }
@@ -401,6 +405,13 @@ final class MockExecutionLogRepository: ExecutionLogRepositoryProtocol {
 
     func findRunning(agentId: AgentID) throws -> [ExecutionLog] {
         logs.values.filter { $0.agentId == agentId && $0.status == .running }.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    func findLatestByAgentAndTask(agentId: AgentID, taskId: TaskID) throws -> ExecutionLog? {
+        logs.values
+            .filter { $0.agentId == agentId && $0.taskId == taskId }
+            .sorted { $0.startedAt > $1.startedAt }
+            .first
     }
 
     func save(_ log: ExecutionLog) throws {
@@ -2246,6 +2257,8 @@ final class UseCaseTests: XCTestCase {
 
     func testAuthenticateUseCaseSuccess() throws {
         // 正しい認証情報でセッションを取得
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         agentRepo.agents[agent.id] = agent
 
@@ -2258,7 +2271,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo
         )
 
-        let result = try useCase.execute(agentId: agent.id.value, passkey: "secret123")
+        let result = try useCase.execute(agentId: agent.id.value, passkey: "secret123", projectId: project.id.value)
 
         XCTAssertTrue(result.success)
         XCTAssertNotNil(result.sessionToken)
@@ -2269,6 +2282,8 @@ final class UseCaseTests: XCTestCase {
 
     func testAuthenticateUseCaseInvalidPasskey() throws {
         // 誤ったパスキーでエラーを返す
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         agentRepo.agents[agent.id] = agent
 
@@ -2281,7 +2296,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo
         )
 
-        let result = try useCase.execute(agentId: agent.id.value, passkey: "wrongpassword")
+        let result = try useCase.execute(agentId: agent.id.value, passkey: "wrongpassword", projectId: project.id.value)
 
         XCTAssertFalse(result.success)
         XCTAssertNil(result.sessionToken)
@@ -2290,13 +2305,16 @@ final class UseCaseTests: XCTestCase {
 
     func testAuthenticateUseCaseUnknownAgentId() throws {
         // 存在しないエージェントIDでエラーを返す
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
         let useCase = AuthenticateUseCase(
             credentialRepository: agentCredentialRepo,
             sessionRepository: agentSessionRepo,
             agentRepository: agentRepo
         )
 
-        let result = try useCase.execute(agentId: "unknown_agent", passkey: "anypasskey")
+        let result = try useCase.execute(agentId: "unknown_agent", passkey: "anypasskey", projectId: project.id.value)
 
         XCTAssertFalse(result.success)
         XCTAssertEqual(result.error, "Invalid agent_id or passkey")
@@ -2304,6 +2322,8 @@ final class UseCaseTests: XCTestCase {
 
     func testAuthenticateUseCaseNoCredential() throws {
         // 認証情報が設定されていないエージェント
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         agentRepo.agents[agent.id] = agent
         // 認証情報は追加しない
@@ -2314,7 +2334,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo
         )
 
-        let result = try useCase.execute(agentId: agent.id.value, passkey: "anypasskey")
+        let result = try useCase.execute(agentId: agent.id.value, passkey: "anypasskey", projectId: project.id.value)
 
         XCTAssertFalse(result.success)
         XCTAssertEqual(result.error, "Invalid agent_id or passkey")
@@ -2322,6 +2342,8 @@ final class UseCaseTests: XCTestCase {
 
     func testAuthenticateUseCaseSavesSession() throws {
         // 認証成功時にセッションが保存される
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         agentRepo.agents[agent.id] = agent
 
@@ -2334,7 +2356,7 @@ final class UseCaseTests: XCTestCase {
             agentRepository: agentRepo
         )
 
-        let result = try useCase.execute(agentId: agent.id.value, passkey: "secret123")
+        let result = try useCase.execute(agentId: agent.id.value, passkey: "secret123", projectId: project.id.value)
 
         XCTAssertTrue(result.success)
         XCTAssertEqual(agentSessionRepo.sessions.count, 1)
@@ -2344,10 +2366,12 @@ final class UseCaseTests: XCTestCase {
 
     func testValidateSessionUseCaseValid() throws {
         // 有効なセッションでエージェントIDを返す
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         agentRepo.agents[agent.id] = agent
 
-        let session = AgentSession(agentId: agent.id)
+        let session = AgentSession(agentId: agent.id, projectId: project.id)
         agentSessionRepo.sessions[session.id] = session
 
         let useCase = ValidateSessionUseCase(
@@ -2362,11 +2386,14 @@ final class UseCaseTests: XCTestCase {
 
     func testValidateSessionUseCaseExpired() throws {
         // 期限切れセッションでnilを返す
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         agentRepo.agents[agent.id] = agent
 
         let expiredSession = AgentSession(
             agentId: agent.id,
+            projectId: project.id,
             expiresAt: Date().addingTimeInterval(-100)
         )
         agentSessionRepo.sessions[expiredSession.id] = expiredSession
@@ -2397,10 +2424,12 @@ final class UseCaseTests: XCTestCase {
 
     func testLogoutUseCaseSuccess() throws {
         // セッションを削除してログアウト
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         agentRepo.agents[agent.id] = agent
 
-        let session = AgentSession(agentId: agent.id)
+        let session = AgentSession(agentId: agent.id, projectId: project.id)
         agentSessionRepo.sessions[session.id] = session
 
         let useCase = LogoutUseCase(sessionRepository: agentSessionRepo)
@@ -2480,14 +2509,17 @@ final class UseCaseTests: XCTestCase {
 
     func testCleanupExpiredSessionsUseCase() throws {
         // 期限切れセッションをクリーンアップ
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         agentRepo.agents[agent.id] = agent
 
         let expiredSession = AgentSession(
             agentId: agent.id,
+            projectId: project.id,
             expiresAt: Date().addingTimeInterval(-100)
         )
-        let validSession = AgentSession(agentId: agent.id)
+        let validSession = AgentSession(agentId: agent.id, projectId: project.id)
         agentSessionRepo.sessions[expiredSession.id] = expiredSession
         agentSessionRepo.sessions[validSession.id] = validSession
 

@@ -21,6 +21,10 @@ struct ExecutionLogRecord: Codable, FetchableRecord, PersistableRecord {
     var durationSeconds: Double?
     var logFilePath: String?
     var errorMessage: String?
+    // Model verification fields
+    var reportedProvider: String?
+    var reportedModel: String?
+    var modelVerified: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -33,6 +37,9 @@ struct ExecutionLogRecord: Codable, FetchableRecord, PersistableRecord {
         case durationSeconds = "duration_seconds"
         case logFilePath = "log_file_path"
         case errorMessage = "error_message"
+        case reportedProvider = "reported_provider"
+        case reportedModel = "reported_model"
+        case modelVerified = "model_verified"
     }
 
     func toDomain() -> ExecutionLog {
@@ -46,7 +53,10 @@ struct ExecutionLogRecord: Codable, FetchableRecord, PersistableRecord {
             exitCode: exitCode,
             durationSeconds: durationSeconds,
             logFilePath: logFilePath,
-            errorMessage: errorMessage
+            errorMessage: errorMessage,
+            reportedProvider: reportedProvider,
+            reportedModel: reportedModel,
+            modelVerified: modelVerified
         )
     }
 
@@ -61,7 +71,10 @@ struct ExecutionLogRecord: Codable, FetchableRecord, PersistableRecord {
             exitCode: log.exitCode,
             durationSeconds: log.durationSeconds,
             logFilePath: log.logFilePath,
-            errorMessage: log.errorMessage
+            errorMessage: log.errorMessage,
+            reportedProvider: log.reportedProvider,
+            reportedModel: log.reportedModel,
+            modelVerified: log.modelVerified
         )
     }
 }

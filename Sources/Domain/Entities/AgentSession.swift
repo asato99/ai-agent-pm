@@ -19,6 +19,16 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     public let expiresAt: Date
     public let createdAt: Date
 
+    // MARK: - Model Verification Fields
+    /// Agent Instanceが申告したプロバイダー
+    public var reportedProvider: String?
+    /// Agent Instanceが申告したモデルID
+    public var reportedModel: String?
+    /// モデル検証結果（nil=未検証, true=一致, false=不一致）
+    public var modelVerified: Bool?
+    /// モデル検証日時
+    public var modelVerifiedAt: Date?
+
     /// セッションが期限切れかどうか
     public var isExpired: Bool {
         Date() > expiresAt
@@ -45,6 +55,10 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.projectId = projectId
         self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(Self.defaultExpirationInterval)
         self.createdAt = createdAt
+        self.reportedProvider = nil
+        self.reportedModel = nil
+        self.modelVerified = nil
+        self.modelVerifiedAt = nil
     }
 
     /// DBから復元用（トークンを直接設定）
@@ -54,7 +68,11 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         agentId: AgentID,
         projectId: ProjectID,
         expiresAt: Date,
-        createdAt: Date
+        createdAt: Date,
+        reportedProvider: String? = nil,
+        reportedModel: String? = nil,
+        modelVerified: Bool? = nil,
+        modelVerifiedAt: Date? = nil
     ) {
         self.id = id
         self.token = token
@@ -62,6 +80,10 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.projectId = projectId
         self.expiresAt = expiresAt
         self.createdAt = createdAt
+        self.reportedProvider = reportedProvider
+        self.reportedModel = reportedModel
+        self.modelVerified = modelVerified
+        self.modelVerifiedAt = modelVerifiedAt
     }
 
     // MARK: - Private

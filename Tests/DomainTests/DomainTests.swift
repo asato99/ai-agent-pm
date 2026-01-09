@@ -972,8 +972,8 @@ final class DomainTests: XCTestCase {
 
     func testAgentSessionCreation_GeneratesUniqueToken() {
         // Given/When
-        let session1 = AgentSession(agentId: AgentID(value: "agt_1"))
-        let session2 = AgentSession(agentId: AgentID(value: "agt_1"))
+        let session1 = AgentSession(agentId: AgentID(value: "agt_1"), projectId: ProjectID(value: "prj_1"))
+        let session2 = AgentSession(agentId: AgentID(value: "agt_1"), projectId: ProjectID(value: "prj_1"))
 
         // Then
         XCTAssertNotEqual(session1.token, session2.token, "Each session should have unique token")
@@ -985,7 +985,7 @@ final class DomainTests: XCTestCase {
         let now = Date()
 
         // When
-        let session = AgentSession(agentId: AgentID(value: "agt_1"), createdAt: now)
+        let session = AgentSession(agentId: AgentID(value: "agt_1"), projectId: ProjectID(value: "prj_1"), createdAt: now)
 
         // Then
         let expectedExpiry = now.addingTimeInterval(3600)
@@ -999,7 +999,7 @@ final class DomainTests: XCTestCase {
 
     func testAgentSessionIsExpired_BeforeExpiry_ReturnsFalse() {
         // Given
-        let session = AgentSession(agentId: AgentID(value: "agt_1"))
+        let session = AgentSession(agentId: AgentID(value: "agt_1"), projectId: ProjectID(value: "prj_1"))
 
         // When/Then
         XCTAssertFalse(session.isExpired, "Newly created session should not be expired")
@@ -1009,6 +1009,7 @@ final class DomainTests: XCTestCase {
         // Given
         let session = AgentSession(
             agentId: AgentID(value: "agt_1"),
+            projectId: ProjectID(value: "prj_1"),
             expiresAt: Date().addingTimeInterval(-1)  // 1秒前に期限切れ
         )
 
@@ -1019,7 +1020,11 @@ final class DomainTests: XCTestCase {
     func testAgentSessionRemainingSeconds_ValidSession() {
         // Given
         let now = Date()
-        let session = AgentSession(agentId: AgentID(value: "agt_1"), createdAt: now)
+        let session = AgentSession(
+            agentId: AgentID(value: "agt_1"),
+            projectId: ProjectID(value: "prj_1"),
+            createdAt: now
+        )
 
         // When
         let remaining = session.remainingSeconds
@@ -1033,6 +1038,7 @@ final class DomainTests: XCTestCase {
         // Given
         let session = AgentSession(
             agentId: AgentID(value: "agt_1"),
+            projectId: ProjectID(value: "prj_1"),
             expiresAt: Date().addingTimeInterval(-100)
         )
 
@@ -1050,6 +1056,7 @@ final class DomainTests: XCTestCase {
         // When
         let session = AgentSession(
             agentId: AgentID(value: "agt_1"),
+            projectId: ProjectID(value: "prj_1"),
             expiresAt: customExpiry
         )
 

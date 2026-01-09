@@ -158,8 +158,8 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
     case gpt4o = "gpt-4o"
     case gpt4oMini = "gpt-4o-mini"
 
-    // Other/Custom
-    case other = "other"
+    // Custom model
+    case custom = "custom"
 
     /// 表示名
     public var displayName: String {
@@ -171,7 +171,7 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
         case .gemini2Pro: return "Gemini 2.0 Pro"
         case .gpt4o: return "GPT-4o"
         case .gpt4oMini: return "GPT-4o Mini"
-        case .other: return "Other"
+        case .custom: return "Custom"
         }
     }
 
@@ -184,8 +184,8 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
             return "gemini"
         case .gpt4o, .gpt4oMini:
             return "openai"
-        case .other:
-            return "other"
+        case .custom:
+            return "custom"
         }
     }
 
@@ -195,10 +195,10 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
         case .claudeOpus4, .claudeSonnet4_5, .claudeSonnet4:
             return "claude"
         case .gemini2Flash, .gemini2Pro:
-            return "gemini"  // TODO: 実際のCLIコマンド名を確認
+            return "gemini"
         case .gpt4o, .gpt4oMini:
-            return "openai"  // TODO: 実際のCLIコマンド名を確認
-        case .other:
+            return "openai"
+        case .custom:
             return "claude"  // fallback
         }
     }
@@ -213,7 +213,7 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
         case .gemini2Pro: return "gemini-2.0-pro"
         case .gpt4o: return "gpt-4o"
         case .gpt4oMini: return "gpt-4o-mini"
-        case .other: return "unknown"
+        case .custom: return "custom"
         }
     }
 }

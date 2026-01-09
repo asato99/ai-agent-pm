@@ -24,12 +24,23 @@ public struct ExecutionLog: Identifiable, Equatable, Sendable {
     public private(set) var logFilePath: String?
     public private(set) var errorMessage: String?
 
+    // MARK: - Model Verification Fields
+    /// Agent Instanceが申告したプロバイダー
+    public private(set) var reportedProvider: String?
+    /// Agent Instanceが申告したモデルID
+    public private(set) var reportedModel: String?
+    /// モデル検証結果（nil=未検証, true=一致, false=不一致）
+    public private(set) var modelVerified: Bool?
+
     /// 新しい実行ログを作成（実行開始時）
     public init(
         id: ExecutionLogID = .generate(),
         taskId: TaskID,
         agentId: AgentID,
-        startedAt: Date = Date()
+        startedAt: Date = Date(),
+        reportedProvider: String? = nil,
+        reportedModel: String? = nil,
+        modelVerified: Bool? = nil
     ) {
         self.id = id
         self.taskId = taskId
@@ -41,6 +52,9 @@ public struct ExecutionLog: Identifiable, Equatable, Sendable {
         self.durationSeconds = nil
         self.logFilePath = nil
         self.errorMessage = nil
+        self.reportedProvider = reportedProvider
+        self.reportedModel = reportedModel
+        self.modelVerified = modelVerified
     }
 
     /// DBから復元用（全フィールド指定）
@@ -54,7 +68,10 @@ public struct ExecutionLog: Identifiable, Equatable, Sendable {
         exitCode: Int?,
         durationSeconds: Double?,
         logFilePath: String?,
-        errorMessage: String?
+        errorMessage: String?,
+        reportedProvider: String? = nil,
+        reportedModel: String? = nil,
+        modelVerified: Bool? = nil
     ) {
         self.id = id
         self.taskId = taskId
@@ -66,6 +83,9 @@ public struct ExecutionLog: Identifiable, Equatable, Sendable {
         self.durationSeconds = durationSeconds
         self.logFilePath = logFilePath
         self.errorMessage = errorMessage
+        self.reportedProvider = reportedProvider
+        self.reportedModel = reportedModel
+        self.modelVerified = modelVerified
     }
 
     /// 実行を完了としてマーク
@@ -88,5 +108,17 @@ public struct ExecutionLog: Identifiable, Equatable, Sendable {
     /// 実行完了後にCoordinatorがログファイルパスを登録する際に使用
     public mutating func setLogFilePath(_ path: String) {
         self.logFilePath = path
+    }
+
+    /// モデル情報を設定
+    /// report_model 呼び出し後にセッションからコピーする際に使用
+    public mutating func setModelInfo(
+        provider: String?,
+        model: String?,
+        verified: Bool?
+    ) {
+        self.reportedProvider = provider
+        self.reportedModel = model
+        self.modelVerified = verified
     }
 }

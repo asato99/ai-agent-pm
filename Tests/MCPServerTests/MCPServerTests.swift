@@ -688,3 +688,127 @@ extension MCPServerTests {
         XCTAssertTrue(error.description.contains("Invalid"))
     }
 }
+
+// MARK: - Model Verification Tool Tests
+
+/// モデル検証ツールのテスト
+final class ModelVerificationToolTests: XCTestCase {
+
+    // MARK: - Tool Definition Tests
+
+    /// report_model ツールが定義されていることを確認
+    func testReportModelToolDefinition() {
+        let tool = ToolDefinitions.reportModel
+
+        XCTAssertEqual(tool["name"] as? String, "report_model")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("session_token"), "report_model should require session_token")
+            XCTAssertTrue(required.contains("provider"), "report_model should require provider")
+            XCTAssertTrue(required.contains("model_id"), "report_model should require model_id")
+
+            if let properties = schema["properties"] as? [String: Any] {
+                XCTAssertNotNil(properties["session_token"], "Should have session_token property")
+                XCTAssertNotNil(properties["provider"], "Should have provider property")
+                XCTAssertNotNil(properties["model_id"], "Should have model_id property")
+            }
+        }
+    }
+
+    /// report_model ツールが全ツール一覧に含まれることを確認
+    func testReportModelToolInAllTools() {
+        let tools = ToolDefinitions.all()
+        let toolNames = tools.compactMap { $0["name"] as? String }
+
+        XCTAssertTrue(toolNames.contains("report_model"), "report_model should be in all tools")
+    }
+
+    /// get_next_action ツールが定義されていることを確認（モデル検証フローの一部）
+    func testGetNextActionToolDefinition() {
+        let tool = ToolDefinitions.getNextAction
+
+        XCTAssertEqual(tool["name"] as? String, "get_next_action")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("session_token"), "get_next_action should require session_token")
+        }
+    }
+
+    /// get_next_action ツールが全ツール一覧に含まれることを確認
+    func testGetNextActionToolInAllTools() {
+        let tools = ToolDefinitions.all()
+        let toolNames = tools.compactMap { $0["name"] as? String }
+
+        XCTAssertTrue(toolNames.contains("get_next_action"), "get_next_action should be in all tools")
+    }
+}
+
+// MARK: - ExecutionLog Model Verification Tests
+
+/// ExecutionLogのモデル検証フィールドテスト
+final class ExecutionLogModelVerificationTests: XCTestCase {
+
+    /// ExecutionLogにモデル検証フィールドが存在することを確認
+    func testExecutionLogHasModelVerificationFields() {
+        let log = ExecutionLog(
+            taskId: TaskID(value: "task-123"),
+            agentId: AgentID(value: "agent-456"),
+            reportedProvider: "claude",
+            reportedModel: "claude-opus-4-20250514",
+            modelVerified: true
+        )
+
+        XCTAssertEqual(log.reportedProvider, "claude")
+        XCTAssertEqual(log.reportedModel, "claude-opus-4-20250514")
+        XCTAssertEqual(log.modelVerified, true)
+    }
+
+    /// ExecutionLogのsetModelInfoメソッドが正しく動作することを確認
+    func testExecutionLogSetModelInfo() {
+        var log = ExecutionLog(
+            taskId: TaskID(value: "task-123"),
+            agentId: AgentID(value: "agent-456")
+        )
+
+        // 初期状態ではnil
+        XCTAssertNil(log.reportedProvider)
+        XCTAssertNil(log.reportedModel)
+        XCTAssertNil(log.modelVerified)
+
+        // setModelInfoでモデル情報を設定
+        log.setModelInfo(provider: "gemini", model: "gemini-2.0-flash", verified: false)
+
+        XCTAssertEqual(log.reportedProvider, "gemini")
+        XCTAssertEqual(log.reportedModel, "gemini-2.0-flash")
+        XCTAssertEqual(log.modelVerified, false)
+    }
+
+    /// ExecutionLogの完全なイニシャライザでモデル検証フィールドが設定できることを確認
+    func testExecutionLogFullInitializerWithModelFields() {
+        let log = ExecutionLog(
+            id: ExecutionLogID(value: "log-789"),
+            taskId: TaskID(value: "task-123"),
+            agentId: AgentID(value: "agent-456"),
+            status: .completed,
+            startedAt: Date(),
+            completedAt: Date(),
+            exitCode: 0,
+            durationSeconds: 120.5,
+            logFilePath: "/tmp/log.txt",
+            errorMessage: nil,
+            reportedProvider: "openai",
+            reportedModel: "gpt-4o",
+            modelVerified: nil  // 未検証
+        )
+
+        XCTAssertEqual(log.reportedProvider, "openai")
+        XCTAssertEqual(log.reportedModel, "gpt-4o")
+        XCTAssertNil(log.modelVerified)
+    }
+}

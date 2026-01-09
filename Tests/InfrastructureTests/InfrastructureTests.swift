@@ -1336,7 +1336,9 @@ final class InfrastructureTests: XCTestCase {
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         try agentRepo.save(agent)
 
-        let session = AgentSession(agentId: agent.id)
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
+        let session = AgentSession(agentId: agent.id, projectId: project.id)
         try agentSessionRepo.save(session)
 
         let found = try agentSessionRepo.findByToken(session.token)
@@ -1349,9 +1351,12 @@ final class InfrastructureTests: XCTestCase {
         // 期限切れセッションはnilを返す
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         try agentRepo.save(agent)
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
 
         let expiredSession = AgentSession(
             agentId: agent.id,
+            projectId: project.id,
             expiresAt: Date().addingTimeInterval(-100) // 100秒前に期限切れ
         )
         try agentSessionRepo.save(expiredSession)
@@ -1364,9 +1369,11 @@ final class InfrastructureTests: XCTestCase {
         // エージェントID別のセッション取得
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         try agentRepo.save(agent)
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
 
-        let session1 = AgentSession(agentId: agent.id)
-        let session2 = AgentSession(agentId: agent.id)
+        let session1 = AgentSession(agentId: agent.id, projectId: project.id)
+        let session2 = AgentSession(agentId: agent.id, projectId: project.id)
         try agentSessionRepo.save(session1)
         try agentSessionRepo.save(session2)
 
@@ -1378,12 +1385,15 @@ final class InfrastructureTests: XCTestCase {
         // 期限切れセッションの一括削除
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         try agentRepo.save(agent)
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
 
         let expiredSession = AgentSession(
             agentId: agent.id,
+            projectId: project.id,
             expiresAt: Date().addingTimeInterval(-100)
         )
-        let validSession = AgentSession(agentId: agent.id)
+        let validSession = AgentSession(agentId: agent.id, projectId: project.id)
         try agentSessionRepo.save(expiredSession)
         try agentSessionRepo.save(validSession)
 
@@ -1400,9 +1410,11 @@ final class InfrastructureTests: XCTestCase {
         // エージェント別のセッション一括削除
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         try agentRepo.save(agent)
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
 
-        let session1 = AgentSession(agentId: agent.id)
-        let session2 = AgentSession(agentId: agent.id)
+        let session1 = AgentSession(agentId: agent.id, projectId: project.id)
+        let session2 = AgentSession(agentId: agent.id, projectId: project.id)
         try agentSessionRepo.save(session1)
         try agentSessionRepo.save(session2)
 
@@ -1416,8 +1428,10 @@ final class InfrastructureTests: XCTestCase {
         // エージェント削除時のカスケード削除
         let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
         try agentRepo.save(agent)
+        let project = Project(id: ProjectID.generate(), name: "Test Project")
+        try projectRepo.save(project)
 
-        let session = AgentSession(agentId: agent.id)
+        let session = AgentSession(agentId: agent.id, projectId: project.id)
         try agentSessionRepo.save(session)
 
         // エージェント削除

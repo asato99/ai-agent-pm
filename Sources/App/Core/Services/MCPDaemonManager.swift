@@ -5,6 +5,29 @@
 import Foundation
 import Infrastructure
 
+// MARK: - Debug Logging for XCUITest (NSLog doesn't work in XCUITest)
+private func debugLog(_ message: String) {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let logMessage = "[\(timestamp)] [MCPDaemonManager] \(message)\n"
+
+    // Log to NSLog for non-test environment
+    NSLog("[MCPDaemonManager] %@", message)
+
+    // Also write to file for XCUITest
+    let logFile = "/tmp/aiagentpm_debug.log"
+    if let data = logMessage.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: logFile) {
+            if let handle = FileHandle(forWritingAtPath: logFile) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        } else {
+            FileManager.default.createFile(atPath: logFile, contents: data, attributes: nil)
+        }
+    }
+}
+
 /// Daemon running status
 public enum DaemonStatus: Equatable {
     case stopped
@@ -94,6 +117,7 @@ public final class MCPDaemonManager: ObservableObject {
     private var executablePath: String {
         // First check if bundled with the app
         if let bundledPath = Bundle.main.path(forResource: "mcp-server-pm", ofType: nil) {
+            debugLog(" Found bundled executable: \(bundledPath)")
             return bundledPath
         }
 
@@ -103,12 +127,15 @@ public final class MCPDaemonManager: ObservableObject {
                 .deletingLastPathComponent()
                 .appendingPathComponent("mcp-server-pm")
                 .path
+            debugLog(" Checking dev path: \(devPath)")
             if FileManager.default.fileExists(atPath: devPath) {
+                debugLog(" Found executable at dev path")
                 return devPath
             }
         }
 
         // Fallback: Use swift build output (for development)
+        // Note: #file is resolved at compile time, so this path points to the original source location
         // Path: Sources/App/Core/Services/MCPDaemonManager.swift
         let projectRoot = URL(fileURLWithPath: #file)
             .deletingLastPathComponent()  // MCPDaemonManager.swift → Services
@@ -117,21 +144,26 @@ public final class MCPDaemonManager: ObservableObject {
             .deletingLastPathComponent()  // App → Sources
             .deletingLastPathComponent()  // Sources → project root
         let buildPath = projectRoot.appendingPathComponent(".build/debug/mcp-server-pm").path
+        debugLog(" Checking swift build path: \(buildPath)")
         if FileManager.default.fileExists(atPath: buildPath) {
+            debugLog(" Found executable at swift build path")
             return buildPath
         }
 
         // Final fallback
+        debugLog(" No executable found, using fallback: /usr/local/bin/mcp-server-pm")
         return "/usr/local/bin/mcp-server-pm"
     }
 
     // MARK: - Initialization
 
     public init() {
+        debugLog("init() called, UITesting: \(CommandLine.arguments.contains("-UITesting"))")
         // Skip timers during UI testing to avoid interfering with XCUITest accessibility queries
         self.skipTimers = CommandLine.arguments.contains("-UITesting")
         // Check if daemon is already running (from previous session or external start)
         checkExistingDaemon()
+        debugLog("init() completed, status: \(status)")
     }
 
     // MARK: - Public Methods
@@ -146,10 +178,14 @@ public final class MCPDaemonManager: ObservableObject {
     ///   the daemon uses the same sandboxed database as the app.
     /// - Throws: DaemonError if startup fails
     public func start(databasePath: String? = nil) async throws {
+        debugLog(" start() called, current status: \(status), databasePath: \(databasePath ?? "nil")")
+
         guard status == .stopped || status.isError else {
             if status == .running {
+                debugLog(" start() - already running, throwing error")
                 throw DaemonError.alreadyRunning
             }
+            debugLog(" start() - status is \(status), returning early")
             return
         }
 
@@ -161,17 +197,23 @@ public final class MCPDaemonManager: ObservableObject {
                 at: AppConfig.appSupportDirectory,
                 withIntermediateDirectories: true
             )
+            debugLog(" App support directory ensured: \(AppConfig.appSupportDirectory.path)")
 
             // Clean up stale socket if exists
             if FileManager.default.fileExists(atPath: socketPath) {
                 try FileManager.default.removeItem(atPath: socketPath)
+                debugLog(" Removed stale socket at: \(socketPath)")
             }
 
             // Verify executable exists
-            guard FileManager.default.fileExists(atPath: executablePath) else {
+            let execPath = executablePath  // Force evaluation and logging
+            debugLog(" Executable path resolved to: \(execPath)")
+            guard FileManager.default.fileExists(atPath: execPath) else {
+                debugLog(" ERROR: Executable not found at \(execPath)")
                 status = .error("Executable not found")
                 throw DaemonError.executableNotFound
             }
+            debugLog(" Executable found at: \(execPath)")
 
             // Launch daemon process (without --foreground so it forks and survives app termination)
             let process = Process()
@@ -188,7 +230,7 @@ public final class MCPDaemonManager: ObservableObject {
             var environment = ProcessInfo.processInfo.environment
             if let databasePath = databasePath {
                 environment["AIAGENTPM_DB_PATH"] = databasePath
-                NSLog("[MCPDaemonManager] Setting AIAGENTPM_DB_PATH=\(databasePath)")
+                debugLog(" Setting AIAGENTPM_DB_PATH=\(databasePath)")
             }
             process.environment = environment
 
@@ -209,7 +251,7 @@ public final class MCPDaemonManager: ObservableObject {
                 startLogMonitor()
             }
 
-            NSLog("[MCPDaemonManager] Daemon started successfully (PID: \(process.processIdentifier), skipTimers: \(skipTimers))")
+            debugLog(" Daemon started successfully (PID: \(process.processIdentifier), skipTimers: \(skipTimers))")
 
         } catch let error as DaemonError {
             status = .error(error.localizedDescription)
@@ -237,7 +279,7 @@ public final class MCPDaemonManager: ObservableObject {
         if let pidString = try? String(contentsOfFile: pidPath, encoding: .utf8),
            let pid = Int32(pidString.trimmingCharacters(in: .whitespacesAndNewlines)) {
             kill(pid, SIGTERM)
-            NSLog("[MCPDaemonManager] Sent SIGTERM to PID \(pid)")
+            debugLog(" Sent SIGTERM to PID \(pid)")
         }
 
         // Also terminate our managed process if we have one
@@ -260,7 +302,7 @@ public final class MCPDaemonManager: ObservableObject {
         uptime = 0
         status = .stopped
 
-        NSLog("[MCPDaemonManager] Daemon stopped")
+        debugLog(" Daemon stopped")
     }
 
     /// Restart the daemon
@@ -283,13 +325,17 @@ public final class MCPDaemonManager: ObservableObject {
 
     /// Check if daemon is already running from a previous session
     private func checkExistingDaemon() {
+        debugLog(" checkExistingDaemon called, pidPath: \(pidPath)")
+
         // Check if PID file exists and process is running
         guard FileManager.default.fileExists(atPath: pidPath),
               let pidString = try? String(contentsOfFile: pidPath, encoding: .utf8),
               let pid = Int32(pidString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            debugLog(" No valid PID file found, status = stopped")
             status = .stopped
             return
         }
+        debugLog(" Found PID file with PID: \(pid)")
 
         // Check if process exists (signal 0 doesn't kill, just checks)
         if kill(pid, 0) == 0 {
@@ -304,10 +350,10 @@ public final class MCPDaemonManager: ObservableObject {
                     startUptimeTimer()
                     startLogMonitor()
                 }
-                NSLog("[MCPDaemonManager] Found existing daemon (PID: \(pid), skipTimers: \(skipTimers))")
+                debugLog(" Found existing daemon (PID: \(pid), skipTimers: \(skipTimers))")
             } else {
                 // Process running but socket missing - daemon is broken, kill it
-                NSLog("[MCPDaemonManager] Daemon process exists (PID: \(pid)) but socket missing - terminating broken daemon")
+                debugLog(" Daemon process exists (PID: \(pid)) but socket missing - terminating broken daemon")
                 kill(pid, SIGTERM)
                 // Wait briefly for process to die
                 usleep(500_000)  // 500ms
@@ -320,7 +366,7 @@ public final class MCPDaemonManager: ObservableObject {
             try? FileManager.default.removeItem(atPath: pidPath)
             try? FileManager.default.removeItem(atPath: socketPath)
             status = .stopped
-            NSLog("[MCPDaemonManager] Cleaned up stale PID file")
+            debugLog(" Cleaned up stale PID file")
         }
     }
 

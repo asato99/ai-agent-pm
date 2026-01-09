@@ -543,6 +543,34 @@ public final class DatabaseSetup {
             try db.create(indexOn: "agent_sessions", columns: ["agent_id", "project_id"])
         }
 
+        // v20: モデル検証フィールド追加（AgentSession）
+        // Agent Instanceが申告したモデルをApp側で検証するための情報を保存
+        migrator.registerMigration("v20_model_verification") { db in
+            try db.alter(table: "agent_sessions") { t in
+                // Agent Instanceが申告したプロバイダー（claude, gemini, openai, custom）
+                t.add(column: "reported_provider", .text)
+                // Agent Instanceが申告したモデルID
+                t.add(column: "reported_model", .text)
+                // モデル検証結果（nil=未検証, true=一致, false=不一致）
+                t.add(column: "model_verified", .boolean)
+                // モデル検証日時
+                t.add(column: "model_verified_at", .datetime)
+            }
+        }
+
+        // v21: モデル検証フィールド追加（ExecutionLog）
+        // タスク実行ごとにどのモデルが使用されたかを記録
+        migrator.registerMigration("v21_execution_log_model_info") { db in
+            try db.alter(table: "execution_logs") { t in
+                // Agent Instanceが申告したプロバイダー
+                t.add(column: "reported_provider", .text)
+                // Agent Instanceが申告したモデルID
+                t.add(column: "reported_model", .text)
+                // モデル検証結果
+                t.add(column: "model_verified", .boolean)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

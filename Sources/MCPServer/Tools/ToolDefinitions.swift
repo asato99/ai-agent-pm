@@ -21,6 +21,7 @@ enum ToolDefinitions {
             authenticate,  // instruction追加
             getMyTask,
             getNextAction,  // 状態駆動ワークフロー制御
+            reportModel,    // モデル申告
             reportCompleted,
 
             // Agent
@@ -44,7 +45,8 @@ enum ToolDefinitions {
             reportExecutionComplete,
 
             // Phase 4: Coordinator用（認証不要）
-            registerExecutionLogFile
+            registerExecutionLogFile,
+            invalidateSession
 
             // 以下のツールはPhase 4で未使用のため除外:
             // - getTask: get_my_task + get_next_action で代替
@@ -199,7 +201,7 @@ enum ToolDefinitions {
     /// Agent Instanceが定期的に呼び出し、現在の状態に応じた指示を取得
     static let getNextAction: [String: Any] = [
         "name": "get_next_action",
-        "description": "次に実行すべきアクションを取得します。Agent Instanceは作業ループ内で定期的にこのツールを呼び出し、返された指示に従ってください。状態に応じて適切な次のステップ（タスク取得、サブタスク作成、サブタスク実行、完了報告など）が指示されます。",
+        "description": "次に実行すべきアクションを取得します。Agent Instanceは作業ループ内で定期的にこのツールを呼び出し、返された指示に従ってください。状態に応じて適切な次のステップ（モデル申告、タスク取得、サブタスク作成、サブタスク実行、完了報告など）が指示されます。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -209,6 +211,32 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token"]
+        ]
+    ]
+
+    /// report_model - 使用中のモデル情報を申告
+    /// Agent Instanceが自身のプロバイダーとモデルIDを申告するために使用
+    /// App側で期待モデルとの照合を行い、検証結果をセッションに記録
+    static let reportModel: [String: Any] = [
+        "name": "report_model",
+        "description": "Agent Instanceが使用中のプロバイダーとモデルIDを申告します。Appは申告内容をエージェント設定と照合し、検証結果をセッションに記録します。get_next_actionで'report_model'アクションが指示された場合に呼び出してください。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "provider": [
+                    "type": "string",
+                    "description": "使用中のプロバイダー名（claude, gemini, openai, custom など）"
+                ],
+                "model_id": [
+                    "type": "string",
+                    "description": "使用中のモデルID（例: claude-opus-4-20250514, gpt-4o など）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "provider", "model_id"]
         ]
     ]
 
@@ -677,6 +705,28 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["agent_id", "task_id", "log_file_path"]
+        ]
+    ]
+
+    /// invalidate_session - セッションを無効化
+    /// Coordinatorがエージェントプロセス終了時に呼び出します。
+    /// 認証不要（Coordinator用API）。
+    static let invalidateSession: [String: Any] = [
+        "name": "invalidate_session",
+        "description": "指定されたエージェント・プロジェクトのセッションを無効化します。Coordinatorがエージェントプロセス終了時に呼び出します。認証不要。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID"
+                ],
+                "project_id": [
+                    "type": "string",
+                    "description": "プロジェクトID"
+                ]
+            ] as [String: Any],
+            "required": ["agent_id", "project_id"]
         ]
     ]
 }

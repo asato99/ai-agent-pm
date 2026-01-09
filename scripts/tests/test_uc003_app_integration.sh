@@ -69,7 +69,9 @@ cleanup() {
     fi
 }
 
-trap cleanup EXIT
+# Keep logs on test failure (pass --keep when cleanup is called on exit)
+TEST_FAILED=false
+trap 'if [ "$TEST_FAILED" = "true" ]; then cleanup --keep; else cleanup; fi' EXIT
 
 echo "=========================================="
 echo -e "${BLUE}UC003 App Integration Test${NC}"
@@ -165,13 +167,15 @@ max_concurrent: 3
 mcp_socket_path: $HOME/Library/Application Support/AIAgentPM/mcp.sock
 
 # AI providers - how to launch each AI type
+# Note: max-turns set for typical workflow
+# (authenticate → report_model → get_task → create_subtasks → execute → complete)
 ai_providers:
   claude:
     cli_command: claude
     cli_args:
       - "--dangerously-skip-permissions"
       - "--max-turns"
-      - "20"
+      - "50"
 
 # Agents - passkey for authentication
 agents:
@@ -230,6 +234,7 @@ else
     echo ""
     echo "Coordinator log (last 30 lines):"
     tail -30 /tmp/uc003_coordinator.log 2>/dev/null || echo "(no log)"
+    TEST_FAILED=true
     exit 1
 fi
 echo ""
@@ -237,8 +242,8 @@ echo ""
 # Step 7: 結果検証
 echo -e "${YELLOW}Step 7: Verifying outputs${NC}"
 
-SONNET_OUTPUT="$WORK_DIR/SONNET_OUTPUT.md"
-OPUS_OUTPUT="$WORK_DIR/OPUS_OUTPUT.md"
+SONNET_OUTPUT="$WORK_DIR/OUTPUT_1.md"
+OPUS_OUTPUT="$WORK_DIR/OUTPUT_2.md"
 
 SONNET_CHARS=0
 OPUS_CHARS=0

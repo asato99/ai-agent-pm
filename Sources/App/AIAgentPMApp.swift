@@ -6,14 +6,37 @@ import AppKit
 import Domain
 import Infrastructure
 
+// MARK: - Debug Logging for XCUITest
+private func appDebugLog(_ message: String) {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let logMessage = "[\(timestamp)] [AppDelegate] \(message)\n"
+    NSLog("[AppDelegate] %@", message)
+
+    let logFile = "/tmp/aiagentpm_debug.log"
+    if let data = logMessage.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: logFile) {
+            if let handle = FileHandle(forWritingAtPath: logFile) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        } else {
+            FileManager.default.createFile(atPath: logFile, contents: data, attributes: nil)
+        }
+    }
+}
+
 /// AppDelegate for proper window management in macOS
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        appDebugLog("applicationDidFinishLaunching called")
+
         // Ensure app is active and windows are visible
         NSApplication.shared.activate(ignoringOtherApps: true)
 
         // Force window to front for UI testing
         if CommandLine.arguments.contains("-UITesting") {
+            appDebugLog("UITesting mode detected")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
             }
@@ -23,15 +46,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Passes database path to daemon via AIAGENTPM_DB_PATH environment variable
         // This ensures the daemon uses the same database as the app (especially during UITest)
         _Concurrency.Task { @MainActor in
+            appDebugLog("Starting MCP daemon task")
             guard let container = DependencyContainer.shared else {
-                NSLog("[AppDelegate] DependencyContainer.shared is nil, cannot start daemon")
+                appDebugLog("DependencyContainer.shared is nil, cannot start daemon")
                 return
             }
+            appDebugLog("Container found, databasePath: \(container.databasePath)")
             do {
                 try await container.mcpDaemonManager.start(databasePath: container.databasePath)
-                NSLog("[AppDelegate] MCP daemon started successfully")
+                appDebugLog("MCP daemon started successfully")
             } catch {
-                NSLog("[AppDelegate] Failed to start MCP daemon: \(error)")
+                appDebugLog("Failed to start MCP daemon: \(error)")
             }
         }
     }
@@ -939,7 +964,7 @@ private final class TestDataSeeder {
             parentAgentId: nil,
             maxParallelTasks: 1,
             capabilities: ["TypeScript", "Python"],
-            systemPrompt: "Claude Sonnet 4.5モデルで動作するエージェントです。",
+            systemPrompt: "あなたは開発タスクを実行するAIエージェントです。指示されたファイルを作成してください。",
             kickMethod: .cli,
             kickCommand: nil,  // kickCommand未設定 → aiTypeが使われる
             status: .active,
@@ -961,15 +986,15 @@ private final class TestDataSeeder {
             parentAgentId: nil,
             maxParallelTasks: 1,
             capabilities: ["TypeScript", "Python"],
-            systemPrompt: "Claude Opus 4モデルで動作するエージェントです。カスタムkickCommandが設定されています。",
+            systemPrompt: "あなたは開発タスクを実行するAIエージェントです。指示されたファイルを作成してください。",
             kickMethod: .cli,
-            kickCommand: "claude --model opus",  // kickCommandが優先される
+            kickCommand: "claude --model opus --dangerously-skip-permissions --max-turns 80",  // kickCommandが優先される
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
         )
         try await agentRepository.save(opusAgent)
-        print("✅ UC003: Opus agent created - \(opusAgent.name) (aiType=claudeOpus4, kickCommand='claude --model opus')")
+        print("✅ UC003: Opus agent created - \(opusAgent.name) (aiType=claudeOpus4, kickCommand includes --max-turns 50)")
 
         // Runner認証用クレデンシャル
         if let credentialRepository = credentialRepository {
@@ -1001,9 +1026,8 @@ private final class TestDataSeeder {
             title: "Sonnet Task",
             description: """
                 【タスク指示】
-                ファイル名: SONNET_OUTPUT.md
-                内容: Claude Sonnet 4.5エージェントによる出力を作成してください。
-                aiTypeがclaude-sonnet-4-5であることを確認できる内容を含めてください。
+                OUTPUT_1.md というファイルを作成してください。
+                内容は「タスク完了」という文字列を含めてください。
                 """,
             status: .backlog,
             priority: .high,
@@ -1021,9 +1045,8 @@ private final class TestDataSeeder {
             title: "Opus Task",
             description: """
                 【タスク指示】
-                ファイル名: OPUS_OUTPUT.md
-                内容: Claude Opus 4エージェントによる出力を作成してください。
-                kickCommandが優先されることを確認できる内容を含めてください。
+                OUTPUT_2.md というファイルを作成してください。
+                内容は「タスク完了」という文字列を含めてください。
                 """,
             status: .backlog,
             priority: .high,
