@@ -36,3 +36,12 @@ data/*.db-wal
 dist/
 *.xcodeproj/
 DerivedData/
+
+# AI/IDE tools
+.gemini/
+.cursor/
+
+# Secrets (should be stored securely, not in repo)
+PyPI-Recovery-Codes*
+*-Recovery-Codes*
+.pypirc
