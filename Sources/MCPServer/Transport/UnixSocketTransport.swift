@@ -104,8 +104,10 @@ final class UnixSocketServer {
 
             log("Client connected")
 
-            // クライアント処理（同期的に1つずつ）
-            handleClient(socket: clientSocket)
+            // クライアント処理（並行処理 - 複数接続を同時に処理可能）
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.handleClient(socket: clientSocket)
+            }
         }
 
         cleanup()
