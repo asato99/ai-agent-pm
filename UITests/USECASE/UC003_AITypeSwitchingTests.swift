@@ -350,13 +350,39 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
     ///
     /// Note: 位置ベースの確認は ScrollView の状態に依存して不安定なため、
     /// タスク詳細画面を開いてステータスを直接確認する方式に変更。
+    /// Doneカラムは右端にあるためスクロールが必要な場合がある。
     private func checkTaskStatusIsDone(taskId: String, taskTitle: String) throws -> Bool {
         let taskCardId = "TaskCard_\(taskId)"
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
 
-        // タスクカードを検索
-        let taskCard = app.descendants(matching: .any).matching(identifier: taskCardId).firstMatch
-        guard taskCard.exists else {
-            print("  ⚠️ Task card \(taskCardId) not found")
+        // まず左端にスクロールリセット
+        if taskBoard.exists {
+            for _ in 0..<3 {
+                taskBoard.swipeRight()
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+
+        // タスクカードを検索（スクロールして探す）
+        var taskCard = app.descendants(matching: .any).matching(identifier: taskCardId).firstMatch
+
+        // タスクカードが見つからない、または画面外にある場合はスクロールして探す
+        if !taskCard.exists || !taskCard.isHittable {
+            if taskBoard.exists {
+                // Doneカラム（右端）に向かってスクロール
+                for _ in 0..<4 {
+                    taskBoard.swipeLeft()
+                    Thread.sleep(forTimeInterval: 0.3)
+                    taskCard = app.descendants(matching: .any).matching(identifier: taskCardId).firstMatch
+                    if taskCard.exists && taskCard.isHittable {
+                        break
+                    }
+                }
+            }
+        }
+
+        guard taskCard.exists && taskCard.isHittable else {
+            print("  ⚠️ Task card \(taskCardId) not found or not hittable")
             return false
         }
 
