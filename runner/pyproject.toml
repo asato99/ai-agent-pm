@@ -4,13 +4,25 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aiagent-runner"
-version = "0.1.0"
+version = "0.1.1"
 description = "Runner for AI Agent PM - executes tasks via MCP and CLI"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 license = "MIT"
 authors = [
     { name = "AI Agent PM Team" }
+]
+keywords = ["ai", "agent", "mcp", "automation", "task-management", "orchestration"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "pyyaml>=6.0",
