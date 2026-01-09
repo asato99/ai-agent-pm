@@ -156,15 +156,13 @@ echo "    - agt_uc003_opus: aiType=claudeOpus4, kickCommand='claude --model opus
 echo ""
 
 # Coordinator設定（2エージェントのpasskeyを管理）
-MCP_SERVER_COMMAND="$PROJECT_ROOT/.build/debug/mcp-server-pm"
 cat > /tmp/coordinator_uc003_config.yaml << EOF
 # Phase 4 Coordinator Configuration for UC003
 polling_interval: 2
 max_concurrent: 3
 
-# MCP server configuration (for Agent Instances via stdio transport)
-mcp_server_command: $MCP_SERVER_COMMAND
-mcp_database_path: $SHARED_DB_PATH
+# MCP socket path (Coordinator and Agent Instances connect to the SAME daemon)
+mcp_socket_path: $HOME/Library/Application Support/AIAgentPM/mcp.sock
 
 # AI providers - how to launch each AI type
 ai_providers:
@@ -211,7 +209,7 @@ echo "    1. Launch app with -UITesting -UITestScenario:UC003"
 echo "    2. App auto-starts MCP daemon (Coordinator will connect)"
 echo "    3. Seed test data (2 agents with different aiType/kickCommand)"
 echo "    4. Change both task statuses: backlog → todo → in_progress via UI"
-echo "    5. Wait for Coordinator to spawn Agent Instances and create files (max 180s)"
+echo "    5. Wait for Coordinator to spawn Agent Instances and create files (max 60s)"
 echo ""
 
 cd "$PROJECT_ROOT"
@@ -266,6 +264,55 @@ else
 fi
 echo ""
 
+# Step 8: モデル検証（execution_logsテーブルのmodel_verified確認）
+echo -e "${YELLOW}Step 8: Verifying model information in execution_logs${NC}"
+
+MODEL_VERIFICATION_PASSED=true
+
+# Sonnetエージェントのモデル検証
+SONNET_MODEL_INFO=$(sqlite3 "$SHARED_DB_PATH" "SELECT reported_provider, reported_model, model_verified FROM execution_logs WHERE agent_id='agt_uc003_sonnet' ORDER BY started_at DESC LIMIT 1;" 2>/dev/null || echo "")
+if [ -n "$SONNET_MODEL_INFO" ]; then
+    SONNET_PROVIDER=$(echo "$SONNET_MODEL_INFO" | cut -d'|' -f1)
+    SONNET_MODEL=$(echo "$SONNET_MODEL_INFO" | cut -d'|' -f2)
+    SONNET_VERIFIED=$(echo "$SONNET_MODEL_INFO" | cut -d'|' -f3)
+
+    echo "Sonnet Agent model info:"
+    echo "  - Provider: $SONNET_PROVIDER"
+    echo "  - Model: $SONNET_MODEL"
+    echo "  - Verified: $SONNET_VERIFIED"
+
+    if [ "$SONNET_PROVIDER" == "claude" ] && [ -n "$SONNET_MODEL" ]; then
+        echo -e "${GREEN}✓ Sonnet agent model info recorded${NC}"
+    else
+        echo -e "${YELLOW}⚠ Sonnet agent model info incomplete (provider: $SONNET_PROVIDER, model: $SONNET_MODEL)${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ No execution log found for Sonnet agent (model verification not recorded)${NC}"
+    # モデル検証はオプショナル（Runner側の実装に依存）なのでFAILにはしない
+fi
+
+# Opusエージェントのモデル検証
+OPUS_MODEL_INFO=$(sqlite3 "$SHARED_DB_PATH" "SELECT reported_provider, reported_model, model_verified FROM execution_logs WHERE agent_id='agt_uc003_opus' ORDER BY started_at DESC LIMIT 1;" 2>/dev/null || echo "")
+if [ -n "$OPUS_MODEL_INFO" ]; then
+    OPUS_PROVIDER=$(echo "$OPUS_MODEL_INFO" | cut -d'|' -f1)
+    OPUS_MODEL=$(echo "$OPUS_MODEL_INFO" | cut -d'|' -f2)
+    OPUS_VERIFIED=$(echo "$OPUS_MODEL_INFO" | cut -d'|' -f3)
+
+    echo "Opus Agent model info:"
+    echo "  - Provider: $OPUS_PROVIDER"
+    echo "  - Model: $OPUS_MODEL"
+    echo "  - Verified: $OPUS_VERIFIED"
+
+    if [ "$OPUS_PROVIDER" == "claude" ] && [ -n "$OPUS_MODEL" ]; then
+        echo -e "${GREEN}✓ Opus agent model info recorded${NC}"
+    else
+        echo -e "${YELLOW}⚠ Opus agent model info incomplete (provider: $OPUS_PROVIDER, model: $OPUS_MODEL)${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ No execution log found for Opus agent (model verification not recorded)${NC}"
+fi
+echo ""
+
 # Coordinator ログ表示
 echo -e "${YELLOW}Coordinator log (last 30 lines):${NC}"
 tail -30 /tmp/uc003_coordinator.log 2>/dev/null || echo "(no log)"
@@ -292,6 +339,18 @@ if [ "$SONNET_CREATED" == "true" ] && [ "$OPUS_CREATED" == "true" ]; then
     echo "  - Sonnet Agent (aiType=claudeSonnet4_5, kickCommand=nil): $SONNET_CHARS chars"
     echo "  - Opus Agent (aiType=claudeOpus4, kickCommand='claude --model opus'): $OPUS_CHARS chars"
     echo "  - kickCommand takes precedence when set"
+    echo ""
+    echo "Model Verification (report_model tool):"
+    if [ -n "$SONNET_MODEL_INFO" ]; then
+        echo "  - Sonnet: provider=$SONNET_PROVIDER, model=$SONNET_MODEL, verified=$SONNET_VERIFIED"
+    else
+        echo "  - Sonnet: (no model info recorded)"
+    fi
+    if [ -n "$OPUS_MODEL_INFO" ]; then
+        echo "  - Opus: provider=$OPUS_PROVIDER, model=$OPUS_MODEL, verified=$OPUS_VERIFIED"
+    else
+        echo "  - Opus: (no model info recorded)"
+    fi
     exit 0
 else
     echo -e "${RED}UC003 App Integration Test: FAILED${NC}"

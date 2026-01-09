@@ -154,9 +154,10 @@ class Coordinator:
                 f"working_dir={project.working_directory}"
             )
 
-        # Step 3: Clean up finished processes and register log file paths
+        # Step 3: Clean up finished processes, register log file paths, and invalidate sessions
         finished_instances = self._cleanup_finished()
         for key, info in finished_instances:
+            # Register log file path (if available)
             if info.task_id and info.log_file_path:
                 try:
                     success = await self.mcp_client.register_execution_log_file(
@@ -177,6 +178,25 @@ class Coordinator:
                     logger.error(
                         f"Error registering log file for {key.agent_id}/{key.project_id}: {e}"
                     )
+
+            # Invalidate session so shouldStart returns True for next instance
+            try:
+                success = await self.mcp_client.invalidate_session(
+                    agent_id=key.agent_id,
+                    project_id=key.project_id
+                )
+                if success:
+                    logger.info(
+                        f"Invalidated session for {key.agent_id}/{key.project_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"Failed to invalidate session for {key.agent_id}/{key.project_id}"
+                    )
+            except MCPError as e:
+                logger.error(
+                    f"Error invalidating session for {key.agent_id}/{key.project_id}: {e}"
+                )
 
         # Step 4: For each (agent_id, project_id), check if should start
         for project in projects:
@@ -309,36 +329,29 @@ class Coordinator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = self.log_directory / f"{agent_id}_{project_id}_{timestamp}.log"
 
-        # Build MCP config for Agent Instance (stdio transport)
-        # Each Claude instance spawns its own mcp-server-pm process
-        mcp_server_command = self.config.mcp_server_command
-        if not mcp_server_command:
-            # Default to looking for mcp-server-pm in PATH
-            mcp_server_command = "mcp-server-pm"
+        # Build MCP config for Agent Instance (Unix Socket transport)
+        # Agent Instance connects to the SAME MCP daemon that the app started
+        # This ensures all components share the same database and state
+        socket_path = self.config.mcp_socket_path
+        if not socket_path:
+            socket_path = os.path.expanduser(
+                "~/Library/Application Support/AIAgentPM/mcp.sock"
+            )
 
         mcp_config_dict = {
             "mcpServers": {
                 "agent-pm": {
-                    "command": mcp_server_command,
-                    "args": ["serve"],
-                    "env": {}
+                    "command": "nc",
+                    "args": ["-U", socket_path]
                 }
             }
         }
 
-        # Add database path to MCP server environment if configured
-        if self.config.mcp_database_path:
-            mcp_config_dict["mcpServers"]["agent-pm"]["env"]["AIAGENTPM_DB_PATH"] = \
-                self.config.mcp_database_path
-
         mcp_config = json.dumps(mcp_config_dict)
 
-        # Debug: Log the full MCP config to verify database path is included
+        # Debug: Log the MCP config
         logger.debug(f"MCP config: {mcp_config}")
-        if self.config.mcp_database_path:
-            logger.info(f"Using database path: {self.config.mcp_database_path}")
-        else:
-            logger.warning("No mcp_database_path configured - MCP server will use default database!")
+        logger.info(f"Agent Instance will connect via Unix Socket: {socket_path}")
 
         # Build command with MCP config
         cmd = [
@@ -353,7 +366,6 @@ class Coordinator:
             f"Spawning {model_desc} instance for {agent_id}/{project_id} "
             f"at {working_dir}"
         )
-        logger.debug(f"MCP server command: {mcp_server_command}")
         logger.debug(f"Command: {' '.join(cmd[:5])}...")
 
         # Ensure working directory exists

@@ -4,6 +4,44 @@
 
 ---
 
+## 🚨 致命的な設計違反警告 (2026-01-09)
+
+**現在の実装には致命的な設計違反があります。修正が必要です。**
+
+### 問題点
+
+Coordinator/Runnerは**純粋なMCPクライアント**であるべきですが、現在の実装は以下の不正な情報を保持しています：
+
+| 設定項目 | 問題 | 対応 |
+|---------|------|------|
+| `mcp_server_command` | サーバー起動コマンドを保持 | **削除必須** |
+| `mcp_database_path` | DBパス（内部実装詳細）を保持 | **削除必須** |
+
+### 設計原則
+
+```
+✅ 正しい設計: Coordinatorはソケット接続のみ行う純粋なクライアント
+❌ 現在の実装: Coordinatorがサーバー起動やDB接続情報を管理
+```
+
+### 影響
+
+- Agent Instanceごとに新しいMCPサーバーをstdio transportで起動
+- 複数のMCPサーバーが同じDBに同時アクセス → データ整合性の問題
+- テストと本番で異なるDB設定が必要 → 設定の複雑化
+
+### 正しいアーキテクチャ
+
+```
+[アプリ] → MCPデーモン起動（唯一のサーバー）
+[Coordinator] → Unix Socketで接続（クライアントのみ）
+[Agent Instance] → 同じUnix Socketで接続（クライアントのみ）
+```
+
+詳細は `docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md` の警告セクションを参照。
+
+---
+
 ## クイックスタート
 
 ```bash
@@ -44,10 +82,6 @@ python -m aiagent_runner --coordinator -c /path/to/config.yaml
 
 polling_interval: 10
 max_concurrent: 3
-
-# MCP server configuration (Agent Instance用)
-mcp_server_command: /path/to/mcp-server-pm
-mcp_database_path: /path/to/database.db
 
 # AI providers
 ai_providers:

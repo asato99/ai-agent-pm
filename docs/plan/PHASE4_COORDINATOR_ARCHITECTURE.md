@@ -4,6 +4,63 @@ Phase 3のRunner実装を発展させ、責務をより明確に分離したア�
 
 ---
 
+> ## 🚨 致命的な設計違反警告 (2026-01-09)
+>
+> **現在の実装には致命的な設計違反があります。**
+>
+> ### 問題点
+>
+> | 違反項目 | 問題の内容 | 正しい設計 |
+> |---------|-----------|-----------|
+> | `mcp_server_command` | Coordinatorがサーバー起動コマンドを保持 | クライアントは起動を知るべきでない |
+> | `mcp_database_path` | CoordinatorがDBパスを保持 | DBは内部実装詳細 |
+> | stdio transport | Agent Instanceごとに新しいMCPサーバーを起動 | 全員が同じデーモンに接続すべき |
+>
+> ### 設計原則違反
+>
+> **Coordinator/Runnerは「純粋なMCPクライアント」であるべき：**
+> - ❌ サーバーの起動/停止を制御してはならない
+> - ❌ DBパスなどの内部実装詳細を知ってはならない
+> - ✅ ソケットパスだけを知り、接続するだけ
+>
+> ### 現在のアーキテクチャ（問題あり）
+>
+> ```
+> [アプリ]
+> └─ MCPデーモン起動 (Unix Socket, DB=X)
+>
+> [Coordinator] ← 問題！
+> ├─ mcp_socket_path → ✓
+> ├─ mcp_server_command → ✗ 不要
+> ├─ mcp_database_path → ✗ 不要
+>
+> [Agent Instance]
+> └─ --mcp-config で新しいMCPサーバー(stdio)を起動 ← 致命的！
+>    └─ 2つの独立したサーバーが同じDBにアクセス
+> ```
+>
+> ### 正しいアーキテクチャ
+>
+> ```
+> [アプリ]
+> └─ MCPデーモン起動 (唯一のMCPサーバー)
+>
+> [Coordinator] (純粋なクライアント)
+> └─ mcp_socket_path のみ
+>
+> [Agent Instance]
+> └─ 同じUnix Socketに接続
+> ```
+>
+> ### 修正が必要なファイル
+>
+> - `runner/src/aiagent_runner/coordinator_config.py` - 不要な設定項目を削除
+> - `runner/src/aiagent_runner/coordinator.py` - stdio transport を Unix Socket に変更
+> - `scripts/tests/test_uc002_app_integration.sh` - 不要な設定を削除
+> - `scripts/tests/test_uc003_app_integration.sh` - 不要な設定を削除
+
+---
+
 > **⚠️ 重要: このドキュメントについて**
 >
 > このドキュメントは**将来のリファクタリング計画**です。

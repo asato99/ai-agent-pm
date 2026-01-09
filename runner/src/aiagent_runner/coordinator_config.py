@@ -39,12 +39,9 @@ class CoordinatorConfig:
     polling_interval: int = 10
     max_concurrent: int = 3
 
-    # MCP connection (Unix socket for Coordinator's own connection)
+    # MCP connection (Unix socket - used by both Coordinator and Agent Instances)
+    # All components connect to the SAME daemon started by the app
     mcp_socket_path: Optional[str] = None
-
-    # MCP server configuration (for Agent Instances via stdio transport)
-    mcp_server_command: Optional[str] = None  # Path to mcp-server-pm executable
-    mcp_database_path: Optional[str] = None   # Database path for MCP server
 
     # AI providers (how to launch each AI type)
     ai_providers: dict[str, AIProviderConfig] = field(default_factory=dict)
@@ -134,8 +131,6 @@ class CoordinatorConfig:
             polling_interval=data.get("polling_interval", 10),
             max_concurrent=data.get("max_concurrent", 3),
             mcp_socket_path=data.get("mcp_socket_path"),
-            mcp_server_command=data.get("mcp_server_command"),
-            mcp_database_path=data.get("mcp_database_path"),
             ai_providers=ai_providers,
             agents=agents,
             log_directory=data.get("log_directory"),
