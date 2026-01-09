@@ -163,15 +163,13 @@ echo "  Agent: agt_uc004_dev (passkey configured in Coordinator)"
 echo ""
 
 # Coordinator設定（単一ファイルで全agentのpasskeyを管理）
-MCP_SERVER_COMMAND="$PROJECT_ROOT/.build/debug/mcp-server-pm"
 cat > /tmp/coordinator_uc004_config.yaml << EOF
 # Phase 4 Coordinator Configuration
 polling_interval: 2
 max_concurrent: 3
 
-# MCP server configuration (for Agent Instances via stdio transport)
-mcp_server_command: $MCP_SERVER_COMMAND
-mcp_database_path: $SHARED_DB_PATH
+# MCP socket path (Coordinator and Agent Instances connect to the SAME daemon)
+mcp_socket_path: $HOME/Library/Application Support/AIAgentPM/mcp.sock
 
 # AI providers - how to launch each AI type
 ai_providers:
