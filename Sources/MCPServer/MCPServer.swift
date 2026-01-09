@@ -415,7 +415,16 @@ final class MCPServer {
         case "get_task_context":
             throw MCPError.unknownTool("get_task_context")
         case "assign_task":
-            throw MCPError.unknownTool("assign_task")
+            // Phase 4: タスク割り当て（マネージャー専用、下位エージェントのみ）
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            let assigneeId = arguments["assignee_id"] as? String  // 省略で割り当て解除
+            let session = try validateSession(token: sessionToken)
+            return try assignTask(taskId: taskId, assigneeId: assigneeId, callingAgentId: session.agentId.value)
         case "get_task":
             throw MCPError.unknownTool("get_task")
         case "create_handoff":
@@ -1828,12 +1837,17 @@ final class MCPServer {
 
             // 未割り当てのサブタスクがある → Worker に委譲
             if let nextSubTask = pendingSubTasks.first {
+                // 下位エージェント（Worker）を取得
+                let subordinates = try agentRepository.findByParent(mainTask.assigneeId!)
+                    .filter { $0.hierarchyType == .worker && $0.status == .active }
+
                 return [
                     "action": "delegate",
                     "instruction": """
                         次のサブタスクを Worker に割り当ててください。
-                        update_task_assignee または適切なツールを使用してください。
-                        割り当て後、get_next_action を呼び出してください。
+                        assign_task ツールを使用して、task_id と assignee_id を指定してください。
+                        割り当て後、update_task_status でサブタスクのステータスを in_progress に変更してください。
+                        その後、get_next_action を呼び出してください。
                         """,
                     "state": "needs_delegation",
                     "next_subtask": [
@@ -1841,6 +1855,12 @@ final class MCPServer {
                         "title": nextSubTask.title,
                         "description": nextSubTask.description
                     ],
+                    "available_workers": subordinates.map { [
+                        "id": $0.id.value,
+                        "name": $0.name,
+                        "role": $0.role,
+                        "status": $0.status.rawValue
+                    ] as [String: Any] },
                     "progress": [
                         "completed": completedSubTasks.count,
                         "total": subTasks.count
@@ -2158,6 +2178,71 @@ final class MCPServer {
                 "parent_task_id": parentTaskId as Any
             ],
             "instruction": "サブタスクが作成されました。update_task_statusでステータスをin_progressに変更してから作業を開始してください。"
+        ]
+    }
+
+    /// assign_task - タスクを指定のエージェントに割り当て
+    /// バリデーション:
+    /// 1. 呼び出し元がマネージャーであること
+    /// 2. 割り当て先が呼び出し元の下位エージェントであること（または割り当て解除）
+    private func assignTask(taskId: String, assigneeId: String?, callingAgentId: String) throws -> [String: Any] {
+        Self.log("[MCP] assignTask: taskId=\(taskId), assigneeId=\(assigneeId ?? "nil"), callingAgentId=\(callingAgentId)")
+
+        // 呼び出し元エージェントを取得
+        guard let callingAgent = try agentRepository.findById(AgentID(value: callingAgentId)) else {
+            throw MCPError.agentNotFound(callingAgentId)
+        }
+
+        // バリデーション1: 呼び出し元がマネージャーであること
+        guard callingAgent.hierarchyType == .manager else {
+            throw MCPError.permissionDenied("assign_task can only be called by manager agents")
+        }
+
+        // タスクを取得
+        guard var task = try taskRepository.findById(TaskID(value: taskId)) else {
+            throw MCPError.taskNotFound(taskId)
+        }
+
+        let previousAssigneeId = task.assigneeId?.value
+
+        // 割り当て解除の場合
+        if assigneeId == nil {
+            task.assigneeId = nil
+            task.updatedAt = Date()
+            try taskRepository.save(task)
+
+            Self.log("[MCP] assignTask: unassigned task \(taskId)")
+            return [
+                "success": true,
+                "message": "タスクの割り当てを解除しました",
+                "task_id": taskId,
+                "previous_assignee_id": previousAssigneeId as Any
+            ]
+        }
+
+        // 割り当て先エージェントを取得
+        guard let assignee = try agentRepository.findById(AgentID(value: assigneeId!)) else {
+            throw MCPError.agentNotFound(assigneeId!)
+        }
+
+        // バリデーション2: 割り当て先が呼び出し元の下位エージェントであること
+        guard assignee.parentAgentId == callingAgent.id else {
+            throw MCPError.permissionDenied("Can only assign tasks to subordinate agents (agents with parentAgentId = \(callingAgentId))")
+        }
+
+        // タスクを更新
+        task.assigneeId = AgentID(value: assigneeId!)
+        task.updatedAt = Date()
+        try taskRepository.save(task)
+
+        Self.log("[MCP] assignTask: assigned task \(taskId) to \(assigneeId!)")
+        return [
+            "success": true,
+            "message": "タスクを \(assignee.name) に割り当てました",
+            "task_id": taskId,
+            "assignee_id": assigneeId!,
+            "assignee_name": assignee.name,
+            "previous_assignee_id": previousAssigneeId as Any
         ]
     }
 
@@ -2810,6 +2895,7 @@ enum MCPError: Error, CustomStringConvertible {
     case sessionAgentMismatch(expected: String, actual: String)  // Phase 3-4: エージェントID不一致
     case agentNotAssignedToProject(agentId: String, projectId: String)  // Phase 4: エージェント未割り当て
     case taskAccessDenied(String)  // Phase 4: タスクアクセス権限なし
+    case permissionDenied(String)  // Phase 4: 権限エラー（マネージャー専用ツール等）
 
     var description: String {
         switch self {
@@ -2857,6 +2943,8 @@ enum MCPError: Error, CustomStringConvertible {
             return "Agent '\(agentId)' is not assigned to project '\(projectId)'. Assign the agent to the project first."
         case .taskAccessDenied(let taskId):
             return "Access denied: You don't have permission to modify task '\(taskId)'. Only the assignee or parent task assignee can modify this task."
+        case .permissionDenied(let message):
+            return "Permission denied: \(message)"
         }
     }
 }

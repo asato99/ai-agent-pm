@@ -39,6 +39,7 @@ enum ToolDefinitions {
             getPendingTasks,  // Phase 3-2: 作業中タスク取得（Phase 4で非推奨）
             createTask,
             updateTaskStatus,  // session_token必須
+            assignTask,  // Phase 4: マネージャー専用タスク割り当て
 
             // Execution Log (Phase 3-3, Phase 4で非推奨)
             reportExecutionStart,
@@ -50,7 +51,6 @@ enum ToolDefinitions {
 
             // 以下のツールはPhase 4で未使用のため除外:
             // - getTask: get_my_task + get_next_action で代替
-            // - assignTask: Manager機能未実装
             // - saveContext: ワークフロー状態で代替
             // - getTaskContext: 同上
             // - createHandoff, acceptHandoff, getPendingHandoffs: ハンドオフ機能未使用
@@ -457,23 +457,27 @@ enum ToolDefinitions {
         ]
     ]
 
-    /// assign_task - タスク割り当て
+    /// assign_task - タスク割り当て（マネージャー専用）
     static let assignTask: [String: Any] = [
         "name": "assign_task",
-        "description": "タスクを指定のエージェントに割り当てます。assignee_idを省略すると割り当て解除になります。",
+        "description": "タスクを指定のエージェントに割り当てます。マネージャーのみが呼び出し可能で、自身の下位エージェントにのみ割り当てできます。assignee_idを省略すると割り当て解除になります。",
         "inputSchema": [
             "type": "object",
             "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "セッショントークン（authenticate で取得）"
+                ],
                 "task_id": [
                     "type": "string",
-                    "description": "タスクID"
+                    "description": "割り当てるタスクのID"
                 ],
                 "assignee_id": [
                     "type": "string",
-                    "description": "担当者のエージェントID（省略で割り当て解除）"
+                    "description": "担当者のエージェントID（自身の下位エージェントのみ指定可能、省略で割り当て解除）"
                 ]
             ] as [String: Any],
-            "required": ["task_id"]
+            "required": ["session_token", "task_id"]
         ]
     ]
 

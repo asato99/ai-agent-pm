@@ -22,6 +22,7 @@ enum UITestScenario: String {
     case uc002 = "UC002"           // UC002: マルチエージェント協調（system_prompt差異検証）
     case uc003 = "UC003"           // UC003: AIタイプ切り替え（kickCommand検証）
     case uc004 = "UC004"           // UC004: 複数プロジェクト×同一エージェント
+    case uc005 = "UC005"           // UC005: マネージャー→ワーカー委任
 }
 
 // MARK: - Base Test Class
@@ -156,4 +157,9 @@ class UC003UITestCase: AIAgentPMUITestCase {
 /// UC004テスト用ベースクラス（複数プロジェクト×同一エージェントテスト用）
 class UC004UITestCase: AIAgentPMUITestCase {
     override var testScenario: UITestScenario { .uc004 }
+}
+
+/// UC005テスト用ベースクラス（マネージャー→ワーカー委任テスト用）
+class UC005UITestCase: AIAgentPMUITestCase {
+    override var testScenario: UITestScenario { .uc005 }
 }
