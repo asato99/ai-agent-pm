@@ -1,0 +1,28 @@
+# AI Agent PM Coordinator - Default Configuration
+# このファイルはデフォルト設定を定義します
+# テスト時は -c オプションで上書き可能
+
+# Polling settings
+polling_interval: 10
+max_concurrent: 3
+
+# MCP connection (default socket path)
+# mcp_socket_path: ~/Library/Application Support/AIAgentPM/mcp.sock
+
+# AI providers - how to launch each AI type
+ai_providers:
+  claude:
+    cli_command: claude
+    cli_args:
+      - "--dangerously-skip-permissions"
+      - "--max-turns"
+      - "50"
+
+# Agents configuration
+# 本番環境では環境変数または別ファイルでpasskeyを管理
+# agents:
+#   agt_example:
+#     passkey: ${AGENT_PASSKEY}
+
+# Logging (optional)
+# log_directory: /tmp/coordinator_logs

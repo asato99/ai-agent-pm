@@ -144,8 +144,33 @@ def load_runner_config(args: argparse.Namespace) -> RunnerConfig:
     return config
 
 
+def get_default_config_path() -> Path:
+    """Get the default configuration file path.
+
+    The default config is located at:
+    runner/config/coordinator_default.yaml
+
+    Returns:
+        Path to default config file
+    """
+    # Find the runner package root (where config/ directory is)
+    # __file__ is runner/src/aiagent_runner/__main__.py
+    # parent = runner/src/aiagent_runner/
+    # parent.parent = runner/src/
+    # parent.parent.parent = runner/
+    runner_root = Path(__file__).parent.parent.parent
+    return runner_root / "config" / "coordinator_default.yaml"
+
+
 def load_coordinator_config(args: argparse.Namespace) -> CoordinatorConfig:
     """Load configuration for Coordinator mode.
+
+    Configuration loading priority:
+    1. User-specified config file (-c/--config) - full override
+    2. Default config file (runner/config/coordinator_default.yaml)
+
+    Note: When using default config, agents must be configured via
+    environment variables or a separate config file.
 
     Args:
         args: Parsed CLI arguments
@@ -153,18 +178,26 @@ def load_coordinator_config(args: argparse.Namespace) -> CoordinatorConfig:
     Returns:
         CoordinatorConfig instance
     """
-    if not args.config or not args.config.exists():
-        raise ValueError(
-            "Coordinator mode requires a config file (-c/--config)\n"
-            "Example config:\n"
-            "  polling_interval: 10\n"
-            "  max_concurrent: 3\n"
-            "  agents:\n"
-            "    agt_developer:\n"
-            "      passkey: secret123\n"
-        )
+    logger = logging.getLogger(__name__)
 
-    config = CoordinatorConfig.from_yaml(args.config)
+    if args.config and args.config.exists():
+        # User specified a config file - use it directly
+        logger.info(f"Loading config from: {args.config}")
+        config = CoordinatorConfig.from_yaml(args.config)
+    else:
+        # Try to load default config
+        default_config_path = get_default_config_path()
+        if default_config_path.exists():
+            logger.info(f"Loading default config from: {default_config_path}")
+            config = CoordinatorConfig.from_yaml(default_config_path)
+        else:
+            # No config available - use built-in defaults
+            logger.warning(
+                "No config file found. Using built-in defaults.\n"
+                f"Expected default config at: {default_config_path}\n"
+                "Note: Agents must be configured to run tasks."
+            )
+            config = CoordinatorConfig()
 
     # Override with CLI arguments
     if args.polling_interval:
