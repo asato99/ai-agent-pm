@@ -155,11 +155,12 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
         }
         Thread.sleep(forTimeInterval: 0.5)
 
-        // Refreshボタンをクリック（データベースから再読み込み）
+        // Note: checkTaskStatusIsDoneはCoordinatorによるDB変更を確認するため、
+        // Refreshが必要（外部プロセスによる変更はリアクティブに反映されない）
         let refreshButton = app.buttons.matching(identifier: "RefreshButton").firstMatch
         if refreshButton.waitForExistence(timeout: 2) {
             refreshButton.click()
-            Thread.sleep(forTimeInterval: 2.0)
+            Thread.sleep(forTimeInterval: 1.5)
         }
 
         // Doneカラムを表示するため左にスワイプ
@@ -335,15 +336,9 @@ final class UC004_MultiProjectSameAgentTests: UC004UITestCase {
         XCTAssertTrue(taskBoard.waitForExistence(timeout: 5),
                       "❌ SETUP: タスクボードが表示されない")
 
-        // Refreshボタンをクリックしてタスクボードを更新
-        let refreshButton = app.buttons.matching(identifier: "RefreshButton").firstMatch
-        if refreshButton.waitForExistence(timeout: 2) {
-            print("  🔄 Refreshボタンをクリック")
-            refreshButton.click()
-            Thread.sleep(forTimeInterval: 2.0)
-        } else {
-            Thread.sleep(forTimeInterval: 2.0)
-        }
+        // リアクティブ要件: プロジェクト変更でタスクボードは自動更新されるべき
+        // Refreshボタンは使用しない
+        Thread.sleep(forTimeInterval: 1.0)
     }
 
     /// 指定されたタスクをin_progressに変更
