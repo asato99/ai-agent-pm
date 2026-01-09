@@ -143,6 +143,18 @@ struct ProjectListView: View {
                 }
             }
             .accessibilityIdentifier("InternalAuditsSection")
+
+            // MCP Server Section
+            Section {
+                MCPServerRowView(daemonManager: container.mcpDaemonManager)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        router.showMCPServer()
+                    }
+            } header: {
+                Label("System", systemImage: "gearshape.2")
+            }
+            .accessibilityIdentifier("SystemSection")
         }
         .accessibilityIdentifier("ProjectList")
         .searchable(text: $searchText, prompt: "Search")

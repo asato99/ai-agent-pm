@@ -20,19 +20,16 @@ struct ContentView: View {
             // サイドバー: プロジェクトリスト
             ProjectListView()
         } content: {
-            // コンテンツ: タスクボード or Internal Audits or エージェント管理
-            if router.showingInternalAudits {
+            // コンテンツ: タスクボード or Internal Audits or MCP Server or エージェント管理
+            if router.showingMCPServer {
+                MCPServerView(daemonManager: container.mcpDaemonManager)
+            } else if router.showingInternalAudits {
                 InternalAuditListView()
             } else if let projectId = router.selectedProject {
-                if let store = taskStore, store.projectId == projectId {
-                    TaskBoardView(projectId: projectId, taskStore: store)
-                } else {
-                    // TaskStoreが未作成またはプロジェクトが変わった場合
-                    TaskBoardView(projectId: projectId, taskStore: nil)
-                        .onAppear {
-                            taskStore = TaskStore(projectId: projectId, container: container)
-                        }
-                }
+                // プロジェクト変更時にビューを再作成するため .id(projectId) を使用
+                // これにより .task が再実行され、タスク一覧がリアクティブに更新される
+                TaskBoardView(projectId: projectId, taskStore: taskStore)
+                    .id(projectId)  // プロジェクト変更時にビューを強制再作成
             } else {
                 ContentUnavailableView(
                     "No Project Selected",
