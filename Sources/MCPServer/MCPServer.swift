@@ -1145,6 +1145,41 @@ final class MCPServer {
 
         Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': \(hasInProgressTask) (in_progress task: \(inProgressTask?.id.value ?? "none"))")
 
+        // Manager の待機状態チェック
+        // Context.progress が "workflow:waiting_for_workers" の場合、動的計算で判断
+        if agent.hierarchyType == .manager, let task = inProgressTask {
+            let latestContext = try contextRepository.findLatest(taskId: task.id)
+
+            if latestContext?.progress == "workflow:waiting_for_workers" {
+                Self.log("[MCP] shouldStart: Manager is in waiting_for_workers state, checking subtasks")
+
+                // サブタスクの状態を動的に確認
+                let allTasks = try taskRepository.findByProject(projId, status: nil)
+                let subTasks = allTasks.filter { $0.parentTaskId == task.id }
+                let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
+                let completedSubTasks = subTasks.filter { $0.status == .done }
+
+                Self.log("[MCP] shouldStart: subtasks=\(subTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count)")
+
+                // まだ Worker が実行中 → 起動しない
+                if !inProgressSubTasks.isEmpty {
+                    Self.log("[MCP] shouldStart: Manager should NOT start (waiting for \(inProgressSubTasks.count) workers)")
+                    return [
+                        "should_start": false,
+                        "reason": "waiting_for_workers",
+                        "progress": [
+                            "completed": completedSubTasks.count,
+                            "in_progress": inProgressSubTasks.count,
+                            "total": subTasks.count
+                        ]
+                    ]
+                }
+
+                // 全サブタスク完了 → 起動して report_completion
+                Self.log("[MCP] shouldStart: All subtasks completed, Manager should start for report_completion")
+            }
+        }
+
         // provider/model を返す（RunnerがCLIコマンドを選択するため）
         // kickCommand があればそれを優先
         var result: [String: Any] = [
@@ -1815,14 +1850,38 @@ final class MCPServer {
             }
 
             // 実行中のサブタスクがある → Worker の完了を待つ
+            // Context に waiting_for_workers を記録し、exit アクションを返す
+            // Coordinator が should_start で待機状態を判断し、Worker 完了後に再起動する
             if !inProgressSubTasks.isEmpty {
+                // 待機状態を Context に記録
+                let workflowSession = Session(
+                    id: SessionID.generate(),
+                    projectId: mainTask.projectId,
+                    agentId: mainTask.assigneeId!,
+                    startedAt: Date(),
+                    status: .active
+                )
+                try sessionRepository.save(workflowSession)
+
+                let context = Context(
+                    id: ContextID.generate(),
+                    taskId: mainTask.id,
+                    sessionId: workflowSession.id,
+                    agentId: mainTask.assigneeId!,
+                    progress: "workflow:waiting_for_workers"
+                )
+                try contextRepository.save(context)
+                Self.log("[MCP] Manager waiting for workers, saved context: waiting_for_workers")
+
                 return [
-                    "action": "wait",
+                    "action": "exit",
                     "instruction": """
-                        サブタスクが Worker によって実行中です。
-                        完了を待ってから get_next_action を再度呼び出してください。
+                        サブタスクを Worker に委譲しました。
+                        Worker の完了を待つため、ここでプロセスを終了してください。
+                        Coordinator が Worker 完了後に自動的に再起動します。
                         """,
                     "state": "waiting_for_workers",
+                    "reason": "subtasks_delegated_to_workers",
                     "in_progress_subtasks": inProgressSubTasks.map { [
                         "id": $0.id.value,
                         "title": $0.title,
@@ -1830,6 +1889,7 @@ final class MCPServer {
                     ] as [String: Any] },
                     "progress": [
                         "completed": completedSubTasks.count,
+                        "in_progress": inProgressSubTasks.count,
                         "total": subTasks.count
                     ]
                 ]
