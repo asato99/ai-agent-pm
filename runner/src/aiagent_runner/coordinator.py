@@ -55,7 +55,7 @@ class Coordinator:
     2. list_active_projects_with_agents() - Get all projects and their agents
     3. For each (agent_id, project_id) pair:
        - Check if we have a passkey configured
-       - should_start(agent_id, project_id) - Check if work exists
+       - get_agent_action(agent_id, project_id) - Check what action to take
        - Spawn Agent Instance if needed
     4. Clean up finished processes
     5. Wait for polling interval
@@ -231,16 +231,16 @@ class Coordinator:
                     logger.debug(f"At max concurrent ({self.config.max_concurrent}), skipping")
                     break
 
-                # Check if should start
-                logger.debug(f"Calling should_start({agent_id}, {project_id})")
+                # Check what action to take
+                logger.debug(f"Calling get_agent_action({agent_id}, {project_id})")
                 try:
-                    result = await self.mcp_client.should_start(agent_id, project_id)
+                    result = await self.mcp_client.get_agent_action(agent_id, project_id)
                     logger.debug(
-                        f"should_start result: {result.should_start}, "
+                        f"get_agent_action result: action={result.action}, reason={result.reason}, "
                         f"provider: {result.provider}, model: {result.model}, "
                         f"kick_command: {result.kick_command}, task_id: {result.task_id}"
                     )
-                    if result.should_start:
+                    if result.action == "start":
                         provider = result.provider or "claude"
                         self._spawn_instance(
                             agent_id=agent_id,
@@ -253,9 +253,9 @@ class Coordinator:
                             task_id=result.task_id
                         )
                     else:
-                        logger.debug(f"should_start returned False for {agent_id}/{project_id}")
+                        logger.debug(f"get_agent_action returned action='{result.action}' (reason: {result.reason}) for {agent_id}/{project_id}")
                 except MCPError as e:
-                    logger.error(f"Failed to check should_start for {agent_id}/{project_id}: {e}")
+                    logger.error(f"Failed to get_agent_action for {agent_id}/{project_id}: {e}")
 
     def _cleanup_finished(self) -> list[tuple[AgentInstanceKey, AgentInstanceInfo]]:
         """Clean up finished Agent Instance processes.

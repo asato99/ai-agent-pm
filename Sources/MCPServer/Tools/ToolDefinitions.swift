@@ -23,7 +23,7 @@ enum ToolDefinitions {
             healthCheck,
             listManagedAgents,
             listActiveProjectsWithAgents,
-            shouldStart,
+            getAgentAction,
             registerExecutionLogFile,
             invalidateSession,
 
@@ -106,13 +106,13 @@ enum ToolDefinitions {
         ]
     ]
 
-    /// should_start - エージェントを起動すべきかどうかを返す
+    /// get_agent_action - エージェントが取るべきアクションを返す
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
-    /// Runnerはタスクの詳細を知らない。boolのみ返す。
-    /// Phase 4: project_idを追加（(agent_id, project_id)単位で起動判断）
-    static let shouldStart: [String: Any] = [
-        "name": "should_start",
-        "description": "エージェントを起動すべきかどうかを判定します。Runnerが使用します。タスク詳細は返さず、起動判断のみを提供します。Phase 4では(agent_id, project_id)の組み合わせで判定します。",
+    /// Coordinatorはタスクの詳細を知らない。action（start/hold/stop/restart）と reason を返す。
+    /// Phase 4: project_idを追加（(agent_id, project_id)単位で判断）
+    static let getAgentAction: [String: Any] = [
+        "name": "get_agent_action",
+        "description": "エージェントが取るべきアクション（start/hold/stop/restart）を判定します。Coordinatorが使用します。タスク詳細は返さず、アクション判断のみを提供します。action='start'の場合はエージェントを起動、'hold'の場合は現状維持です。",
         "inputSchema": [
             "type": "object",
             "properties": [

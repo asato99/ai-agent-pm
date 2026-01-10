@@ -15,7 +15,7 @@ extension TestDataSeeder {
     /// - 各エージェントに1タスク
     ///
     /// 検証内容:
-    /// - aiTypeがshould_start APIで正しく返されること
+    /// - aiTypeがget_agent_action APIで正しく返されること
     /// - kickCommandがaiTypeより優先されること
     func seedUC003Data() async throws {
         print("=== UC003 Test Data Configuration ===")

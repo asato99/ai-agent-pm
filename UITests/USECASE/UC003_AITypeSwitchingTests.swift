@@ -5,7 +5,7 @@
 // 設計方針:
 // ========================================
 // - 異なるai_type/kickCommandを持つエージェントの検証
-// - ai_typeがshould_start APIで正しく返されることを確認
+// - ai_typeがget_agent_action APIで正しく返されることを確認
 // - kickCommandがai_typeより優先されることを確認
 //
 // シードデータ:

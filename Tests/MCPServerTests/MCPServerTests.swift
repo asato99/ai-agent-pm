@@ -526,7 +526,7 @@ final class MCPServerTests: XCTestCase {
 
         // Phase 5 権限ベース認可システム版ツール: 22個
         // Unauthenticated: 1 (authenticate)
-        // Coordinator-only: 6 (health_check, list_managed_agents, list_active_projects_with_agents, should_start, register_execution_log_file, invalidate_session)
+        // Coordinator-only: 6 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, invalidate_session)
         // Manager-only: 4 (list_subordinates, get_subordinate_profile, create_task, assign_task)
         // Worker-only: 1 (report_completed)
         // Authenticated (Manager + Worker): 10 (report_model, get_my_profile, get_my_task, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete)
@@ -556,7 +556,7 @@ final class MCPPRDComplianceTests: XCTestCase {
             "health_check",
             "list_managed_agents",
             "list_active_projects_with_agents",
-            "should_start",
+            "get_agent_action",
             "register_execution_log_file",
             "invalidate_session",
 
@@ -869,7 +869,7 @@ final class ToolAuthorizationTests: XCTestCase {
     func testCoordinatorOnlyToolPermissions() {
         XCTAssertEqual(ToolAuthorization.permissions["health_check"], .coordinatorOnly)
         XCTAssertEqual(ToolAuthorization.permissions["list_active_projects_with_agents"], .coordinatorOnly)
-        XCTAssertEqual(ToolAuthorization.permissions["should_start"], .coordinatorOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["get_agent_action"], .coordinatorOnly)
         XCTAssertEqual(ToolAuthorization.permissions["register_execution_log_file"], .coordinatorOnly)
         XCTAssertEqual(ToolAuthorization.permissions["invalidate_session"], .coordinatorOnly)
         XCTAssertEqual(ToolAuthorization.permissions["list_managed_agents"], .coordinatorOnly)
@@ -929,7 +929,7 @@ final class ToolAuthorizationTests: XCTestCase {
     func testToolsForPermission() {
         let coordinatorTools = ToolAuthorization.tools(for: .coordinatorOnly)
         XCTAssertTrue(coordinatorTools.contains("health_check"))
-        XCTAssertTrue(coordinatorTools.contains("should_start"))
+        XCTAssertTrue(coordinatorTools.contains("get_agent_action"))
 
         let managerTools = ToolAuthorization.tools(for: .managerOnly)
         XCTAssertTrue(managerTools.contains("list_subordinates"))

@@ -310,12 +310,12 @@ final class MCPServer {
         case "list_active_projects_with_agents":
             return try listActiveProjectsWithAgents()
 
-        case "should_start":
+        case "get_agent_action":
             guard let agentId = arguments["agent_id"] as? String,
                   let projectId = arguments["project_id"] as? String else {
                 throw MCPError.missingArguments(["agent_id", "project_id"])
             }
-            return try shouldStart(agentId: agentId, projectId: projectId)
+            return try getAgentAction(agentId: agentId, projectId: projectId)
 
         case "register_execution_log_file":
             guard let agentId = arguments["agent_id"] as? String,
@@ -1120,13 +1120,17 @@ final class MCPServer {
         ]
     }
 
-    /// should_start - エージェントを起動すべきかどうかを返す
-    /// Runnerはタスクの詳細を知らない。bool と ai_type を返す。
+    /// get_agent_action - エージェントが取るべきアクションを返す
+    /// Runnerはタスクの詳細を知らない。action と reason を返す。
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     /// 参照: docs/plan/MULTI_AGENT_USE_CASES.md - AIタイプ
-    /// Phase 4: (agent_id, project_id)単位で起動判断
-    private func shouldStart(agentId: String, projectId: String) throws -> [String: Any] {
-        Self.log("[MCP] shouldStart called for agent: '\(agentId)', project: '\(projectId)'")
+    /// Phase 4: (agent_id, project_id)単位で判断
+    /// action: "start" - エージェントを起動すべき
+    ///         "hold" - 起動不要（現状維持）
+    ///         "stop" - 停止すべき（将来用）
+    ///         "restart" - 再起動すべき（将来用）
+    private func getAgentAction(agentId: String, projectId: String) throws -> [String: Any] {
+        Self.log("[MCP] getAgentAction called for agent: '\(agentId)', project: '\(projectId)'")
 
         let id = AgentID(value: agentId)
         let projId = ProjectID(value: projectId)
@@ -1149,9 +1153,9 @@ final class MCPServer {
             projectId: projId
         )
         if !isAssigned {
-            Self.log("[MCP] shouldStart: Agent '\(agentId)' is not assigned to project '\(projectId)'")
+            Self.log("[MCP] getAgentAction: Agent '\(agentId)' is not assigned to project '\(projectId)'")
             return [
-                "should_start": false,
+                "action": "hold",
                 "reason": "agent_not_assigned"
             ]
         }
@@ -1160,9 +1164,9 @@ final class MCPServer {
         let allSessions = try agentSessionRepository.findByAgentIdAndProjectId(id, projectId: projId)
         let activeSessions = allSessions.filter { $0.expiresAt > Date() }
         if !activeSessions.isEmpty {
-            Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': false (already running - active session exists)")
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (already running - active session exists)")
             return [
-                "should_start": false,
+                "action": "hold",
                 "reason": "already_running"
             ]
         }
@@ -1171,12 +1175,12 @@ final class MCPServer {
         let tasks = try taskRepository.findByAssignee(id)
 
         // Debug: log all tasks found for this agent with full details
-        Self.log("[MCP] shouldStart: Agent '\(agentId)' checking for in_progress tasks in project '\(projectId)'")
-        Self.log("[MCP] shouldStart: Found \(tasks.count) total assigned task(s)")
+        Self.log("[MCP] getAgentAction: Agent '\(agentId)' checking for in_progress tasks in project '\(projectId)'")
+        Self.log("[MCP] getAgentAction: Found \(tasks.count) total assigned task(s)")
         for task in tasks {
             let matchesProject = task.projectId == projId
             let isInProgress = task.status == .inProgress
-            Self.log("[MCP] shouldStart:   - Task '\(task.id.value)': status=\(task.status.rawValue), projectId=\(task.projectId.value), matchesProject=\(matchesProject), isInProgress=\(isInProgress)")
+            Self.log("[MCP] getAgentAction:   - Task '\(task.id.value)': status=\(task.status.rawValue), projectId=\(task.projectId.value), matchesProject=\(matchesProject), isInProgress=\(isInProgress)")
         }
 
         let inProgressTask = tasks.first { task in
@@ -1184,7 +1188,7 @@ final class MCPServer {
         }
         let hasInProgressTask = inProgressTask != nil
 
-        Self.log("[MCP] shouldStart for '\(agentId)/\(projectId)': \(hasInProgressTask) (in_progress task: \(inProgressTask?.id.value ?? "none"))")
+        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasInProgressTask=\(hasInProgressTask) (in_progress task: \(inProgressTask?.id.value ?? "none"))")
 
         // Manager の待機状態チェック
         // Context.progress が "workflow:waiting_for_workers" の場合、動的計算で判断
@@ -1192,7 +1196,7 @@ final class MCPServer {
             let latestContext = try contextRepository.findLatest(taskId: task.id)
 
             if latestContext?.progress == "workflow:waiting_for_workers" {
-                Self.log("[MCP] shouldStart: Manager is in waiting_for_workers state, checking subtasks")
+                Self.log("[MCP] getAgentAction: Manager is in waiting_for_workers state, checking subtasks")
 
                 // サブタスクの状態を動的に確認
                 let allTasks = try taskRepository.findByProject(projId, status: nil)
@@ -1200,13 +1204,13 @@ final class MCPServer {
                 let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
                 let completedSubTasks = subTasks.filter { $0.status == .done }
 
-                Self.log("[MCP] shouldStart: subtasks=\(subTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count)")
+                Self.log("[MCP] getAgentAction: subtasks=\(subTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count)")
 
                 // まだ Worker が実行中 → 起動しない
                 if !inProgressSubTasks.isEmpty {
-                    Self.log("[MCP] shouldStart: Manager should NOT start (waiting for \(inProgressSubTasks.count) workers)")
+                    Self.log("[MCP] getAgentAction: Manager should hold (waiting for \(inProgressSubTasks.count) workers)")
                     return [
-                        "should_start": false,
+                        "action": "hold",
                         "reason": "waiting_for_workers",
                         "progress": [
                             "completed": completedSubTasks.count,
@@ -1217,14 +1221,17 @@ final class MCPServer {
                 }
 
                 // 全サブタスク完了 → 起動して report_completion
-                Self.log("[MCP] shouldStart: All subtasks completed, Manager should start for report_completion")
+                Self.log("[MCP] getAgentAction: All subtasks completed, Manager should start for report_completion")
             }
         }
 
-        // provider/model を返す（RunnerがCLIコマンドを選択するため）
-        // kickCommand があればそれを優先
+        // action と reason を設定
+        let action = hasInProgressTask ? "start" : "hold"
+        let reason = hasInProgressTask ? "has_in_progress_task" : "no_in_progress_task"
+
         var result: [String: Any] = [
-            "should_start": hasInProgressTask
+            "action": action,
+            "reason": reason
         ]
 
         // task_id を返す（Coordinatorがログファイルパスを登録するため）
@@ -1232,7 +1239,8 @@ final class MCPServer {
             result["task_id"] = task.id.value
         }
 
-        // kickCommand があれば provider/model より優先
+        // provider/model を返す（RunnerがCLIコマンドを選択するため）
+        // kickCommand があればそれを優先
         if let kickCommand = agent.kickCommand, !kickCommand.isEmpty {
             result["kick_command"] = kickCommand
         }
@@ -1245,9 +1253,6 @@ final class MCPServer {
             result["provider"] = "claude"              // デフォルト
             result["model"] = "claude-sonnet-4-5"      // デフォルト
         }
-
-        // 後方互換性のため ai_type も維持（非推奨）
-        result["ai_type"] = agent.aiType?.rawValue ?? "claude-sonnet-4-5"
 
         return result
     }
@@ -1900,7 +1905,7 @@ final class MCPServer {
 
             // 実行中のサブタスクがある → Worker の完了を待つ
             // Context に waiting_for_workers を記録し、exit アクションを返す
-            // Coordinator が should_start で待機状態を判断し、Worker 完了後に再起動する
+            // Coordinator が get_agent_action で待機状態を判断し、Worker 完了後に再起動する
             if !inProgressSubTasks.isEmpty {
                 // 待機状態を Context に記録
                 let workflowSession = Session(

@@ -123,7 +123,7 @@ nohup python -m aiagent_runner --coordinator -v > coordinator.log 2>&1 &
 
 1. MCPサーバーに接続（Unixソケット）
 2. `list_active_projects_with_agents()` で全プロジェクト・エージェントを取得
-3. 各(agent_id, project_id)ペアに対して `should_start()` を呼び出し
+3. 各(agent_id, project_id)ペアに対して `get_agent_action()` を呼び出し
 4. 作業が必要な場合、Agent Instance（Claude CLI等）をスポーン
 5. Agent Instanceが `authenticate` → `get_my_task` → 実行 → `report_completed`
 6. 待機して2に戻る

@@ -15,7 +15,7 @@
 #
 # アーキテクチャ（Phase 4 Coordinator）:
 #   - 単一のCoordinatorが全てのagentを管理
-#   - should_start(agent_id, project_id)でモデル情報/kickCommandを取得
+#   - get_agent_action(agent_id, project_id)でモデル情報/kickCommandを取得
 #   - kickCommandがnilでなければkickCommandを優先
 #   - kickCommandがnilならモデル情報を使用してCLI起動
 #

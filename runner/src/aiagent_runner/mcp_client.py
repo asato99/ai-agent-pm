@@ -49,13 +49,13 @@ class ProjectWithAgents:
 
 
 @dataclass
-class ShouldStartResult:
-    """Result of should_start check."""
-    should_start: bool
+class AgentActionResult:
+    """Result of get_agent_action check."""
+    action: str                          # "start", "hold", "stop", "restart"
+    reason: Optional[str] = None         # Reason for the action
     provider: Optional[str] = None       # "claude", "gemini", "openai", "other"
     model: Optional[str] = None          # "claude-sonnet-4-5", "gemini-2.0-flash", etc.
     kick_command: Optional[str] = None   # Custom CLI command (takes priority if set)
-    ai_type: Optional[str] = None        # Deprecated: use provider/model instead
     task_id: Optional[str] = None        # Phase 4: タスクID（ログファイル登録用）
 
 
@@ -237,11 +237,11 @@ class MCPClient:
             ))
         return projects
 
-    async def should_start(self, agent_id: str, project_id: str) -> ShouldStartResult:
-        """Check if an Agent Instance should be started.
+    async def get_agent_action(self, agent_id: str, project_id: str) -> AgentActionResult:
+        """Get the action an Agent Instance should take.
 
         The Coordinator calls this for each (agent_id, project_id) pair
-        to determine if there's work to do.
+        to determine what action to take.
         Phase 5: Requires coordinator_token for authorization.
 
         Args:
@@ -249,7 +249,7 @@ class MCPClient:
             project_id: Project ID
 
         Returns:
-            ShouldStartResult with should_start flag, provider, model, and kick_command
+            AgentActionResult with action (start/hold/stop/restart), reason, provider, model, and kick_command
 
         Raises:
             MCPError: If request fails or unauthorized
@@ -260,14 +260,14 @@ class MCPClient:
         }
         if self._coordinator_token:
             args["coordinator_token"] = self._coordinator_token
-        result = await self._call_tool("should_start", args)
+        result = await self._call_tool("get_agent_action", args)
 
-        return ShouldStartResult(
-            should_start=result.get("should_start", False),
+        return AgentActionResult(
+            action=result.get("action", "hold"),
+            reason=result.get("reason"),
             provider=result.get("provider"),
             model=result.get("model"),
             kick_command=result.get("kick_command"),
-            ai_type=result.get("ai_type"),  # Deprecated, kept for backwards compatibility
             task_id=result.get("task_id")  # Phase 4: Coordinatorがログファイルパス登録に使用
         )
 

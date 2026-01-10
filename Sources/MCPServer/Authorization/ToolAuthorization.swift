@@ -76,7 +76,7 @@ struct ToolAuthorization {
         // Coordinator専用
         "health_check": .coordinatorOnly,
         "list_active_projects_with_agents": .coordinatorOnly,
-        "should_start": .coordinatorOnly,
+        "get_agent_action": .coordinatorOnly,
         "register_execution_log_file": .coordinatorOnly,
         "invalidate_session": .coordinatorOnly,
         "list_managed_agents": .coordinatorOnly,

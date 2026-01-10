@@ -333,12 +333,13 @@ class TestMCPClientCoordinatorAPI:
             mock_call.assert_called_once_with("health_check", {})
 
     @pytest.mark.asyncio
-    async def test_should_start_with_coordinator_token(self):
-        """Should pass coordinator_token for should_start."""
+    async def test_get_agent_action_with_coordinator_token(self):
+        """Should pass coordinator_token for get_agent_action."""
         client = MCPClient("/tmp/test.sock", coordinator_token="coord-token-456")
 
         mock_response = {
-            "should_start": True,
+            "action": "start",
+            "reason": "has_in_progress_task",
             "provider": "claude",
             "model": "claude-sonnet-4-5",
             "task_id": "task-789"
@@ -347,13 +348,14 @@ class TestMCPClientCoordinatorAPI:
         with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = mock_response
 
-            result = await client.should_start("agent-001", "project-001")
+            result = await client.get_agent_action("agent-001", "project-001")
 
-            assert result.should_start is True
+            assert result.action == "start"
+            assert result.reason == "has_in_progress_task"
             assert result.provider == "claude"
             assert result.model == "claude-sonnet-4-5"
             assert result.task_id == "task-789"
-            mock_call.assert_called_once_with("should_start", {
+            mock_call.assert_called_once_with("get_agent_action", {
                 "agent_id": "agent-001",
                 "project_id": "project-001",
                 "coordinator_token": "coord-token-456"

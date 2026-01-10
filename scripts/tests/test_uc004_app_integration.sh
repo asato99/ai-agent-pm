@@ -16,7 +16,7 @@
 # アーキテクチャ（Phase 4 Coordinator）:
 #   - 単一のCoordinatorが全ての(agent_id, project_id)ペアを管理
 #   - Coordinatorはagentごとのpasskeyを保持
-#   - should_start(agent_id, project_id)で各ペアの作業有無を確認
+#   - get_agent_action(agent_id, project_id)で各ペアの作業有無を確認
 #   - 作業があればAgent Instance（Claude Code）をスポーン
 #   - Agent Instanceがauthenticate → get_my_task → execute → report_completed
 #
@@ -160,7 +160,7 @@ echo "  Architecture: Phase 4 Coordinator"
 echo "  - Coordinator starts FIRST and waits for MCP socket"
 echo "  - App will start daemon, Coordinator will connect"
 echo "  - Single Coordinator polls list_active_projects_with_agents()"
-echo "  - Calls should_start(agent_id, project_id) for each pair"
+echo "  - Calls get_agent_action(agent_id, project_id) for each pair"
 echo "  - Spawns Agent Instances (Claude Code) as needed"
 echo "  Agent: agt_uc004_dev (passkey configured in Coordinator)"
 echo ""

@@ -29,7 +29,7 @@ class CoordinatorConfig:
 
     The Coordinator is a single orchestrator that:
     1. Polls MCP server for active projects and their assigned agents
-    2. Calls should_start(agent_id, project_id) for each pair
+    2. Calls get_agent_action(agent_id, project_id) for each pair
     3. Spawns Agent Instances (Claude Code processes) as needed
 
     Unlike the old Runner which was tied to a single (agent_id, project_id),

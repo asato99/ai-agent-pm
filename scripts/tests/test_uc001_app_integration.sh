@@ -13,7 +13,7 @@
 # アーキテクチャ（Phase 4 Coordinator）:
 #   - 単一のCoordinatorが全ての(agent_id, project_id)ペアを管理
 #   - Coordinatorはagentごとのpasskeyを保持
-#   - should_start(agent_id, project_id)で作業有無を確認
+#   - get_agent_action(agent_id, project_id)で作業有無を確認
 #   - 作業があればAgent Instance（Claude Code）をスポーン
 #   - Agent Instanceがauthenticate → get_my_task → execute → report_completed
 
