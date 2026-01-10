@@ -1628,35 +1628,7 @@ private final class TestDataSeeder {
             parentAgentId: nil,
             maxParallelTasks: 1,
             capabilities: ["TaskDecomposition", "Delegation"],
-            systemPrompt: """
-                あなたはマネージャーエージェントです。
-                get_next_actionで指示されたアクションに従ってください。
-
-                create_subtasksアクションの場合:
-                create_taskツールを使って2つのサブタスクを作成してください:
-
-                1. 生成タスク:
-                   - title: "乱数を生成"
-                   - description: "Pythonで random.randint(1, 1000) を実行し、その数値だけを /tmp/uc007/seed.txt に書いてください（改行なし）"
-                   - 作成後、assign_task で agt_uc007_generator に割り当て
-
-                2. 計算タスク:
-                   - title: "2倍を計算"
-                   - description: "/tmp/uc007/seed.txt を読み込み、その値を2倍にして /tmp/uc007/result.txt に書いてください（改行なし）"
-                   - dependencies: [生成タスクのID] ← 重要！
-                   - 作成後、assign_task で agt_uc007_calculator に割り当て
-
-                重要: 計算タスクには必ず dependencies パラメータで生成タスクのIDを指定してください。
-
-                delegateアクションの場合:
-                サブタスクを適切なエージェントに割り当ててください。
-
-                waitアクションの場合:
-                少し待ってからget_next_actionを呼び出してください。
-
-                report_completionアクションの場合:
-                report_completedでタスクを完了してください。
-                """,
+            systemPrompt: "タスクを分解しワーカーに委譲するマネージャーエージェントです",
             kickMethod: .cli,
             kickCommand: nil,
             status: .active,
@@ -1679,20 +1651,7 @@ private final class TestDataSeeder {
             parentAgentId: managerAgentId,
             maxParallelTasks: 1,
             capabilities: ["Python", "Generation"],
-            systemPrompt: """
-                あなたは生成担当のワーカーです。
-                get_next_actionで指示されたアクションに従ってください。
-
-                executeアクションの場合:
-                1. Pythonで乱数を生成してください
-                2. import random; print(random.randint(1, 1000)) を実行
-                3. その数値だけを /tmp/uc007/seed.txt に書く（改行なし）
-                4. update_task_statusでタスクをdoneに変更
-                5. get_next_actionを呼び出す
-
-                report_completionアクションの場合:
-                report_completedでタスクを完了してください。
-                """,
+            systemPrompt: "乱数生成を担当するワーカーエージェントです",
             kickMethod: .cli,
             kickCommand: nil,
             status: .active,
@@ -1715,20 +1674,7 @@ private final class TestDataSeeder {
             parentAgentId: managerAgentId,
             maxParallelTasks: 1,
             capabilities: ["Python", "Calculation"],
-            systemPrompt: """
-                あなたは計算担当のワーカーです。
-                get_next_actionで指示されたアクションに従ってください。
-
-                executeアクションの場合:
-                1. /tmp/uc007/seed.txt を読み込む
-                2. その値を整数として解釈
-                3. 2倍にした値を /tmp/uc007/result.txt に書く（改行なし）
-                4. update_task_statusでタスクをdoneに変更
-                5. get_next_actionを呼び出す
-
-                report_completionアクションの場合:
-                report_completedでタスクを完了してください。
-                """,
+            systemPrompt: "計算処理を担当するワーカーエージェントです",
             kickMethod: .cli,
             kickCommand: nil,
             status: .active,
@@ -1772,12 +1718,8 @@ private final class TestDataSeeder {
             projectId: projectId,
             title: "乱数を生成し、その2倍を計算せよ",
             description: """
-                以下の作業を2つのサブタスクに分けて実行してください:
-
-                1. 生成タスク: random.randint(1, 1000) で乱数を生成し /tmp/uc007/seed.txt に書く
-                2. 計算タスク: seed.txt を読み込み、2倍にして /tmp/uc007/result.txt に書く
-
-                重要: 計算タスクは生成タスクに依存します。create_task時に dependencies パラメータで依存関係を設定してください。
+                生成タスク: random.randint(1,1000)の結果を/tmp/uc007/seed.txtに出力
+                計算タスク: /tmp/uc007/seed.txtを読み2倍した値を/tmp/uc007/result.txtに出力
                 """,
             status: .backlog,
             priority: .high,

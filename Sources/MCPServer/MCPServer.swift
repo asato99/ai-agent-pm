@@ -360,13 +360,15 @@ final class MCPServer {
             }
             let priority = arguments["priority"] as? String
             let parentTaskId = arguments["parent_task_id"] as? String
+            let dependencies = arguments["dependencies"] as? [String]
             return try createTask(
                 agentId: session.agentId,
                 projectId: session.projectId,
                 title: title,
                 description: description,
                 priority: priority,
-                parentTaskId: parentTaskId
+                parentTaskId: parentTaskId,
+                dependencies: dependencies
             )
 
         case "assign_task":
@@ -1688,6 +1690,8 @@ final class MCPServer {
                     タスクを2〜5個のサブタスクに分解してください。
                     create_task ツールを使用して、具体的で実行可能なサブタスクを作成してください。
                     各サブタスクには parent_task_id として '\(mainTask.id.value)' を指定してください。
+                    タスク間に順序関係がある場合（例: タスクBがタスクAの出力を使用する）、
+                    後続タスクの dependencies に先行タスクのIDを指定してください。
                     サブタスク作成後、get_next_action を呼び出してください。
                     """,
                 "state": "needs_subtask_creation",
@@ -1857,6 +1861,8 @@ final class MCPServer {
                     タスクを2〜5個のサブタスクに分解してください。
                     create_task ツールを使用して、具体的で実行可能なサブタスクを作成してください。
                     各サブタスクには parent_task_id として '\(mainTask.id.value)' を指定してください。
+                    タスク間に順序関係がある場合（例: タスクBがタスクAの出力を使用する）、
+                    後続タスクの dependencies に先行タスクのIDを指定してください。
                     サブタスク作成後、get_next_action を呼び出してください。
                     """,
                 "state": "needs_subtask_creation",
@@ -2289,7 +2295,8 @@ final class MCPServer {
         title: String,
         description: String,
         priority: String?,
-        parentTaskId: String?
+        parentTaskId: String?,
+        dependencies: [String]?
     ) throws -> [String: Any] {
         // 優先度のパース
         let taskPriority: TaskPriority
@@ -2308,6 +2315,18 @@ final class MCPServer {
             }
         }
 
+        // 依存タスクIDの検証
+        var taskDependencies: [TaskID] = []
+        if let deps = dependencies {
+            for depId in deps {
+                let depTaskId = TaskID(value: depId)
+                guard try taskRepository.findById(depTaskId) != nil else {
+                    throw MCPError.taskNotFound(depId)
+                }
+                taskDependencies.append(depTaskId)
+            }
+        }
+
         // 新しいタスクを作成
         let newTask = Task(
             id: TaskID.generate(),
@@ -2317,13 +2336,14 @@ final class MCPServer {
             status: .todo,
             priority: taskPriority,
             assigneeId: agentId,
-            dependencies: [],
+            dependencies: taskDependencies,
             parentTaskId: parentId
         )
 
         try taskRepository.save(newTask)
 
-        Self.log("[MCP] Task created: \(newTask.id.value) (parent: \(parentTaskId ?? "none"))")
+        let depsStr = taskDependencies.map { $0.value }.joined(separator: ", ")
+        Self.log("[MCP] Task created: \(newTask.id.value) (parent: \(parentTaskId ?? "none"), dependencies: [\(depsStr)])")
 
         return [
             "success": true,
@@ -2334,9 +2354,10 @@ final class MCPServer {
                 "status": newTask.status.rawValue,
                 "priority": newTask.priority.rawValue,
                 "assignee_id": agentId.value,
-                "parent_task_id": parentTaskId as Any
+                "parent_task_id": parentTaskId as Any,
+                "dependencies": taskDependencies.map { $0.value }
             ],
-            "instruction": "サブタスクが作成されました。update_task_statusでステータスをin_progressに変更してから作業を開始してください。"
+            "instruction": "サブタスクが作成されました。assign_taskで適切なワーカーに割り当ててください。"
         ]
     }
 

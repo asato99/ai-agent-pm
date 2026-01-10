@@ -436,6 +436,11 @@ enum ToolDefinitions {
                 "parent_task_id": [
                     "type": "string",
                     "description": "親タスクID（サブタスク作成時に指定）"
+                ],
+                "dependencies": [
+                    "type": "array",
+                    "items": ["type": "string"],
+                    "description": "依存タスクIDの配列（このタスクは指定されたタスクが完了するまで開始できない）"
                 ]
             ] as [String: Any],
             "required": ["session_token", "title", "description"]
