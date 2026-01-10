@@ -113,6 +113,7 @@ struct AIAgentPMApp: App {
         case uc004 = "UC004"           // UC004: 複数プロジェクト×同一エージェント
         case uc005 = "UC005"           // UC005: マネージャー→ワーカー委任
         case uc006 = "UC006"           // UC006: 複数ワーカーへのタスク割り当て
+        case uc007 = "UC007"           // UC007: 依存関係のあるタスク実行（実装→テスト）
         case noWD = "NoWD"             // NoWD: workingDirectory未設定エラーテスト用
         case internalAudit = "InternalAudit" // Internal Audit機能テスト用
         case workflowTemplate = "WorkflowTemplate" // ワークフローテンプレート機能テスト用
@@ -290,6 +291,8 @@ struct AIAgentPMApp: App {
                 try await seeder.seedUC005Data()
             case .uc006:
                 try await seeder.seedUC006Data()
+            case .uc007:
+                try await seeder.seedUC007Data()
             case .noWD:
                 try await seeder.seedNoWDData()
             case .internalAudit:
@@ -1567,6 +1570,226 @@ private final class TestDataSeeder {
         print("✅ UC006: Parent task created - \(parentTask.title)")
 
         print("✅ UC006: All test data seeded successfully (1 project, 3 agents, 1 task, 1 input file)")
+    }
+
+    /// UC007: 依存関係のあるタスク実行テスト用シードデータ
+    ///
+    /// 構成:
+    /// - 1プロジェクト
+    /// - 3エージェント（マネージャー、実装ワーカー、テストワーカー）
+    /// - 1タスク（親タスク、マネージャーに割り当て）
+    ///
+    /// 検証内容:
+    /// - マネージャーが2つのサブタスクを作成（実装タスク、テストタスク）
+    /// - テストタスクは実装タスクに依存（依存関係あり）
+    /// - 実装ワーカーが先に完了してからテストワーカーが実行される
+    /// - 各ワーカーが成果物を生成
+    func seedUC007Data() async throws {
+        print("=== UC007 Test Data Configuration ===")
+        print("Design: Manager → Workers with dependent tasks (generator → calculator)")
+
+        guard let projectAgentAssignmentRepository = projectAgentAssignmentRepository else {
+            print("⚠️ UC007: projectAgentAssignmentRepository not available")
+            return
+        }
+
+        // 作業ディレクトリを作成
+        let fileManager = FileManager.default
+        let workingDir = "/tmp/uc007"
+        if !fileManager.fileExists(atPath: workingDir) {
+            try fileManager.createDirectory(atPath: workingDir, withIntermediateDirectories: true)
+        }
+        print("✅ UC007: Working directory created - \(workingDir)")
+
+        // UC007用プロジェクト
+        let projectId = ProjectID(value: "prj_uc007")
+        let project = Project(
+            id: projectId,
+            name: "UC007 Dependent Task Test",
+            description: "依存関係のあるタスク実行テスト用プロジェクト（生成→計算）",
+            status: .active,
+            workingDirectory: workingDir,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(project)
+        print("✅ UC007: Project created - \(project.name)")
+
+        // マネージャーエージェント
+        let managerAgentId = AgentID(value: "agt_uc007_manager")
+        let managerAgent = Agent(
+            id: managerAgentId,
+            name: "UC007マネージャー",
+            role: "タスク分配",
+            type: .ai,
+            aiType: .claudeSonnet4_5,
+            hierarchyType: .manager,
+            roleType: .manager,
+            parentAgentId: nil,
+            maxParallelTasks: 1,
+            capabilities: ["TaskDecomposition", "Delegation"],
+            systemPrompt: """
+                あなたはマネージャーエージェントです。
+                get_next_actionで指示されたアクションに従ってください。
+
+                create_subtasksアクションの場合:
+                create_taskツールを使って2つのサブタスクを作成してください:
+
+                1. 生成タスク:
+                   - title: "乱数を生成"
+                   - description: "Pythonで random.randint(1, 1000) を実行し、その数値だけを /tmp/uc007/seed.txt に書いてください（改行なし）"
+                   - 作成後、assign_task で agt_uc007_generator に割り当て
+
+                2. 計算タスク:
+                   - title: "2倍を計算"
+                   - description: "/tmp/uc007/seed.txt を読み込み、その値を2倍にして /tmp/uc007/result.txt に書いてください（改行なし）"
+                   - dependencies: [生成タスクのID] ← 重要！
+                   - 作成後、assign_task で agt_uc007_calculator に割り当て
+
+                重要: 計算タスクには必ず dependencies パラメータで生成タスクのIDを指定してください。
+
+                delegateアクションの場合:
+                サブタスクを適切なエージェントに割り当ててください。
+
+                waitアクションの場合:
+                少し待ってからget_next_actionを呼び出してください。
+
+                report_completionアクションの場合:
+                report_completedでタスクを完了してください。
+                """,
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(managerAgent)
+        print("✅ UC007: Manager agent created - \(managerAgent.name)")
+
+        // 生成ワーカーエージェント
+        let generatorAgentId = AgentID(value: "agt_uc007_generator")
+        let generatorAgent = Agent(
+            id: generatorAgentId,
+            name: "UC007生成担当",
+            role: "乱数生成",
+            type: .ai,
+            aiType: .claudeSonnet4_5,
+            hierarchyType: .worker,
+            roleType: .developer,
+            parentAgentId: managerAgentId,
+            maxParallelTasks: 1,
+            capabilities: ["Python", "Generation"],
+            systemPrompt: """
+                あなたは生成担当のワーカーです。
+                get_next_actionで指示されたアクションに従ってください。
+
+                executeアクションの場合:
+                1. Pythonで乱数を生成してください
+                2. import random; print(random.randint(1, 1000)) を実行
+                3. その数値だけを /tmp/uc007/seed.txt に書く（改行なし）
+                4. update_task_statusでタスクをdoneに変更
+                5. get_next_actionを呼び出す
+
+                report_completionアクションの場合:
+                report_completedでタスクを完了してください。
+                """,
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(generatorAgent)
+        print("✅ UC007: Generator worker agent created - \(generatorAgent.name)")
+
+        // 計算ワーカーエージェント
+        let calculatorAgentId = AgentID(value: "agt_uc007_calculator")
+        let calculatorAgent = Agent(
+            id: calculatorAgentId,
+            name: "UC007計算担当",
+            role: "計算処理",
+            type: .ai,
+            aiType: .claudeSonnet4_5,
+            hierarchyType: .worker,
+            roleType: .developer,
+            parentAgentId: managerAgentId,
+            maxParallelTasks: 1,
+            capabilities: ["Python", "Calculation"],
+            systemPrompt: """
+                あなたは計算担当のワーカーです。
+                get_next_actionで指示されたアクションに従ってください。
+
+                executeアクションの場合:
+                1. /tmp/uc007/seed.txt を読み込む
+                2. その値を整数として解釈
+                3. 2倍にした値を /tmp/uc007/result.txt に書く（改行なし）
+                4. update_task_statusでタスクをdoneに変更
+                5. get_next_actionを呼び出す
+
+                report_completionアクションの場合:
+                report_completedでタスクを完了してください。
+                """,
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(calculatorAgent)
+        print("✅ UC007: Calculator worker agent created - \(calculatorAgent.name)")
+
+        // Runner認証用クレデンシャル
+        if let credentialRepository = credentialRepository {
+            let managerCredential = AgentCredential(
+                agentId: managerAgentId,
+                rawPasskey: "test_passkey_uc007_manager"
+            )
+            try credentialRepository.save(managerCredential)
+
+            let generatorCredential = AgentCredential(
+                agentId: generatorAgentId,
+                rawPasskey: "test_passkey_uc007_generator"
+            )
+            try credentialRepository.save(generatorCredential)
+
+            let calculatorCredential = AgentCredential(
+                agentId: calculatorAgentId,
+                rawPasskey: "test_passkey_uc007_calculator"
+            )
+            try credentialRepository.save(calculatorCredential)
+            print("✅ UC007: Credentials created")
+        }
+
+        // エージェントをプロジェクトに割り当て
+        _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: managerAgentId)
+        _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: generatorAgentId)
+        _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: calculatorAgentId)
+        print("✅ UC007: Agents assigned to project")
+
+        // 親タスク（マネージャーに割り当て）
+        let parentTask = Task(
+            id: TaskID(value: "tsk_uc007_main"),
+            projectId: projectId,
+            title: "乱数を生成し、その2倍を計算せよ",
+            description: """
+                以下の作業を2つのサブタスクに分けて実行してください:
+
+                1. 生成タスク: random.randint(1, 1000) で乱数を生成し /tmp/uc007/seed.txt に書く
+                2. 計算タスク: seed.txt を読み込み、2倍にして /tmp/uc007/result.txt に書く
+
+                重要: 計算タスクは生成タスクに依存します。create_task時に dependencies パラメータで依存関係を設定してください。
+                """,
+            status: .backlog,
+            priority: .high,
+            assigneeId: managerAgentId,
+            parentTaskId: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(parentTask)
+        print("✅ UC007: Parent task created - \(parentTask.title)")
+
+        print("✅ UC007: All test data seeded successfully (1 project, 3 agents, 1 task)")
     }
 
     /// 複数プロジェクトをシード
