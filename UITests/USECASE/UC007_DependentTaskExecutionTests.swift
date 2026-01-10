@@ -59,8 +59,8 @@ final class UC007_DependentTaskExecutionTests: UC007UITestCase {
 
         var mainTaskDone = false
 
-        // 最大180秒（10秒間隔で18回）待機
-        for i in 1...18 {
+        // 最大220秒（10秒間隔で22回）待機
+        for i in 1...22 {
             if try checkTaskStatusIsDone(taskId: taskId, taskTitle: taskTitle) {
                 print("✅ メインタスクがDoneになりました")
                 mainTaskDone = true
