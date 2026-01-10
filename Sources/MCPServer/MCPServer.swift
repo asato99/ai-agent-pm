@@ -1160,6 +1160,23 @@ final class MCPServer {
             ]
         }
 
+        // UC008: ブロックされたタスクをチェック（アクティブセッションより先にチェック）
+        // 該当プロジェクトで該当エージェントにアサインされたblockedタスクがあれば停止
+        let tasks = try taskRepository.findByAssignee(id)
+
+        // blockedタスクをチェック（stopアクション）
+        let blockedTask = tasks.first { task in
+            task.status == .blocked && task.projectId == projId
+        }
+        if let blocked = blockedTask {
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': stop (task '\(blocked.id.value)' is blocked)")
+            return [
+                "action": "stop",
+                "reason": "task_blocked",
+                "task_id": blocked.id.value
+            ]
+        }
+
         // Phase 4: (agent_id, project_id)単位でアクティブセッションをチェック
         let allSessions = try agentSessionRepository.findByAgentIdAndProjectId(id, projectId: projId)
         let activeSessions = allSessions.filter { $0.expiresAt > Date() }
@@ -1170,9 +1187,6 @@ final class MCPServer {
                 "reason": "already_running"
             ]
         }
-
-        // 該当プロジェクトで該当エージェントにアサインされた in_progress タスクがあるか確認
-        let tasks = try taskRepository.findByAssignee(id)
 
         // Debug: log all tasks found for this agent with full details
         Self.log("[MCP] getAgentAction: Agent '\(agentId)' checking for in_progress tasks in project '\(projectId)'")
@@ -2436,56 +2450,46 @@ final class MCPServer {
     }
 
     /// update_task_status - タスクのステータスを更新
+    /// UpdateTaskStatusUseCaseに委譲（カスケードブロック等のロジックを統一）
     private func updateTaskStatus(taskId: String, status: String, reason: String?) throws -> [String: Any] {
-        guard var task = try taskRepository.findById(TaskID(value: taskId)) else {
-            throw MCPError.taskNotFound(taskId)
-        }
-
         guard let newStatus = TaskStatus(rawValue: status) else {
             throw MCPError.invalidStatus(status)
         }
 
-        let previousStatus = task.status
-
-        // Validate transition
-        guard UpdateTaskStatusUseCase.canTransition(from: previousStatus, to: newStatus) else {
-            throw MCPError.invalidStatusTransition(from: previousStatus.rawValue, to: newStatus.rawValue)
-        }
-
-        task.status = newStatus
-        task.updatedAt = Date()
-        if newStatus == .done {
-            task.completedAt = Date()
-        }
-
-        try taskRepository.save(task)
-
-        // Record event (agentId is not available in stateless design, use nil)
-        let event = StateChangeEvent(
-            id: EventID.generate(),
-            projectId: task.projectId,
-            entityType: .task,
-            entityId: task.id.value,
-            eventType: .statusChanged,
-            agentId: nil,
-            sessionId: nil,
-            previousState: previousStatus.rawValue,
-            newState: newStatus.rawValue,
-            reason: reason
+        // UseCaseを使用してステータス更新（カスケードブロック含む）
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepository,
+            agentRepository: agentRepository,
+            eventRepository: eventRepository
         )
-        try eventRepository.save(event)
 
-        logDebug("Task \(taskId) status changed: \(previousStatus.rawValue) -> \(newStatus.rawValue)")
+        do {
+            let result = try useCase.executeWithResult(
+                taskId: TaskID(value: taskId),
+                newStatus: newStatus,
+                agentId: nil,
+                sessionId: nil,
+                reason: reason
+            )
 
-        return [
-            "success": true,
-            "task": [
-                "id": task.id.value,
-                "title": task.title,
-                "previous_status": previousStatus.rawValue,
-                "new_status": task.status.rawValue
+            logDebug("Task \(taskId) status changed: \(result.previousStatus.rawValue) -> \(result.task.status.rawValue)")
+
+            return [
+                "success": true,
+                "task": [
+                    "id": result.task.id.value,
+                    "title": result.task.title,
+                    "previous_status": result.previousStatus.rawValue,
+                    "new_status": result.task.status.rawValue
+                ]
             ]
-        ]
+        } catch UseCaseError.taskNotFound {
+            throw MCPError.taskNotFound(taskId)
+        } catch UseCaseError.invalidStatusTransition(let from, let to) {
+            throw MCPError.invalidStatusTransition(from: from.rawValue, to: to.rawValue)
+        } catch UseCaseError.validationFailed(let message) {
+            throw MCPError.validationError(message)
+        }
     }
 
     /// assign_task - タスクをエージェントに割り当て
@@ -3085,6 +3089,7 @@ enum MCPError: Error, CustomStringConvertible {
     case agentNotAssignedToProject(agentId: String, projectId: String)  // Phase 4: エージェント未割り当て
     case taskAccessDenied(String)  // Phase 4: タスクアクセス権限なし
     case permissionDenied(String)  // Phase 4: 権限エラー（マネージャー専用ツール等）
+    case validationError(String)  // バリデーションエラー
     case invalidCoordinatorToken  // Phase 5: Coordinatorトークン無効
     case notSubordinate(managerId: String, targetId: String)  // Phase 5: 下位エージェントではない
 
@@ -3136,6 +3141,8 @@ enum MCPError: Error, CustomStringConvertible {
             return "Access denied: You don't have permission to modify task '\(taskId)'. Only the assignee or parent task assignee can modify this task."
         case .permissionDenied(let message):
             return "Permission denied: \(message)"
+        case .validationError(let message):
+            return "Validation error: \(message)"
         case .invalidCoordinatorToken:
             return "Invalid coordinator token. Set MCP_COORDINATOR_TOKEN environment variable."
         case .notSubordinate(let managerId, let targetId):

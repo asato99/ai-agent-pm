@@ -439,5 +439,130 @@ extension TestDataSeeder {
 
         NSLog("✅ UITest: Workflow Template test data seeded successfully")
     }
+
+    // MARK: - UC008: タスクブロックによる作業中断
+
+    /// UC008: タスクブロックによる作業中断テスト用シードデータ
+    ///
+    /// 構成:
+    /// - 1プロジェクト
+    /// - 1エージェント（ワーカー）
+    /// - 1親タスク（ワーカーにアサイン、backlog状態）
+    ///
+    /// テストフロー:
+    /// 1. 親タスクをin_progressに変更（エージェント起動）
+    /// 2. エージェントがサブタスクを作成
+    /// 3. 親タスクをblockedに変更（ユーザー操作）
+    /// 4. サブタスクがblockedにカスケード（システム自動）
+    /// 5. エージェントが停止（get_agent_actionでstop）
+    func seedUC008Data() async throws {
+        print("=== UC008 Test Data Configuration ===")
+        print("Design: Task blocking to interrupt agent work")
+
+        guard let projectAgentAssignmentRepository = projectAgentAssignmentRepository else {
+            print("⚠️ UC008: projectAgentAssignmentRepository not available")
+            return
+        }
+
+        // 作業ディレクトリを作成
+        let fileManager = FileManager.default
+        let workingDir = "/tmp/uc008"
+        if !fileManager.fileExists(atPath: workingDir) {
+            try fileManager.createDirectory(atPath: workingDir, withIntermediateDirectories: true)
+        }
+
+        // UC008用プロジェクト
+        let projectId = ProjectID(value: "prj_uc008")
+        let project = Project(
+            id: projectId,
+            name: "UC008 Blocking Test",
+            description: "タスクブロックによる作業中断テスト用プロジェクト",
+            status: .active,
+            workingDirectory: workingDir,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(project)
+        print("✅ UC008: Project created - \(project.name)")
+
+        // ワーカーエージェント
+        let workerAgentId = AgentID(value: "agt_uc008_worker")
+        let workerAgent = Agent(
+            id: workerAgentId,
+            name: "UC008ワーカー",
+            role: "タスク実行ワーカー",
+            type: .ai,
+            aiType: .claudeSonnet4_5,
+            hierarchyType: .worker,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 1,
+            capabilities: ["FileCreation", "Documentation"],
+            systemPrompt: """
+                あなたはワーカーエージェントです。
+                get_next_actionで指示されたアクションに従ってください。
+
+                create_subtasksアクションの場合:
+                1. create_taskでサブタスクを作成
+                2. get_next_actionを呼び出す
+
+                execute_subtaskアクションの場合:
+                1. 指定されたサブタスクを実行（ファイル作成など）
+                2. update_task_statusでサブタスクをdoneに変更
+                3. get_next_actionを呼び出す
+
+                report_completionアクションの場合:
+                report_completedでタスクを完了してください。
+                """,
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(workerAgent)
+        print("✅ UC008: Worker agent created - \(workerAgent.name)")
+
+        // Runner認証用クレデンシャル
+        if let credentialRepository = credentialRepository {
+            let workerCredential = AgentCredential(
+                agentId: workerAgentId,
+                rawPasskey: "test_passkey_uc008_worker"
+            )
+            try credentialRepository.save(workerCredential)
+            print("✅ UC008: Credential created for \(workerAgentId.value)")
+        }
+
+        // エージェントをプロジェクトに割り当て
+        _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: workerAgentId)
+        print("✅ UC008: Worker agent assigned to project")
+
+        // 親タスク（ワーカーに割り当て）
+        let parentTask = Task(
+            id: TaskID(value: "tsk_uc008_main"),
+            projectId: projectId,
+            title: "ドキュメント作成タスク",
+            description: """
+                【タスク指示】
+                working_directory内にREADME.mdを作成してください。
+
+                このタスクはサブタスクに分解して実行してください。
+                以下のサブタスクを作成してください:
+                1. 概要セクションの作成
+                2. インストール手順の作成
+                3. 使い方セクションの作成
+                """,
+            status: .backlog,
+            priority: .high,
+            assigneeId: workerAgentId,
+            parentTaskId: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(parentTask)
+        print("✅ UC008: Parent task created - \(parentTask.title)")
+
+        print("✅ UC008: All test data seeded successfully (1 project, 1 agent, 1 task)")
+    }
 }
 #endif

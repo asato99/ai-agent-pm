@@ -117,6 +117,12 @@ public struct UpdateTaskStatusUseCase: Sendable {
 
         try taskRepository.save(task)
 
+        // UC008: ブロック時のカスケード処理
+        // 親タスクがblockedになった場合、全サブタスクもblockedにカスケード
+        if newStatus == .blocked {
+            try cascadeBlockingToSubtasks(parentTask: task, agentId: agentId, sessionId: sessionId)
+        }
+
         // イベント記録
         let event = StateChangeEvent(
             id: EventID.generate(),
@@ -284,6 +290,52 @@ public struct UpdateTaskStatusUseCase: Sendable {
                 maxParallel: agent.maxParallelTasks,
                 currentCount: currentInProgressParentTasks
             )
+        }
+    }
+
+    /// UC008: サブタスクへのブロックカスケード
+    /// 親タスクがblockedになった場合、全サブタスクもblockedにカスケードする
+    /// 参照: docs/usecases/UC008_TaskBlocking.md
+    private func cascadeBlockingToSubtasks(
+        parentTask: Task,
+        agentId: AgentID?,
+        sessionId: SessionID?
+    ) throws {
+        // プロジェクト内の全タスクを取得してサブタスクをフィルタリング
+        let allTasks = try taskRepository.findByProject(parentTask.projectId, status: nil)
+        let subtasks = allTasks.filter { $0.parentTaskId == parentTask.id }
+
+        for var subtask in subtasks {
+            // 既にblockedまたは完了状態のタスクはスキップ
+            guard subtask.status != .blocked && !subtask.status.isCompleted else {
+                continue
+            }
+
+            // previousStateを保存してからステータス変更
+            let previousStatus = subtask.status
+
+            // サブタスクをblockedに更新
+            subtask.status = .blocked
+            subtask.updatedAt = Date()
+            try taskRepository.save(subtask)
+
+            // イベント記録
+            let event = StateChangeEvent(
+                id: EventID.generate(),
+                projectId: subtask.projectId,
+                entityType: .task,
+                entityId: subtask.id.value,
+                eventType: .statusChanged,
+                agentId: agentId,
+                sessionId: sessionId,
+                previousState: previousStatus.rawValue,
+                newState: TaskStatus.blocked.rawValue,
+                reason: "Cascaded from parent task: \(parentTask.id.value)"
+            )
+            try eventRepository.save(event)
+
+            // 再帰的にサブタスクのサブタスクもブロック
+            try cascadeBlockingToSubtasks(parentTask: subtask, agentId: agentId, sessionId: sessionId)
         }
     }
 

@@ -272,6 +272,8 @@ struct AIAgentPMApp: App {
                 try await seeder.seedUC006Data()
             case .uc007:
                 try await seeder.seedUC007Data()
+            case .uc008:
+                try await seeder.seedUC008Data()
             case .noWD:
                 try await seeder.seedNoWDData()
             case .internalAudit:

@@ -214,16 +214,27 @@ class Coordinator:
                 key = AgentInstanceKey(agent_id, project_id)
                 logger.debug(f"Checking agent {agent_id} for project {project_id}")
 
-                # Skip if already running
-                if key in self._instances:
-                    logger.debug(f"Instance {agent_id}/{project_id} already running")
-                    continue
-
                 # Skip if we don't have passkey configured
                 passkey = self.config.get_agent_passkey(agent_id)
                 logger.debug(f"Passkey for {agent_id}: {'configured' if passkey else 'NOT FOUND'}")
                 if not passkey:
                     logger.debug(f"No passkey configured for {agent_id}, skipping")
+                    continue
+
+                # Check if instance is already running
+                instance_running = key in self._instances
+
+                # UC008: Always check get_agent_action for running instances to detect stop
+                if instance_running:
+                    logger.debug(f"Instance {agent_id}/{project_id} running, checking for stop action")
+                    try:
+                        result = await self.mcp_client.get_agent_action(agent_id, project_id)
+                        logger.debug(f"get_agent_action for running instance: action={result.action}, reason={result.reason}")
+                        if result.action == "stop":
+                            logger.info(f"Stopping instance {agent_id}/{project_id} due to {result.reason}")
+                            await self._stop_instance(key)
+                    except MCPError as e:
+                        logger.error(f"Failed to check stop action for {agent_id}/{project_id}: {e}")
                     continue
 
                 # Skip if at max concurrent
@@ -256,6 +267,41 @@ class Coordinator:
                         logger.debug(f"get_agent_action returned action='{result.action}' (reason: {result.reason}) for {agent_id}/{project_id}")
                 except MCPError as e:
                     logger.error(f"Failed to get_agent_action for {agent_id}/{project_id}: {e}")
+
+    async def _stop_instance(self, key: AgentInstanceKey) -> None:
+        """Stop a running Agent Instance.
+
+        Args:
+            key: The AgentInstanceKey identifying the instance to stop.
+        """
+        info = self._instances.get(key)
+        if not info:
+            logger.warning(f"Instance {key.agent_id}/{key.project_id} not found in _instances")
+            return
+
+        logger.info(f"Terminating instance {key.agent_id}/{key.project_id} (PID: {info.process.pid})")
+
+        try:
+            info.process.terminate()
+            # Wait a short time for graceful shutdown
+            try:
+                info.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Instance {key.agent_id}/{key.project_id} did not terminate, killing")
+                info.process.kill()
+        except Exception as e:
+            logger.error(f"Error terminating process: {e}")
+
+        # Close log file handle
+        if info.log_file_handle:
+            try:
+                info.log_file_handle.close()
+            except Exception:
+                pass
+
+        # Remove from instances
+        del self._instances[key]
+        logger.info(f"Instance {key.agent_id}/{key.project_id} stopped and removed")
 
     def _cleanup_finished(self) -> list[tuple[AgentInstanceKey, AgentInstanceInfo]]:
         """Clean up finished Agent Instance processes.

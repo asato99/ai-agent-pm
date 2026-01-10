@@ -25,6 +25,7 @@ enum UITestScenario: String {
     case uc005 = "UC005"           // UC005: マネージャー→ワーカー委任
     case uc006 = "UC006"           // UC006: 複数ワーカーへのタスク割り当て
     case uc007 = "UC007"           // UC007: 依存関係のあるタスク実行（実装→テスト）
+    case uc008 = "UC008"           // UC008: タスクブロックによる作業中断
 }
 
 // MARK: - Base Test Class
@@ -180,4 +181,9 @@ class UC006UITestCase: AIAgentPMUITestCase {
 /// UC007テスト用ベースクラス（依存関係のあるタスク実行テスト用）
 class UC007UITestCase: AIAgentPMUITestCase {
     override var testScenario: UITestScenario { .uc007 }
+}
+
+/// UC008テスト用ベースクラス（タスクブロックによる作業中断テスト用）
+class UC008UITestCase: AIAgentPMUITestCase {
+    override var testScenario: UITestScenario { .uc008 }
 }
