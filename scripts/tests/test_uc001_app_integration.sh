@@ -33,6 +33,9 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TEST_DIR="/tmp/uc001_test"
 OUTPUT_FILE="test_output.md"
 
+# Phase 5: Coordinator token for authorization
+export MCP_COORDINATOR_TOKEN="test_coordinator_token_uc001"
+
 # 共有DB: XCUITestアプリが使用するパス
 SHARED_DB_PATH="/tmp/AIAgentPM_UITest.db"
 
@@ -138,9 +141,12 @@ echo ""
 
 MCP_SERVER_COMMAND="$PROJECT_ROOT/.build/debug/mcp-server-pm"
 cat > /tmp/coordinator_uc001_config.yaml << EOF
-# Phase 4 Coordinator Configuration for UC001
+# Phase 4/5 Coordinator Configuration for UC001
 polling_interval: 2
 max_concurrent: 3
+
+# Phase 5: Coordinator token for authorization
+coordinator_token: ${MCP_COORDINATOR_TOKEN}
 
 # MCP server configuration (for Agent Instances via stdio transport)
 mcp_server_command: $MCP_SERVER_COMMAND
@@ -153,7 +159,7 @@ ai_providers:
     cli_args:
       - "--dangerously-skip-permissions"
       - "--max-turns"
-      - "20"
+      - "50"
 
 # Agents
 agents:

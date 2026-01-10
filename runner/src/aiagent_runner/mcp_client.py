@@ -5,10 +5,13 @@
 
 import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationError(Exception):
@@ -94,11 +97,17 @@ class MCPClient:
     Handles authentication, task retrieval, and execution reporting.
     """
 
-    def __init__(self, socket_path: Optional[str] = None):
+    def __init__(
+        self,
+        socket_path: Optional[str] = None,
+        coordinator_token: Optional[str] = None
+    ):
         """Initialize MCP client.
 
         Args:
             socket_path: Path to MCP Unix socket. Defaults to standard location.
+            coordinator_token: Token for Coordinator-only API calls (Phase 5).
+                              If not provided, reads from MCP_COORDINATOR_TOKEN env var.
         """
         # Always expand tilde in socket path
         if socket_path:
@@ -106,6 +115,8 @@ class MCPClient:
         else:
             self.socket_path = self._default_socket_path()
         self._session_token: Optional[str] = None
+        # Phase 5: Coordinator token for Coordinator-only API calls
+        self._coordinator_token = coordinator_token or os.environ.get("MCP_COORDINATOR_TOKEN")
 
     def _default_socket_path(self) -> str:
         """Get default MCP socket path."""
@@ -173,14 +184,18 @@ class MCPClient:
         """Check MCP server health.
 
         The Coordinator calls this first to verify the server is available.
+        Phase 5: Requires coordinator_token for authorization.
 
         Returns:
             HealthCheckResult with server status
 
         Raises:
-            MCPError: If server is not available
+            MCPError: If server is not available or unauthorized
         """
-        result = await self._call_tool("health_check", {})
+        args = {}
+        if self._coordinator_token:
+            args["coordinator_token"] = self._coordinator_token
+        result = await self._call_tool("health_check", args)
         return HealthCheckResult(
             status=result.get("status", "ok"),
             version=result.get("version"),
@@ -192,14 +207,22 @@ class MCPClient:
 
         The Coordinator calls this to discover what (agent_id, project_id)
         combinations exist and need to be monitored.
+        Phase 5: Requires coordinator_token for authorization.
 
         Returns:
             List of ProjectWithAgents
 
         Raises:
-            MCPError: If request fails
+            MCPError: If request fails or unauthorized
         """
-        result = await self._call_tool("list_active_projects_with_agents", {})
+        args = {}
+        if self._coordinator_token:
+            args["coordinator_token"] = self._coordinator_token
+            logger.debug("list_active_projects_with_agents: passing coordinator_token")
+        else:
+            logger.warning("list_active_projects_with_agents: NO coordinator_token set!")
+        result = await self._call_tool("list_active_projects_with_agents", args)
+        logger.debug(f"list_active_projects_with_agents result: {result}")
 
         if not result.get("success", True):
             raise MCPError(result.get("error", "Failed to list projects"))
@@ -219,6 +242,7 @@ class MCPClient:
 
         The Coordinator calls this for each (agent_id, project_id) pair
         to determine if there's work to do.
+        Phase 5: Requires coordinator_token for authorization.
 
         Args:
             agent_id: Agent ID
@@ -228,12 +252,15 @@ class MCPClient:
             ShouldStartResult with should_start flag, provider, model, and kick_command
 
         Raises:
-            MCPError: If request fails
+            MCPError: If request fails or unauthorized
         """
-        result = await self._call_tool("should_start", {
+        args = {
             "agent_id": agent_id,
             "project_id": project_id
-        })
+        }
+        if self._coordinator_token:
+            args["coordinator_token"] = self._coordinator_token
+        result = await self._call_tool("should_start", args)
 
         return ShouldStartResult(
             should_start=result.get("should_start", False),
@@ -250,7 +277,7 @@ class MCPClient:
         """Register log file path for an execution log.
 
         Called by Coordinator after Agent Instance process completes.
-        No authentication required.
+        Phase 5: Requires coordinator_token for authorization.
 
         Args:
             agent_id: Agent ID
@@ -261,13 +288,16 @@ class MCPClient:
             True if successful, False otherwise
 
         Raises:
-            MCPError: If request fails
+            MCPError: If request fails or unauthorized
         """
-        result = await self._call_tool("register_execution_log_file", {
+        args = {
             "agent_id": agent_id,
             "task_id": task_id,
             "log_file_path": log_file_path
-        })
+        }
+        if self._coordinator_token:
+            args["coordinator_token"] = self._coordinator_token
+        result = await self._call_tool("register_execution_log_file", args)
 
         return result.get("success", False)
 
@@ -276,7 +306,7 @@ class MCPClient:
 
         Called by Coordinator when Agent Instance process exits.
         This allows shouldStart to return True again for the next instance.
-        No authentication required.
+        Phase 5: Requires coordinator_token for authorization.
 
         Args:
             agent_id: Agent ID
@@ -286,12 +316,15 @@ class MCPClient:
             True if successful, False otherwise
 
         Raises:
-            MCPError: If request fails
+            MCPError: If request fails or unauthorized
         """
-        result = await self._call_tool("invalidate_session", {
+        args = {
             "agent_id": agent_id,
             "project_id": project_id
-        })
+        }
+        if self._coordinator_token:
+            args["coordinator_token"] = self._coordinator_token
+        result = await self._call_tool("invalidate_session", args)
 
         return result.get("success", False)
 

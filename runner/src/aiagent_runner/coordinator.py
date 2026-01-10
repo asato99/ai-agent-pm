@@ -74,7 +74,12 @@ class Coordinator:
             config: Coordinator configuration with agents and ai_providers
         """
         self.config = config
-        self.mcp_client = MCPClient(config.mcp_socket_path)
+        # Phase 5: Pass coordinator_token for Coordinator-only API authorization
+        logger.debug(f"Initializing MCPClient with coordinator_token: {'set' if config.coordinator_token else 'NOT SET'}")
+        self.mcp_client = MCPClient(
+            config.mcp_socket_path,
+            coordinator_token=config.coordinator_token
+        )
 
         self._running = False
         self._instances: dict[AgentInstanceKey, AgentInstanceInfo] = {}

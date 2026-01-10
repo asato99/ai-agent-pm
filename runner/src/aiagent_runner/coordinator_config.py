@@ -43,6 +43,10 @@ class CoordinatorConfig:
     # All components connect to the SAME daemon started by the app
     mcp_socket_path: Optional[str] = None
 
+    # Phase 5: Coordinator token for Coordinator-only API authorization
+    # Reference: Sources/MCPServer/Authorization/ToolAuthorization.swift
+    coordinator_token: Optional[str] = None
+
     # AI providers (how to launch each AI type)
     ai_providers: dict[str, AIProviderConfig] = field(default_factory=dict)
 
@@ -68,6 +72,10 @@ class CoordinatorConfig:
                 "~/Library/Application Support/AIAgentPM/mcp.sock"
             )
 
+        # Phase 5: Set coordinator token from environment if not specified
+        if self.coordinator_token is None:
+            self.coordinator_token = os.environ.get("MCP_COORDINATOR_TOKEN")
+
         # Ensure default Claude provider exists
         if "claude" not in self.ai_providers:
             self.ai_providers["claude"] = AIProviderConfig(
@@ -84,6 +92,10 @@ class CoordinatorConfig:
         polling_interval: 10
         max_concurrent: 3
         mcp_socket_path: ~/Library/Application Support/AIAgentPM/mcp.sock
+
+        # Phase 5: Coordinator token for Coordinator-only API calls
+        # Can also be set via MCP_COORDINATOR_TOKEN environment variable
+        coordinator_token: ${MCP_COORDINATOR_TOKEN}
 
         ai_providers:
           claude:
@@ -130,10 +142,17 @@ class CoordinatorConfig:
                 passkey = os.environ.get(env_var, "")
             agents[agent_id] = AgentConfig(passkey=passkey)
 
+        # Parse coordinator_token (supports environment variable expansion)
+        coordinator_token = data.get("coordinator_token")
+        if coordinator_token and coordinator_token.startswith("${") and coordinator_token.endswith("}"):
+            env_var = coordinator_token[2:-1]
+            coordinator_token = os.environ.get(env_var)
+
         return cls(
             polling_interval=data.get("polling_interval", 10),
             max_concurrent=data.get("max_concurrent", 3),
             mcp_socket_path=data.get("mcp_socket_path"),
+            coordinator_token=coordinator_token,
             ai_providers=ai_providers,
             agents=agents,
             log_directory=data.get("log_directory"),

@@ -9,51 +9,59 @@ import Foundation
 enum ToolDefinitions {
 
     /// 全Tool一覧
+    /// 参照: Sources/MCPServer/Authorization/ToolAuthorization.swift - 権限定義
     static func all() -> [[String: Any]] {
         [
-            // Phase 4: Runner API
+            // ========================================
+            // 未認証でも呼び出し可能
+            // ========================================
+            authenticate,
+
+            // ========================================
+            // Coordinator専用（coordinator_token必須）
+            // ========================================
             healthCheck,
             listManagedAgents,
             listActiveProjectsWithAgents,
             shouldStart,
+            registerExecutionLogFile,
+            invalidateSession,
 
-            // Phase 4: Agent API
-            authenticate,  // instruction追加
-            getMyTask,
-            getNextAction,  // 状態駆動ワークフロー制御
-            reportModel,    // モデル申告
+            // ========================================
+            // Manager専用（session_token + hierarchy_type=manager）
+            // ========================================
+            listSubordinates,      // NEW: 下位エージェント一覧
+            getSubordinateProfile, // NEW: 下位エージェント詳細
+            createTask,
+            assignTask,
+
+            // ========================================
+            // Worker専用（session_token + hierarchy_type=worker）
+            // ========================================
             reportCompleted,
 
-            // Agent
-            getAgentProfile,
-            getMyProfile,  // 後方互換性のため維持（非推奨）
-            listAgents,
-
-            // Project
-            listProjects,
+            // ========================================
+            // 認証済み共通（Manager + Worker）
+            // ========================================
+            reportModel,
+            getMyProfile,
+            getMyTask,
+            getNextAction,
+            updateTaskStatus,
             getProject,
-
-            // Tasks
             listTasks,
-            getMyTasks,  // 後方互換性のため維持（非推奨）
-            getPendingTasks,  // Phase 3-2: 作業中タスク取得（Phase 4で非推奨）
-            createTask,
-            updateTaskStatus,  // session_token必須
-            assignTask,  // Phase 4: マネージャー専用タスク割り当て
+            getTask,
+            reportExecutionStart,  // 非推奨（後方互換性のため維持）
+            reportExecutionComplete,  // 非推奨（後方互換性のため維持）
 
-            // Execution Log (Phase 3-3, Phase 4で非推奨)
-            reportExecutionStart,
-            reportExecutionComplete,
-
-            // Phase 4: Coordinator用（認証不要）
-            registerExecutionLogFile,
-            invalidateSession
-
-            // 以下のツールはPhase 4で未使用のため除外:
-            // - getTask: get_my_task + get_next_action で代替
-            // - saveContext: ワークフロー状態で代替
-            // - getTaskContext: 同上
-            // - createHandoff, acceptHandoff, getPendingHandoffs: ハンドオフ機能未使用
+            // ========================================
+            // 削除済み（権限なし - 呼び出し不可）
+            // ========================================
+            // - list_agents: → list_subordinates を使用
+            // - get_agent_profile: → get_subordinate_profile を使用
+            // - list_projects: → get_project を使用
+            // - get_my_tasks: → list_tasks(assignee_id) を使用
+            // - get_pending_tasks: → get_my_task を使用
         ]
     }
 
@@ -240,66 +248,68 @@ enum ToolDefinitions {
         ]
     ]
 
-    // MARK: - Deprecated (Phase 3, use Phase 4 APIs instead)
+    // MARK: - Manager-Only Tools (Phase 5: Authorization)
 
-    // MARK: - Agent Tools
-
-    /// get_agent_profile - 指定エージェントの情報を取得
-    static let getAgentProfile: [String: Any] = [
-        "name": "get_agent_profile",
-        "description": "指定したエージェントの情報を取得します。エージェントID、名前、役割、タイプが含まれます。",
+    /// list_subordinates - マネージャーの下位エージェント一覧を取得
+    /// 参照: Sources/MCPServer/Authorization/ToolAuthorization.swift
+    /// マネージャーのみ呼び出し可能。自身のparentAgentIdを持つエージェントのみ返す。
+    static let listSubordinates: [String: Any] = [
+        "name": "list_subordinates",
+        "description": "自分の下位エージェント（ワーカー）一覧を取得します。マネージャーのみ呼び出し可能です。各エージェントのID、名前、役割、現在のステータスが含まれます。",
         "inputSchema": [
             "type": "object",
             "properties": [
-                "agent_id": [
+                "session_token": [
                     "type": "string",
-                    "description": "エージェントID"
+                    "description": "authenticateツールで取得したセッショントークン"
                 ]
             ] as [String: Any],
-            "required": ["agent_id"]
+            "required": ["session_token"]
         ]
     ]
 
-    /// get_my_profile - 後方互換性のため維持（非推奨）
-    /// 新しいコードは get_agent_profile を使用すべき
+    /// get_subordinate_profile - 下位エージェントの詳細情報を取得
+    /// 参照: Sources/MCPServer/Authorization/ToolAuthorization.swift
+    /// マネージャーのみ呼び出し可能。自身の下位エージェントの詳細情報（プロンプト等）を取得。
+    static let getSubordinateProfile: [String: Any] = [
+        "name": "get_subordinate_profile",
+        "description": "指定した下位エージェントの詳細情報を取得します。マネージャーのみ呼び出し可能で、自分の下位エージェントのみ指定できます。ID、名前、役割、システムプロンプト、設定が含まれます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "agent_id": [
+                    "type": "string",
+                    "description": "取得する下位エージェントのID"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "agent_id"]
+        ]
+    ]
+
+    // MARK: - Authenticated Tools (Manager + Worker)
+
+    /// get_my_profile - 自身のエージェント情報を取得
+    /// 認証済みエージェント（Manager/Worker）が呼び出し可能
     static let getMyProfile: [String: Any] = [
         "name": "get_my_profile",
         "description": "自分のエージェント情報を取得します。エージェントID、名前、役割、タイプが含まれます。",
         "inputSchema": [
             "type": "object",
             "properties": [
-                "agent_id": [
+                "session_token": [
                     "type": "string",
-                    "description": "エージェントID（キック時のプロンプトから取得）"
+                    "description": "authenticateツールで取得したセッショントークン"
                 ]
             ] as [String: Any],
-            "required": ["agent_id"]
-        ]
-    ]
-
-    /// list_agents - 全エージェント一覧を取得
-    static let listAgents: [String: Any] = [
-        "name": "list_agents",
-        "description": "全エージェント一覧を取得します。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [:] as [String: Any],
-            "required": [] as [String]
+            "required": ["session_token"]
         ]
     ]
 
     // MARK: - Project Tools
-
-    /// list_projects - 全プロジェクト一覧を取得
-    static let listProjects: [String: Any] = [
-        "name": "list_projects",
-        "description": "全プロジェクト一覧を取得します。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [:] as [String: Any],
-            "required": [] as [String]
-        ]
-    ]
 
     /// get_project - プロジェクト詳細を取得
     static let getProject: [String: Any] = [
@@ -377,19 +387,24 @@ enum ToolDefinitions {
         ]
     ]
 
-    /// get_task - タスク詳細を取得
+    /// get_task - タスク詳細を取得（認証必須）
+    /// 認証済みエージェント（Manager/Worker）が呼び出し可能
     static let getTask: [String: Any] = [
         "name": "get_task",
-        "description": "指定したタスクの詳細情報を取得します。最新のコンテキストも含まれます。",
+        "description": "指定したタスクの詳細情報を取得します。最新のコンテキストも含まれます。認証が必要です。",
         "inputSchema": [
             "type": "object",
             "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
                 "task_id": [
                     "type": "string",
                     "description": "タスクID"
                 ]
             ] as [String: Any],
-            "required": ["task_id"]
+            "required": ["session_token", "task_id"]
         ]
     ]
 

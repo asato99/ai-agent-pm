@@ -50,13 +50,32 @@ class TestMCPClientInit:
         client = MCPClient("/tmp/custom.sock")
         assert client.socket_path == "/tmp/custom.sock"
 
+    def test_init_with_coordinator_token(self):
+        """Should store coordinator token for Coordinator-only API calls."""
+        client = MCPClient("/tmp/test.sock", coordinator_token="test-token-123")
+        assert client._coordinator_token == "test-token-123"
+
+    def test_init_coordinator_token_from_env(self):
+        """Should read coordinator token from environment if not provided."""
+        import os
+        original = os.environ.get("MCP_COORDINATOR_TOKEN")
+        try:
+            os.environ["MCP_COORDINATOR_TOKEN"] = "env-token-456"
+            client = MCPClient("/tmp/test.sock")
+            assert client._coordinator_token == "env-token-456"
+        finally:
+            if original:
+                os.environ["MCP_COORDINATOR_TOKEN"] = original
+            elif "MCP_COORDINATOR_TOKEN" in os.environ:
+                del os.environ["MCP_COORDINATOR_TOKEN"]
+
 
 class TestMCPClientAuthenticate:
     """Tests for MCPClient.authenticate()."""
 
     @pytest.mark.asyncio
     async def test_authenticate_success(self):
-        """Should authenticate successfully."""
+        """Should authenticate successfully with project_id (Phase 4)."""
         client = MCPClient("/tmp/test.sock")
 
         mock_response = {
@@ -69,7 +88,7 @@ class TestMCPClientAuthenticate:
         with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = mock_response
 
-            result = await client.authenticate("agent-001", "passkey")
+            result = await client.authenticate("agent-001", "passkey", "project-001")
 
             assert isinstance(result, AuthResult)
             assert result.session_token == "token-12345"
@@ -78,7 +97,8 @@ class TestMCPClientAuthenticate:
 
             mock_call.assert_called_once_with("authenticate", {
                 "agent_id": "agent-001",
-                "passkey": "passkey"
+                "passkey": "passkey",
+                "project_id": "project-001"
             })
 
     @pytest.mark.asyncio
@@ -95,7 +115,7 @@ class TestMCPClientAuthenticate:
             mock_call.return_value = mock_response
 
             with pytest.raises(AuthenticationError, match="Invalid credentials"):
-                await client.authenticate("agent-001", "wrong-passkey")
+                await client.authenticate("agent-001", "wrong-passkey", "project-001")
 
 
 class TestMCPClientGetPendingTasks:
@@ -270,3 +290,112 @@ class TestMCPClientTaskOperations:
             call_args = mock_call.call_args[0]
             assert call_args[1]["task_id"] == "task-001"
             assert call_args[1]["progress"] == "50% complete"
+
+
+class TestMCPClientCoordinatorAPI:
+    """Tests for Coordinator-only API methods (Phase 5)."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_with_coordinator_token(self):
+        """Should pass coordinator_token for health_check."""
+        client = MCPClient("/tmp/test.sock", coordinator_token="coord-token-123")
+
+        mock_response = {
+            "status": "ok",
+            "version": "1.0.0",
+            "timestamp": "2025-01-10T12:00:00Z"
+        }
+
+        with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = mock_response
+
+            result = await client.health_check()
+
+            assert result.status == "ok"
+            assert result.version == "1.0.0"
+            mock_call.assert_called_once_with("health_check", {
+                "coordinator_token": "coord-token-123"
+            })
+
+    @pytest.mark.asyncio
+    async def test_health_check_without_coordinator_token(self):
+        """Should call health_check without token if not configured."""
+        client = MCPClient("/tmp/test.sock")
+        client._coordinator_token = None  # Ensure no token
+
+        mock_response = {"status": "ok"}
+
+        with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = mock_response
+
+            await client.health_check()
+
+            mock_call.assert_called_once_with("health_check", {})
+
+    @pytest.mark.asyncio
+    async def test_should_start_with_coordinator_token(self):
+        """Should pass coordinator_token for should_start."""
+        client = MCPClient("/tmp/test.sock", coordinator_token="coord-token-456")
+
+        mock_response = {
+            "should_start": True,
+            "provider": "claude",
+            "model": "claude-sonnet-4-5",
+            "task_id": "task-789"
+        }
+
+        with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = mock_response
+
+            result = await client.should_start("agent-001", "project-001")
+
+            assert result.should_start is True
+            assert result.provider == "claude"
+            assert result.model == "claude-sonnet-4-5"
+            assert result.task_id == "task-789"
+            mock_call.assert_called_once_with("should_start", {
+                "agent_id": "agent-001",
+                "project_id": "project-001",
+                "coordinator_token": "coord-token-456"
+            })
+
+    @pytest.mark.asyncio
+    async def test_register_execution_log_file_with_coordinator_token(self):
+        """Should pass coordinator_token for register_execution_log_file."""
+        client = MCPClient("/tmp/test.sock", coordinator_token="coord-token-789")
+
+        mock_response = {"success": True}
+
+        with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = mock_response
+
+            result = await client.register_execution_log_file(
+                "agent-001", "task-001", "/tmp/log.txt"
+            )
+
+            assert result is True
+            mock_call.assert_called_once_with("register_execution_log_file", {
+                "agent_id": "agent-001",
+                "task_id": "task-001",
+                "log_file_path": "/tmp/log.txt",
+                "coordinator_token": "coord-token-789"
+            })
+
+    @pytest.mark.asyncio
+    async def test_invalidate_session_with_coordinator_token(self):
+        """Should pass coordinator_token for invalidate_session."""
+        client = MCPClient("/tmp/test.sock", coordinator_token="coord-token-abc")
+
+        mock_response = {"success": True}
+
+        with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = mock_response
+
+            result = await client.invalidate_session("agent-001", "project-001")
+
+            assert result is True
+            mock_call.assert_called_once_with("invalidate_session", {
+                "agent_id": "agent-001",
+                "project_id": "project-001",
+                "coordinator_token": "coord-token-abc"
+            })

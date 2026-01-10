@@ -35,6 +35,9 @@ OUTPUT_FILE="README.md"
 # 共有DB: XCUITestアプリが使用するパス
 SHARED_DB_PATH="/tmp/AIAgentPM_UITest.db"
 
+# Phase 5: Coordinator token for authorization
+export MCP_COORDINATOR_TOKEN="test_coordinator_token_uc001"
+
 COORDINATOR_PID=""
 TEST_FAILED=false
 
@@ -140,9 +143,12 @@ echo ""
 
 # Coordinator設定
 cat > /tmp/coordinator_uc005_config.yaml << EOF
-# Phase 4 Coordinator Configuration
+# Phase 4/5 Coordinator Configuration
 polling_interval: 2
 max_concurrent: 3
+
+# Phase 5: Coordinator token for authorization
+coordinator_token: ${MCP_COORDINATOR_TOKEN}
 
 # MCP socket path (Coordinator and Agent Instances connect to the SAME daemon)
 mcp_socket_path: $HOME/Library/Application Support/AIAgentPM/mcp.sock

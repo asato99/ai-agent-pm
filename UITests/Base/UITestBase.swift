@@ -52,9 +52,15 @@ class AIAgentPMUITestCase: XCTestCase {
         ]
 
         // アクセシビリティを有効化
-        app.launchEnvironment = [
-            "XCUI_ENABLE_ACCESSIBILITY": "1"
+        // Phase 5: MCP_COORDINATOR_TOKEN を渡してCoordinator APIを認可
+        // UIテスト用の固定トークンを使用（テストスクリプトと同じ値）
+        var launchEnv: [String: String] = [
+            "XCUI_ENABLE_ACCESSIBILITY": "1",
+            // Phase 5: Integration test coordinator token
+            // This must match the token used in test_uc00X_app_integration.sh scripts
+            "MCP_COORDINATOR_TOKEN": "test_coordinator_token_uc001"
         ]
+        app.launchEnvironment = launchEnv
 
         // システムダイアログの自動ハンドリングを設定
         // macOSの通知許可ダイアログ等がXCUITestを阻害する問題を回避

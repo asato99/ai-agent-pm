@@ -13,52 +13,56 @@ final class MCPServerTests: XCTestCase {
 
     /// MCP_DESIGN.md: 全ツールが定義されていることを確認
     /// ステートレス設計: セッション管理ツール（start_session, end_session）は削除済み
+    /// Phase 5: 権限ベース認可システム導入
     func testToolDefinitionsContainsAllTools() {
         let tools = ToolDefinitions.all()
         let toolNames = tools.compactMap { $0["name"] as? String }
 
-        // PRD定義ツール（MCP_DESIGN.md）- ステートレス設計版
-        // エージェント管理
+        // PRD定義ツール（MCP_DESIGN.md）- ステートレス設計版 + Phase 5権限システム
+        // エージェント管理（Phase 5: Manager用ツール追加）
         XCTAssertTrue(toolNames.contains("get_my_profile"), "get_my_profile should be defined per MCP_DESIGN.md")
-        XCTAssertTrue(toolNames.contains("get_agent_profile"), "get_agent_profile should be defined for stateless design")
-        XCTAssertTrue(toolNames.contains("list_agents"), "list_agents should be defined")
+        XCTAssertTrue(toolNames.contains("list_subordinates"), "list_subordinates should be defined for Manager hierarchy (Phase 5)")
+        XCTAssertTrue(toolNames.contains("get_subordinate_profile"), "get_subordinate_profile should be defined for Manager hierarchy (Phase 5)")
 
         // プロジェクト管理
-        XCTAssertTrue(toolNames.contains("list_projects"), "list_projects should be defined")
         XCTAssertTrue(toolNames.contains("get_project"), "get_project should be defined")
         XCTAssertTrue(toolNames.contains("list_active_projects_with_agents"), "list_active_projects_with_agents should be defined")
 
         // タスク管理
         XCTAssertTrue(toolNames.contains("list_tasks"), "list_tasks should be defined per MCP_DESIGN.md")
         XCTAssertTrue(toolNames.contains("get_task"), "get_task should be defined per MCP_DESIGN.md")
-        XCTAssertTrue(toolNames.contains("get_my_tasks"), "get_my_tasks should be defined per MCP_DESIGN.md")
+        XCTAssertTrue(toolNames.contains("get_my_task"), "get_my_task should be defined (Phase 4 replacement for get_my_tasks)")
         XCTAssertTrue(toolNames.contains("update_task_status"), "update_task_status should be defined per MCP_DESIGN.md")
         XCTAssertTrue(toolNames.contains("assign_task"), "assign_task should be defined per MCP_DESIGN.md")
+        XCTAssertTrue(toolNames.contains("create_task"), "create_task should be defined for Managers (Phase 5)")
 
-        // コンテキスト・ハンドオフ
-        XCTAssertTrue(toolNames.contains("save_context"), "save_context should be defined (add_context in MCP_DESIGN.md)")
-        XCTAssertTrue(toolNames.contains("get_task_context"), "get_task_context should be defined (get_context in MCP_DESIGN.md)")
-        XCTAssertTrue(toolNames.contains("create_handoff"), "create_handoff should be defined per MCP_DESIGN.md")
-        XCTAssertTrue(toolNames.contains("get_pending_handoffs"), "get_pending_handoffs should be defined per MCP_DESIGN.md")
-        XCTAssertTrue(toolNames.contains("accept_handoff"), "accept_handoff should be defined (acknowledge_handoff in MCP_DESIGN.md)")
+        // Phase 4: Worker報告
+        XCTAssertTrue(toolNames.contains("report_completed"), "report_completed should be defined (Phase 4 Worker API)")
     }
 
     /// ステートレス設計で削除されたツールが存在しないことを確認
+    /// Phase 5: 権限システムにより削除されたツールを追加
     func testRemovedToolsFromStatelessDesign() {
         let tools = ToolDefinitions.all()
         let toolNames = tools.compactMap { $0["name"] as? String }
 
-        // ステートレス設計により削除されたツール
+        // ステートレス設計およびPhase 5で削除されたツール
         let removedTools = [
             "start_session",   // セッション管理は削除
             "end_session",     // セッション管理は削除
             "get_my_sessions", // セッション管理は削除
-            "create_task",     // UIでのみ作成可能
-            "update_task"      // UIでのみ編集可能
+            "update_task",     // UIでのみ編集可能
+            // Phase 5: 権限システムにより削除されたツール
+            "list_agents",     // Coordinator専用のlist_managed_agentsに置き換え
+            "get_agent_profile", // Manager専用のget_subordinate_profileに置き換え
+            "list_projects",   // 削除（プロジェクト情報はget_projectで取得）
+            // Phase 5: get_my_tasksとget_pending_tasksはget_my_taskに統合
+            "get_my_tasks",
+            "get_pending_tasks"
         ]
 
         for tool in removedTools {
-            XCTAssertFalse(toolNames.contains(tool), "\(tool) should not exist in stateless design")
+            XCTAssertFalse(toolNames.contains(tool), "\(tool) should not exist in Phase 5 authorization design")
         }
     }
 
@@ -79,7 +83,7 @@ final class MCPServerTests: XCTestCase {
         }
     }
 
-    /// get_my_profileツール定義（後方互換、ステートレス設計）
+    /// get_my_profileツール定義（Phase 5: session_token認証）
     func testGetMyProfileToolDefinition() {
         let tool = ToolDefinitions.getMyProfile
 
@@ -89,50 +93,50 @@ final class MCPServerTests: XCTestCase {
         if let schema = tool["inputSchema"] as? [String: Any] {
             XCTAssertEqual(schema["type"] as? String, "object")
             let required = schema["required"] as? [String] ?? []
-            // ステートレス設計: agent_idが必須
-            XCTAssertTrue(required.contains("agent_id"), "get_my_profile should require agent_id in stateless design")
+            // Phase 5: session_tokenで認証（agent_idはセッションから取得）
+            XCTAssertTrue(required.contains("session_token"), "get_my_profile should require session_token in Phase 5")
         }
     }
 
-    /// get_agent_profileツール定義（ステートレス設計）
-    func testGetAgentProfileToolDefinition() {
-        let tool = ToolDefinitions.getAgentProfile
+    /// Phase 5: list_subordinatesツール定義（Manager専用）
+    func testListSubordinatesToolDefinition() {
+        let tool = ToolDefinitions.listSubordinates
 
-        XCTAssertEqual(tool["name"] as? String, "get_agent_profile")
+        XCTAssertEqual(tool["name"] as? String, "list_subordinates")
         XCTAssertNotNil(tool["description"])
 
         if let schema = tool["inputSchema"] as? [String: Any] {
             XCTAssertEqual(schema["type"] as? String, "object")
             let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.contains("agent_id"), "get_agent_profile should require agent_id")
+            XCTAssertTrue(required.contains("session_token"), "list_subordinates should require session_token")
         }
     }
 
-    /// list_agentsツール定義
-    func testListAgentsToolDefinition() {
-        let tool = ToolDefinitions.listAgents
+    /// Phase 5: get_subordinate_profileツール定義（Manager専用）
+    func testGetSubordinateProfileToolDefinition() {
+        let tool = ToolDefinitions.getSubordinateProfile
 
-        XCTAssertEqual(tool["name"] as? String, "list_agents")
+        XCTAssertEqual(tool["name"] as? String, "get_subordinate_profile")
         XCTAssertNotNil(tool["description"])
 
         if let schema = tool["inputSchema"] as? [String: Any] {
             XCTAssertEqual(schema["type"] as? String, "object")
             let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.isEmpty, "list_agents should have no required parameters")
+            XCTAssertTrue(required.contains("session_token"), "get_subordinate_profile should require session_token")
+            XCTAssertTrue(required.contains("agent_id"), "get_subordinate_profile should require agent_id")
         }
     }
 
-    /// list_projectsツール定義
-    func testListProjectsToolDefinition() {
-        let tool = ToolDefinitions.listProjects
+    /// Phase 5: list_managed_agentsツール定義（Coordinator専用）
+    func testListManagedAgentsToolDefinition() {
+        let tool = ToolDefinitions.listManagedAgents
 
-        XCTAssertEqual(tool["name"] as? String, "list_projects")
+        XCTAssertEqual(tool["name"] as? String, "list_managed_agents")
         XCTAssertNotNil(tool["description"])
 
         if let schema = tool["inputSchema"] as? [String: Any] {
             XCTAssertEqual(schema["type"] as? String, "object")
-            let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.isEmpty, "list_projects should have no required parameters")
+            // coordinator_tokenはオプショナル（環境変数からも取得可能）
         }
     }
 
@@ -228,11 +232,14 @@ final class MCPServerTests: XCTestCase {
     }
 
     /// Phase 3-2: get_pending_tasksがall()に含まれている
-    func testGetPendingTasksToolInAllTools() {
+    /// Phase 5: get_pending_tasksはget_my_taskに統合されたため削除
+    func testGetPendingTasksToolRemovedInPhase5() {
         let allTools = ToolDefinitions.all()
         let toolNames = allTools.compactMap { $0["name"] as? String }
 
-        XCTAssertTrue(toolNames.contains("get_pending_tasks"), "get_pending_tasks should be in all tools")
+        // Phase 5: get_pending_tasksはget_my_taskに統合され削除
+        XCTAssertFalse(toolNames.contains("get_pending_tasks"), "get_pending_tasks should NOT be in all tools (replaced by get_my_task in Phase 5)")
+        XCTAssertTrue(toolNames.contains("get_my_task"), "get_my_task should be in all tools (Phase 5 replacement)")
     }
 
     /// Phase 3-3: report_execution_startツール定義
@@ -513,65 +520,64 @@ final class MCPServerTests: XCTestCase {
     // MARK: - Tool Count Test
 
     /// 定義されているツール数を確認
+    /// Phase 5: 権限ベース認可システム導入により変更
     func testToolCount() {
         let tools = ToolDefinitions.all()
 
-        // ステートレス設計版ツール: 19個
-        // Phase 4 Coordinator API: 4 (health_check, list_managed_agents, should_start, list_active_projects_with_agents)
-        // Phase 4 Agent API: 3 (authenticate, get_my_task, report_completed)
-        // Agent: 3 (get_agent_profile, get_my_profile, list_agents)
-        // Project: 3 (list_projects, get_project, list_active_projects_with_agents)
-        // Tasks: 6 (list_tasks, get_task, get_my_tasks, get_pending_tasks, update_task_status, assign_task)
-        // Context: 2 (save_context, get_task_context)
-        // Handoff: 3 (create_handoff, accept_handoff, get_pending_handoffs)
-        // Execution Log (Phase 3-3, Phase 4で非推奨): 2 (report_execution_start, report_execution_complete)
-        XCTAssertEqual(tools.count, 25, "Should have 25 tools defined (including Phase 4 Coordinator/Agent APIs)")
+        // Phase 5 権限ベース認可システム版ツール: 22個
+        // Unauthenticated: 1 (authenticate)
+        // Coordinator-only: 6 (health_check, list_managed_agents, list_active_projects_with_agents, should_start, register_execution_log_file, invalidate_session)
+        // Manager-only: 4 (list_subordinates, get_subordinate_profile, create_task, assign_task)
+        // Worker-only: 1 (report_completed)
+        // Authenticated (Manager + Worker): 10 (report_model, get_my_profile, get_my_task, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete)
+        // 注: list_agents, get_agent_profile, list_projects は削除済み
+        // 注: get_my_tasks, get_pending_tasks はget_my_taskに統合済み
+        // 注: save_context, get_task_context, create_handoff, get_pending_handoffs, accept_handoff は将来追加予定
+        XCTAssertEqual(tools.count, 22, "Should have 22 tools defined (Phase 5 authorization system)")
     }
 }
 
 // MARK: - PRD Compliance Summary Tests
 
-/// ステートレス設計版PRD仕様との適合性サマリーテスト
+/// Phase 5: 権限ベース認可システムのPRD適合性テスト
 final class MCPPRDComplianceTests: XCTestCase {
 
-    /// ステートレス設計版MCP_DESIGN.md仕様との適合性サマリー
+    /// Phase 5: 権限ベース認可システムの適合性サマリー
     func testPRDComplianceSummary() {
         let tools = ToolDefinitions.all()
         let toolNames = Set(tools.compactMap { $0["name"] as? String })
 
-        // ステートレス設計版で実装されているツール
+        // Phase 5 権限ベース認可システムで実装されているツール
         let implementedTools = [
-            // 認証 (Phase 3-1)
+            // Unauthenticated (Phase 3-1)
             "authenticate",
 
-            // エージェント管理
-            "get_agent_profile",  // 新規追加
-            "get_my_profile",     // 後方互換
-            "list_agents",
+            // Coordinator-only (Phase 5)
+            "health_check",
+            "list_managed_agents",
+            "list_active_projects_with_agents",
+            "should_start",
+            "register_execution_log_file",
+            "invalidate_session",
 
-            // プロジェクト管理
-            "list_projects",
-            "get_project",
-            "list_active_projects_with_agents", // Phase 4: Coordinator用API
-
-            // タスク管理
-            "list_tasks",
-            "get_task",
-            "get_my_tasks",       // 後方互換
-            "get_pending_tasks",  // Phase 3-2
-            "update_task_status",
+            // Manager-only (Phase 5)
+            "list_subordinates",
+            "get_subordinate_profile",
+            "create_task",
             "assign_task",
 
-            // コンテキスト
-            "save_context",
-            "get_task_context",
+            // Worker-only (Phase 5)
+            "report_completed",
 
-            // ハンドオフ
-            "create_handoff",
-            "get_pending_handoffs",
-            "accept_handoff",
-
-            // 実行ログ (Phase 3-3)
+            // Authenticated (Manager + Worker)
+            "report_model",
+            "get_my_profile",
+            "get_my_task",
+            "get_next_action",
+            "update_task_status",
+            "get_project",
+            "list_tasks",
+            "get_task",
             "report_execution_start",
             "report_execution_complete"
         ]
@@ -583,13 +589,17 @@ final class MCPPRDComplianceTests: XCTestCase {
             }
         }
 
-        // ステートレス設計版 + 認証 + Phase 3-2 + Phase 3-3 + Phase 4: 20個のツールが実装されている
-        XCTAssertEqual(implementedCount, 20, "Should have 20 tools implemented (including Phase 3 & Phase 4 tools)")
+        // Phase 5: 主要ツール24個が実装されている
+        XCTAssertGreaterThanOrEqual(implementedCount, 22, "Should have at least 22 core tools implemented in Phase 5")
 
-        // ステートレス設計で削除されたツール
-        let removedTools = ["start_session", "end_session", "get_my_sessions", "create_task", "update_task"]
+        // Phase 5で削除されたツール
+        let removedTools = [
+            "start_session", "end_session", "get_my_sessions",  // ステートレス設計で削除
+            "update_task",                                        // UIでのみ編集可能
+            "list_agents", "get_agent_profile", "list_projects"   // Phase 5権限システムで削除
+        ]
         for tool in removedTools {
-            XCTAssertFalse(toolNames.contains(tool), "\(tool) should be removed in stateless design")
+            XCTAssertFalse(toolNames.contains(tool), "\(tool) should be removed in Phase 5 authorization design")
         }
     }
 }
@@ -810,5 +820,144 @@ final class ExecutionLogModelVerificationTests: XCTestCase {
         XCTAssertEqual(log.reportedProvider, "openai")
         XCTAssertEqual(log.reportedModel, "gpt-4o")
         XCTAssertNil(log.modelVerified)
+    }
+}
+
+// MARK: - Tool Authorization Tests
+
+/// Phase 5: ツール認可システムのテスト
+final class ToolAuthorizationTests: XCTestCase {
+
+    // MARK: - CallerType Tests
+
+    /// CallerTypeのagentIdプロパティテスト
+    func testCallerTypeAgentIdProperty() {
+        // Coordinator has no agentId
+        XCTAssertNil(CallerType.coordinator.agentId)
+
+        // Unauthenticated has no agentId
+        XCTAssertNil(CallerType.unauthenticated.agentId)
+    }
+
+    /// CallerTypeのisManager/isWorkerプロパティテスト
+    func testCallerTypeHierarchyProperties() {
+        XCTAssertFalse(CallerType.coordinator.isManager)
+        XCTAssertFalse(CallerType.coordinator.isWorker)
+        XCTAssertFalse(CallerType.unauthenticated.isManager)
+        XCTAssertFalse(CallerType.unauthenticated.isWorker)
+    }
+
+    // MARK: - ToolPermission Tests
+
+    /// ToolPermissionのrawValue確認
+    func testToolPermissionRawValues() {
+        XCTAssertEqual(ToolPermission.coordinatorOnly.rawValue, "coordinator_only")
+        XCTAssertEqual(ToolPermission.managerOnly.rawValue, "manager_only")
+        XCTAssertEqual(ToolPermission.workerOnly.rawValue, "worker_only")
+        XCTAssertEqual(ToolPermission.authenticated.rawValue, "authenticated")
+        XCTAssertEqual(ToolPermission.unauthenticated.rawValue, "unauthenticated")
+    }
+
+    // MARK: - Authorization Permission Tests
+
+    /// 認証不要ツールの権限確認
+    func testUnauthenticatedToolPermissions() {
+        XCTAssertEqual(ToolAuthorization.permissions["authenticate"], .unauthenticated)
+    }
+
+    /// Coordinator専用ツールの権限確認
+    func testCoordinatorOnlyToolPermissions() {
+        XCTAssertEqual(ToolAuthorization.permissions["health_check"], .coordinatorOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["list_active_projects_with_agents"], .coordinatorOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["should_start"], .coordinatorOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["register_execution_log_file"], .coordinatorOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["invalidate_session"], .coordinatorOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["list_managed_agents"], .coordinatorOnly)
+    }
+
+    /// Manager専用ツールの権限確認
+    func testManagerOnlyToolPermissions() {
+        XCTAssertEqual(ToolAuthorization.permissions["list_subordinates"], .managerOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["get_subordinate_profile"], .managerOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["create_task"], .managerOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["assign_task"], .managerOnly)
+    }
+
+    /// Worker専用ツールの権限確認
+    func testWorkerOnlyToolPermissions() {
+        XCTAssertEqual(ToolAuthorization.permissions["report_completed"], .workerOnly)
+    }
+
+    /// 認証済み共通ツールの権限確認
+    func testAuthenticatedToolPermissions() {
+        XCTAssertEqual(ToolAuthorization.permissions["get_my_profile"], .authenticated)
+        XCTAssertEqual(ToolAuthorization.permissions["update_task_status"], .authenticated)
+        XCTAssertEqual(ToolAuthorization.permissions["list_tasks"], .authenticated)
+        XCTAssertEqual(ToolAuthorization.permissions["get_task"], .authenticated)
+    }
+
+    // MARK: - Authorization Logic Tests
+
+    /// 未認証でもauthenticateは呼び出し可能
+    func testAuthenticateAllowedForUnauthenticated() {
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "authenticate", caller: .unauthenticated))
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "authenticate", caller: .coordinator))
+    }
+
+    /// Coordinator専用ツールはCoordinatorのみ呼び出し可能
+    func testCoordinatorOnlyToolsRequireCoordinator() {
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "health_check", caller: .coordinator))
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "health_check", caller: .unauthenticated)) { error in
+            XCTAssertTrue(error is ToolAuthorizationError)
+        }
+    }
+
+    /// 未登録ツールは拒否される
+    func testUnregisteredToolRejected() {
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "unknown_tool", caller: .coordinator)) { error in
+            guard case ToolAuthorizationError.toolNotRegistered(let tool) = error else {
+                XCTFail("Expected toolNotRegistered error")
+                return
+            }
+            XCTAssertEqual(tool, "unknown_tool")
+        }
+    }
+
+    // MARK: - Tools Helper Tests
+
+    /// 特定権限のツール一覧取得
+    func testToolsForPermission() {
+        let coordinatorTools = ToolAuthorization.tools(for: .coordinatorOnly)
+        XCTAssertTrue(coordinatorTools.contains("health_check"))
+        XCTAssertTrue(coordinatorTools.contains("should_start"))
+
+        let managerTools = ToolAuthorization.tools(for: .managerOnly)
+        XCTAssertTrue(managerTools.contains("list_subordinates"))
+        XCTAssertTrue(managerTools.contains("create_task"))
+    }
+
+    // MARK: - Error Message Tests
+
+    /// 認可エラーメッセージの確認
+    func testAuthorizationErrorMessages() {
+        let toolNotRegistered = ToolAuthorizationError.toolNotRegistered("test_tool")
+        XCTAssertTrue(toolNotRegistered.errorDescription?.contains("test_tool") ?? false)
+        XCTAssertTrue(toolNotRegistered.errorDescription?.contains("not registered") ?? false)
+
+        let coordinatorRequired = ToolAuthorizationError.coordinatorRequired("test_tool")
+        XCTAssertTrue(coordinatorRequired.errorDescription?.contains("Coordinator") ?? false)
+
+        let managerRequired = ToolAuthorizationError.managerRequired("test_tool")
+        XCTAssertTrue(managerRequired.errorDescription?.contains("Manager") ?? false)
+
+        let workerRequired = ToolAuthorizationError.workerRequired("test_tool")
+        XCTAssertTrue(workerRequired.errorDescription?.contains("Worker") ?? false)
+
+        let authRequired = ToolAuthorizationError.authenticationRequired("test_tool")
+        XCTAssertTrue(authRequired.errorDescription?.contains("authentication") ?? false)
+
+        let notSubordinate = ToolAuthorizationError.notSubordinate(managerId: "mgr-1", targetId: "wkr-1")
+        XCTAssertTrue(notSubordinate.errorDescription?.contains("mgr-1") ?? false)
+        XCTAssertTrue(notSubordinate.errorDescription?.contains("wkr-1") ?? false)
     }
 }

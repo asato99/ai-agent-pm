@@ -220,11 +220,23 @@ final class MCPServer {
         let arguments = params["arguments"]?.dictionaryValue ?? [:]
 
         do {
-            let result = try executeTool(name: name, arguments: arguments)
+            // Phase 5: 認可チェック
+            let caller = try identifyCaller(tool: name, arguments: arguments)
+            try ToolAuthorization.authorize(tool: name, caller: caller)
+
+            let result = try executeTool(name: name, arguments: arguments, caller: caller)
             return JSONRPCResponse(id: request.id, result: [
                 "content": [
                     ["type": "text", "text": formatResult(result)]
                 ]
+            ])
+        } catch let error as ToolAuthorizationError {
+            // 認可エラーは専用のエラーメッセージで返す
+            return JSONRPCResponse(id: request.id, result: [
+                "content": [
+                    ["type": "text", "text": "Authorization Error: \(error.errorDescription ?? error.localizedDescription)"]
+                ],
+                "isError": true
             ])
         } catch {
             return JSONRPCResponse(id: request.id, result: [
@@ -236,25 +248,48 @@ final class MCPServer {
         }
     }
 
+    // MARK: - Caller Identification (Phase 5: Authorization)
+
+    /// 呼び出し元を識別
+    /// 参照: Sources/MCPServer/Authorization/ToolAuthorization.swift
+    private func identifyCaller(tool: String, arguments: [String: Any]) throws -> CallerType {
+        // 1. Coordinator token チェック
+        if let coordinatorToken = arguments["coordinator_token"] as? String {
+            let expectedToken = ProcessInfo.processInfo.environment["MCP_COORDINATOR_TOKEN"] ?? ""
+            if !expectedToken.isEmpty && coordinatorToken == expectedToken {
+                return .coordinator
+            }
+            throw MCPError.invalidCoordinatorToken
+        }
+
+        // 2. Session token チェック
+        if let sessionToken = arguments["session_token"] as? String {
+            let session = try validateSession(token: sessionToken)
+            let agent = try agentRepository.findById(session.agentId)
+            guard let agent = agent else {
+                throw MCPError.agentNotFound(session.agentId.value)
+            }
+
+            switch agent.hierarchyType {
+            case .manager:
+                return .manager(agentId: agent.id, session: session)
+            case .worker:
+                return .worker(agentId: agent.id, session: session)
+            }
+        }
+
+        // 3. 未認証（authenticate ツールのみ許可）
+        return .unauthenticated
+    }
+
     /// Toolを実行
     /// ステートレス設計: 必要なIDは全て引数として受け取る
-    private func executeTool(name: String, arguments: [String: Any]) throws -> Any {
+    /// Phase 5: caller で認可済みの呼び出し元情報を受け取る
+    private func executeTool(name: String, arguments: [String: Any], caller: CallerType) throws -> Any {
         switch name {
-        // Phase 4: Runner API
-        case "health_check":
-            return try healthCheck()
-
-        case "list_managed_agents":
-            return try listManagedAgents()
-
-        case "should_start":
-            guard let agentId = arguments["agent_id"] as? String,
-                  let projectId = arguments["project_id"] as? String else {
-                throw MCPError.missingArguments(["agent_id", "project_id"])
-            }
-            return try shouldStart(agentId: agentId, projectId: projectId)
-
-        // Authentication (Phase 4: project_id 必須)
+        // ========================================
+        // 未認証でも呼び出し可能
+        // ========================================
         case "authenticate":
             guard let agentId = arguments["agent_id"] as? String,
                   let passkey = arguments["passkey"] as? String,
@@ -263,212 +298,25 @@ final class MCPServer {
             }
             return try authenticate(agentId: agentId, passkey: passkey, projectId: projectId)
 
-        // Agent
-        case "get_my_profile":
-            // 後方互換性のため維持（非推奨）
-            // 新しいコードは get_agent_profile を使用すべき
-            guard let agentId = arguments["agent_id"] as? String else {
-                throw MCPError.missingArguments(["agent_id"])
-            }
-            return try getAgentProfile(agentId: agentId)
-        case "get_agent_profile":
-            guard let agentId = arguments["agent_id"] as? String else {
-                throw MCPError.missingArguments(["agent_id"])
-            }
-            return try getAgentProfile(agentId: agentId)
-        case "list_agents":
-            return try listAgents()
+        // ========================================
+        // Coordinator専用
+        // ========================================
+        case "health_check":
+            return try healthCheck()
 
-        // Project
-        case "list_projects":
-            return try listProjects()
-        case "get_project":
-            guard let projectId = arguments["project_id"] as? String else {
-                throw MCPError.missingArguments(["project_id"])
-            }
-            return try getProject(projectId: projectId)
+        case "list_managed_agents":
+            return try listManagedAgents()
+
         case "list_active_projects_with_agents":
-            // Phase 4: Runner用API - アクティブプロジェクトと割り当てエージェント一覧
             return try listActiveProjectsWithAgents()
 
-        // Tasks
-        case "list_tasks":
-            let status = arguments["status"] as? String
-            let assigneeId = arguments["assignee_id"] as? String
-            return try listTasks(status: status, assigneeId: assigneeId)
-        case "get_my_tasks":
-            // 後方互換性のため維持（非推奨）
-            // 新しいコードは list_tasks(assignee_id=...) を使用すべき
-            guard let agentId = arguments["agent_id"] as? String else {
-                throw MCPError.missingArguments(["agent_id"])
+        case "should_start":
+            guard let agentId = arguments["agent_id"] as? String,
+                  let projectId = arguments["project_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id", "project_id"])
             }
-            return try listTasks(status: nil, assigneeId: agentId)
-        case "get_pending_tasks":
-            // Phase 3-2: 作業中タスク取得（Phase 3-4: セッション検証必須）
-            // Phase 4: 非推奨 - get_my_task を使用してください
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            // セッションからエージェントIDを取得（引数のagent_idは信頼しない）
-            let session = try validateSession(token: sessionToken)
-            return try getPendingTasks(agentId: session.agentId.value)
+            return try shouldStart(agentId: agentId, projectId: projectId)
 
-        // Phase 4: Agent API
-        case "get_my_task":
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            // Phase 4: セッションからprojectIdも取得してタスクをフィルタリング
-            let session = try validateSession(token: sessionToken)
-            return try getMyTask(agentId: session.agentId.value, projectId: session.projectId.value)
-
-        case "report_completed":
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            guard let result = arguments["result"] as? String else {
-                throw MCPError.missingArguments(["result"])
-            }
-            // Phase 4: セッションからprojectIdも取得してタスクをフィルタリング
-            let session = try validateSession(token: sessionToken)
-            let summary = arguments["summary"] as? String
-            let nextSteps = arguments["next_steps"] as? String
-            return try reportCompleted(
-                agentId: session.agentId.value,
-                projectId: session.projectId.value,
-                sessionToken: sessionToken,
-                result: result,
-                summary: summary,
-                nextSteps: nextSteps
-            )
-
-        case "get_next_action":
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            let session = try validateSession(token: sessionToken)
-            return try getNextAction(
-                session: session
-            )
-
-        case "report_model":
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            guard let provider = arguments["provider"] as? String,
-                  let modelId = arguments["model_id"] as? String else {
-                throw MCPError.missingArguments(["provider", "model_id"])
-            }
-            let session = try validateSession(token: sessionToken)
-            return try reportModel(
-                session: session,
-                provider: provider,
-                modelId: modelId
-            )
-
-        case "get_task":
-            guard let taskId = arguments["task_id"] as? String else {
-                throw MCPError.missingArguments(["task_id"])
-            }
-            return try getTask(taskId: taskId)
-        case "create_task":
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            guard let title = arguments["title"] as? String,
-                  let description = arguments["description"] as? String else {
-                throw MCPError.missingArguments(["title", "description"])
-            }
-            let priority = arguments["priority"] as? String
-            let parentTaskId = arguments["parent_task_id"] as? String
-            let session = try validateSession(token: sessionToken)
-            return try createTask(
-                agentId: session.agentId,
-                projectId: session.projectId,
-                title: title,
-                description: description,
-                priority: priority,
-                parentTaskId: parentTaskId
-            )
-        case "update_task_status":
-            // Phase 4: session_token必須（権限チェック）
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            guard let taskId = arguments["task_id"] as? String,
-                  let status = arguments["status"] as? String else {
-                throw MCPError.missingArguments(["task_id", "status"])
-            }
-            let session = try validateSession(token: sessionToken)
-            // タスクへの書き込み権限を検証
-            _ = try validateTaskWriteAccess(taskId: TaskID(value: taskId), session: session)
-            let reason = arguments["reason"] as? String
-            return try updateTaskStatus(taskId: taskId, status: status, reason: reason)
-
-        // 以下のツールはPhase 4で未使用のため除外（ToolDefinitionsからも削除済み）
-        // case "assign_task", "save_context", "get_task_context",
-        // "create_handoff", "accept_handoff", "get_pending_handoffs", "get_task":
-
-        case "save_context":
-            // レガシーツール: ToolDefinitionsから除外済みだがハンドラは残す（エラー用）
-            throw MCPError.unknownTool("save_context")
-        case "get_task_context":
-            throw MCPError.unknownTool("get_task_context")
-        case "assign_task":
-            // Phase 4: タスク割り当て（マネージャー専用、下位エージェントのみ）
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            guard let taskId = arguments["task_id"] as? String else {
-                throw MCPError.missingArguments(["task_id"])
-            }
-            let assigneeId = arguments["assignee_id"] as? String  // 省略で割り当て解除
-            let session = try validateSession(token: sessionToken)
-            return try assignTask(taskId: taskId, assigneeId: assigneeId, callingAgentId: session.agentId.value)
-        case "get_task":
-            throw MCPError.unknownTool("get_task")
-        case "create_handoff":
-            throw MCPError.unknownTool("create_handoff")
-        case "accept_handoff":
-            throw MCPError.unknownTool("accept_handoff")
-        case "get_pending_handoffs":
-            throw MCPError.unknownTool("get_pending_handoffs")
-
-        // Execution Log (Phase 3-3, Phase 3-4: セッション検証必須)
-        case "report_execution_start":
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            guard let taskId = arguments["task_id"] as? String else {
-                throw MCPError.missingArguments(["task_id"])
-            }
-            // セッションからエージェントIDを取得（引数のagent_idは信頼しない）
-            let session = try validateSession(token: sessionToken)
-            return try reportExecutionStart(taskId: taskId, agentId: session.agentId.value)
-        case "report_execution_complete":
-            // Phase 3-4: セッション検証必須
-            guard let sessionToken = arguments["session_token"] as? String else {
-                throw MCPError.sessionTokenRequired
-            }
-            guard let executionLogId = arguments["execution_log_id"] as? String,
-                  let exitCode = arguments["exit_code"] as? Int,
-                  let durationSeconds = arguments["duration_seconds"] as? Double else {
-                throw MCPError.missingArguments(["execution_log_id", "exit_code", "duration_seconds"])
-            }
-            // セッションを検証（エージェントIDを取得）
-            let session = try validateSession(token: sessionToken)
-            let logFilePath = arguments["log_file_path"] as? String
-            let errorMessage = arguments["error_message"] as? String
-            return try reportExecutionComplete(
-                executionLogId: executionLogId,
-                exitCode: exitCode,
-                durationSeconds: durationSeconds,
-                logFilePath: logFilePath,
-                errorMessage: errorMessage,
-                validatedAgentId: session.agentId.value
-            )
-
-        // Phase 4: Coordinator用（認証不要）
         case "register_execution_log_file":
             guard let agentId = arguments["agent_id"] as? String,
                   let taskId = arguments["task_id"] as? String,
@@ -483,6 +331,197 @@ final class MCPServer {
                 throw MCPError.missingArguments(["agent_id", "project_id"])
             }
             return try invalidateSession(agentId: agentId, projectId: projectId)
+
+        // ========================================
+        // Manager専用
+        // ========================================
+        case "list_subordinates":
+            guard case .manager(let agentId, _) = caller else {
+                throw ToolAuthorizationError.managerRequired("list_subordinates")
+            }
+            return try listSubordinates(managerId: agentId.value)
+
+        case "get_subordinate_profile":
+            guard case .manager(let managerId, _) = caller else {
+                throw ToolAuthorizationError.managerRequired("get_subordinate_profile")
+            }
+            guard let targetAgentId = arguments["agent_id"] as? String else {
+                throw MCPError.missingArguments(["agent_id"])
+            }
+            return try getSubordinateProfile(managerId: managerId.value, targetAgentId: targetAgentId)
+
+        case "create_task":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let title = arguments["title"] as? String,
+                  let description = arguments["description"] as? String else {
+                throw MCPError.missingArguments(["title", "description"])
+            }
+            let priority = arguments["priority"] as? String
+            let parentTaskId = arguments["parent_task_id"] as? String
+            return try createTask(
+                agentId: session.agentId,
+                projectId: session.projectId,
+                title: title,
+                description: description,
+                priority: priority,
+                parentTaskId: parentTaskId
+            )
+
+        case "assign_task":
+            guard case .manager(_, let session) = caller else {
+                throw ToolAuthorizationError.managerRequired("assign_task")
+            }
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            let assigneeId = arguments["assignee_id"] as? String
+            return try assignTask(taskId: taskId, assigneeId: assigneeId, callingAgentId: session.agentId.value)
+
+        // ========================================
+        // Worker専用
+        // ========================================
+        case "report_completed":
+            guard case .worker(_, let session) = caller else {
+                throw ToolAuthorizationError.workerRequired("report_completed")
+            }
+            guard let result = arguments["result"] as? String else {
+                throw MCPError.missingArguments(["result"])
+            }
+            let summary = arguments["summary"] as? String
+            let nextSteps = arguments["next_steps"] as? String
+            guard let sessionToken = arguments["session_token"] as? String else {
+                throw MCPError.sessionTokenRequired
+            }
+            return try reportCompleted(
+                agentId: session.agentId.value,
+                projectId: session.projectId.value,
+                sessionToken: sessionToken,
+                result: result,
+                summary: summary,
+                nextSteps: nextSteps
+            )
+
+        // ========================================
+        // 認証済み共通（Manager + Worker）
+        // ========================================
+        case "get_my_profile":
+            guard let agentId = caller.agentId else {
+                throw MCPError.sessionTokenRequired
+            }
+            return try getAgentProfile(agentId: agentId.value)
+
+        case "get_my_task":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            return try getMyTask(agentId: session.agentId.value, projectId: session.projectId.value)
+
+        case "get_next_action":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            return try getNextAction(session: session)
+
+        case "report_model":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let provider = arguments["provider"] as? String,
+                  let modelId = arguments["model_id"] as? String else {
+                throw MCPError.missingArguments(["provider", "model_id"])
+            }
+            return try reportModel(session: session, provider: provider, modelId: modelId)
+
+        case "update_task_status":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let taskId = arguments["task_id"] as? String,
+                  let status = arguments["status"] as? String else {
+                throw MCPError.missingArguments(["task_id", "status"])
+            }
+            _ = try validateTaskWriteAccess(taskId: TaskID(value: taskId), session: session)
+            let reason = arguments["reason"] as? String
+            return try updateTaskStatus(taskId: taskId, status: status, reason: reason)
+
+        case "get_project":
+            guard let projectId = arguments["project_id"] as? String else {
+                throw MCPError.missingArguments(["project_id"])
+            }
+            return try getProject(projectId: projectId)
+
+        case "list_tasks":
+            let status = arguments["status"] as? String
+            let assigneeId = arguments["assignee_id"] as? String
+            return try listTasks(status: status, assigneeId: assigneeId)
+
+        case "get_task":
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            return try getTask(taskId: taskId)
+
+        case "report_execution_start":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            return try reportExecutionStart(taskId: taskId, agentId: session.agentId.value)
+
+        case "report_execution_complete":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let executionLogId = arguments["execution_log_id"] as? String,
+                  let exitCode = arguments["exit_code"] as? Int,
+                  let durationSeconds = arguments["duration_seconds"] as? Double else {
+                throw MCPError.missingArguments(["execution_log_id", "exit_code", "duration_seconds"])
+            }
+            let logFilePath = arguments["log_file_path"] as? String
+            let errorMessage = arguments["error_message"] as? String
+            return try reportExecutionComplete(
+                executionLogId: executionLogId,
+                exitCode: exitCode,
+                durationSeconds: durationSeconds,
+                logFilePath: logFilePath,
+                errorMessage: errorMessage,
+                validatedAgentId: session.agentId.value
+            )
+
+        // ========================================
+        // 削除済み（エラーを返す）
+        // ========================================
+        case "list_agents":
+            throw MCPError.unknownTool("list_agents (use list_subordinates instead)")
+        case "get_agent_profile":
+            throw MCPError.unknownTool("get_agent_profile (use get_subordinate_profile instead)")
+        case "list_projects":
+            throw MCPError.unknownTool("list_projects (use get_project instead)")
+
+        case "get_my_tasks":
+            throw MCPError.unknownTool("get_my_tasks (use list_tasks with assignee_id instead)")
+
+        case "get_pending_tasks":
+            throw MCPError.unknownTool("get_pending_tasks (use get_my_task instead)")
+
+        case "save_context":
+            throw MCPError.unknownTool("save_context")
+
+        case "get_task_context":
+            throw MCPError.unknownTool("get_task_context")
+
+        case "create_handoff":
+            throw MCPError.unknownTool("create_handoff")
+
+        case "accept_handoff":
+            throw MCPError.unknownTool("accept_handoff")
+
+        case "get_pending_handoffs":
+            throw MCPError.unknownTool("get_pending_handoffs")
 
         default:
             throw MCPError.unknownTool(name)
@@ -2070,9 +2109,69 @@ final class MCPServer {
     }
 
     /// list_agents - 全エージェント一覧を取得
+    /// ⚠️ Phase 5で非推奨: list_subordinates を使用
     private func listAgents() throws -> [[String: Any]] {
         let agents = try agentRepository.findAll()
         return agents.map { agentToDict($0) }
+    }
+
+    // MARK: - Phase 5: Manager-Only Tools
+
+    /// list_subordinates - マネージャーの下位エージェント一覧を取得
+    /// 参照: Sources/MCPServer/Authorization/ToolAuthorization.swift
+    private func listSubordinates(managerId: String) throws -> [[String: Any]] {
+        Self.log("[MCP] listSubordinates called for manager: '\(managerId)'")
+
+        // マネージャーの下位エージェント（parentAgentId == managerId）を取得
+        let allAgents = try agentRepository.findAll()
+        let subordinates = allAgents.filter { $0.parentAgentId?.value == managerId }
+
+        Self.log("[MCP] Found \(subordinates.count) subordinates for manager '\(managerId)'")
+
+        return subordinates.map { agent in
+            [
+                "id": agent.id.value,
+                "name": agent.name,
+                "role": agent.role,
+                "type": agent.type.rawValue,
+                "hierarchy_type": agent.hierarchyType.rawValue,
+                "status": agent.status.rawValue
+            ]
+        }
+    }
+
+    /// get_subordinate_profile - 下位エージェントの詳細情報を取得
+    /// 参照: Sources/MCPServer/Authorization/ToolAuthorization.swift
+    private func getSubordinateProfile(managerId: String, targetAgentId: String) throws -> [String: Any] {
+        Self.log("[MCP] getSubordinateProfile called by manager: '\(managerId)' for target: '\(targetAgentId)'")
+
+        let targetId = AgentID(value: targetAgentId)
+        guard let agent = try agentRepository.findById(targetId) else {
+            throw MCPError.agentNotFound(targetAgentId)
+        }
+
+        // 下位エージェントかどうかを検証
+        guard agent.parentAgentId?.value == managerId else {
+            throw MCPError.notSubordinate(managerId: managerId, targetId: targetAgentId)
+        }
+
+        Self.log("[MCP] Found subordinate: \(agent.name)")
+
+        // 詳細情報（システムプロンプト含む）を返す
+        return [
+            "id": agent.id.value,
+            "name": agent.name,
+            "role": agent.role,
+            "type": agent.type.rawValue,
+            "hierarchy_type": agent.hierarchyType.rawValue,
+            "status": agent.status.rawValue,
+            "system_prompt": agent.systemPrompt ?? "",
+            "parent_agent_id": agent.parentAgentId?.value ?? NSNull(),
+            "ai_type": agent.aiType?.rawValue ?? NSNull(),
+            "kick_method": agent.kickMethod.rawValue,
+            "kick_command": agent.kickCommand ?? NSNull(),
+            "max_parallel_tasks": agent.maxParallelTasks
+        ]
     }
 
     /// list_projects - 全プロジェクト一覧を取得
@@ -2956,6 +3055,8 @@ enum MCPError: Error, CustomStringConvertible {
     case agentNotAssignedToProject(agentId: String, projectId: String)  // Phase 4: エージェント未割り当て
     case taskAccessDenied(String)  // Phase 4: タスクアクセス権限なし
     case permissionDenied(String)  // Phase 4: 権限エラー（マネージャー専用ツール等）
+    case invalidCoordinatorToken  // Phase 5: Coordinatorトークン無効
+    case notSubordinate(managerId: String, targetId: String)  // Phase 5: 下位エージェントではない
 
     var description: String {
         switch self {
@@ -3005,6 +3106,10 @@ enum MCPError: Error, CustomStringConvertible {
             return "Access denied: You don't have permission to modify task '\(taskId)'. Only the assignee or parent task assignee can modify this task."
         case .permissionDenied(let message):
             return "Permission denied: \(message)"
+        case .invalidCoordinatorToken:
+            return "Invalid coordinator token. Set MCP_COORDINATOR_TOKEN environment variable."
+        case .notSubordinate(let managerId, let targetId):
+            return "Agent '\(targetId)' is not a subordinate of manager '\(managerId)'"
         }
     }
 }
