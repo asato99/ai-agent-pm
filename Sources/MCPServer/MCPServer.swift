@@ -1825,7 +1825,11 @@ final class MCPServer {
         Self.log("[MCP] getManagerNextAction: task=\(mainTask.id.value), phase=\(phase)")
 
         // サブタスク（parentTaskId = mainTask.id）を取得
-        let subTasks = allTasks.filter { $0.parentTaskId == mainTask.id }
+        // Note: allTasksはマネージャーに割り当てられたタスクのみ（findByAssignee）なので、
+        // ワーカーに割り当てられたサブタスクは含まれない。
+        // プロジェクト全体からサブタスクを検索する必要がある。
+        let projectTasks = try taskRepository.findByProject(mainTask.projectId, status: nil)
+        let subTasks = projectTasks.filter { $0.parentTaskId == mainTask.id }
         let pendingSubTasks = subTasks.filter { $0.status == .todo || $0.status == .backlog }
         let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
         let completedSubTasks = subTasks.filter { $0.status == .done }
