@@ -6,21 +6,6 @@ import Domain
 
 private typealias AsyncTask = _Concurrency.Task
 
-// Debug helper for UITesting
-private extension String {
-    func appendToFile(_ path: String) throws {
-        if let handle = FileHandle(forWritingAtPath: path) {
-            defer { handle.closeFile() }
-            handle.seekToEndOfFile()
-            if let data = (self + "\n").data(using: .utf8) {
-                handle.write(data)
-            }
-        } else {
-            try self.write(toFile: path, atomically: true, encoding: .utf8)
-        }
-    }
-}
-
 struct ProjectListView: View {
     @EnvironmentObject var container: DependencyContainer
     @Environment(Router.self) var router
@@ -223,10 +208,14 @@ struct ProjectListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .testDataSeeded)) { _ in
             // UIテストデータシード完了後に再読み込み
+            #if DEBUG
             try? "ProjectListView received testDataSeeded at \(Date())".appendToFile("/tmp/uitest_workflow_debug.txt")
+            #endif
             _Concurrency.Task {
                 await loadData()
+                #if DEBUG
                 try? "ProjectListView loadData completed, projects count: \(projects.count)".appendToFile("/tmp/uitest_workflow_debug.txt")
+                #endif
             }
         }
         .onChange(of: router.currentSheet) { oldValue, newValue in
