@@ -166,31 +166,53 @@ final class UC009_ChatCommunicationTests: UC009UITestCase {
     }
 
     /// エージェントの応答を待機
+    /// ChatMessageContent要素の中から指定のテキストを含むものを探す
+    /// （UIヘッダーなどに含まれるエージェント名を誤検出しないよう、メッセージ要素のみを検索）
     private func waitForAgentResponse(containingText: String, timeout: TimeInterval) throws -> Bool {
         let startTime = Date()
         let pollInterval: TimeInterval = 2.0
 
         while Date().timeIntervalSince(startTime) < timeout {
-            // 応答テキストを検索
-            let responseTexts = app.staticTexts.matching(
-                NSPredicate(format: "label CONTAINS[c] %@", containingText)
-            )
+            // ChatMessageContent- プレフィックスを持つ要素（実際のメッセージコンテンツ）の中から検索
+            // これにより、ヘッダーやラベルに表示されるエージェント名を誤検出しない
+            let messageContents = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'ChatMessageContent-'"))
 
-            if responseTexts.count > 0 {
-                print("  エージェント応答を検出: 「\(containingText)」を含むテキストが見つかりました")
-                return true
+            let messageCount = messageContents.count
+            if messageCount > 1 {  // ユーザーメッセージ + エージェント応答で2件以上
+                for i in 0..<messageCount {
+                    let element = messageContents.element(boundBy: i)
+                    // label をチェック
+                    if let label = element.label as String?, label.contains(containingText) {
+                        print("  エージェント応答を検出: ChatMessageContent要素(\(i))に「\(containingText)」が見つかりました (label)")
+                        return true
+                    }
+                    // value もチェック
+                    if let value = element.value as? String, value.contains(containingText) {
+                        print("  エージェント応答を検出: ChatMessageContent要素(\(i))に「\(containingText)」が見つかりました (value)")
+                        return true
+                    }
+                }
             }
 
             // 待機状況を表示（10秒ごと）
             let elapsed = Int(Date().timeIntervalSince(startTime))
             if elapsed > 0 && elapsed % 10 == 0 {
-                print("  待機中... (\(elapsed)秒経過)")
+                print("  待機中... (\(elapsed)秒経過, messages=\(messageCount))")
             }
 
             Thread.sleep(forTimeInterval: pollInterval)
         }
 
-        print("  タイムアウト: \(timeout)秒以内に応答を受信できませんでした")
+        // タイムアウト時のデバッグ情報
+        let finalMessageContents = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'ChatMessageContent-'"))
+        print("  タイムアウト: \(timeout)秒以内に「\(containingText)」を含む応答を受信できませんでした")
+        print("  最終メッセージ数: \(finalMessageContents.count)")
+        for i in 0..<finalMessageContents.count {
+            let element = finalMessageContents.element(boundBy: i)
+            print("    メッセージ[\(i)]: identifier=\(element.identifier), label=\(element.label ?? "nil")")
+        }
         return false
     }
 }
