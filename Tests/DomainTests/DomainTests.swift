@@ -1180,4 +1180,89 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(ExecutionStatus.failed.rawValue, "failed")
         XCTAssertEqual(ExecutionStatus.allCases.count, 3)
     }
+
+    // MARK: - ChatMessage Tests (Chat Feature)
+
+    func testChatMessageIDGeneration() {
+        // 要件: msg_[ランダム文字列] 形式
+        let id = ChatMessageID.generate()
+        XCTAssertTrue(id.value.hasPrefix("msg_"), "ChatMessage ID must start with 'msg_'")
+        XCTAssertGreaterThan(id.value.count, 4, "ChatMessage ID must have characters after prefix")
+    }
+
+    func testChatMessageCreation() {
+        // 要件: ChatMessage { id, sender, content, createdAt, relatedTaskId?, relatedHandoffId? }
+        let message = ChatMessage(
+            id: ChatMessageID.generate(),
+            sender: .user,
+            content: "タスクAの進捗を教えてください",
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(message.sender, .user)
+        XCTAssertEqual(message.content, "タスクAの進捗を教えてください")
+        XCTAssertNil(message.relatedTaskId, "New message should not have related task by default")
+        XCTAssertNil(message.relatedHandoffId, "New message should not have related handoff by default")
+    }
+
+    func testChatMessageWithRelatedTask() {
+        let taskId = TaskID.generate()
+        let message = ChatMessage(
+            id: ChatMessageID.generate(),
+            sender: .agent,
+            content: "タスクは50%完了しています",
+            createdAt: Date(),
+            relatedTaskId: taskId
+        )
+
+        XCTAssertEqual(message.sender, .agent)
+        XCTAssertEqual(message.relatedTaskId, taskId)
+    }
+
+    func testSenderTypeValues() {
+        // 要件: user (人間) / agent (AIエージェント)
+        XCTAssertEqual(SenderType.user.rawValue, "user")
+        XCTAssertEqual(SenderType.agent.rawValue, "agent")
+    }
+
+    func testChatMessageEquality() {
+        let id = ChatMessageID.generate()
+        let now = Date()
+
+        let message1 = ChatMessage(
+            id: id,
+            sender: .user,
+            content: "Hello",
+            createdAt: now
+        )
+
+        let message2 = ChatMessage(
+            id: id,
+            sender: .user,
+            content: "Hello",
+            createdAt: now
+        )
+
+        XCTAssertEqual(message1, message2, "Messages with same properties should be equal")
+    }
+
+    func testChatMessageCodable() throws {
+        let message = ChatMessage(
+            id: ChatMessageID(value: "msg_test123"),
+            sender: .agent,
+            content: "テストメッセージ",
+            createdAt: Date(timeIntervalSince1970: 1704067200) // 2024-01-01 00:00:00 UTC
+        )
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(message)
+
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(ChatMessage.self, from: data)
+
+        XCTAssertEqual(decoded.id, message.id)
+        XCTAssertEqual(decoded.sender, message.sender)
+        XCTAssertEqual(decoded.content, message.content)
+        XCTAssertEqual(decoded.createdAt, message.createdAt)
+    }
 }

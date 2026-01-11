@@ -39,6 +39,11 @@ public final class DependencyContainer: ObservableObject {
     public let agentCredentialRepository: AgentCredentialRepository
     public let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository
 
+    // MARK: - File Storage
+
+    public let projectDirectoryManager: ProjectDirectoryManager
+    public let chatRepository: ChatFileRepository
+
     // MARK: - Event Recorder
 
     public let eventRecorder: EventRecorder
@@ -368,6 +373,13 @@ public final class DependencyContainer: ObservableObject {
         self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
         self.mcpDaemonManager = MCPDaemonManager()
+
+        // File Storage (ファイルベースストレージ)
+        self.projectDirectoryManager = ProjectDirectoryManager()
+        self.chatRepository = ChatFileRepository(
+            directoryManager: projectDirectoryManager,
+            projectRepository: projectRepository
+        )
     }
 
     /// デフォルトのデータベースパスを使用して初期化

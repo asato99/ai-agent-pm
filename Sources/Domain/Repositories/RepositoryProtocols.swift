@@ -202,3 +202,23 @@ public protocol ProjectAgentAssignmentRepositoryProtocol: Sendable {
     /// 全割り当て一覧を取得
     func findAll() throws -> [ProjectAgentAssignment]
 }
+
+// MARK: - ChatRepositoryProtocol
+
+/// チャットメッセージリポジトリのプロトコル
+/// 参照: docs/design/CHAT_FEATURE.md
+/// ファイルベースストレージを想定（.ai-pm/agents/{id}/chat.jsonl）
+public protocol ChatRepositoryProtocol: Sendable {
+    /// メッセージ一覧を取得（時系列順）
+    func findMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage]
+
+    /// メッセージを保存（追記）
+    func saveMessage(_ message: ChatMessage, projectId: ProjectID, agentId: AgentID) throws
+
+    /// 最新N件のメッセージを取得
+    func getLastMessages(projectId: ProjectID, agentId: AgentID, limit: Int) throws -> [ChatMessage]
+
+    /// 未読メッセージを取得（エージェントからの最後のメッセージ以降のユーザーメッセージ）
+    /// MCP連携用: エージェントが応答すべきメッセージを取得
+    func findUnreadUserMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage]
+}

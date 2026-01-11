@@ -38,10 +38,16 @@ struct ContentView: View {
                 )
             }
         } detail: {
-            // 詳細: タスク詳細 or エージェント詳細
+            // 詳細: タスク詳細 or チャット or エージェント詳細
+            // 優先順位: selectedTask > selectedChatAgent > selectedAgent
             if let taskId = router.selectedTask {
                 TaskDetailView(taskId: taskId, taskStore: taskStore)
                     .id(router.detailRefreshId)  // タスク再選択時にビューを再作成
+            } else if let chatAgentId = router.selectedChatAgent,
+                      let chatProjectId = router.selectedChatProjectId {
+                // チャット画面（参照: docs/design/CHAT_FEATURE.md）
+                AgentChatView(agentId: chatAgentId, projectId: chatProjectId)
+                    .id(router.detailRefreshId)  // 再選択時にビューを再作成
             } else if let agentId = router.selectedAgent {
                 AgentDetailView(agentId: agentId)
                     .id(agentId)  // エージェント再選択時にビューを再作成

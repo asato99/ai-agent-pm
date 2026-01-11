@@ -69,6 +69,7 @@ struct TaskBoardView: View {
     @ObservedObject var taskStore: TaskStore
 
     @State private var agents: [Agent] = []
+    @State private var assignedAgents: [Agent] = []  // プロジェクトに割り当てられたエージェント
     @State private var templates: [WorkflowTemplate] = []
     @State private var project: Project?
     @State private var isLoading = false
@@ -116,6 +117,7 @@ struct TaskBoardView: View {
             // Project Info Header
             if let project = project {
                 VStack(alignment: .leading, spacing: 4) {
+                    // Working Directory Row
                     HStack {
                         Text("Working Directory:")
                             .font(.caption)
@@ -127,6 +129,17 @@ struct TaskBoardView: View {
                     }
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("ProjectWorkingDirectory")
+
+                    Divider()
+
+                    // Assigned Agents Row（参照: docs/design/CHAT_FEATURE.md）
+                    AssignedAgentsRow(
+                        projectId: projectId,
+                        agents: assignedAgents,
+                        onAgentTap: { agentId in
+                            router.selectChatWithAgent(agentId, in: projectId)
+                        }
+                    )
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
@@ -228,6 +241,8 @@ struct TaskBoardView: View {
             // タスクはTaskStore経由で読み込み
             await taskStore.loadTasks()
             agents = try container.getAgentsUseCase.execute()
+            // プロジェクトに割り当てられたエージェントを取得
+            assignedAgents = try container.projectAgentAssignmentRepository.findAgentsByProject(projectId)
             templates = try container.listTemplatesUseCase.execute(
                 projectId: projectId,
                 includeArchived: false

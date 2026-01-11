@@ -236,3 +236,21 @@ public struct ExecutionLogID: Hashable, Codable, Sendable, CustomStringConvertib
 
     public var description: String { value }
 }
+
+// MARK: - ChatMessageID
+
+/// チャットメッセージの一意識別子
+/// 参照: docs/design/CHAT_FEATURE.md
+public struct ChatMessageID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> ChatMessageID {
+        ChatMessageID(value: "msg_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}

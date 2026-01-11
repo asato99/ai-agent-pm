@@ -25,6 +25,13 @@ public final class Router {
     /// 選択中のInternal Audit
     public var selectedInternalAudit: InternalAuditID?
 
+    /// チャット表示中のエージェント
+    /// 参照: docs/design/CHAT_FEATURE.md
+    public var selectedChatAgent: AgentID?
+
+    /// チャットのプロジェクトコンテキスト
+    public var selectedChatProjectId: ProjectID?
+
     /// Internal Audits一覧を表示中かどうか
     public var showingInternalAudits: Bool = false
 
@@ -151,6 +158,8 @@ public final class Router {
         selectedProject = projectId
         selectedTask = nil
         selectedAgent = nil
+        selectedChatAgent = nil
+        selectedChatProjectId = nil
         showingInternalAudits = false
         showingMCPServer = false
     }
@@ -158,6 +167,9 @@ public final class Router {
     /// タスクを選択
     public func selectTask(_ taskId: TaskID?) {
         selectedTask = taskId
+        // タスク選択時はチャットをクリア
+        selectedChatAgent = nil
+        selectedChatProjectId = nil
         // タスク選択時は常にdetailRefreshIdを更新してビューを再作成
         detailRefreshId = UUID()
     }
@@ -175,6 +187,22 @@ public final class Router {
     /// Internal Auditを選択
     public func selectInternalAudit(_ auditId: InternalAuditID?) {
         selectedInternalAudit = auditId
+    }
+
+    /// エージェントとのチャットを開く
+    /// 参照: docs/design/CHAT_FEATURE.md
+    public func selectChatWithAgent(_ agentId: AgentID, in projectId: ProjectID) {
+        selectedTask = nil
+        selectedAgent = nil
+        selectedChatAgent = agentId
+        selectedChatProjectId = projectId
+        detailRefreshId = UUID()
+    }
+
+    /// チャット画面を閉じる
+    public func closeChatView() {
+        selectedChatAgent = nil
+        selectedChatProjectId = nil
     }
 
     /// Internal Audits一覧を表示

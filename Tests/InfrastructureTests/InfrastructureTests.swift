@@ -1796,4 +1796,400 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertEqual(assignments.count, 3)
     }
 
+    // MARK: - ProjectDirectoryManager Tests (Chat Feature)
+    // 参照: docs/design/CHAT_FEATURE.md - ディレクトリ構成
+
+    func testProjectDirectoryManagerGetAppDirectoryURL() throws {
+        // PRD: .ai-pm ディレクトリパスの取得
+        let directoryManager = ProjectDirectoryManager()
+        let workingDir = "/tmp/test-project"
+
+        // When: アプリディレクトリURLを取得
+        let appDirURL = try directoryManager.getAppDirectoryURL(workingDirectory: workingDir)
+
+        // Then: 正しいパスが返される
+        XCTAssertEqual(appDirURL.path, "/tmp/test-project/.ai-pm")
+    }
+
+    func testProjectDirectoryManagerGetAppDirectoryURLThrowsWhenNoWorkingDirectory() throws {
+        // PRD: 作業ディレクトリ未設定時のエラー
+        let directoryManager = ProjectDirectoryManager()
+
+        // When/Then: nilの場合エラー
+        XCTAssertThrowsError(try directoryManager.getAppDirectoryURL(workingDirectory: nil)) { error in
+            guard case ProjectDirectoryManagerError.workingDirectoryNotSet = error else {
+                XCTFail("Expected workingDirectoryNotSet error")
+                return
+            }
+        }
+    }
+
+    func testProjectDirectoryManagerGetOrCreateAppDirectory() throws {
+        // PRD: .ai-pm ディレクトリの作成
+        let directoryManager = ProjectDirectoryManager()
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        // When: アプリディレクトリを作成
+        let appDirURL = try directoryManager.getOrCreateAppDirectory(workingDirectory: tempDir.path)
+
+        // Then: ディレクトリが作成されている
+        XCTAssertTrue(FileManager.default.fileExists(atPath: appDirURL.path))
+
+        // Then: .gitignore も作成されている
+        let gitignoreURL = appDirURL.appendingPathComponent(".gitignore")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: gitignoreURL.path))
+    }
+
+    func testProjectDirectoryManagerGetOrCreateAgentDirectory() throws {
+        // PRD: エージェント別ディレクトリの作成
+        let directoryManager = ProjectDirectoryManager()
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let agentId = AgentID.generate()
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        // When: エージェントディレクトリを作成
+        let agentDirURL = try directoryManager.getOrCreateAgentDirectory(
+            workingDirectory: tempDir.path,
+            agentId: agentId
+        )
+
+        // Then: ディレクトリが作成されている
+        XCTAssertTrue(FileManager.default.fileExists(atPath: agentDirURL.path))
+
+        // Then: 正しいパスになっている
+        XCTAssertTrue(agentDirURL.path.contains("agents"))
+        XCTAssertTrue(agentDirURL.path.contains(agentId.value))
+    }
+
+    func testProjectDirectoryManagerGetChatFilePath() throws {
+        // PRD: チャットファイルパスの取得
+        let directoryManager = ProjectDirectoryManager()
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let agentId = AgentID.generate()
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        // When: チャットファイルパスを取得
+        let chatFileURL = try directoryManager.getChatFilePath(
+            workingDirectory: tempDir.path,
+            agentId: agentId
+        )
+
+        // Then: 正しいパスになっている
+        XCTAssertTrue(chatFileURL.path.hasSuffix("chat.jsonl"))
+
+        // Then: 親ディレクトリが作成されている
+        XCTAssertTrue(FileManager.default.fileExists(atPath: chatFileURL.deletingLastPathComponent().path))
+    }
+
+    func testProjectDirectoryManagerChatFileExistsReturnsFalseWhenNotExists() throws {
+        // PRD: チャットファイル存在確認（存在しない場合）
+        let directoryManager = ProjectDirectoryManager()
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let agentId = AgentID.generate()
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        // When: チャットファイルの存在を確認
+        let exists = try directoryManager.chatFileExists(
+            workingDirectory: tempDir.path,
+            agentId: agentId
+        )
+
+        // Then: ファイルは存在しない
+        XCTAssertFalse(exists)
+    }
+
+    func testProjectDirectoryManagerChatFileExistsReturnsTrueWhenExists() throws {
+        // PRD: チャットファイル存在確認（存在する場合）
+        let directoryManager = ProjectDirectoryManager()
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let agentId = AgentID.generate()
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        // チャットファイルを作成
+        let chatFileURL = try directoryManager.getChatFilePath(
+            workingDirectory: tempDir.path,
+            agentId: agentId
+        )
+        try "".write(to: chatFileURL, atomically: true, encoding: .utf8)
+
+        // When: チャットファイルの存在を確認
+        let exists = try directoryManager.chatFileExists(
+            workingDirectory: tempDir.path,
+            agentId: agentId
+        )
+
+        // Then: ファイルが存在する
+        XCTAssertTrue(exists)
+    }
+
+    // MARK: - ChatFileRepository Tests (Chat Feature)
+    // 参照: docs/design/CHAT_FEATURE.md - ChatFileRepository
+
+    func testChatFileRepositorySaveAndFindMessages() throws {
+        // PRD: メッセージの保存と取得
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        // プロジェクトを作成（workingDirectoryを設定）
+        var project = Project(id: ProjectID.generate(), name: "TestProject")
+        project.workingDirectory = tempDir.path
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let directoryManager = ProjectDirectoryManager()
+        let chatRepo = ChatFileRepository(
+            directoryManager: directoryManager,
+            projectRepository: projectRepo
+        )
+
+        // メッセージを作成
+        let message1 = ChatMessage(
+            id: ChatMessageID.generate(),
+            sender: .user,
+            content: "こんにちは",
+            createdAt: Date()
+        )
+        let message2 = ChatMessage(
+            id: ChatMessageID.generate(),
+            sender: .agent,
+            content: "こんにちは！何かお手伝いできることはありますか？",
+            createdAt: Date()
+        )
+
+        // When: メッセージを保存
+        try chatRepo.saveMessage(message1, projectId: project.id, agentId: agent.id)
+        try chatRepo.saveMessage(message2, projectId: project.id, agentId: agent.id)
+
+        // Then: メッセージを取得できる
+        let messages = try chatRepo.findMessages(projectId: project.id, agentId: agent.id)
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0].id, message1.id)
+        XCTAssertEqual(messages[0].content, "こんにちは")
+        XCTAssertEqual(messages[0].sender, .user)
+        XCTAssertEqual(messages[1].id, message2.id)
+        XCTAssertEqual(messages[1].content, "こんにちは！何かお手伝いできることはありますか？")
+        XCTAssertEqual(messages[1].sender, .agent)
+    }
+
+    func testChatFileRepositoryFindMessagesReturnsEmptyWhenNoFile() throws {
+        // PRD: ファイルが存在しない場合は空配列を返す
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        var project = Project(id: ProjectID.generate(), name: "TestProject")
+        project.workingDirectory = tempDir.path
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let directoryManager = ProjectDirectoryManager()
+        let chatRepo = ChatFileRepository(
+            directoryManager: directoryManager,
+            projectRepository: projectRepo
+        )
+
+        // When: 存在しないファイルからメッセージを取得
+        let messages = try chatRepo.findMessages(projectId: project.id, agentId: agent.id)
+
+        // Then: 空配列が返される
+        XCTAssertTrue(messages.isEmpty)
+    }
+
+    func testChatFileRepositoryGetLastMessages() throws {
+        // PRD: 最後のN件のメッセージを取得
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        var project = Project(id: ProjectID.generate(), name: "TestProject")
+        project.workingDirectory = tempDir.path
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let directoryManager = ProjectDirectoryManager()
+        let chatRepo = ChatFileRepository(
+            directoryManager: directoryManager,
+            projectRepository: projectRepo
+        )
+
+        // 5件のメッセージを作成
+        for i in 1...5 {
+            let message = ChatMessage(
+                id: ChatMessageID.generate(),
+                sender: i % 2 == 0 ? .agent : .user,
+                content: "Message \(i)",
+                createdAt: Date()
+            )
+            try chatRepo.saveMessage(message, projectId: project.id, agentId: agent.id)
+        }
+
+        // When: 最後の3件を取得
+        let lastMessages = try chatRepo.getLastMessages(projectId: project.id, agentId: agent.id, limit: 3)
+
+        // Then: 3件返される
+        XCTAssertEqual(lastMessages.count, 3)
+        XCTAssertEqual(lastMessages[0].content, "Message 3")
+        XCTAssertEqual(lastMessages[1].content, "Message 4")
+        XCTAssertEqual(lastMessages[2].content, "Message 5")
+    }
+
+    func testChatFileRepositoryFindUnreadUserMessages() throws {
+        // PRD: 未読ユーザーメッセージの取得
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        var project = Project(id: ProjectID.generate(), name: "TestProject")
+        project.workingDirectory = tempDir.path
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let directoryManager = ProjectDirectoryManager()
+        let chatRepo = ChatFileRepository(
+            directoryManager: directoryManager,
+            projectRepository: projectRepo
+        )
+
+        // メッセージを作成（user → agent → user → user）
+        let msg1 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg1", createdAt: Date())
+        let msg2 = ChatMessage(id: ChatMessageID.generate(), sender: .agent, content: "msg2", createdAt: Date())
+        let msg3 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg3", createdAt: Date())
+        let msg4 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg4", createdAt: Date())
+
+        try chatRepo.saveMessage(msg1, projectId: project.id, agentId: agent.id)
+        try chatRepo.saveMessage(msg2, projectId: project.id, agentId: agent.id)
+        try chatRepo.saveMessage(msg3, projectId: project.id, agentId: agent.id)
+        try chatRepo.saveMessage(msg4, projectId: project.id, agentId: agent.id)
+
+        // When: 未読ユーザーメッセージを取得
+        let unreadMessages = try chatRepo.findUnreadUserMessages(projectId: project.id, agentId: agent.id)
+
+        // Then: エージェント応答後のユーザーメッセージが返される
+        XCTAssertEqual(unreadMessages.count, 2)
+        XCTAssertEqual(unreadMessages[0].content, "msg3")
+        XCTAssertEqual(unreadMessages[1].content, "msg4")
+    }
+
+    func testChatFileRepositoryFindUnreadUserMessagesWhenNoAgentMessages() throws {
+        // PRD: エージェントメッセージがない場合は全ユーザーメッセージが未読
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // 親ディレクトリを作成
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        var project = Project(id: ProjectID.generate(), name: "TestProject")
+        project.workingDirectory = tempDir.path
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let directoryManager = ProjectDirectoryManager()
+        let chatRepo = ChatFileRepository(
+            directoryManager: directoryManager,
+            projectRepository: projectRepo
+        )
+
+        // ユーザーメッセージのみ
+        let msg1 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg1", createdAt: Date())
+        let msg2 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg2", createdAt: Date())
+
+        try chatRepo.saveMessage(msg1, projectId: project.id, agentId: agent.id)
+        try chatRepo.saveMessage(msg2, projectId: project.id, agentId: agent.id)
+
+        // When: 未読ユーザーメッセージを取得
+        let unreadMessages = try chatRepo.findUnreadUserMessages(projectId: project.id, agentId: agent.id)
+
+        // Then: 全てのユーザーメッセージが返される
+        XCTAssertEqual(unreadMessages.count, 2)
+    }
+
+    func testChatFileRepositoryThrowsWhenWorkingDirectoryNotSet() throws {
+        // PRD: 作業ディレクトリ未設定時のエラー
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        // workingDirectoryを設定しない
+        try projectRepo.save(project)
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        let directoryManager = ProjectDirectoryManager()
+        let chatRepo = ChatFileRepository(
+            directoryManager: directoryManager,
+            projectRepository: projectRepo
+        )
+
+        // When/Then: メッセージ取得時にエラー
+        XCTAssertThrowsError(try chatRepo.findMessages(projectId: project.id, agentId: agent.id)) { error in
+            guard case ChatFileRepositoryError.workingDirectoryNotSet = error else {
+                XCTFail("Expected workingDirectoryNotSet error")
+                return
+            }
+        }
+    }
+
 }
