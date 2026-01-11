@@ -191,6 +191,12 @@ final class TestDataSeeder {
             completedAt: nil
         )
         try await taskRepository.save(additionalTaskForResourceTest)
+
+        // プロジェクトにエージェントを割り当て（Chat機能テスト用）
+        if let assignmentRepo = projectAgentAssignmentRepository {
+            _ = try assignmentRepo.assign(projectId: project.id, agentId: devAgent.id)
+            _ = try assignmentRepo.assign(projectId: project.id, agentId: ownerAgent.id)
+        }
     }
 
     /// 空のプロジェクト状態をシード（プロジェクトなし）

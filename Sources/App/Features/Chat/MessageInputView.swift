@@ -44,6 +44,8 @@ struct MessageInputView: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.background)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("MessageInputArea")
     }
 
     // MARK: - Actions

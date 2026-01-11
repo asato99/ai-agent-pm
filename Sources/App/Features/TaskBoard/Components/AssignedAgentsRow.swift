@@ -52,6 +52,7 @@ struct AssignedAgentsRow: View {
 
             Spacer()
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("AssignedAgentsRow")
     }
 

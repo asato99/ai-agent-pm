@@ -59,6 +59,7 @@ struct AgentChatView: View {
     // MARK: - Header
 
     private var chatHeader: some View {
+        Group {
         HStack {
             // Agent info
             if let agent = agent {
@@ -103,6 +104,8 @@ struct AgentChatView: View {
         }
         .padding()
         .background(.background.secondary)
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ChatHeader")
     }
 
@@ -140,6 +143,7 @@ struct AgentChatView: View {
                 ProgressView()
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ChatMessageList")
     }
 
