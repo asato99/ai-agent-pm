@@ -1265,4 +1265,172 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(decoded.content, message.content)
         XCTAssertEqual(decoded.createdAt, message.createdAt)
     }
+
+    // MARK: - PendingAgentPurpose Tests (Chat Feature - 起動理由管理)
+
+    func testAgentPurposeValues() {
+        // 要件: task (タスク実行) / chat (チャット応答)
+        XCTAssertEqual(AgentPurpose.task.rawValue, "task")
+        XCTAssertEqual(AgentPurpose.chat.rawValue, "chat")
+    }
+
+    func testPendingAgentPurposeCreation() {
+        // 要件: PendingAgentPurpose { agentId, projectId, purpose, createdAt, startedAt }
+        let agentId = AgentID.generate()
+        let projectId = ProjectID.generate()
+        let now = Date()
+
+        let pending = PendingAgentPurpose(
+            agentId: agentId,
+            projectId: projectId,
+            purpose: .chat,
+            createdAt: now
+        )
+
+        XCTAssertEqual(pending.agentId, agentId)
+        XCTAssertEqual(pending.projectId, projectId)
+        XCTAssertEqual(pending.purpose, .chat)
+        XCTAssertEqual(pending.createdAt, now)
+        XCTAssertNil(pending.startedAt, "New pending purpose should not have startedAt")
+    }
+
+    func testPendingAgentPurposeId() {
+        // 要件: 複合キー (agentId, projectId)
+        let agentId = AgentID(value: "agt_test123")
+        let projectId = ProjectID(value: "prj_test456")
+
+        let pending = PendingAgentPurpose(
+            agentId: agentId,
+            projectId: projectId,
+            purpose: .task
+        )
+
+        XCTAssertEqual(pending.id, "agt_test123_prj_test456")
+    }
+
+    func testPendingAgentPurposeTTL() {
+        // 要件: TTL = 5分 (300秒)
+        XCTAssertEqual(PendingAgentPurpose.ttlSeconds, 300)
+    }
+
+    func testPendingAgentPurposeIsExpired_BeforeTTL_ReturnsFalse() {
+        // 要件: createdAtから5分未満なら期限切れではない
+        let now = Date()
+        let fourMinutesAgo = now.addingTimeInterval(-240) // 4分前
+
+        let pending = PendingAgentPurpose(
+            agentId: AgentID.generate(),
+            projectId: ProjectID.generate(),
+            purpose: .chat,
+            createdAt: fourMinutesAgo
+        )
+
+        XCTAssertFalse(pending.isExpired(now: now), "Should not be expired before TTL (4min < 5min)")
+    }
+
+    func testPendingAgentPurposeIsExpired_AfterTTL_ReturnsTrue() {
+        // 要件: createdAtから5分以上経過なら期限切れ
+        let now = Date()
+        let sixMinutesAgo = now.addingTimeInterval(-360) // 6分前
+
+        let pending = PendingAgentPurpose(
+            agentId: AgentID.generate(),
+            projectId: ProjectID.generate(),
+            purpose: .chat,
+            createdAt: sixMinutesAgo
+        )
+
+        XCTAssertTrue(pending.isExpired(now: now), "Should be expired after TTL (6min > 5min)")
+    }
+
+    func testPendingAgentPurposeIsExpired_ExactlyAtTTL_ReturnsTrue() {
+        // 要件: ちょうど5分でも期限切れ（> ttlSeconds）
+        let now = Date()
+        let exactlyFiveMinutesAgo = now.addingTimeInterval(-300.001) // 5分0.001秒前
+
+        let pending = PendingAgentPurpose(
+            agentId: AgentID.generate(),
+            projectId: ProjectID.generate(),
+            purpose: .chat,
+            createdAt: exactlyFiveMinutesAgo
+        )
+
+        XCTAssertTrue(pending.isExpired(now: now), "Should be expired at exactly TTL")
+    }
+
+    func testPendingAgentPurposeMarkAsStarted() {
+        // 要件: 起動済みとしてマーク
+        let now = Date()
+        let startTime = now.addingTimeInterval(10) // 10秒後
+
+        let pending = PendingAgentPurpose(
+            agentId: AgentID.generate(),
+            projectId: ProjectID.generate(),
+            purpose: .task,
+            createdAt: now
+        )
+
+        XCTAssertNil(pending.startedAt)
+
+        let started = pending.markAsStarted(at: startTime)
+
+        // 元のインスタンスは変更されない（イミュータブル）
+        XCTAssertNil(pending.startedAt)
+
+        // 新しいインスタンスにはstartedAtが設定される
+        XCTAssertEqual(started.startedAt, startTime)
+        XCTAssertEqual(started.agentId, pending.agentId)
+        XCTAssertEqual(started.projectId, pending.projectId)
+        XCTAssertEqual(started.purpose, pending.purpose)
+        XCTAssertEqual(started.createdAt, pending.createdAt)
+    }
+
+    func testPendingAgentPurposeEquality() {
+        let agentId = AgentID.generate()
+        let projectId = ProjectID.generate()
+        let now = Date()
+
+        let pending1 = PendingAgentPurpose(
+            agentId: agentId,
+            projectId: projectId,
+            purpose: .chat,
+            createdAt: now
+        )
+
+        let pending2 = PendingAgentPurpose(
+            agentId: agentId,
+            projectId: projectId,
+            purpose: .chat,
+            createdAt: now
+        )
+
+        XCTAssertEqual(pending1, pending2)
+    }
+
+    // MARK: - DateProvider Tests
+
+    func testSystemDateProviderReturnsCurrentDate() {
+        let provider = SystemDateProvider()
+        let before = Date()
+        let now = provider.now()
+        let after = Date()
+
+        // provider.now() は before と after の間にあるはず
+        XCTAssertGreaterThanOrEqual(now.timeIntervalSince1970, before.timeIntervalSince1970)
+        XCTAssertLessThanOrEqual(now.timeIntervalSince1970, after.timeIntervalSince1970)
+    }
+
+    func testMockDateProviderForTesting() {
+        // テスト用のモックDateProviderの使用例
+        struct MockDateProvider: DateProvider {
+            let fixedDate: Date
+            func now() -> Date { fixedDate }
+        }
+
+        let fixedTime = Date(timeIntervalSince1970: 1704067200) // 2024-01-01 00:00:00 UTC
+        let mockProvider = MockDateProvider(fixedDate: fixedTime)
+
+        XCTAssertEqual(mockProvider.now(), fixedTime)
+        XCTAssertEqual(mockProvider.now(), fixedTime) // 複数回呼んでも同じ
+    }
 }

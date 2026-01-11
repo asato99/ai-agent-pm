@@ -1280,11 +1280,44 @@ final class MCPServer {
         } catch {
             Self.log("[MCP] DEBUG: Failed to dump pending_agent_purposes: \(error)")
         }
+
         let pendingPurpose = try pendingAgentPurposeRepository.find(agentId: id, projectId: projId)
-        let hasPendingPurpose = pendingPurpose != nil
-        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasPendingPurpose=\(hasPendingPurpose) (purpose: \(pendingPurpose?.purpose.rawValue ?? "none"))")
-        if hasPendingPurpose {
-            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': start (pending purpose exists)")
+        var hasPendingPurpose = false
+        var pendingPurposeExpired = false
+
+        if let pending = pendingPurpose {
+            let now = Date()
+
+            // 案E: TTLチェック（5分経過でタイムアウト）
+            if pending.isExpired(now: now) {
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose EXPIRED (created: \(pending.createdAt), TTL: \(PendingAgentPurpose.ttlSeconds)s)")
+                // 期限切れのpending purposeを削除
+                try pendingAgentPurposeRepository.delete(agentId: id, projectId: projId)
+                pendingPurposeExpired = true
+            }
+            // 案C: 起動済みチェック（started_atがあれば既に起動済み）
+            else if pending.startedAt != nil {
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose already STARTED at \(pending.startedAt!), returning hold")
+                hasPendingPurpose = false  // 起動済みなのでstartは返さない
+            }
+            // 未起動 → startを返し、started_atを更新
+            else {
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose exists, marking as started")
+                hasPendingPurpose = true
+                // started_atを更新（次回以降はholdを返す）
+                try pendingAgentPurposeRepository.markAsStarted(agentId: id, projectId: projId, startedAt: now)
+            }
+        }
+
+        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasPendingPurpose=\(hasPendingPurpose), expired=\(pendingPurposeExpired)")
+
+        // 案E: TTL超過時はエラーメッセージ付きで返す
+        if pendingPurposeExpired {
+            return [
+                "action": "hold",
+                "reason": "pending_purpose_expired",
+                "error": "エージェントの起動がタイムアウトしました（5分経過）。再度チャットメッセージを送信してください。"
+            ]
         }
 
         // action と reason を設定（pending purposeがあれば起動）
@@ -2129,7 +2162,8 @@ final class MCPServer {
             Self.log("[MCP] authenticate failed: Project '\(projectId)' not found")
             return [
                 "success": false,
-                "error": "Project not found"
+                "error": "Project not found",
+                "action": "exit"  // 案A: 認証失敗時は即終了
             ]
         }
 
@@ -2142,7 +2176,8 @@ final class MCPServer {
             Self.log("[MCP] authenticate failed: Agent '\(agentId)' not assigned to project '\(projectId)'")
             return [
                 "success": false,
-                "error": "Agent not assigned to project"
+                "error": "Agent not assigned to project",
+                "action": "exit"  // 案A: 認証失敗時は即終了
             ]
         }
 
@@ -2153,7 +2188,8 @@ final class MCPServer {
             Self.log("[MCP] authenticate failed for agent: '\(agentId)' on project '\(projectId)' - Agent already running")
             return [
                 "success": false,
-                "error": "Agent already running on this project"
+                "error": "Agent already running on this project",
+                "action": "exit"  // 案A: 認証失敗時は即終了
             ]
         }
 
@@ -2187,7 +2223,8 @@ final class MCPServer {
             Self.log("[MCP] Authentication failed for agent: \(agentId) - \(result.error ?? "Unknown error")")
             return [
                 "success": false,
-                "error": result.error ?? "Authentication failed"
+                "error": result.error ?? "Authentication failed",
+                "action": "exit"  // 案A: 認証失敗時は即終了
             ]
         }
     }

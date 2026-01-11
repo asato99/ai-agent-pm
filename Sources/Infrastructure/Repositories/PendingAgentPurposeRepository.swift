@@ -15,12 +15,14 @@ struct PendingAgentPurposeRecord: Codable, FetchableRecord, PersistableRecord {
     var projectId: String
     var purpose: String
     var createdAt: Date
+    var startedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case agentId = "agent_id"
         case projectId = "project_id"
         case purpose
         case createdAt = "created_at"
+        case startedAt = "started_at"
     }
 
     func toDomain() -> PendingAgentPurpose {
@@ -28,7 +30,8 @@ struct PendingAgentPurposeRecord: Codable, FetchableRecord, PersistableRecord {
             agentId: AgentID(value: agentId),
             projectId: ProjectID(value: projectId),
             purpose: AgentPurpose(rawValue: purpose) ?? .task,
-            createdAt: createdAt
+            createdAt: createdAt,
+            startedAt: startedAt
         )
     }
 
@@ -37,7 +40,8 @@ struct PendingAgentPurposeRecord: Codable, FetchableRecord, PersistableRecord {
             agentId: entity.agentId.value,
             projectId: entity.projectId.value,
             purpose: entity.purpose.rawValue,
-            createdAt: entity.createdAt
+            createdAt: entity.createdAt,
+            startedAt: entity.startedAt
         )
     }
 }
@@ -95,6 +99,43 @@ public final class PendingAgentPurposeRepository: PendingAgentPurposeRepositoryP
             try PendingAgentPurposeRecord
                 .filter(Column("created_at") < date)
                 .deleteAll(db)
+        }
+    }
+
+    /// 起動済みとしてマーク（started_atを更新）
+    public func markAsStarted(agentId: AgentID, projectId: ProjectID, startedAt: Date) throws {
+        try db.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE pending_agent_purposes
+                    SET started_at = ?
+                    WHERE agent_id = ? AND project_id = ?
+                """,
+                arguments: [startedAt, agentId.value, projectId.value]
+            )
+        }
+
+        // WAL mode: 他プロセスからの可視性を確保
+        do {
+            try db.write { db in
+                try db.execute(sql: "PRAGMA wal_checkpoint(PASSIVE)")
+            }
+        } catch {
+            NSLog("[PendingAgentPurposeRepository] WAL checkpoint failed (non-fatal): \(error)")
+        }
+    }
+
+    /// デバッグ用: 全レコードをダンプ
+    public func dumpAllForDebug() throws -> [[String: Any]] {
+        try db.read { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT * FROM pending_agent_purposes")
+            return rows.map { row in
+                var dict: [String: Any] = [:]
+                for (column, value) in row {
+                    dict[column] = value.databaseValue.storage.value
+                }
+                return dict
+            }
         }
     }
 }

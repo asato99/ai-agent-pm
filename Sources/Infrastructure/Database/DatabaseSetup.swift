@@ -606,6 +606,16 @@ public final class DatabaseSetup {
             }
         }
 
+        // v25: 起動済みフラグ追加（複数起動防止）
+        // 参照: 案A+C+E - 認証失敗時の複数起動防止
+        // - started_at: Coordinatorが起動を開始した時刻（nilなら未起動）
+        // - createdAtから5分経過でTTL超過として削除
+        migrator.registerMigration("v25_pending_purpose_started_at") { db in
+            try db.alter(table: "pending_agent_purposes") { t in
+                t.add(column: "started_at", .datetime)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }
