@@ -105,7 +105,18 @@ swift build --product mcp-server-pm 2>&1 | tail -3 || {
     exit 1
 }
 echo "MCP server build complete"
-echo "Note: MCP Daemon will be started by the app"
+
+# CRITICAL: Copy daemon binary to Application Support
+# This works around a macOS issue where file access to .build directory blocks
+# when the app is running (dyld blocking issue)
+APP_SUPPORT_DIR="$HOME/Library/Application Support/AIAgentPM"
+DAEMON_SRC="$PROJECT_ROOT/.build/debug/mcp-server-pm"
+DAEMON_DST="$APP_SUPPORT_DIR/mcp-server-pm"
+mkdir -p "$APP_SUPPORT_DIR"
+echo "Copying daemon binary to Application Support (required for app to start daemon)..."
+cp "$DAEMON_SRC" "$DAEMON_DST"
+chmod +x "$DAEMON_DST"
+echo "Daemon binary copied to: $DAEMON_DST"
 echo ""
 
 # Step 4: Runnerの確認
