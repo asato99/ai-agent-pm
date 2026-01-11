@@ -247,7 +247,8 @@ struct AIAgentPMApp: App {
             internalAuditRepository: container.internalAuditRepository,
             auditRuleRepository: container.auditRuleRepository,
             credentialRepository: container.agentCredentialRepository,
-            projectAgentAssignmentRepository: container.projectAgentAssignmentRepository
+            projectAgentAssignmentRepository: container.projectAgentAssignmentRepository,
+            appSettingsRepository: container.appSettingsRepository
         )
 
         do {
@@ -276,6 +277,8 @@ struct AIAgentPMApp: App {
                 try await seeder.seedUC008Data()
             case .uc009:
                 try await seeder.seedUC009Data()
+            case .uc010:
+                try await seeder.seedUC010Data()
             case .noWD:
                 try await seeder.seedNoWDData()
             case .internalAudit:

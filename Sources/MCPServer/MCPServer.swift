@@ -39,6 +39,9 @@ final class MCPServer {
     private let chatRepository: ChatFileRepository
     private let pendingAgentPurposeRepository: PendingAgentPurposeRepository
 
+    // アプリ設定リポジトリ（TTL設定など）
+    private let appSettingsRepository: AppSettingsRepository
+
     private let debugMode: Bool
 
     /// ステートレス設計: DBパスのみで初期化（stdio用）
@@ -70,6 +73,8 @@ final class MCPServer {
             projectRepository: self.projectRepository
         )
         self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
+        // アプリ設定リポジトリ
+        self.appSettingsRepository = AppSettingsRepository(database: database)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
 
         // 起動時ログ（常に出力）- ファイルとstderrの両方に出力
@@ -1285,12 +1290,23 @@ final class MCPServer {
         var hasPendingPurpose = false
         var pendingPurposeExpired = false
 
+        // AppSettingsから設定可能なTTLを取得（デフォルト: 300秒 = 5分）
+        let configuredTTL: TimeInterval
+        do {
+            let settings = try appSettingsRepository.get()
+            configuredTTL = TimeInterval(settings.pendingPurposeTTLSeconds)
+            Self.log("[MCP] getAgentAction: Using configured TTL: \(Int(configuredTTL))s")
+        } catch {
+            configuredTTL = TimeInterval(AppSettings.defaultPendingPurposeTTLSeconds)
+            Self.log("[MCP] getAgentAction: Failed to load TTL setting, using default: \(Int(configuredTTL))s")
+        }
+
         if let pending = pendingPurpose {
             let now = Date()
 
-            // 案E: TTLチェック（5分経過でタイムアウト）
-            if pending.isExpired(now: now) {
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose EXPIRED (created: \(pending.createdAt), TTL: \(PendingAgentPurpose.ttlSeconds)s)")
+            // 案E: TTLチェック（設定された時間経過でタイムアウト）
+            if pending.isExpired(now: now, ttlSeconds: configuredTTL) {
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose EXPIRED (created: \(pending.createdAt), TTL: \(Int(configuredTTL))s)")
                 // 期限切れのpending purposeを削除
                 try pendingAgentPurposeRepository.delete(agentId: id, projectId: projId)
                 pendingPurposeExpired = true
@@ -1311,12 +1327,26 @@ final class MCPServer {
 
         Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasPendingPurpose=\(hasPendingPurpose), expired=\(pendingPurposeExpired)")
 
-        // 案E: TTL超過時はエラーメッセージ付きで返す
+        // TTL超過時はチャットにエラーメッセージを書き込み、holdを返す
         if pendingPurposeExpired {
+            let ttlMinutes = Int(configuredTTL) / 60
+            // チャットにシステムエラーメッセージを書き込む
+            let errorMessage = ChatMessage(
+                id: ChatMessageID(value: "sys_\(UUID().uuidString)"),
+                sender: .system,
+                content: "エージェントの起動がタイムアウトしました（\(ttlMinutes)分経過）。再度メッセージを送信してください。",
+                createdAt: Date()
+            )
+            do {
+                try chatRepository.saveMessage(errorMessage, projectId: projId, agentId: id)
+                Self.log("[MCP] getAgentAction: Wrote timeout error message to chat")
+            } catch {
+                Self.log("[MCP] getAgentAction: Failed to write timeout error to chat: \(error)")
+            }
+
             return [
                 "action": "hold",
-                "reason": "pending_purpose_expired",
-                "error": "エージェントの起動がタイムアウトしました（5分経過）。再度チャットメッセージを送信してください。"
+                "reason": "no_pending_work"
             ]
         }
 

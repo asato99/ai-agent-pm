@@ -13,12 +13,14 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
 
     var id: String
     var coordinatorToken: String?
+    var pendingPurposeTTLSeconds: Int
     var createdAt: Date
     var updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
         case id
         case coordinatorToken = "coordinator_token"
+        case pendingPurposeTTLSeconds = "pending_purpose_ttl_seconds"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -27,6 +29,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
         AppSettings(
             id: id,
             coordinatorToken: coordinatorToken,
+            pendingPurposeTTLSeconds: pendingPurposeTTLSeconds,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -36,6 +39,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
         AppSettingsRecord(
             id: settings.id,
             coordinatorToken: settings.coordinatorToken,
+            pendingPurposeTTLSeconds: settings.pendingPurposeTTLSeconds,
             createdAt: settings.createdAt,
             updatedAt: settings.updatedAt
         )

@@ -9,11 +9,18 @@ public struct AppSettings: Sendable {
     /// シングルトン用の固定ID
     public static let singletonId = "app_settings"
 
+    /// デフォルトのPending Purpose TTL（5分 = 300秒）
+    public static let defaultPendingPurposeTTLSeconds: Int = 300
+
     public let id: String
 
     /// MCP Coordinator Token（プレーンテキストで保存）
     /// デーモンとエージェント間の認証に使用
     public private(set) var coordinatorToken: String?
+
+    /// Pending Purpose のTTL（秒）
+    /// エージェント起動理由（chat/task）が有効な期間
+    public var pendingPurposeTTLSeconds: Int
 
     public let createdAt: Date
     public var updatedAt: Date
@@ -22,11 +29,13 @@ public struct AppSettings: Sendable {
     public init(
         id: String = singletonId,
         coordinatorToken: String? = nil,
+        pendingPurposeTTLSeconds: Int = defaultPendingPurposeTTLSeconds,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
         self.id = id
         self.coordinatorToken = coordinatorToken
+        self.pendingPurposeTTLSeconds = pendingPurposeTTLSeconds
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -43,6 +52,7 @@ public struct AppSettings: Sendable {
         return AppSettings(
             id: self.id,
             coordinatorToken: token,
+            pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
             createdAt: self.createdAt,
             updatedAt: Date()
         )
@@ -53,6 +63,18 @@ public struct AppSettings: Sendable {
         return AppSettings(
             id: self.id,
             coordinatorToken: nil,
+            pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
+            createdAt: self.createdAt,
+            updatedAt: Date()
+        )
+    }
+
+    /// Pending Purpose TTLを更新
+    public func withPendingPurposeTTL(_ seconds: Int) -> AppSettings {
+        return AppSettings(
+            id: self.id,
+            coordinatorToken: self.coordinatorToken,
+            pendingPurposeTTLSeconds: seconds,
             createdAt: self.createdAt,
             updatedAt: Date()
         )

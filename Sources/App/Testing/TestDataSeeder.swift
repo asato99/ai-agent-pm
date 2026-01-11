@@ -21,6 +21,7 @@ final class TestDataSeeder {
     let auditRuleRepository: AuditRuleRepository?
     let credentialRepository: AgentCredentialRepository?
     let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository?
+    let appSettingsRepository: AppSettingsRepository?
 
     init(
         projectRepository: ProjectRepository,
@@ -31,7 +32,8 @@ final class TestDataSeeder {
         internalAuditRepository: InternalAuditRepository? = nil,
         auditRuleRepository: AuditRuleRepository? = nil,
         credentialRepository: AgentCredentialRepository? = nil,
-        projectAgentAssignmentRepository: ProjectAgentAssignmentRepository? = nil
+        projectAgentAssignmentRepository: ProjectAgentAssignmentRepository? = nil,
+        appSettingsRepository: AppSettingsRepository? = nil
     ) {
         self.projectRepository = projectRepository
         self.agentRepository = agentRepository
@@ -42,6 +44,7 @@ final class TestDataSeeder {
         self.auditRuleRepository = auditRuleRepository
         self.credentialRepository = credentialRepository
         self.projectAgentAssignmentRepository = projectAgentAssignmentRepository
+        self.appSettingsRepository = appSettingsRepository
     }
 
     /// 基本的なテストデータを生成（プロジェクト、エージェント、タスク）

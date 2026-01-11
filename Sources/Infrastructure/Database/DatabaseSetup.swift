@@ -616,6 +616,14 @@ public final class DatabaseSetup {
             }
         }
 
+        // v26: Pending Purpose TTL設定を追加
+        // 参照: 設定画面でタイムアウト時間を変更可能に
+        migrator.registerMigration("v26_app_settings_ttl") { db in
+            try db.alter(table: "app_settings") { t in
+                t.add(column: "pending_purpose_ttl_seconds", .integer).defaults(to: 300) // デフォルト5分
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

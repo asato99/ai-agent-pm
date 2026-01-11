@@ -78,8 +78,12 @@ public struct PendingAgentPurpose: Identifiable, Equatable, Sendable {
     }
 
     /// TTLを超過しているかどうか
-    public func isExpired(now: Date) -> Bool {
-        now.timeIntervalSince(createdAt) > Self.ttlSeconds
+    /// - Parameters:
+    ///   - now: 現在時刻
+    ///   - ttlSeconds: TTL秒数（nilの場合はデフォルト値を使用）
+    public func isExpired(now: Date, ttlSeconds: TimeInterval? = nil) -> Bool {
+        let ttl = ttlSeconds ?? Self.ttlSeconds
+        return now.timeIntervalSince(createdAt) > ttl
     }
 }
 

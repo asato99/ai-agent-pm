@@ -27,6 +27,7 @@ enum UITestScenario: String {
     case uc007 = "UC007"           // UC007: 依存関係のあるタスク実行（実装→テスト）
     case uc008 = "UC008"           // UC008: タスクブロックによる作業中断
     case uc009 = "UC009"           // UC009: エージェントとのチャット通信
+    case uc010 = "UC010"           // UC010: チャットタイムアウトエラー表示
 }
 
 // MARK: - Base Test Class
@@ -192,4 +193,9 @@ class UC008UITestCase: AIAgentPMUITestCase {
 /// UC009テスト用ベースクラス（エージェントとのチャット通信テスト用）
 class UC009UITestCase: AIAgentPMUITestCase {
     override var testScenario: UITestScenario { .uc009 }
+}
+
+/// UC010テスト用ベースクラス（チャットタイムアウトエラー表示テスト用）
+class UC010UITestCase: AIAgentPMUITestCase {
+    override var testScenario: UITestScenario { .uc010 }
 }

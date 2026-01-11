@@ -175,6 +175,7 @@ struct MCPSettingsView: View {
     @State private var isTokenVisible = false
     @State private var isLoading = false
     @State private var showCopiedToast = false
+    @State private var pendingPurposeTTLSeconds: Int = 300
 
     var body: some View {
         Form {
@@ -197,6 +198,10 @@ struct MCPSettingsView: View {
 
             Section("Coordinator Token") {
                 coordinatorTokenSection
+            }
+
+            Section("Agent Startup Timeout") {
+                agentStartupTimeoutSection
             }
 
             Section("Configuration") {
@@ -294,6 +299,26 @@ struct MCPSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var agentStartupTimeoutSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Timeout", selection: $pendingPurposeTTLSeconds) {
+                Text("1 minute").tag(60)
+                Text("2 minutes").tag(120)
+                Text("5 minutes (default)").tag(300)
+                Text("10 minutes").tag(600)
+                Text("30 minutes").tag(1800)
+            }
+            .onChange(of: pendingPurposeTTLSeconds) { _, newValue in
+                AsyncTask { await saveTTLSetting(newValue) }
+            }
+
+            Text("Time to wait for an agent to complete authentication after receiving a chat message. If the agent doesn't authenticate within this time, the pending request expires.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func loadMCPInfo() {
         // Get the path to the MCP server executable
         let bundle = Bundle.main
@@ -312,8 +337,22 @@ struct MCPSettingsView: View {
         do {
             let settings = try repo.get()
             coordinatorToken = settings.coordinatorToken ?? ""
+            pendingPurposeTTLSeconds = settings.pendingPurposeTTLSeconds
         } catch {
-            NSLog("[MCPSettingsView] Failed to load coordinator token: \(error)")
+            NSLog("[MCPSettingsView] Failed to load settings: \(error)")
+        }
+    }
+
+    @MainActor
+    private func saveTTLSetting(_ ttlSeconds: Int) async {
+        let repo = container.appSettingsRepository
+        do {
+            var settings = try repo.get()
+            settings = settings.withPendingPurposeTTL(ttlSeconds)
+            try repo.save(settings)
+            NSLog("[MCPSettingsView] TTL setting saved: \(ttlSeconds) seconds")
+        } catch {
+            NSLog("[MCPSettingsView] Failed to save TTL setting: \(error)")
         }
     }
 

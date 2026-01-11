@@ -655,5 +655,102 @@ extension TestDataSeeder {
 
         print("Saved: UC009: All test data seeded successfully (1 project, 1 agent)")
     }
+
+    // MARK: - UC010: チャットタイムアウトエラー表示
+
+    /// UC010: チャットタイムアウトエラー表示テスト用シードデータ
+    ///
+    /// 構成:
+    /// - 1プロジェクト
+    /// - 1エージェント（認証失敗用：パスキーなし）
+    /// - app_settings: TTL=10秒（短いタイムアウト）
+    ///
+    /// テストフロー:
+    /// 1. ユーザーがメッセージ送信 → pending_agent_purpose作成
+    /// 2. Runner: get_agent_action → action: start, started_atセット
+    /// 3. エージェント起動 → 認証失敗（パスキーなし）→ 終了
+    /// 4. TTL経過（10秒）
+    /// 5. Runner: get_agent_action → タイムアウト検知 → エラーメッセージ書き込み
+    /// 6. UI: チャットにシステムエラーメッセージが表示される
+    func seedUC010Data() async throws {
+        print("=== UC010 Test Data Configuration ===")
+        print("Design: Chat timeout error display")
+
+        guard let projectAgentAssignmentRepository = projectAgentAssignmentRepository else {
+            print("WARNING: UC010: projectAgentAssignmentRepository not available")
+            return
+        }
+
+        // TTLを短く設定（10秒）
+        if let appSettingsRepository = appSettingsRepository {
+            let settings = AppSettings(
+                coordinatorToken: "test_coordinator_token_uc001",  // 固定トークン
+                pendingPurposeTTLSeconds: 10  // 10秒でタイムアウト
+            )
+            try appSettingsRepository.save(settings)
+            print("Saved: UC010: AppSettings with TTL=10 seconds")
+        } else {
+            print("WARNING: UC010: appSettingsRepository not available")
+        }
+
+        // 作業ディレクトリを作成
+        let fileManager = FileManager.default
+        let workingDir = "/tmp/uc010"
+        if !fileManager.fileExists(atPath: workingDir) {
+            try fileManager.createDirectory(atPath: workingDir, withIntermediateDirectories: true)
+        }
+
+        // .ai-pmディレクトリも作成
+        let aiPmDir = "\(workingDir)/.ai-pm/agents/agt_uc010_timeout"
+        if !fileManager.fileExists(atPath: aiPmDir) {
+            try fileManager.createDirectory(atPath: aiPmDir, withIntermediateDirectories: true)
+        }
+
+        // UC010用プロジェクト
+        let projectId = ProjectID(value: "prj_uc010")
+        let project = Project(
+            id: projectId,
+            name: "UC010 Timeout Test",
+            description: "チャットタイムアウトエラー表示テスト用プロジェクト",
+            status: .active,
+            workingDirectory: workingDir,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(project)
+        print("Saved: UC010: Project created - \(project.name)")
+
+        // タイムアウトテスト用エージェント（パスキーなし → 認証失敗）
+        let timeoutAgentId = AgentID(value: "agt_uc010_timeout")
+        let timeoutAgent = Agent(
+            id: timeoutAgentId,
+            name: "timeout-test-agent",
+            role: "タイムアウトテスト",
+            type: .ai,
+            aiType: .claudeSonnet4_5,
+            hierarchyType: .worker,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 1,
+            capabilities: ["Test"],
+            systemPrompt: "タイムアウトテスト用エージェント",
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(timeoutAgent)
+        print("Saved: UC010: Timeout agent created - \(timeoutAgent.name)")
+
+        // 注意: パスキーは設定しない（認証失敗させるため）
+        // Runner統合テストでは、認証失敗 → pending残る → TTL経過 → タイムアウト
+
+        // エージェントをプロジェクトに割り当て
+        _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: timeoutAgentId)
+        print("Saved: UC010: Agent assigned to project")
+
+        print("Saved: UC010: All test data seeded successfully (1 project, 1 agent, TTL=10s)")
+    }
 }
 #endif

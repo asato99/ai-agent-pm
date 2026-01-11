@@ -52,12 +52,15 @@ public enum SenderType: String, Codable, Sendable {
     case user
     /// AIエージェント
     case agent
+    /// システム（エラーメッセージ等）
+    case system
 
     /// 表示用ラベル
     public var displayName: String {
         switch self {
         case .user: return "User"
         case .agent: return "Agent"
+        case .system: return "System"
         }
     }
 }

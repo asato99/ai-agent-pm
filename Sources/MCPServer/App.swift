@@ -154,6 +154,7 @@ struct Daemon: ParsableCommand {
 
         debugLog("Daemon starting...")
         debugLog("Environment AIAGENTPM_DB_PATH: \(ProcessInfo.processInfo.environment["AIAGENTPM_DB_PATH"] ?? "not set")")
+        debugLog("Environment MCP_COORDINATOR_TOKEN: \(ProcessInfo.processInfo.environment["MCP_COORDINATOR_TOKEN"] ?? "not set")")
 
         let dbPath = AppConfig.databasePath
         debugLog("Using database path: \(dbPath)")

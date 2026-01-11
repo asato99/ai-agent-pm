@@ -13,7 +13,58 @@ struct ChatMessageRow: View {
         message.sender == .user
     }
 
+    private var isSystemMessage: Bool {
+        message.sender == .system
+    }
+
     var body: some View {
+        if isSystemMessage {
+            // システムメッセージ（エラー等）は中央揃えで表示
+            systemMessageView
+        } else {
+            // 通常のユーザー/エージェントメッセージ
+            normalMessageView
+        }
+    }
+
+    // MARK: - System Message View
+
+    private var systemMessageView: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    Text("⚠️")
+                        .font(.caption)
+                    Text("System")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(formattedTime)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Text(message.content)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.red.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(message.content)
+                    .accessibilityIdentifier("ChatMessageContent-\(message.id.value)")
+            }
+            Spacer()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ChatMessageRow-\(message.id.value)")
+    }
+
+    // MARK: - Normal Message View
+
+    private var normalMessageView: some View {
         HStack(alignment: .top, spacing: 8) {
             if isFromUser {
                 Spacer(minLength: 60)
