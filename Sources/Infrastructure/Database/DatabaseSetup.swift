@@ -596,6 +596,16 @@ public final class DatabaseSetup {
             }
         }
 
+        // v24: アプリケーション設定テーブル（Coordinator Token保存用）
+        migrator.registerMigration("v24_app_settings") { db in
+            try db.create(table: "app_settings", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("coordinator_token", .text)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

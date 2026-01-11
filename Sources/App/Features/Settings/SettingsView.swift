@@ -2,7 +2,11 @@
 // 設定ビュー
 
 import SwiftUI
+import Domain
 import Infrastructure
+
+// Swift.Task と Domain.Task の名前衝突を解決
+private typealias AsyncTask = _Concurrency.Task
 
 struct SettingsView: View {
     @EnvironmentObject var container: DependencyContainer
@@ -37,7 +41,7 @@ struct SettingsView: View {
                 Label("About", systemImage: "info.circle")
             }
         }
-        .frame(width: 500, height: 350)
+        .frame(width: 500, height: 450)
     }
 }
 
@@ -163,8 +167,14 @@ struct DatabaseSettingsView: View {
 // MARK: - MCP Settings
 
 struct MCPSettingsView: View {
+    @EnvironmentObject var container: DependencyContainer
+
     @State private var mcpServerPath: String = ""
     @State private var isServerRunning = false
+    @State private var coordinatorToken: String = ""
+    @State private var isTokenVisible = false
+    @State private var isLoading = false
+    @State private var showCopiedToast = false
 
     var body: some View {
         Form {
@@ -185,6 +195,10 @@ struct MCPSettingsView: View {
                 }
             }
 
+            Section("Coordinator Token") {
+                coordinatorTokenSection
+            }
+
             Section("Configuration") {
                 Button("Copy Claude Code Config") {
                     copyClaudeCodeConfig()
@@ -200,6 +214,83 @@ struct MCPSettingsView: View {
         .padding()
         .task {
             loadMCPInfo()
+            await loadCoordinatorToken()
+        }
+        .overlay {
+            if showCopiedToast {
+                VStack {
+                    Spacer()
+                    Text("Copied to clipboard")
+                        .padding()
+                        .background(.regularMaterial)
+                        .cornerRadius(8)
+                        .padding(.bottom, 20)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var coordinatorTokenSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if coordinatorToken.isEmpty {
+                Text("No token configured")
+                    .foregroundStyle(.secondary)
+                    .italic()
+            } else {
+                HStack {
+                    if isTokenVisible {
+                        Text(coordinatorToken)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    } else {
+                        Text(String(repeating: "•", count: min(coordinatorToken.count, 32)))
+                            .font(.system(.caption, design: .monospaced))
+                    }
+
+                    Spacer()
+
+                    Button {
+                        isTokenVisible.toggle()
+                    } label: {
+                        Image(systemName: isTokenVisible ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(isTokenVisible ? "Hide token" : "Show token")
+
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(coordinatorToken, forType: .string)
+                        showCopiedToast = true
+                        AsyncTask {
+                            try? await AsyncTask.sleep(nanoseconds: 2_000_000_000)
+                            showCopiedToast = false
+                        }
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy token to clipboard")
+                }
+            }
+
+            HStack {
+                Button(coordinatorToken.isEmpty ? "Generate Token" : "Regenerate Token") {
+                    AsyncTask { await regenerateToken() }
+                }
+                .disabled(isLoading)
+
+                if !coordinatorToken.isEmpty {
+                    Button("Clear Token", role: .destructive) {
+                        AsyncTask { await clearToken() }
+                    }
+                    .disabled(isLoading)
+                }
+            }
+
+            Text("This token authenticates the Coordinator with the MCP daemon. Regenerating will require updating the Coordinator configuration.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -211,6 +302,50 @@ struct MCPSettingsView: View {
                 .deletingLastPathComponent()
                 .appendingPathComponent("mcp-server-pm")
             mcpServerPath = mcpPath.path
+        }
+        isServerRunning = container.mcpDaemonManager.status == .running
+    }
+
+    @MainActor
+    private func loadCoordinatorToken() async {
+        let repo = container.appSettingsRepository
+        do {
+            let settings = try repo.get()
+            coordinatorToken = settings.coordinatorToken ?? ""
+        } catch {
+            NSLog("[MCPSettingsView] Failed to load coordinator token: \(error)")
+        }
+    }
+
+    @MainActor
+    private func regenerateToken() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let repo = container.appSettingsRepository
+        do {
+            var settings = try repo.get()
+            settings = settings.regenerateCoordinatorToken()
+            try repo.save(settings)
+            coordinatorToken = settings.coordinatorToken ?? ""
+        } catch {
+            NSLog("[MCPSettingsView] Failed to regenerate token: \(error)")
+        }
+    }
+
+    @MainActor
+    private func clearToken() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let repo = container.appSettingsRepository
+        do {
+            var settings = try repo.get()
+            settings = settings.clearCoordinatorToken()
+            try repo.save(settings)
+            coordinatorToken = ""
+        } catch {
+            NSLog("[MCPSettingsView] Failed to clear token: \(error)")
         }
     }
 

@@ -222,3 +222,15 @@ public protocol ChatRepositoryProtocol: Sendable {
     /// MCP連携用: エージェントが応答すべきメッセージを取得
     func findUnreadUserMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage]
 }
+
+// MARK: - AppSettingsRepositoryProtocol
+
+/// アプリケーション設定リポジトリのプロトコル
+/// シングルトンパターン: 設定は1つのみ存在
+public protocol AppSettingsRepositoryProtocol: Sendable {
+    /// アプリケーション設定を取得（存在しない場合はデフォルトを作成）
+    func get() throws -> AppSettings
+
+    /// アプリケーション設定を保存
+    func save(_ settings: AppSettings) throws
+}

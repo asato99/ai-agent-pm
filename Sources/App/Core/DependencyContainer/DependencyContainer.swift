@@ -48,6 +48,10 @@ public final class DependencyContainer: ObservableObject {
     /// チャット起動理由を管理するリポジトリ
     public let pendingAgentPurposeRepository: PendingAgentPurposeRepository
 
+    // MARK: - App Settings
+    /// アプリケーション設定リポジトリ（Coordinator Token等）
+    public let appSettingsRepository: AppSettingsRepository
+
     // MARK: - Event Recorder
 
     public let eventRecorder: EventRecorder
@@ -387,6 +391,16 @@ public final class DependencyContainer: ObservableObject {
 
         // Chat Support (チャット起動理由管理)
         self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
+
+        // App Settings (アプリケーション設定)
+        self.appSettingsRepository = AppSettingsRepository(database: database)
+
+        // Set coordinator token provider for MCPDaemonManager
+        // This allows the daemon to read the token from the database
+        let settingsRepo = self.appSettingsRepository
+        self.mcpDaemonManager.coordinatorTokenProvider = {
+            try? settingsRepo.get().coordinatorToken
+        }
     }
 
     /// デフォルトのデータベースパスを使用して初期化

@@ -82,7 +82,7 @@ public final class PendingAgentPurposeRepository: PendingAgentPurposeRepositoryP
     }
 
     public func delete(agentId: AgentID, projectId: ProjectID) throws {
-        try db.write { db in
+        _ = try db.write { db in
             try PendingAgentPurposeRecord
                 .filter(Column("agent_id") == agentId.value)
                 .filter(Column("project_id") == projectId.value)
@@ -91,7 +91,7 @@ public final class PendingAgentPurposeRepository: PendingAgentPurposeRepositoryP
     }
 
     public func deleteExpired(olderThan date: Date) throws {
-        try db.write { db in
+        _ = try db.write { db in
             try PendingAgentPurposeRecord
                 .filter(Column("created_at") < date)
                 .deleteAll(db)

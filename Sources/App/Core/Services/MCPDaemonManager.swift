@@ -96,6 +96,10 @@ public final class MCPDaemonManager: ObservableObject {
     /// Whether to skip timers (for UI testing to avoid accessibility interference)
     private let skipTimers: Bool
 
+    /// Optional closure to get coordinator token from database
+    /// Set by DependencyContainer after initialization
+    public var coordinatorTokenProvider: (() -> String?)?
+
     // MARK: - Path Properties
 
     /// Unix socket path
@@ -215,24 +219,80 @@ public final class MCPDaemonManager: ObservableObject {
             }
             debugLog(" Executable found at: \(execPath)")
 
-            // Launch daemon process (without --foreground so it forks and survives app termination)
+            // Determine which daemon binary to use
+            // Running from .build directory can cause dyld blocking issues
+            // If a pre-copied stable binary exists in Application Support, use that instead
+            let stableDaemonPath = AppConfig.appSupportDirectory.appendingPathComponent("mcp-server-pm").path
+            debugLog(" Stable daemon path: \(stableDaemonPath)")
+
+            // Check if stable binary exists, if so use it (avoids blocking issue)
+            // If running from .build directory, copying would block, so we skip the copy
+            // and just use the original location if stable doesn't exist
+            var daemonToRun: String
+            if FileManager.default.fileExists(atPath: stableDaemonPath) {
+                debugLog(" Using existing stable binary at: \(stableDaemonPath)")
+                daemonToRun = stableDaemonPath
+            } else if execPath.contains(".build/") {
+                // Running from build directory - file ops will block, use original directly
+                // Note: This may cause dyld blocking, but at least we log it
+                debugLog(" WARNING: No stable binary exists and source is in .build directory")
+                debugLog(" File operations on .build may block. Consider pre-copying the daemon:")
+                debugLog("   cp '\(execPath)' '\(stableDaemonPath)'")
+                daemonToRun = execPath
+            } else {
+                // Not in .build directory, safe to use directly
+                debugLog(" Using daemon from: \(execPath)")
+                daemonToRun = execPath
+            }
+
+            // Launch daemon process directly with minimal environment
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = ["daemon"]  // No --foreground: daemon forks and runs independently
+            process.executableURL = URL(fileURLWithPath: daemonToRun)
+            process.arguments = ["daemon"]
+
+            // Redirect all standard I/O to prevent blocking
+            process.standardInput = FileHandle.nullDevice
             process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
+            let stderrPath = "/tmp/mcp_daemon_stderr.log"
+            FileManager.default.createFile(atPath: stderrPath, contents: nil, attributes: nil)
+            process.standardError = FileHandle(forWritingAtPath: stderrPath) ?? FileHandle.nullDevice
 
             // Set working directory to app support
             process.currentDirectoryURL = AppConfig.appSupportDirectory
 
-            // Set environment variables for daemon process
-            // Copy current environment and add AIAGENTPM_DB_PATH if specified
-            var environment = ProcessInfo.processInfo.environment
+            // Set minimal environment variables
+            var environment: [String: String] = [
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin",
+                "HOME": NSHomeDirectory(),
+                "TMPDIR": NSTemporaryDirectory()
+            ]
             if let databasePath = databasePath {
                 environment["AIAGENTPM_DB_PATH"] = databasePath
                 debugLog(" Setting AIAGENTPM_DB_PATH=\(databasePath)")
             }
+            // Pass coordinator token if available (for Phase 5 authorization)
+            // Priority: 1. Database (via provider), 2. Environment variable
+            var coordinatorToken: String?
+            if let provider = coordinatorTokenProvider {
+                coordinatorToken = provider()
+                if coordinatorToken != nil {
+                    debugLog(" Got MCP_COORDINATOR_TOKEN from database")
+                }
+            }
+            // Fallback to environment variable for backwards compatibility
+            if coordinatorToken == nil {
+                coordinatorToken = ProcessInfo.processInfo.environment["MCP_COORDINATOR_TOKEN"]
+                if coordinatorToken != nil {
+                    debugLog(" Got MCP_COORDINATOR_TOKEN from environment")
+                }
+            }
+            if let token = coordinatorToken {
+                environment["MCP_COORDINATOR_TOKEN"] = token
+                debugLog(" Setting MCP_COORDINATOR_TOKEN")
+            }
             process.environment = environment
+            debugLog(" Using minimal environment: \(environment.keys.sorted())")
+            debugLog(" Launching daemon from: \(stableDaemonPath)")
 
             try process.run()
             // The process forks, so daemonProcess will exit quickly
@@ -264,8 +324,7 @@ public final class MCPDaemonManager: ObservableObject {
 
     /// Stop the daemon process
     ///
-    /// Sends SIGTERM to the daemon process and waits for it to exit.
-    /// Cleans up the socket and PID files.
+    /// Stops the launchd job and cleans up files.
     public func stop() async {
         guard status == .running || status == .starting else { return }
 
@@ -275,7 +334,20 @@ public final class MCPDaemonManager: ObservableObject {
         stopUptimeTimer()
         stopLogMonitor()
 
-        // Try to read PID and send SIGTERM
+        // Try to stop via launchctl first (if launched via launchd)
+        let jobLabel = "com.aiagentpm.mcp-daemon"
+        let plistPath = "/tmp/\(jobLabel).plist"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "launchctl bootout gui/\(getuid())/\(jobLabel) 2>/dev/null || true"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+        debugLog(" Sent launchctl bootout")
+
+        // Also try to read PID and send SIGTERM (fallback for PID-based processes)
         if let pidString = try? String(contentsOfFile: pidPath, encoding: .utf8),
            let pid = Int32(pidString.trimmingCharacters(in: .whitespacesAndNewlines)) {
             kill(pid, SIGTERM)
@@ -297,6 +369,7 @@ public final class MCPDaemonManager: ObservableObject {
         // Clean up files
         try? FileManager.default.removeItem(atPath: socketPath)
         try? FileManager.default.removeItem(atPath: pidPath)
+        try? FileManager.default.removeItem(atPath: plistPath)
 
         startTime = nil
         uptime = 0

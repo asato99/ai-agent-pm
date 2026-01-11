@@ -7,6 +7,27 @@ import Domain
 /// _Concurrency.Task と Domain.Task の衝突を避けるためのエイリアス
 private typealias AsyncTask = _Concurrency.Task
 
+// MARK: - Debug Logging for XCUITest
+
+private func chatDebugLog(_ message: String) {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let logMessage = "[\(timestamp)] [AgentChatView] \(message)\n"
+
+    // Also write to file for XCUITest
+    let logFile = "/tmp/aiagentpm_debug.log"
+    if let data = logMessage.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: logFile) {
+            if let handle = FileHandle(forWritingAtPath: logFile) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        } else {
+            FileManager.default.createFile(atPath: logFile, contents: data, attributes: nil)
+        }
+    }
+}
+
 /// エージェントとのチャット画面
 struct AgentChatView: View {
     @EnvironmentObject var container: DependencyContainer
@@ -21,6 +42,7 @@ struct AgentChatView: View {
     @State private var inputText = ""
     @State private var isLoading = false
     @State private var isSending = false
+    @State private var isWaitingForResponse = false
     @State private var errorMessage: String?
     @State private var pollingTimer: Timer?
 
@@ -125,6 +147,12 @@ struct AgentChatView: View {
                             )
                             .id(message.id)
                         }
+
+                        // 応答待機中のインジケータ
+                        if isWaitingForResponse {
+                            WaitingForResponseView(agentName: agent?.name)
+                                .id("waiting-indicator")
+                        }
                     }
                 }
                 .padding()
@@ -188,15 +216,32 @@ struct AgentChatView: View {
     }
 
     private func loadMessages() async {
-        guard project?.workingDirectory != nil else { return }
+        guard project?.workingDirectory != nil else {
+            chatDebugLog("loadMessages: workingDirectory is nil")
+            return
+        }
 
         do {
-            messages = try container.chatRepository.findMessages(
+            let newMessages = try container.chatRepository.findMessages(
                 projectId: projectId,
                 agentId: agentId
             )
+            let previousCount = messages.count
+            messages = newMessages
+            if newMessages.count != previousCount {
+                chatDebugLog("loadMessages: count changed \(previousCount) -> \(newMessages.count)")
+
+                // エージェントからの応答を受信したら待機状態を解除
+                if isWaitingForResponse,
+                   let lastMessage = newMessages.last,
+                   lastMessage.sender == .agent {
+                    isWaitingForResponse = false
+                    chatDebugLog("loadMessages: agent response received, waiting state cleared")
+                }
+            }
         } catch {
             // ファイルが存在しない場合は空のままでOK
+            chatDebugLog("loadMessages error: \(error)")
             messages = []
         }
     }
@@ -231,6 +276,10 @@ struct AgentChatView: View {
                 // チャット用の起動理由を登録（Coordinatorがエージェントを起動する）
                 await triggerAgentForChat()
 
+                await MainActor.run {
+                    isWaitingForResponse = true
+                }
+
             } catch {
                 await MainActor.run {
                     router.showAlert(.error(message: error.localizedDescription))
@@ -247,6 +296,7 @@ struct AgentChatView: View {
     /// Coordinatorがこれを検知してエージェントを起動し、
     /// エージェントが get_pending_messages → respond_chat を実行する
     private func triggerAgentForChat() async {
+        chatDebugLog("triggerAgentForChat: agentId=\(agentId.value), projectId=\(projectId.value)")
         do {
             let pendingPurpose = PendingAgentPurpose(
                 agentId: agentId,
@@ -255,8 +305,16 @@ struct AgentChatView: View {
                 createdAt: Date()
             )
             try container.pendingAgentPurposeRepository.save(pendingPurpose)
+            chatDebugLog("triggerAgentForChat: PendingAgentPurpose saved successfully")
+
+            // Verify it was saved by reading it back
+            if let found = try? container.pendingAgentPurposeRepository.find(agentId: agentId, projectId: projectId) {
+                chatDebugLog("triggerAgentForChat: Verified - found pending purpose: \(found.purpose)")
+            } else {
+                chatDebugLog("triggerAgentForChat: WARNING - pending purpose NOT found after save!")
+            }
         } catch {
-            print("Failed to trigger agent for chat: \(error)")
+            chatDebugLog("triggerAgentForChat: FAILED - \(error)")
             // エラーでもUIには表示しない（ポーリングで応答を待つ）
         }
     }
@@ -264,7 +322,9 @@ struct AgentChatView: View {
     // MARK: - Polling
 
     private func startPolling() {
+        chatDebugLog("startPolling: interval=\(pollingInterval)s")
         pollingTimer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { _ in
+            chatDebugLog("Polling timer fired")
             AsyncTask { await loadMessages() }
         }
     }
@@ -283,6 +343,56 @@ struct AgentChatView: View {
         case .suspended: return .orange
         case .archived: return .secondary
         }
+    }
+}
+
+// MARK: - WaitingForResponseView
+
+/// エージェントの応答待機中に表示するインジケータ
+private struct WaitingForResponseView: View {
+    let agentName: String?
+
+    @State private var dotCount = 0
+    private let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                // 送信者表示
+                HStack(spacing: 4) {
+                    Text("🤖")
+                        .font(.caption)
+                    if let name = agentName {
+                        Text(name)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // ローディングバブル
+                HStack(spacing: 4) {
+                    Text("応答を待っています")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                    Text(String(repeating: ".", count: dotCount + 1))
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, alignment: .leading)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.secondary.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+
+            Spacer(minLength: 60)
+        }
+        .onReceive(timer) { _ in
+            dotCount = (dotCount + 1) % 3
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("エージェントの応答を待っています")
+        .accessibilityIdentifier("WaitingForResponseIndicator")
     }
 }
 

@@ -19,8 +19,38 @@ enum MCPServerConstants {
 
 // MARK: - Main Command
 
+// Early startup debug function
+private func earlyDebugLog(_ msg: String) {
+    let debugLogPath = "/tmp/mcp_daemon_early.log"
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = "[\(timestamp)] \(msg)\n"
+    if let data = line.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: debugLogPath) {
+            if let handle = FileHandle(forWritingAtPath: debugLogPath) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        } else {
+            FileManager.default.createFile(atPath: debugLogPath, contents: data, attributes: nil)
+        }
+    }
+}
+
 @main
 struct MCPServerCommand: ParsableCommand {
+    static func main() {
+        earlyDebugLog("MCPServerCommand.main() starting, args: \(CommandLine.arguments)")
+        do {
+            var command = try parseAsRoot()
+            earlyDebugLog("Parsed command: \(type(of: command))")
+            try command.run()
+            earlyDebugLog("Command completed")
+        } catch {
+            earlyDebugLog("Error: \(error)")
+            exit(withError: error)
+        }
+    }
     static let configuration = CommandConfiguration(
         commandName: "mcp-server-pm",
         abstract: "AI Agent Project Manager - MCP Server",
@@ -104,14 +134,42 @@ struct Daemon: ParsableCommand {
     var foreground = false
 
     func run() throws {
+        // Early debug logging to file (stderr may not be captured)
+        let debugLogPath = "/tmp/mcp_daemon_startup.log"
+        func debugLog(_ msg: String) {
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+            let line = "[\(timestamp)] \(msg)\n"
+            if let data = line.data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: debugLogPath) {
+                    if let handle = FileHandle(forWritingAtPath: debugLogPath) {
+                        handle.seekToEndOfFile()
+                        handle.write(data)
+                        handle.closeFile()
+                    }
+                } else {
+                    FileManager.default.createFile(atPath: debugLogPath, contents: data, attributes: nil)
+                }
+            }
+        }
+
+        debugLog("Daemon starting...")
+        debugLog("Environment AIAGENTPM_DB_PATH: \(ProcessInfo.processInfo.environment["AIAGENTPM_DB_PATH"] ?? "not set")")
+
         let dbPath = AppConfig.databasePath
+        debugLog("Using database path: \(dbPath)")
 
         // 初回起動時は自動セットアップ
         if !FileManager.default.fileExists(atPath: dbPath) {
+            debugLog("Database not found, performing auto-setup...")
             try performAutoSetup(dbPath: dbPath)
+            debugLog("Auto-setup completed")
+        } else {
+            debugLog("Database file exists")
         }
 
+        debugLog("Creating database connection (this may block on lock)...")
         let database = try DatabaseSetup.createDatabase(at: dbPath)
+        debugLog("Database connection created")
 
         // PIDファイルを作成
         let pidPath = AppConfig.appSupportDirectory.appendingPathComponent("daemon.pid").path

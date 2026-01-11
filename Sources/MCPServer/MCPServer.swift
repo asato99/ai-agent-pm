@@ -1271,7 +1271,18 @@ final class MCPServer {
 
         // Chat機能: pending_agent_purposesをチェック
         // チャットメッセージが送信された場合、purpose=chatでエージェントを起動する
-        let hasPendingPurpose = try pendingAgentPurposeRepository.find(agentId: id, projectId: projId) != nil
+        Self.log("[MCP] getAgentAction: Checking pending_agent_purposes for '\(agentId)/\(projectId)'")
+
+        // DEBUG: Dump all pending purposes in database to diagnose visibility issues
+        do {
+            let rows = try pendingAgentPurposeRepository.dumpAllForDebug()
+            Self.log("[MCP] DEBUG: All pending_agent_purposes rows: \(rows)")
+        } catch {
+            Self.log("[MCP] DEBUG: Failed to dump pending_agent_purposes: \(error)")
+        }
+        let pendingPurpose = try pendingAgentPurposeRepository.find(agentId: id, projectId: projId)
+        let hasPendingPurpose = pendingPurpose != nil
+        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasPendingPurpose=\(hasPendingPurpose) (purpose: \(pendingPurpose?.purpose.rawValue ?? "none"))")
         if hasPendingPurpose {
             Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': start (pending purpose exists)")
         }
