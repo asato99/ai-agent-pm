@@ -103,6 +103,11 @@ struct ToolAuthorization {
         "get_task": .authenticated,
         "report_execution_start": .authenticated,
         "report_execution_complete": .authenticated,
+
+        // チャット機能（認証済み）- UC009
+        // 参照: docs/design/CHAT_FEATURE.md
+        "get_pending_messages": .authenticated,
+        "respond_chat": .authenticated,
     ]
 
     /// ツール呼び出しの認可チェック

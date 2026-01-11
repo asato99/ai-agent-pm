@@ -44,6 +44,8 @@ struct ChatMessageRow: View {
                 }
 
                 // メッセージ本文
+                // Note: Text(message.content) を独立したアクセシビリティ要素として公開
+                // XCUITestが staticTexts で検索できるようにする
                 Text(message.content)
                     .font(.body)
                     .textSelection(.enabled)
@@ -51,13 +53,18 @@ struct ChatMessageRow: View {
                     .padding(.vertical, 8)
                     .background(messageBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                    // 明示的に独立したアクセシビリティ要素として宣言
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(message.content)
+                    .accessibilityIdentifier("ChatMessageContent-\(message.id.value)")
             }
 
             if !isFromUser {
                 Spacer(minLength: 60)
             }
         }
-        .accessibilityElement(children: .combine)
+        // .contain に変更して、子要素を個別にアクセス可能にする
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ChatMessageRow-\(message.id.value)")
     }
 

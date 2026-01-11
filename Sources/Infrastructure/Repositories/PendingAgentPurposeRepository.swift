@@ -68,6 +68,17 @@ public final class PendingAgentPurposeRepository: PendingAgentPurposeRepositoryP
             try PendingAgentPurposeRecord.fromDomain(purpose)
                 .save(db, onConflict: .replace)
         }
+
+        // WAL mode: 他プロセスからの可視性を確保するためにチェックポイント実行
+        // これにより、WALファイルの内容がメインDBファイルにフラッシュされる
+        do {
+            try db.write { db in
+                try db.execute(sql: "PRAGMA wal_checkpoint(PASSIVE)")
+            }
+        } catch {
+            // チェックポイント失敗は致命的ではない（WALには既にコミット済み）
+            NSLog("[PendingAgentPurposeRepository] WAL checkpoint failed (non-fatal): \(error)")
+        }
     }
 
     public func delete(agentId: AgentID, projectId: ProjectID) throws {
