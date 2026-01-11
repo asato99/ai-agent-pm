@@ -564,5 +564,96 @@ extension TestDataSeeder {
 
         print("✅ UC008: All test data seeded successfully (1 project, 1 agent, 1 task)")
     }
+
+    // MARK: - UC009: エージェントとのチャット通信
+
+    /// UC009: エージェントとのチャット通信テスト用シードデータ
+    ///
+    /// 構成:
+    /// - 1プロジェクト
+    /// - 1エージェント（チャット応答用）
+    ///
+    /// 検証内容:
+    /// - ユーザーがメッセージを送信
+    /// - エージェントが名前を含む応答を返す
+    func seedUC009Data() async throws {
+        print("=== UC009 Test Data Configuration ===")
+        print("Design: Chat communication with agent")
+
+        guard let projectAgentAssignmentRepository = projectAgentAssignmentRepository else {
+            print("WARNING: UC009: projectAgentAssignmentRepository not available")
+            return
+        }
+
+        // 作業ディレクトリを作成
+        let fileManager = FileManager.default
+        let workingDir = "/tmp/uc009"
+        if !fileManager.fileExists(atPath: workingDir) {
+            try fileManager.createDirectory(atPath: workingDir, withIntermediateDirectories: true)
+        }
+
+        // .ai-pmディレクトリも作成
+        let aiPmDir = "\(workingDir)/.ai-pm/agents/agt_uc009_chat"
+        if !fileManager.fileExists(atPath: aiPmDir) {
+            try fileManager.createDirectory(atPath: aiPmDir, withIntermediateDirectories: true)
+        }
+
+        // UC009用プロジェクト
+        let projectId = ProjectID(value: "prj_uc009")
+        let project = Project(
+            id: projectId,
+            name: "UC009 Chat Test",
+            description: "エージェントとのチャット通信テスト用プロジェクト",
+            status: .active,
+            workingDirectory: workingDir,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await projectRepository.save(project)
+        print("Saved: UC009: Project created - \(project.name)")
+
+        // チャット応答用エージェント
+        let chatAgentId = AgentID(value: "agt_uc009_chat")
+        let chatAgent = Agent(
+            id: chatAgentId,
+            name: "chat-responder",
+            role: "チャット応答",
+            type: .ai,
+            aiType: .claudeSonnet4_5,
+            hierarchyType: .worker,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 1,
+            capabilities: ["Chat", "Communication"],
+            systemPrompt: """
+                あなたはチャット応答用エージェントです。
+                ユーザーからのメッセージに丁寧に応答してください。
+                名前を聞かれたら「私の名前はchat-responderです」と答えてください。
+                """,
+            kickMethod: .cli,
+            kickCommand: nil,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(chatAgent)
+        print("Saved: UC009: Chat agent created - \(chatAgent.name)")
+
+        // Runner認証用クレデンシャル
+        if let credentialRepository = credentialRepository {
+            let chatCredential = AgentCredential(
+                agentId: chatAgentId,
+                rawPasskey: "test_passkey_uc009_chat"
+            )
+            try credentialRepository.save(chatCredential)
+            print("Saved: UC009: Credential created")
+        }
+
+        // エージェントをプロジェクトに割り当て
+        _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: chatAgentId)
+        print("Saved: UC009: Agent assigned to project")
+
+        print("Saved: UC009: All test data seeded successfully (1 project, 1 agent)")
+    }
 }
 #endif

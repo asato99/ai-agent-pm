@@ -18,6 +18,7 @@ public enum TestScenario: String {
     case uc006 = "UC006"                     // UC006: 複数ワーカーへのタスク割り当て
     case uc007 = "UC007"                     // UC007: 依存関係のあるタスク実行
     case uc008 = "UC008"                     // UC008: タスクブロックによる作業中断
+    case uc009 = "UC009"                     // UC009: エージェントとのチャット通信
     case noWD = "NoWD"                       // NoWD: workingDirectory未設定エラーテスト
     case internalAudit = "InternalAudit"     // Internal Audit機能テスト
     case workflowTemplate = "WorkflowTemplate" // ワークフローテンプレート機能テスト
