@@ -47,14 +47,14 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
         // Phase 1: 詳細ライター担当タスクをin_progressに変更
         // ========================================
         print("🔍 Phase 1: 詳細ライター担当タスクをin_progressに変更")
-        try changeTaskStatusToInProgress(assigneeName: "詳細ライター")
+        try changeTaskStatusToInProgress(taskId: "tsk_uc002_detailed", taskTitle: "プロジェクトサマリー作成")
         print("✅ Phase 1完了: 詳細ライタータスクがin_progress")
 
         // ========================================
         // Phase 2: 簡潔ライター担当タスクをin_progressに変更
         // ========================================
         print("🔍 Phase 2: 簡潔ライター担当タスクをin_progressに変更")
-        try changeTaskStatusToInProgress(assigneeName: "簡潔ライター")
+        try changeTaskStatusToInProgress(taskId: "tsk_uc002_concise", taskTitle: "プロジェクトサマリー作成")
         print("✅ Phase 2完了: 簡潔ライタータスクがin_progress")
 
         print("🎯 UC002: 両タスクがin_progress状態になりました")
@@ -162,22 +162,34 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
         }
     }
 
-    /// 指定されたassignee名を持つタスクをin_progressに変更
-    private func changeTaskStatusToInProgress(assigneeName: String) throws {
-        // タスクカードはラベルに "assigned to [エージェント名]" を含む
-        print("  🔍 「\(assigneeName)」担当タスクを検索中...")
+    /// タスクをin_progressに変更（UC005と同様のタスクIDベースの検索）
+    private func changeTaskStatusToInProgress(taskId: String, taskTitle: String) throws {
+        print("  🔍 タスク「\(taskTitle)」(ID: \(taskId)) を検索中...")
 
-        // デバッグ: 利用可能な要素を出力
-        let allButtons = app.buttons.allElementsBoundByIndex.prefix(25).map { $0.label }
-        print("  📋 利用可能なbuttons: \(allButtons)")
-
-        // タスクカードを探す（assignee名で検索）
-        let taskCard = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", assigneeName)).firstMatch
-        guard taskCard.waitForExistence(timeout: 5) else {
-            XCTFail("❌ STEP1: 「\(assigneeName)」担当タスクが見つからない")
+        let taskBoard = app.descendants(matching: .any).matching(identifier: "TaskBoard").firstMatch
+        guard taskBoard.waitForExistence(timeout: 5) else {
+            XCTFail("❌ TaskBoardが見つかりません")
             return
         }
-        print("  ✅ 「\(assigneeName)」担当タスクが見つかりました: \(taskCard.label)")
+
+        // Backlogカラムを表示（タスクは初期状態でBacklogにある）
+        // スワイプ回数を増やして確実に左端（Backlog）まで移動
+        print("  🔄 Backlogカラムへスクロール中...")
+        for i in 1...5 {
+            taskBoard.swipeRight()
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // タスクカードをidentifierで検索
+        let taskCardIdentifier = "TaskCard_\(taskId)"
+        let taskCard = app.descendants(matching: .any).matching(identifier: taskCardIdentifier).firstMatch
+
+        guard taskCard.waitForExistence(timeout: 5) else {
+            XCTFail("❌ STEP1: タスク「\(taskTitle)」が見つからない")
+            return
+        }
+        print("  ✅ タスク「\(taskTitle)」が見つかりました")
 
         // タスク詳細を開く
         taskCard.click()
