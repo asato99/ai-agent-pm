@@ -44,6 +44,10 @@ public final class DependencyContainer: ObservableObject {
     public let projectDirectoryManager: ProjectDirectoryManager
     public let chatRepository: ChatFileRepository
 
+    // MARK: - Chat Support
+    /// チャット起動理由を管理するリポジトリ
+    public let pendingAgentPurposeRepository: PendingAgentPurposeRepository
+
     // MARK: - Event Recorder
 
     public let eventRecorder: EventRecorder
@@ -380,6 +384,9 @@ public final class DependencyContainer: ObservableObject {
             directoryManager: projectDirectoryManager,
             projectRepository: projectRepository
         )
+
+        // Chat Support (チャット起動理由管理)
+        self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
     }
 
     /// デフォルトのデータベースパスを使用して初期化

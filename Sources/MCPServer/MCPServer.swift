@@ -35,6 +35,10 @@ final class MCPServer {
     // Phase 4: Project-Agent Assignment Repository
     private let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository
 
+    // Chat機能: チャットリポジトリと起動理由リポジトリ
+    private let chatRepository: ChatFileRepository
+    private let pendingAgentPurposeRepository: PendingAgentPurposeRepository
+
     private let debugMode: Bool
 
     /// ステートレス設計: DBパスのみで初期化（stdio用）
@@ -59,6 +63,13 @@ final class MCPServer {
         self.executionLogRepository = ExecutionLogRepository(database: database)
         // Phase 4: Project-Agent Assignment Repository
         self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
+        // Chat機能: チャットリポジトリと起動理由リポジトリ
+        let directoryManager = ProjectDirectoryManager()
+        self.chatRepository = ChatFileRepository(
+            directoryManager: directoryManager,
+            projectRepository: self.projectRepository
+        )
+        self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
 
         // 起動時ログ（常に出力）- ファイルとstderrの両方に出力
@@ -493,6 +504,25 @@ final class MCPServer {
                 errorMessage: errorMessage,
                 validatedAgentId: session.agentId.value
             )
+
+        // ========================================
+        // チャット機能（認証済み）
+        // 参照: docs/design/CHAT_FEATURE.md
+        // ========================================
+        case "get_pending_messages":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            return try getPendingMessages(session: session)
+
+        case "respond_chat":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let content = arguments["content"] as? String else {
+                throw MCPError.missingArguments(["content"])
+            }
+            return try respondChat(session: session, content: content)
 
         // ========================================
         // 削除済み（エラーを返す）
@@ -1239,9 +1269,24 @@ final class MCPServer {
             }
         }
 
-        // action と reason を設定
-        let action = hasInProgressTask ? "start" : "hold"
-        let reason = hasInProgressTask ? "has_in_progress_task" : "no_in_progress_task"
+        // Chat機能: pending_agent_purposesをチェック
+        // チャットメッセージが送信された場合、purpose=chatでエージェントを起動する
+        let hasPendingPurpose = try pendingAgentPurposeRepository.find(agentId: id, projectId: projId) != nil
+        if hasPendingPurpose {
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': start (pending purpose exists)")
+        }
+
+        // action と reason を設定（pending purposeがあれば起動）
+        let shouldStart = hasInProgressTask || hasPendingPurpose
+        let action = shouldStart ? "start" : "hold"
+        let reason: String
+        if hasInProgressTask {
+            reason = "has_in_progress_task"
+        } else if hasPendingPurpose {
+            reason = "has_pending_purpose"
+        } else {
+            reason = "no_in_progress_task"
+        }
 
         var result: [String: Any] = [
             "action": action,
@@ -1628,6 +1673,21 @@ final class MCPServer {
                     申告後、get_next_action を再度呼び出してください。
                     """,
                 "state": "needs_model_verification"
+            ]
+        }
+
+        // 1.6. Chat機能: purpose=chat の場合はチャット応答フローへ
+        if session.purpose == .chat {
+            Self.log("[MCP] getNextAction: Chat session detected, directing to get_pending_messages")
+            return [
+                "action": "get_pending_messages",
+                "instruction": """
+                    チャットセッションです。
+                    get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
+                    メッセージに対する応答は respond_chat で送信してください。
+                    応答が完了したら logout を呼び出してセッションを終了してください。
+                    """,
+                "state": "chat_session"
             ]
         }
 
@@ -2086,11 +2146,12 @@ final class MCPServer {
             ]
         }
 
-        // AuthenticateUseCaseを使用して認証
+        // AuthenticateUseCaseを使用して認証（Chat機能: pendingAgentPurposeRepository を渡す）
         let useCase = AuthenticateUseCase(
             credentialRepository: agentCredentialRepository,
             sessionRepository: agentSessionRepository,
-            agentRepository: agentRepository
+            agentRepository: agentRepository,
+            pendingPurposeRepository: pendingAgentPurposeRepository
         )
 
         let result = try useCase.execute(agentId: agentId, passkey: passkey, projectId: projectId)
@@ -2102,8 +2163,8 @@ final class MCPServer {
                 "session_token": result.sessionToken ?? "",
                 "expires_in": result.expiresIn ?? 0,
                 "agent_name": result.agentName ?? "",
-                // Phase 4: 次のアクション指示を追加
-                "instruction": "get_my_task を呼び出してタスク詳細を取得してください"
+                // Phase 4: 次のアクション指示（get_next_actionがchat/taskを判別）
+                "instruction": "get_next_action を呼び出して次の指示を確認してください"
             ]
             // system_prompt があれば追加（エージェントの役割を定義）
             // 参照: docs/plan/MULTI_AGENT_USE_CASES.md
@@ -2894,6 +2955,65 @@ final class MCPServer {
             "agent_id": agentId,
             "project_id": projectId,
             "deleted_count": deletedCount
+        ]
+    }
+
+    // MARK: - Chat Tools
+    // 参照: docs/design/CHAT_FEATURE.md
+
+    /// get_pending_messages - 未読チャットメッセージを取得
+    /// チャット目的で起動されたエージェントが呼び出す
+    private func getPendingMessages(session: AgentSession) throws -> [String: Any] {
+        Self.log("[MCP] getPendingMessages called: agentId='\(session.agentId.value)', projectId='\(session.projectId.value)'")
+
+        // 未読メッセージを取得
+        let messages = try chatRepository.findUnreadUserMessages(
+            projectId: session.projectId,
+            agentId: session.agentId
+        )
+
+        Self.log("[MCP] Found \(messages.count) unread message(s)")
+
+        let messagesDicts = messages.map { message -> [String: Any] in
+            [
+                "id": message.id.value,
+                "content": message.content,
+                "created_at": ISO8601DateFormatter().string(from: message.createdAt)
+            ]
+        }
+
+        return [
+            "success": true,
+            "messages": messagesDicts,
+            "count": messages.count,
+            "instruction": messages.isEmpty
+                ? "未読メッセージはありません。logout を呼び出してセッションを終了してください。"
+                : "上記のメッセージに応答してください。respond_chat ツールを使用して応答を保存してください。"
+        ]
+    }
+
+    /// respond_chat - チャット応答を保存
+    /// エージェントがユーザーメッセージに対する応答を保存する
+    private func respondChat(session: AgentSession, content: String) throws -> [String: Any] {
+        Self.log("[MCP] respondChat called: agentId='\(session.agentId.value)', content length=\(content.count)")
+
+        // エージェント応答メッセージを作成
+        let message = ChatMessage(
+            id: ChatMessageID.generate(),
+            sender: .agent,
+            content: content,
+            createdAt: Date()
+        )
+
+        // メッセージを保存
+        try chatRepository.saveMessage(message, projectId: session.projectId, agentId: session.agentId)
+
+        Self.log("[MCP] Chat response saved: \(message.id.value)")
+
+        return [
+            "success": true,
+            "message_id": message.id.value,
+            "instruction": "応答を保存しました。get_next_action を呼び出して次の指示を確認してください。"
         ]
     }
 

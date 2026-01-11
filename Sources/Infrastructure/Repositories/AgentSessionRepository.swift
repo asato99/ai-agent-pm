@@ -1,6 +1,7 @@
 // Sources/Infrastructure/Repositories/AgentSessionRepository.swift
 // 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-1 認証基盤
 // 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md - (agent_id, project_id) 単位のセッション管理
+// 参照: docs/design/CHAT_FEATURE.md - セッションの起動理由(purpose)管理
 
 import Foundation
 import GRDB
@@ -10,6 +11,7 @@ import Domain
 
 /// GRDB用のAgentSessionレコード
 /// Phase 4: project_id を追加して (agent_id, project_id) 単位でセッション管理
+/// Chat機能: purpose フィールドで起動理由を管理
 struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "agent_sessions"
 
@@ -18,6 +20,8 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var agentId: String
     /// Phase 4: セッションが紐づくプロジェクトID
     var projectId: String
+    /// Chat機能: 起動理由（task=タスク実行, chat=チャット応答）
+    var purpose: String?
     var expiresAt: Date
     var createdAt: Date
     // Model verification fields
@@ -31,6 +35,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case token
         case agentId = "agent_id"
         case projectId = "project_id"
+        case purpose
         case expiresAt = "expires_at"
         case createdAt = "created_at"
         case reportedProvider = "reported_provider"
@@ -45,6 +50,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             token: token,
             agentId: AgentID(value: agentId),
             projectId: ProjectID(value: projectId),
+            purpose: AgentPurpose(rawValue: purpose ?? "task") ?? .task,
             expiresAt: expiresAt,
             createdAt: createdAt,
             reportedProvider: reportedProvider,
@@ -60,6 +66,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             token: session.token,
             agentId: session.agentId.value,
             projectId: session.projectId.value,
+            purpose: session.purpose.rawValue,
             expiresAt: session.expiresAt,
             createdAt: session.createdAt,
             reportedProvider: session.reportedProvider,

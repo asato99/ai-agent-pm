@@ -43,22 +43,27 @@ public struct AuthenticateResult: Sendable {
 // MARK: - AuthenticateUseCase
 
 /// エージェント認証ユースケース
+/// Chat機能対応: pending_agent_purposesから起動理由を取得してセッションに設定
 public struct AuthenticateUseCase: Sendable {
     private let credentialRepository: any AgentCredentialRepositoryProtocol
     private let sessionRepository: any AgentSessionRepositoryProtocol
     private let agentRepository: any AgentRepositoryProtocol
+    private let pendingPurposeRepository: (any PendingAgentPurposeRepositoryProtocol)?
 
     public init(
         credentialRepository: any AgentCredentialRepositoryProtocol,
         sessionRepository: any AgentSessionRepositoryProtocol,
-        agentRepository: any AgentRepositoryProtocol
+        agentRepository: any AgentRepositoryProtocol,
+        pendingPurposeRepository: (any PendingAgentPurposeRepositoryProtocol)? = nil
     ) {
         self.credentialRepository = credentialRepository
         self.sessionRepository = sessionRepository
         self.agentRepository = agentRepository
+        self.pendingPurposeRepository = pendingPurposeRepository
     }
 
     /// Phase 4: projectId は必須
+    /// Chat機能: pending purposeがあればそれをセッションに設定
     public func execute(agentId: String, passkey: String, projectId: String) throws -> AuthenticateResult {
         let agentID = AgentID(value: agentId)
         let projID = ProjectID(value: projectId)
@@ -83,8 +88,17 @@ public struct AuthenticateUseCase: Sendable {
         // 既存のセッションを無効化（オプション：同時ログインを許可しない場合）
         // try sessionRepository.deleteByAgentId(agentID)
 
-        // Phase 4: 新しいセッションを作成（projectId を含む）
-        let session = AgentSession(agentId: agentID, projectId: projID)
+        // Chat機能: pending purposeを確認
+        var purpose: AgentPurpose = .task
+        if let pendingRepo = pendingPurposeRepository,
+           let pendingPurpose = try pendingRepo.find(agentId: agentID, projectId: projID) {
+            purpose = pendingPurpose.purpose
+            // 使用済みのpending purposeを削除
+            try pendingRepo.delete(agentId: agentID, projectId: projID)
+        }
+
+        // Phase 4: 新しいセッションを作成（projectId, purpose を含む）
+        let session = AgentSession(agentId: agentID, projectId: projID, purpose: purpose)
         try sessionRepository.save(session)
 
         // 認証情報のlastUsedAtを更新

@@ -55,6 +55,13 @@ enum ToolDefinitions {
             reportExecutionComplete,  // 非推奨（後方互換性のため維持）
 
             // ========================================
+            // チャット機能（認証済み）
+            // 参照: docs/design/CHAT_FEATURE.md
+            // ========================================
+            getPendingMessages,
+            respondChat,
+
+            // ========================================
             // 削除済み（権限なし - 呼び出し不可）
             // ========================================
             // - list_agents: → list_subordinates を使用
@@ -751,6 +758,47 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["agent_id", "project_id"]
+        ]
+    ]
+
+    // MARK: - Chat Tools
+    // 参照: docs/design/CHAT_FEATURE.md - MCP連携設計
+
+    /// get_pending_messages - 未読チャットメッセージを取得
+    /// Agent Instance用: purpose=chatのセッションでのみ使用
+    static let getPendingMessages: [String: Any] = [
+        "name": "get_pending_messages",
+        "description": "未読のユーザーチャットメッセージを取得します。チャット目的で起動されたエージェントが最初に呼び出し、ユーザーからのメッセージを取得します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ]
+            ] as [String: Any],
+            "required": ["session_token"]
+        ]
+    ]
+
+    /// respond_chat - チャット応答を保存
+    /// Agent Instance用: ユーザーメッセージに対する応答を保存
+    static let respondChat: [String: Any] = [
+        "name": "respond_chat",
+        "description": "チャットメッセージに対する応答を保存します。get_pending_messagesで取得したメッセージに対して応答する際に使用します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "content": [
+                    "type": "string",
+                    "description": "応答メッセージの内容"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "content"]
         ]
     ]
 }

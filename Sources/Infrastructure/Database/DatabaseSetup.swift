@@ -571,6 +571,31 @@ public final class DatabaseSetup {
             }
         }
 
+        // v22: 起動待ちエージェントの起動理由管理テーブル
+        // 参照: docs/design/CHAT_FEATURE.md - MCP連携設計
+        // チャットメッセージ送信時に purpose=chat を記録し、
+        // Coordinator 経由でエージェント起動 → authenticate 時に参照
+        migrator.registerMigration("v22_pending_agent_purposes") { db in
+            try db.create(table: "pending_agent_purposes", ifNotExists: true) { t in
+                t.column("agent_id", .text).notNull()
+                t.column("project_id", .text).notNull()
+                t.column("purpose", .text).notNull() // "task" | "chat"
+                t.column("created_at", .datetime).notNull()
+                t.primaryKey(["agent_id", "project_id"])
+            }
+            try db.create(indexOn: "pending_agent_purposes", columns: ["agent_id"])
+            try db.create(indexOn: "pending_agent_purposes", columns: ["project_id"])
+        }
+
+        // v23: セッションに起動理由(purpose)フィールド追加
+        // 参照: docs/design/CHAT_FEATURE.md - セッション管理
+        // authenticate時にpending_agent_purposesから取得してセッションに設定
+        migrator.registerMigration("v23_session_purpose") { db in
+            try db.alter(table: "agent_sessions") { t in
+                t.add(column: "purpose", .text).defaults(to: "task")
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

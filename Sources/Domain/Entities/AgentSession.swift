@@ -1,6 +1,7 @@
 // Sources/Domain/Entities/AgentSession.swift
 // 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-1 認証基盤
 // 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md - (agent_id, project_id) 単位のセッション管理
+// 参照: docs/design/CHAT_FEATURE.md - セッションの起動理由(purpose)管理
 
 import Foundation
 
@@ -18,6 +19,10 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     public let projectId: ProjectID
     public let expiresAt: Date
     public let createdAt: Date
+
+    // MARK: - Purpose Field
+    /// セッションの起動理由（task=タスク実行, chat=チャット応答）
+    public var purpose: AgentPurpose
 
     // MARK: - Model Verification Fields
     /// Agent Instanceが申告したプロバイダー
@@ -42,10 +47,12 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
 
     /// 新しいセッションを生成
     /// Phase 4: projectId は必須
+    /// Chat機能: purpose はデフォルトで .task
     public init(
         id: AgentSessionID = .generate(),
         agentId: AgentID,
         projectId: ProjectID,
+        purpose: AgentPurpose = .task,
         expiresAt: Date? = nil,
         createdAt: Date = Date()
     ) {
@@ -53,6 +60,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.token = Self.generateToken()
         self.agentId = agentId
         self.projectId = projectId
+        self.purpose = purpose
         self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(Self.defaultExpirationInterval)
         self.createdAt = createdAt
         self.reportedProvider = nil
@@ -67,6 +75,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         token: String,
         agentId: AgentID,
         projectId: ProjectID,
+        purpose: AgentPurpose = .task,
         expiresAt: Date,
         createdAt: Date,
         reportedProvider: String? = nil,
@@ -78,6 +87,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.token = token
         self.agentId = agentId
         self.projectId = projectId
+        self.purpose = purpose
         self.expiresAt = expiresAt
         self.createdAt = createdAt
         self.reportedProvider = reportedProvider

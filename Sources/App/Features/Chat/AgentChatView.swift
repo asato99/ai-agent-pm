@@ -228,8 +228,8 @@ struct AgentChatView: View {
                 // メッセージを再読み込み
                 await loadMessages()
 
-                // モック応答を追加（将来的にはMCP連携で実際のエージェント応答に置き換え）
-                await addMockResponse()
+                // チャット用の起動理由を登録（Coordinatorがエージェントを起動する）
+                await triggerAgentForChat()
 
             } catch {
                 await MainActor.run {
@@ -243,30 +243,21 @@ struct AgentChatView: View {
         }
     }
 
-    /// モック応答を追加（Phase 1ではMCP連携なし）
-    private func addMockResponse() async {
-        // 少し待ってからモック応答を追加
-        try? await AsyncTask.sleep(nanoseconds: 1_000_000_000) // 1秒
-
-        let mockContent = "メッセージを受け取りました。現在、この機能はモック実装です。将来的にはMCPを通じて実際のエージェントと通信します。"
-
-        let mockMessage = ChatMessage(
-            id: ChatMessageID.generate(),
-            sender: .agent,
-            content: mockContent,
-            createdAt: Date()
-        )
-
+    /// エージェントをチャット応答用に起動するためのpending purposeを登録
+    /// Coordinatorがこれを検知してエージェントを起動し、
+    /// エージェントが get_pending_messages → respond_chat を実行する
+    private func triggerAgentForChat() async {
         do {
-            try container.chatRepository.saveMessage(
-                mockMessage,
+            let pendingPurpose = PendingAgentPurpose(
+                agentId: agentId,
                 projectId: projectId,
-                agentId: agentId
+                purpose: .chat,
+                createdAt: Date()
             )
-
-            await loadMessages()
+            try container.pendingAgentPurposeRepository.save(pendingPurpose)
         } catch {
-            print("Failed to save mock response: \(error)")
+            print("Failed to trigger agent for chat: \(error)")
+            // エラーでもUIには表示しない（ポーリングで応答を待つ）
         }
     }
 
