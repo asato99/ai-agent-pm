@@ -158,6 +158,27 @@ cat /tmp/app_debug.log
 
 ---
 
+## 修正済みの問題
+
+### ドラッグ＆ドロップ機能（2026-01-11修正）
+
+**原因**: `Button`と`onDrag`のジェスチャー競合
+**修正**: `onTapGesture` + `draggable` + `dropDestination`に変更
+**検証**: 手動テスト✅、UIテスト✅
+
+**詳細**: [`docs/retrospective/2026-01-11_DragAndDrop_XCUITest.md`](docs/retrospective/2026-01-11_DragAndDrop_XCUITest.md)
+
+### XCUITestの制限: LazyVStack内の要素検出
+
+`LazyVStack`内の要素はXCUITestのアクセシビリティ階層に正しく公開されない場合がある。
+
+**対応**:
+- 要素のframe座標を使用した検出は避ける
+- accessibilityIdentifierで直接検索する
+- 必要に応じてDB検証にフォールバック
+
+---
+
 ## 設計方針
 
 - **サブタスク**: 初期実装では不要（依存関係のみでタスク間関係を表現）
@@ -173,3 +194,4 @@ cat /tmp/app_debug.log
 | 2025-01-02 | 初版作成: UIテスト実行ルール、要件参照を記載 |
 | 2026-01-06 | リアクティブ要件追加: テストでのリフレッシュ操作は要件違反として扱う |
 | 2026-01-06 | ログ取得ベストプラクティス追加: 詳細は`docs/guide/LOGGING.md`に分離 |
+| 2026-01-11 | ドラッグ＆ドロップ機能修正: Button+onDrag競合を解消 |

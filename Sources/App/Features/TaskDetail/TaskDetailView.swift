@@ -9,6 +9,28 @@ import Domain
 // Domain.Task と Swift.Task の名前衝突を解決
 private typealias AsyncTask = _Concurrency.Task
 
+/// TaskStoreの変更を監視するためのObservableObjectラッパー
+/// TaskStoreがnilの場合でも安全に動作する
+@MainActor
+private final class TaskStoreObserver: ObservableObject {
+    @Published var tasks: [Task] = []
+    private var taskStore: TaskStore?
+    private var cancellable: AnyCancellable?
+
+    init(taskStore: TaskStore?) {
+        self.taskStore = taskStore
+        if let store = taskStore {
+            // TaskStoreのtasksをサブスクライブ
+            cancellable = store.$tasks.sink { [weak self] newTasks in
+                self?.tasks = newTasks
+            }
+            tasks = store.tasks
+        }
+    }
+}
+
+import Combine
+
 struct TaskDetailView: View {
     @EnvironmentObject var container: DependencyContainer
     @Environment(Router.self) var router
@@ -19,6 +41,10 @@ struct TaskDetailView: View {
     /// ステータス変更時にこのストアを更新することで、TaskBoardViewも自動更新される
     var taskStore: TaskStore?
 
+    /// TaskStoreの変更を監視するためのラッパー
+    /// taskStoreがnilでない場合のみリアクティブ更新が有効
+    @ObservedObject private var storeObserver: TaskStoreObserver
+
     @State private var task: Task?
     @State private var contexts: [Context] = []
     @State private var dependentTasks: [Task] = []
@@ -27,6 +53,13 @@ struct TaskDetailView: View {
     @State private var executionLogs: [ExecutionLog] = []
     @State private var assignee: Agent?
     @State private var isLoading = false
+
+    /// イニシャライザ: taskStoreを監視するためのobserverを初期化
+    init(taskId: TaskID, taskStore: TaskStore? = nil) {
+        self.taskId = taskId
+        self.taskStore = taskStore
+        self._storeObserver = ObservedObject(wrappedValue: TaskStoreObserver(taskStore: taskStore))
+    }
 
     var body: some View {
         Group {
@@ -136,6 +169,13 @@ struct TaskDetailView: View {
                         await loadData()
                     }
                 }
+            }
+        }
+        // リアクティブ更新: TaskStoreのタスク配列が変更されたらローカル状態を更新
+        // ドラッグ&ドロップでステータスが変更された場合にTaskDetailViewも自動更新される
+        .onChange(of: storeObserver.tasks) { _, newTasks in
+            if let updatedTask = newTasks.first(where: { $0.id == taskId }) {
+                task = updatedTask
             }
         }
     }

@@ -58,31 +58,6 @@ struct DraggableTaskID: Codable, Transferable {
     }
 }
 
-/// NSItemProvider extension for TaskID drag & drop (XCUITest compatibility)
-extension NSItemProvider {
-    static let taskIDTypeIdentifier = "com.aiagentpm.taskid"
-
-    convenience init(taskId: TaskID) {
-        self.init()
-        let data = taskId.value.data(using: .utf8)!
-        self.registerDataRepresentation(forTypeIdentifier: Self.taskIDTypeIdentifier, visibility: .all) { completion in
-            completion(data, nil)
-            return nil
-        }
-    }
-
-    func loadTaskID(completion: @escaping (TaskID?) -> Void) {
-        self.loadDataRepresentation(forTypeIdentifier: Self.taskIDTypeIdentifier) { data, _ in
-            guard let data = data,
-                  let value = String(data: data, encoding: .utf8) else {
-                completion(nil)
-                return
-            }
-            completion(TaskID(value: value))
-        }
-    }
-}
-
 struct TaskBoardView: View {
     @EnvironmentObject var container: DependencyContainer
     @Environment(Router.self) var router
@@ -455,26 +430,14 @@ struct TaskColumnView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(tasks, id: \.id) { task in
-                        TaskCardButton(task: task, agents: agents) {
-                            DebugLog.write("🟠 [Click] TaskCard clicked: \(task.id.value)")
-                            router.selectTask(task.id)
-                        }
-                        .onDrag {
-                            DebugLog.write("🔵 [onDrag] onDrag called for task: \(task.id.value), title: \(task.title)")
-                            let provider = NSItemProvider()
-                            let data = task.id.value.data(using: .utf8)!
-                            provider.registerDataRepresentation(forTypeIdentifier: UTType.taskID.identifier, visibility: .all) { completion in
-                                completion(data, nil)
-                                return nil
+                        DraggableTaskCard(
+                            task: task,
+                            agents: agents,
+                            onTap: {
+                                DebugLog.write("🟠 [Click] TaskCard clicked: \(task.id.value)")
+                                router.selectTask(task.id)
                             }
-                            return provider
-                        } preview: {
-                            DebugLog.write("🔵 [onDrag] preview for task: \(task.id.value)")
-                            return TaskCardView(task: task, agents: agents)
-                                .frame(width: 200)
-                                .background(Color(.controlBackgroundColor))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
+                        )
                     }
                 }
                 .padding(.horizontal, 4)
@@ -488,31 +451,18 @@ struct TaskColumnView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
         )
-        .onDrop(of: [.taskID], isTargeted: Binding(
-            get: { isDropTargeted },
-            set: { newValue in
-                DebugLog.write("🟡 [onDrop] isTargeted changed to: \(newValue) for column: \(status.rawValue)")
-                isDropTargeted = newValue
-            }
-        )) { providers in
-            DebugLog.write("🟢 [onDrop] onDrop called for column: \(status.rawValue), providers count: \(providers.count)")
-            guard let provider = providers.first else {
-                DebugLog.write("🔴 [onDrop] No provider")
+        .dropDestination(for: DraggableTaskID.self) { droppedItems, _ in
+            DebugLog.write("🟢 [dropDestination] drop called for column: \(status.rawValue), items count: \(droppedItems.count)")
+            guard let droppedItem = droppedItems.first else {
+                DebugLog.write("🔴 [dropDestination] No items")
                 return false
             }
-            provider.loadDataRepresentation(forTypeIdentifier: UTType.taskID.identifier) { data, error in
-                DebugLog.write("🟢 [onDrop] loadDataRepresentation callback")
-                guard let data = data,
-                      let taskIdValue = String(data: data, encoding: .utf8) else {
-                    DebugLog.write("🔴 [onDrop] Failed to decode taskId")
-                    return
-                }
-                DebugLog.write("🟢 [onDrop] Decoded taskId: \(taskIdValue)")
-                DispatchQueue.main.async {
-                    onTaskDropped(TaskID(value: taskIdValue), status)
-                }
-            }
+            DebugLog.write("🟢 [dropDestination] Dropped taskId: \(droppedItem.taskId.value)")
+            onTaskDropped(droppedItem.taskId, status)
             return true
+        } isTargeted: { isTargeted in
+            DebugLog.write("🟡 [dropDestination] isTargeted changed to: \(isTargeted) for column: \(status.rawValue)")
+            isDropTargeted = isTargeted
         }
         .accessibilityIdentifier("TaskColumn_\(status.rawValue)")
     }
@@ -600,12 +550,12 @@ struct PriorityBadge: View {
     }
 }
 
-/// タスクカードボタン
-/// XCUITestでタイトルが認識できるよう、キーボードアクセシブルなButtonを使用
-struct TaskCardButton: View {
+/// ドラッグ可能なタスクカード
+/// ButtonではなくonTapGestureを使用し、draggableと競合しないようにする
+struct DraggableTaskCard: View {
     let task: Task
     let agents: [Agent]
-    let action: () -> Void
+    let onTap: () -> Void
 
     @FocusState private var isFocused: Bool
 
@@ -624,21 +574,31 @@ struct TaskCardButton: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            TaskCardView(task: task, agents: agents)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(isFocused ? Color.accentColor : Color.clear, lineWidth: 2)
-                )
-        }
-        .buttonStyle(.plain)
-        .focusable()
-        .focused($isFocused)
-        // アクセシビリティ設定
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabelText)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("TaskCard_\(task.id.value)")
+        TaskCardView(task: task, agents: agents)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isFocused ? Color.accentColor : Color.clear, lineWidth: 2)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .onTapGesture {
+                onTap()
+            }
+            .draggable(DraggableTaskID(taskId: task.id)) {
+                TaskCardView(task: task, agents: agents)
+                    .frame(width: 200)
+                    .background(Color(.controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .onAppear {
+                        DebugLog.write("🔵 [draggable] preview shown for task: \(task.id.value)")
+                    }
+            }
+            .focusable()
+            .focused($isFocused)
+            // アクセシビリティ設定
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityLabelText)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("TaskCard_\(task.id.value)")
     }
 }
 
