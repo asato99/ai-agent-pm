@@ -407,18 +407,30 @@ class Coordinator:
         logger.debug(f"MCP config: {mcp_config}")
         logger.info(f"Agent Instance will connect via Unix Socket: {socket_path}")
 
-        # Build command with MCP config
+        # Handle provider-specific MCP configuration
+        # Gemini CLI uses file-based config (.gemini/settings.json)
+        # Claude CLI uses inline JSON via --mcp-config flag
+        if provider == "gemini":
+            self._prepare_gemini_mcp_config(working_dir, socket_path)
+            logger.debug("Prepared Gemini MCP config file")
+
+        # Build command
         cmd = [
             cli_command,
             *cli_args,
-            "--mcp-config", mcp_config,
         ]
 
+        # Add MCP config (only for non-Gemini providers)
+        # Gemini reads from .gemini/settings.json automatically
+        if provider != "gemini":
+            cmd.extend(["--mcp-config", mcp_config])
+
         # Add model flag if specified
-        # This ensures the agent uses the model configured for its aiType
+        # Note: Gemini uses -m, Claude uses --model
         if model:
-            cmd.extend(["--model", model])
-            logger.debug(f"Using model: {model}")
+            model_flag = "-m" if provider == "gemini" else "--model"
+            cmd.extend([model_flag, model])
+            logger.debug(f"Using model: {model} (flag: {model_flag})")
 
         # Add verbose flag for debugging if enabled
         if self.config.debug_mode:
@@ -469,6 +481,35 @@ class Coordinator:
         )
 
         logger.info(f"Spawned instance {agent_id}/{project_id} (PID: {process.pid})")
+
+    def _prepare_gemini_mcp_config(self, working_dir: str, socket_path: str) -> None:
+        """Prepare MCP config file for Gemini CLI.
+
+        Gemini CLI reads MCP configuration from .gemini/settings.json in the
+        working directory, unlike Claude CLI which accepts --mcp-config flag.
+
+        Args:
+            working_dir: Working directory where .gemini/settings.json will be created
+            socket_path: Unix socket path for MCP connection
+        """
+        gemini_dir = Path(working_dir) / ".gemini"
+        gemini_dir.mkdir(parents=True, exist_ok=True)
+
+        config = {
+            "mcpServers": {
+                "agent-pm": {
+                    "command": "nc",
+                    "args": ["-U", socket_path],
+                    "trust": True  # Auto-approve tool calls
+                }
+            }
+        }
+
+        config_file = gemini_dir / "settings.json"
+        with open(config_file, "w") as f:
+            json.dump(config, f, indent=2)
+
+        logger.debug(f"Created Gemini MCP config at {config_file}")
 
     def _build_agent_prompt(self, agent_id: str, project_id: str, passkey: str) -> str:
         """Build the prompt for an Agent Instance.

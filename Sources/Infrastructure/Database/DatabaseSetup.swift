@@ -643,6 +643,42 @@ public final class DatabaseSetup {
             try db.create(indexOn: "tasks", columns: ["status_changed_by_agent_id"])
         }
 
+        // v29: provider/model_id 直接保存（Enumパース依存を排除）
+        migrator.registerMigration("v29_agent_provider_model") { db in
+            try db.alter(table: "agents") { t in
+                t.add(column: "provider", .text)   // "claude", "gemini", "openai", etc.
+                t.add(column: "model_id", .text)   // "gemini-2.5-pro", "claude-opus-4-20250514", etc.
+            }
+
+            // 既存データのマイグレーション: ai_type から provider/model_id を設定
+            // claude-* → provider: claude
+            try db.execute(sql: """
+                UPDATE agents SET provider = 'claude'
+                WHERE ai_type LIKE 'claude-%' AND provider IS NULL
+            """)
+            // gemini-* → provider: gemini
+            try db.execute(sql: """
+                UPDATE agents SET provider = 'gemini'
+                WHERE ai_type LIKE 'gemini-%' AND provider IS NULL
+            """)
+            // gpt-* → provider: openai
+            try db.execute(sql: """
+                UPDATE agents SET provider = 'openai'
+                WHERE ai_type LIKE 'gpt-%' AND provider IS NULL
+            """)
+            // その他 → provider: custom
+            try db.execute(sql: """
+                UPDATE agents SET provider = 'custom'
+                WHERE provider IS NULL
+            """)
+
+            // model_id: ai_type の値をそのままコピー（日付サフィックス付きのフルIDに更新が必要な場合は別途対応）
+            try db.execute(sql: """
+                UPDATE agents SET model_id = ai_type
+                WHERE model_id IS NULL AND ai_type IS NOT NULL
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

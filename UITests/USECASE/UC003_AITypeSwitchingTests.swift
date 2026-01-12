@@ -11,8 +11,10 @@
 // - プロジェクト: UC003 AIType Test (prj_uc003, wd=/tmp/uc003)
 // - エージェント1: UC003 Sonnet Agent (agt_uc003_sonnet, aiType=claudeSonnet4_5)
 // - エージェント2: UC003 Opus Agent (agt_uc003_opus, aiType=claudeOpus4)
+// - エージェント3: UC003 Gemini Agent (agt_uc003_gemini, aiType=gemini25Pro)
 // - タスク1: Sonnet Task (tsk_uc003_sonnet)
 // - タスク2: Opus Task (tsk_uc003_opus)
+// - タスク3: Gemini Task (tsk_uc003_gemini)
 // ========================================
 
 import XCTest
@@ -20,17 +22,18 @@ import XCTest
 /// UC003: AIタイプ切り替え - 統合テスト
 ///
 /// 検証内容:
-/// 1. 両エージェントがプロジェクトに存在する
-/// 2. 各エージェントのモデル（Sonnet/Opus）が正しく設定されている
-/// 3. 両タスクをin_progressに変更可能
+/// 1. 3つのエージェント（Sonnet/Opus/Gemini）がプロジェクトに存在する
+/// 2. 各エージェントのモデルが正しく設定されている
+/// 3. 全タスクをin_progressに変更可能
 final class UC003_AITypeSwitchingTests: UC003UITestCase {
 
     /// UC003 UIテスト（ステータス変更のみ）
     ///
     /// 1回のアプリ起動で以下の全フローを検証:
     /// 1. プロジェクトの存在確認
-    /// 2. Claudeエージェント担当タスクの操作
-    /// 3. Customエージェント担当タスクの操作
+    /// 2. Sonnetエージェント担当タスクの操作
+    /// 3. Opusエージェント担当タスクの操作
+    /// 4. Geminiエージェント担当タスクの操作
     func testE2E_UC003_AITypeSwitching() throws {
         // ========================================
         // Phase 1: プロジェクト確認
@@ -54,9 +57,16 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
         print("✅ Phase 3完了: Opusタスクがin_progress")
 
         // ========================================
+        // Phase 4: Geminiエージェントタスク操作
+        // ========================================
+        print("🔍 Phase 4: Geminiエージェントタスク操作")
+        try verifyPhase4_GeminiAgentTask()
+        print("✅ Phase 4完了: Geminiタスクがin_progress")
+
+        // ========================================
         // 完了
         // ========================================
-        print("🎉 UC003 E2Eテスト完了: 両エージェントのタスクがin_progress状態")
+        print("🎉 UC003 E2Eテスト完了: 全3エージェントのタスクがin_progress状態")
     }
 
     // MARK: - Phase 1: プロジェクト確認
@@ -142,6 +152,45 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
         let agentLabel = detailView.staticTexts[agentName]
         XCTAssertTrue(agentLabel.exists,
                       "❌ PHASE3: 担当エージェント「\(agentName)」が表示されていない")
+
+        // ステータスをin_progressに変更
+        try changeTaskStatusToInProgress()
+
+        // 詳細画面を閉じる
+        app.typeKey(.escape, modifierFlags: [])
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    // MARK: - Phase 4: Geminiエージェントタスク操作
+
+    private func verifyPhase4_GeminiAgentTask() throws {
+        let taskTitle = "Gemini Task"
+        let agentName = "UC003 Gemini Agent"
+
+        // Refreshボタンをクリックしてタスクボードを更新
+        let refreshButton = app.buttons.matching(identifier: "RefreshButton").firstMatch
+        if refreshButton.waitForExistence(timeout: 2) {
+            refreshButton.click()
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+
+        // タスクカードを探す
+        let taskCard = findTaskCard(withTitle: taskTitle)
+        XCTAssertTrue(taskCard.waitForExistence(timeout: 5),
+                      "❌ PHASE4: タスク「\(taskTitle)」が見つからない")
+
+        // タスク詳細を開く
+        taskCard.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        let detailView = app.descendants(matching: .any).matching(identifier: "TaskDetailView").firstMatch
+        XCTAssertTrue(detailView.waitForExistence(timeout: 5),
+                      "❌ PHASE4: タスク詳細画面が開かない")
+
+        // 担当エージェント確認
+        let agentLabel = detailView.staticTexts[agentName]
+        XCTAssertTrue(agentLabel.exists,
+                      "❌ PHASE4: 担当エージェント「\(agentName)」が表示されていない")
 
         // ステータスをin_progressに変更
         try changeTaskStatusToInProgress()
@@ -249,13 +298,14 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
     /// UC003 統合テスト（Coordinator連携）
     ///
     /// test_uc003_app_integration.sh から呼び出される統合テスト
-    /// 1. 両エージェントのタスクをin_progressに変更
+    /// 1. 全3エージェントのタスクをin_progressに変更
     /// 2. Coordinatorがエージェントを起動してタスクを完了させる
     /// 3. タスクがDoneになることを確認
     func testE2E_UC003_AITypeSwitching_Integration() throws {
         let workDir = "/tmp/uc003"
         let sonnetOutput = "OUTPUT_1.md"
         let opusOutput = "OUTPUT_2.md"
+        let geminiOutput = "OUTPUT_3.md"
 
         // ========================================
         // Phase 1: Sonnetエージェントタスクをin_progressに変更
@@ -272,18 +322,26 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
         try verifyPhase3_OpusAgentTask()
         print("✅ Phase 2完了: Opusタスクがin_progress")
 
-        print("🎯 UC003: 両タスクがin_progress状態になりました")
+        // ========================================
+        // Phase 3: Geminiエージェントタスクをin_progressに変更
+        // ========================================
+        print("🔍 Phase 3: Geminiエージェントタスクをin_progressに変更")
+        try verifyPhase4_GeminiAgentTask()
+        print("✅ Phase 3完了: Geminiタスクがin_progress")
+
+        print("🎯 UC003: 全3タスクがin_progress状態になりました")
 
         // ========================================
-        // Phase 3: UIでタスクステータスがDoneになることを確認
+        // Phase 4: UIでタスクステータスがDoneになることを確認
         // ========================================
-        print("⏳ Phase 3: タスクステータスがDoneになるのを待機中（最大60秒）...")
+        print("⏳ Phase 4: タスクステータスがDoneになるのを待機中（最大90秒）...")
 
         var sonnetDone = false
         var opusDone = false
+        var geminiDone = false
 
-        // 最大60秒（5秒間隔で12回）待機
-        for i in 1...12 {
+        // 最大90秒（5秒間隔で18回）待機
+        for i in 1...18 {
             // Sonnetタスクのステータス確認
             if !sonnetDone {
                 if try checkTaskStatusIsDone(taskId: "tsk_uc003_sonnet", taskTitle: "Sonnet Task") {
@@ -300,7 +358,15 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
                 }
             }
 
-            if sonnetDone && opusDone {
+            // Geminiタスクのステータス確認
+            if !geminiDone {
+                if try checkTaskStatusIsDone(taskId: "tsk_uc003_gemini", taskTitle: "Gemini Task") {
+                    print("✅ Gemini タスクがDoneになりました")
+                    geminiDone = true
+                }
+            }
+
+            if sonnetDone && opusDone && geminiDone {
                 break
             }
 
@@ -316,40 +382,48 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
         // ========================================
         XCTAssertTrue(sonnetDone, "❌ Sonnet タスクがDoneになりませんでした")
         XCTAssertTrue(opusDone, "❌ Opus タスクがDoneになりませんでした")
+        XCTAssertTrue(geminiDone, "❌ Gemini タスクがDoneになりませんでした")
 
         // ========================================
-        // Phase 4: ファイル作成確認（おまけ）
+        // Phase 5: ファイル作成確認（おまけ）
         // ========================================
         let fileManager = FileManager.default
         let sonnetPath = "\(workDir)/\(sonnetOutput)"
         let opusPath = "\(workDir)/\(opusOutput)"
+        let geminiPath = "\(workDir)/\(geminiOutput)"
 
         let sonnetFileExists = fileManager.fileExists(atPath: sonnetPath)
         let opusFileExists = fileManager.fileExists(atPath: opusPath)
+        let geminiFileExists = fileManager.fileExists(atPath: geminiPath)
 
-        if sonnetFileExists && opusFileExists {
+        if sonnetFileExists && opusFileExists && geminiFileExists {
             let contentSonnet = try? String(contentsOfFile: sonnetPath, encoding: .utf8)
             let contentOpus = try? String(contentsOfFile: opusPath, encoding: .utf8)
+            let contentGemini = try? String(contentsOfFile: geminiPath, encoding: .utf8)
             let charsSonnet = contentSonnet?.count ?? 0
             let charsOpus = contentOpus?.count ?? 0
+            let charsGemini = contentGemini?.count ?? 0
 
             print("🎯 UC003 モデル切り替え統合テスト: 成功")
             print("  - Sonnet タスク: Done ✅")
             print("  - Opus タスク: Done ✅")
+            print("  - Gemini タスク: Done ✅")
             print("  - \(sonnetOutput): \(charsSonnet) 文字")
             print("  - \(opusOutput): \(charsOpus) 文字")
+            print("  - \(geminiOutput): \(charsGemini) 文字")
         } else {
             print("⚠️ ファイル作成確認:")
             print("  - \(sonnetOutput): \(sonnetFileExists ? "✅" : "❌")")
             print("  - \(opusOutput): \(opusFileExists ? "✅" : "❌")")
+            print("  - \(geminiOutput): \(geminiFileExists ? "✅" : "❌")")
         }
 
         // ========================================
-        // Phase 5: モデル検証結果の確認
+        // Phase 6: モデル検証結果の確認
         // ========================================
-        print("🔍 Phase 5: execution_logsテーブルでモデル検証結果を確認")
+        print("🔍 Phase 6: execution_logsテーブルでモデル検証結果を確認")
         try verifyModelVerificationInDB()
-        print("✅ Phase 5完了: モデル検証結果がDBに正しく保存されている")
+        print("✅ Phase 6完了: モデル検証結果がDBに正しく保存されている")
     }
 
     /// タスクステータスがDoneかどうかを確認
@@ -469,8 +543,25 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
         XCTAssertTrue(opusResult.model?.lowercased().contains("opus") ?? false,
                       "❌ Opus Agent: reported_modelに'opus'が含まれていない（実際: \(opusResult.model ?? "nil")）")
 
+        // Geminiエージェントのモデル検証
+        let geminiResult = queryExecutionLog(dbPath: dbPath, agentId: "agt_uc003_gemini")
+        print("  📊 Gemini Agent model info:")
+        print("    - Provider: \(geminiResult.provider ?? "nil")")
+        print("    - Model: \(geminiResult.model ?? "nil")")
+        print("    - Verified: \(geminiResult.verified ?? "nil")")
+
+        XCTAssertEqual(geminiResult.provider, "gemini",
+                       "❌ Gemini Agent: reported_providerが'gemini'ではない（実際: \(geminiResult.provider ?? "nil")）")
+        XCTAssertNotNil(geminiResult.model,
+                        "❌ Gemini Agent: reported_modelが記録されていない")
+        XCTAssertFalse(geminiResult.model?.isEmpty ?? true,
+                       "❌ Gemini Agent: reported_modelが空")
+        // aiType=gemini25Pro のエージェントは gemini モデルを使用すべき
+        XCTAssertTrue(geminiResult.model?.lowercased().contains("gemini") ?? false,
+                      "❌ Gemini Agent: reported_modelに'gemini'が含まれていない（実際: \(geminiResult.model ?? "nil")）")
+
         // モデル検証結果のサマリー
-        print("  ✅ モデル検証: 両エージェントが正しいモデルを使用している")
+        print("  ✅ モデル検証: 全3エージェントが正しいモデルを使用している")
     }
 
     /// SQLiteからexecution_logsをクエリ

@@ -11,7 +11,9 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var name: String
     public var role: String
     public var type: AgentType
-    public var aiType: AIType?                    // AIプロバイダー種別（AI agentの場合）
+    public var aiType: AIType?                    // AIプロバイダー種別（AI agentの場合）- 後方互換性用
+    public var provider: String?                  // プロバイダー名（"claude", "gemini", "openai"）- 直接保存
+    public var modelId: String?                   // モデルID（"gemini-2.5-pro", "claude-opus-4-20250514"）- 直接保存
     public var hierarchyType: AgentHierarchyType  // 階層タイプ（Manager/Worker）
     public var roleType: AgentRoleType
     public var parentAgentId: AgentID?      // 階層構造（親エージェント）
@@ -40,6 +42,8 @@ public struct Agent: Identifiable, Equatable, Sendable {
         role: String,
         type: AgentType = .ai,
         aiType: AIType? = nil,
+        provider: String? = nil,
+        modelId: String? = nil,
         hierarchyType: AgentHierarchyType = .worker,
         roleType: AgentRoleType = .developer,
         parentAgentId: AgentID? = nil,
@@ -61,6 +65,9 @@ public struct Agent: Identifiable, Equatable, Sendable {
         self.role = role
         self.type = type
         self.aiType = aiType
+        // provider/modelId: 直接指定があればそれを使用、なければ aiType から導出
+        self.provider = provider ?? aiType?.provider
+        self.modelId = modelId ?? aiType?.modelId
         self.hierarchyType = hierarchyType
         self.roleType = roleType
         self.parentAgentId = parentAgentId
@@ -148,8 +155,8 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
     case claudeSonnet4 = "claude-sonnet-4"
 
     // Gemini models
-    case gemini2Flash = "gemini-2.0-flash"
-    case gemini2Pro = "gemini-2.0-pro"
+    case gemini25Flash = "gemini-2.5-flash"
+    case gemini25Pro = "gemini-2.5-pro"
 
     // OpenAI models
     case gpt4o = "gpt-4o"
@@ -164,8 +171,8 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
         case .claudeOpus4: return "Claude Opus 4"
         case .claudeSonnet4_5: return "Claude Sonnet 4.5"
         case .claudeSonnet4: return "Claude Sonnet 4"
-        case .gemini2Flash: return "Gemini 2.0 Flash"
-        case .gemini2Pro: return "Gemini 2.0 Pro"
+        case .gemini25Flash: return "Gemini 2.5 Flash"
+        case .gemini25Pro: return "Gemini 2.5 Pro"
         case .gpt4o: return "GPT-4o"
         case .gpt4oMini: return "GPT-4o Mini"
         case .custom: return "Custom"
@@ -177,7 +184,7 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
         switch self {
         case .claudeOpus4, .claudeSonnet4_5, .claudeSonnet4:
             return "claude"
-        case .gemini2Flash, .gemini2Pro:
+        case .gemini25Flash, .gemini25Pro:
             return "gemini"
         case .gpt4o, .gpt4oMini:
             return "openai"
@@ -191,7 +198,7 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
         switch self {
         case .claudeOpus4, .claudeSonnet4_5, .claudeSonnet4:
             return "claude"
-        case .gemini2Flash, .gemini2Pro:
+        case .gemini25Flash, .gemini25Pro:
             return "gemini"
         case .gpt4o, .gpt4oMini:
             return "openai"
@@ -207,8 +214,8 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
         case .claudeOpus4: return "claude-opus-4-20250514"
         case .claudeSonnet4_5: return "claude-sonnet-4-5-20250929"
         case .claudeSonnet4: return "claude-sonnet-4-20250514"
-        case .gemini2Flash: return "gemini-2.0-flash"
-        case .gemini2Pro: return "gemini-2.0-pro"
+        case .gemini25Flash: return "gemini-2.5-flash"
+        case .gemini25Pro: return "gemini-2.5-pro"
         case .gpt4o: return "gpt-4o"
         case .gpt4oMini: return "gpt-4o-mini"
         case .custom: return "custom"

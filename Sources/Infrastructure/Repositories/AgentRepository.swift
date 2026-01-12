@@ -17,6 +17,8 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
     var role: String
     var type: String
     var aiType: String?
+    var provider: String?      // v29: 直接保存（"claude", "gemini", "openai"）
+    var modelId: String?       // v29: 直接保存（"gemini-2.5-pro", "claude-opus-4-20250514"）
     var hierarchyType: String
     var roleType: String
     var parentAgentId: String?
@@ -40,6 +42,8 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
         case role
         case type
         case aiType = "ai_type"
+        case provider
+        case modelId = "model_id"
         case hierarchyType = "hierarchy_type"
         case roleType = "role_type"
         case parentAgentId = "parent_agent_id"
@@ -71,6 +75,8 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             role: role,
             type: AgentType(rawValue: type) ?? .ai,
             aiType: aiType.flatMap { AIType(rawValue: $0) },
+            provider: provider,    // v29: 直接保存された値を使用
+            modelId: modelId,      // v29: 直接保存された値を使用
             hierarchyType: AgentHierarchyType(rawValue: hierarchyType) ?? .worker,
             roleType: AgentRoleType(rawValue: roleType) ?? .developer,
             parentAgentId: parentAgentId.map { AgentID(value: $0) },
@@ -102,6 +108,8 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             role: agent.role,
             type: agent.type.rawValue,
             aiType: agent.aiType?.rawValue,
+            provider: agent.provider,      // v29: 直接保存
+            modelId: agent.modelId,        // v29: 直接保存
             hierarchyType: agent.hierarchyType.rawValue,
             roleType: agent.roleType.rawValue,
             parentAgentId: agent.parentAgentId?.value,

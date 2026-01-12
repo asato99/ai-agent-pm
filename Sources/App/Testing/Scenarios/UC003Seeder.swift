@@ -11,7 +11,7 @@ extension TestDataSeeder {
 
     /// UC003用のテストデータを生成（AIタイプ切り替え検証）
     /// - 1つのプロジェクト
-    /// - 2つのエージェント（Sonnet、Opus）
+    /// - 3つのエージェント（Sonnet、Opus、Gemini）
     /// - 各エージェントに1タスク
     ///
     /// 検証内容:
@@ -19,7 +19,7 @@ extension TestDataSeeder {
     /// - aiTypeがget_agent_action APIで正しく返されること
     func seedUC003Data() async throws {
         print("=== UC003 Test Data Configuration ===")
-        print("Design: 1 project + 2 agents (different aiType)")
+        print("Design: 1 project + 3 agents (different aiType: Sonnet, Opus, Gemini)")
 
         guard let projectAgentAssignmentRepository = projectAgentAssignmentRepository else {
             print("⚠️ UC003: projectAgentAssignmentRepository not available")
@@ -89,6 +89,27 @@ extension TestDataSeeder {
         try await agentRepository.save(opusAgent)
         print("✅ UC003: Opus agent created - \(opusAgent.name) (aiType=claudeOpus4)")
 
+        // UC003用エージェント3: Gemini 2.5 Pro
+        let geminiAgentId = AgentID(value: "agt_uc003_gemini")
+        let geminiAgent = Agent(
+            id: geminiAgentId,
+            name: "UC003 Gemini Agent",
+            role: "Gemini 2.5 Proエージェント",
+            type: .ai,
+            aiType: .gemini25Pro,
+            roleType: .developer,
+            parentAgentId: nil,
+            maxParallelTasks: 1,
+            capabilities: ["TypeScript", "Python"],
+            systemPrompt: "あなたは開発タスクを実行するAIエージェントです。指示されたファイルを作成してください。",
+            kickMethod: .cli,
+            status: .active,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await agentRepository.save(geminiAgent)
+        print("✅ UC003: Gemini agent created - \(geminiAgent.name) (aiType=gemini25Pro)")
+
         // Runner認証用クレデンシャル
         if let credentialRepository = credentialRepository {
             let sonnetCredential = AgentCredential(
@@ -104,6 +125,13 @@ extension TestDataSeeder {
             )
             try credentialRepository.save(opusCredential)
             print("✅ UC003: Credential created for \(opusAgentId.value)")
+
+            let geminiCredential = AgentCredential(
+                agentId: geminiAgentId,
+                rawPasskey: "test_passkey_uc003_gemini"
+            )
+            try credentialRepository.save(geminiCredential)
+            print("✅ UC003: Credential created for \(geminiAgentId.value)")
         }
 
         // エージェントをプロジェクトに割り当て
@@ -111,6 +139,8 @@ extension TestDataSeeder {
         print("✅ UC003: Sonnet agent assigned to project")
         _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: opusAgentId)
         print("✅ UC003: Opus agent assigned to project")
+        _ = try projectAgentAssignmentRepository.assign(projectId: projectId, agentId: geminiAgentId)
+        print("✅ UC003: Gemini agent assigned to project")
 
         // Sonnetエージェント用タスク
         let sonnetTask = Task(
@@ -150,7 +180,26 @@ extension TestDataSeeder {
         try await taskRepository.save(opusTask)
         print("✅ UC003: Opus task created")
 
-        print("✅ UC003: All test data seeded successfully (1 project, 2 agents, 2 tasks)")
+        // Geminiエージェント用タスク
+        let geminiTask = Task(
+            id: TaskID(value: "tsk_uc003_gemini"),
+            projectId: projectId,
+            title: "Gemini Task",
+            description: """
+                【タスク指示】
+                OUTPUT_3.md というファイルを作成してください。
+                内容は「タスク完了」という文字列を含めてください。
+                """,
+            status: .backlog,
+            priority: .high,
+            assigneeId: geminiAgentId,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await taskRepository.save(geminiTask)
+        print("✅ UC003: Gemini task created")
+
+        print("✅ UC003: All test data seeded successfully (1 project, 3 agents, 3 tasks)")
     }
 }
 #endif

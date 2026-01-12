@@ -2,7 +2,7 @@
 # UC003 App Integration Test - AI Type Switching E2E Test
 # AIタイプ切り替え統合テスト
 #
-# 設計: 1プロジェクト + 2エージェント（Sonnet 4.5、Opus 4）+ 2タスク
+# 設計: 1プロジェクト + 3エージェント（Sonnet 4.5、Opus 4、Gemini 2.5 Pro）+ 3タスク
 # - 異なるモデル指定（aiType）によるCLI選択を検証
 #
 # フロー:
@@ -157,9 +157,10 @@ echo "  - App will start daemon, Coordinator will connect"
 echo "  - Agents:"
 echo "    - agt_uc003_sonnet: aiType=claudeSonnet4_5"
 echo "    - agt_uc003_opus: aiType=claudeOpus4"
+echo "    - agt_uc003_gemini: aiType=gemini25Pro"
 echo ""
 
-# Coordinator設定（2エージェントのpasskeyを管理）
+# Coordinator設定（3エージェントのpasskeyを管理）
 cat > /tmp/coordinator_uc003_config.yaml << EOF
 # Phase 4/5 Coordinator Configuration for UC003
 polling_interval: 2
@@ -181,6 +182,10 @@ ai_providers:
       - "--dangerously-skip-permissions"
       - "--max-turns"
       - "50"
+  gemini:
+    cli_command: gemini
+    cli_args:
+      - "-y"
 
 # Agents - passkey for authentication
 agents:
@@ -188,6 +193,8 @@ agents:
     passkey: test_passkey_uc003_sonnet
   agt_uc003_opus:
     passkey: test_passkey_uc003_opus
+  agt_uc003_gemini:
+    passkey: test_passkey_uc003_gemini
 
 log_directory: /tmp/coordinator_logs_uc003
 EOF
@@ -216,9 +223,9 @@ echo -e "${YELLOW}Step 6: Running XCUITest (app + MCP auto-start + seed data + w
 echo "  This will:"
 echo "    1. Launch app with -UITesting -UITestScenario:UC003"
 echo "    2. App auto-starts MCP daemon (Coordinator will connect)"
-echo "    3. Seed test data (2 agents with different aiType)"
-echo "    4. Change both task statuses: backlog → todo → in_progress via UI"
-echo "    5. Wait for Coordinator to spawn Agent Instances and create files (max 60s)"
+echo "    3. Seed test data (3 agents with different aiType: Sonnet, Opus, Gemini)"
+echo "    4. Change all task statuses: backlog → todo → in_progress via UI"
+echo "    5. Wait for Coordinator to spawn Agent Instances and create files (max 90s)"
 echo ""
 
 cd "$PROJECT_ROOT"
@@ -249,9 +256,11 @@ echo -e "${YELLOW}Step 7: Verifying outputs${NC}"
 
 SONNET_OUTPUT="$WORK_DIR/OUTPUT_1.md"
 OPUS_OUTPUT="$WORK_DIR/OUTPUT_2.md"
+GEMINI_OUTPUT="$WORK_DIR/OUTPUT_3.md"
 
 SONNET_CHARS=0
 OPUS_CHARS=0
+GEMINI_CHARS=0
 
 # Sonnet Agent検証
 if [ -f "$SONNET_OUTPUT" ]; then
@@ -271,6 +280,16 @@ if [ -f "$OPUS_OUTPUT" ]; then
     echo -e "${GREEN}✓ Opus agent (aiType=claudeOpus4) created output${NC}"
 else
     echo -e "${RED}✗ Opus agent output not found${NC}"
+fi
+
+# Gemini Agent検証
+if [ -f "$GEMINI_OUTPUT" ]; then
+    CONTENT=$(cat "$GEMINI_OUTPUT")
+    GEMINI_CHARS=$(echo "$CONTENT" | wc -c | tr -d ' ')
+    echo "Gemini agent output: $GEMINI_CHARS characters"
+    echo -e "${GREEN}✓ Gemini agent (aiType=gemini25Pro) created output${NC}"
+else
+    echo -e "${RED}✗ Gemini agent output not found${NC}"
 fi
 echo ""
 
@@ -321,6 +340,27 @@ if [ -n "$OPUS_MODEL_INFO" ]; then
 else
     echo -e "${YELLOW}⚠ No execution log found for Opus agent (model verification not recorded)${NC}"
 fi
+
+# Geminiエージェントのモデル検証
+GEMINI_MODEL_INFO=$(sqlite3 "$SHARED_DB_PATH" "SELECT reported_provider, reported_model, model_verified FROM execution_logs WHERE agent_id='agt_uc003_gemini' ORDER BY started_at DESC LIMIT 1;" 2>/dev/null || echo "")
+if [ -n "$GEMINI_MODEL_INFO" ]; then
+    GEMINI_PROVIDER=$(echo "$GEMINI_MODEL_INFO" | cut -d'|' -f1)
+    GEMINI_MODEL=$(echo "$GEMINI_MODEL_INFO" | cut -d'|' -f2)
+    GEMINI_VERIFIED=$(echo "$GEMINI_MODEL_INFO" | cut -d'|' -f3)
+
+    echo "Gemini Agent model info:"
+    echo "  - Provider: $GEMINI_PROVIDER"
+    echo "  - Model: $GEMINI_MODEL"
+    echo "  - Verified: $GEMINI_VERIFIED"
+
+    if [ "$GEMINI_PROVIDER" == "gemini" ] && [ -n "$GEMINI_MODEL" ]; then
+        echo -e "${GREEN}✓ Gemini agent model info recorded${NC}"
+    else
+        echo -e "${YELLOW}⚠ Gemini agent model info incomplete (provider: $GEMINI_PROVIDER, model: $GEMINI_MODEL)${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ No execution log found for Gemini agent (model verification not recorded)${NC}"
+fi
 echo ""
 
 # Coordinator ログ表示
@@ -332,6 +372,7 @@ echo ""
 echo "=========================================="
 SONNET_CREATED=false
 OPUS_CREATED=false
+GEMINI_CREATED=false
 
 if [ -f "$SONNET_OUTPUT" ]; then
     SONNET_CREATED=true
@@ -339,8 +380,11 @@ fi
 if [ -f "$OPUS_OUTPUT" ]; then
     OPUS_CREATED=true
 fi
+if [ -f "$GEMINI_OUTPUT" ]; then
+    GEMINI_CREATED=true
+fi
 
-if [ "$SONNET_CREATED" == "true" ] && [ "$OPUS_CREATED" == "true" ]; then
+if [ "$SONNET_CREATED" == "true" ] && [ "$OPUS_CREATED" == "true" ] && [ "$GEMINI_CREATED" == "true" ]; then
     echo -e "${GREEN}UC003 App Integration Test: PASSED${NC}"
     echo ""
     echo "Verified (Phase 4 Coordinator Architecture):"
@@ -348,6 +392,7 @@ if [ "$SONNET_CREATED" == "true" ] && [ "$OPUS_CREATED" == "true" ]; then
     echo "  - App started MCP daemon, Coordinator connected"
     echo "  - Sonnet Agent (aiType=claudeSonnet4_5): $SONNET_CHARS chars"
     echo "  - Opus Agent (aiType=claudeOpus4): $OPUS_CHARS chars"
+    echo "  - Gemini Agent (aiType=gemini25Pro): $GEMINI_CHARS chars"
     echo ""
     echo "Model Verification (report_model tool):"
     if [ -n "$SONNET_MODEL_INFO" ]; then
@@ -360,6 +405,11 @@ if [ "$SONNET_CREATED" == "true" ] && [ "$OPUS_CREATED" == "true" ]; then
     else
         echo "  - Opus: (no model info recorded)"
     fi
+    if [ -n "$GEMINI_MODEL_INFO" ]; then
+        echo "  - Gemini: provider=$GEMINI_PROVIDER, model=$GEMINI_MODEL, verified=$GEMINI_VERIFIED"
+    else
+        echo "  - Gemini: (no model info recorded)"
+    fi
     exit 0
 else
     echo -e "${RED}UC003 App Integration Test: FAILED${NC}"
@@ -369,5 +419,8 @@ else
     echo "  - Coordinator log: /tmp/uc003_coordinator.log"
     echo "  - Coordinator logs dir: /tmp/coordinator_logs_uc003/"
     echo "  - Shared DB: $SHARED_DB_PATH"
+    echo "  - Sonnet output: $SONNET_CREATED"
+    echo "  - Opus output: $OPUS_CREATED"
+    echo "  - Gemini output: $GEMINI_CREATED"
     exit 1
 fi
