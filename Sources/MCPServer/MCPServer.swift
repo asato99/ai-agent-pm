@@ -1399,6 +1399,7 @@ final class MCPServer {
 
         // provider/model を返す（RunnerがCLIコマンドを選択するため）
         // v29: 直接保存された値を使用（Enumパースに依存しない）
+        Self.log("[MCP] getAgentAction: agent '\(agentId)' - provider='\(agent.provider ?? "nil")', modelId='\(agent.modelId ?? "nil")', aiType='\(agent.aiType?.rawValue ?? "nil")'")
         if let provider = agent.provider {
             result["provider"] = provider              // "claude", "gemini", "openai"
         } else {
@@ -1409,6 +1410,7 @@ final class MCPServer {
         } else {
             result["model"] = "claude-sonnet-4-5-20250929"  // デフォルト（正しいモデルID）
         }
+        Self.log("[MCP] getAgentAction: returning provider='\(result["provider"] ?? "nil")', model='\(result["model"] ?? "nil")'")
 
         return result
     }
@@ -1781,6 +1783,11 @@ final class MCPServer {
                 "instruction": """
                     モデル情報を申告してください。
                     report_model ツールを呼び出し、現在使用中の provider と model_id を申告してください。
+
+                    - provider: "claude", "gemini", "openai" などのプロバイダー名
+                    - model_id: バージョンを含む完全なモデルID（例: "claude-sonnet-4-5-20250929", "gemini-2.5-pro", "gpt-4o"）
+
+                    ※ model_id は省略形ではなく、使用中の正確なモデル名を申告してください。
                     申告後、get_next_action を再度呼び出してください。
                     """,
                 "state": "needs_model_verification"
