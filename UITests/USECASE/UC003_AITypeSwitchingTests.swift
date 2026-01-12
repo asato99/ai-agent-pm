@@ -343,6 +343,13 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
             print("  - \(sonnetOutput): \(sonnetFileExists ? "✅" : "❌")")
             print("  - \(opusOutput): \(opusFileExists ? "✅" : "❌")")
         }
+
+        // ========================================
+        // Phase 5: モデル検証結果の確認
+        // ========================================
+        print("🔍 Phase 5: execution_logsテーブルでモデル検証結果を確認")
+        try verifyModelVerificationInDB()
+        print("✅ Phase 5完了: モデル検証結果がDBに正しく保存されている")
     }
 
     /// タスクステータスがDoneかどうかを確認
@@ -414,5 +421,92 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
             print("  ❌ \(taskTitle) is not Done (status: \(currentStatus))")
             return false
         }
+    }
+
+    // MARK: - Model Verification
+
+    /// execution_logsテーブルでモデル検証結果を確認
+    ///
+    /// 各エージェントの実行ログに以下が記録されていることを検証:
+    /// - reported_provider: "claude" (モデル提供元)
+    /// - reported_model: モデル名が記録されている（空でない）
+    ///
+    /// 注: model_verifiedの値はテスト環境では期待通りにならない可能性がある
+    /// （テスト環境では同一モデルが全エージェントを実行するため）
+    private func verifyModelVerificationInDB() throws {
+        let dbPath = "/tmp/AIAgentPM_UITest.db"
+
+        // Sonnetエージェントのモデル検証
+        let sonnetResult = queryExecutionLog(dbPath: dbPath, agentId: "agt_uc003_sonnet")
+        print("  📊 Sonnet Agent model info:")
+        print("    - Provider: \(sonnetResult.provider ?? "nil")")
+        print("    - Model: \(sonnetResult.model ?? "nil")")
+        print("    - Verified: \(sonnetResult.verified ?? "nil")")
+
+        XCTAssertEqual(sonnetResult.provider, "claude",
+                       "❌ Sonnet Agent: reported_providerが'claude'ではない（実際: \(sonnetResult.provider ?? "nil")）")
+        XCTAssertNotNil(sonnetResult.model,
+                        "❌ Sonnet Agent: reported_modelが記録されていない")
+        XCTAssertFalse(sonnetResult.model?.isEmpty ?? true,
+                       "❌ Sonnet Agent: reported_modelが空")
+
+        // Opusエージェントのモデル検証
+        let opusResult = queryExecutionLog(dbPath: dbPath, agentId: "agt_uc003_opus")
+        print("  📊 Opus Agent model info:")
+        print("    - Provider: \(opusResult.provider ?? "nil")")
+        print("    - Model: \(opusResult.model ?? "nil")")
+        print("    - Verified: \(opusResult.verified ?? "nil")")
+
+        XCTAssertEqual(opusResult.provider, "claude",
+                       "❌ Opus Agent: reported_providerが'claude'ではない（実際: \(opusResult.provider ?? "nil")）")
+        XCTAssertNotNil(opusResult.model,
+                        "❌ Opus Agent: reported_modelが記録されていない")
+        XCTAssertFalse(opusResult.model?.isEmpty ?? true,
+                       "❌ Opus Agent: reported_modelが空")
+
+        // モデル検証結果のサマリー
+        print("  ✅ モデル検証メカニズムが正常に動作: 両エージェントのmodel infoがDBに記録済み")
+    }
+
+    /// SQLiteからexecution_logsをクエリ
+    private func queryExecutionLog(dbPath: String, agentId: String) -> (provider: String?, model: String?, verified: String?) {
+        let query = """
+            SELECT reported_provider, reported_model, model_verified
+            FROM execution_logs
+            WHERE agent_id='\(agentId)'
+            ORDER BY started_at DESC
+            LIMIT 1;
+            """
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = [dbPath, query]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            print("    ⚠️ sqlite3実行エラー: \(error)")
+            return (nil, nil, nil)
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !output.isEmpty else {
+            print("    ⚠️ execution_logsにレコードが見つからない（agent_id: \(agentId)）")
+            return (nil, nil, nil)
+        }
+
+        // SQLite出力: "provider|model|verified"
+        let components = output.split(separator: "|", omittingEmptySubsequences: false).map { String($0) }
+        let provider = components.count > 0 && !components[0].isEmpty ? components[0] : nil
+        let model = components.count > 1 && !components[1].isEmpty ? components[1] : nil
+        let verified = components.count > 2 && !components[2].isEmpty ? components[2] : nil
+
+        return (provider, model, verified)
     }
 }

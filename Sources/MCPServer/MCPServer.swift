@@ -434,7 +434,7 @@ final class MCPServer {
             guard let session = caller.session else {
                 throw MCPError.sessionTokenRequired
             }
-            return try getMyTask(agentId: session.agentId.value, projectId: session.projectId.value)
+            return try getMyTask(session: session)
 
         case "get_next_action":
             guard let session = caller.session else {
@@ -1390,7 +1390,9 @@ final class MCPServer {
     /// get_my_task - 認証済みエージェントの現在のタスクを取得
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     /// Phase 4: projectId でフィルタリング（同一エージェントが複数プロジェクトで同時稼働可能）
-    private func getMyTask(agentId: String, projectId: String) throws -> [String: Any] {
+    private func getMyTask(session: AgentSession) throws -> [String: Any] {
+        let agentId = session.agentId.value
+        let projectId = session.projectId.value
         Self.log("[MCP] getMyTask called for agent: '\(agentId)', project: '\(projectId)'")
 
         let id = AgentID(value: agentId)
@@ -1438,11 +1440,23 @@ final class MCPServer {
             }
 
             // Phase 4: 実行ログを自動作成（report_execution_startの代替）
-            let executionLog = ExecutionLog(
+            var executionLog = ExecutionLog(
                 taskId: task.id,
                 agentId: id,
                 startedAt: Date()
             )
+
+            // セッションに既に model info がある場合は ExecutionLog にコピー
+            // （report_model が get_my_task より先に呼ばれた場合）
+            if session.modelVerified != nil {
+                executionLog.setModelInfo(
+                    provider: session.reportedProvider ?? "",
+                    model: session.reportedModel ?? "",
+                    verified: session.modelVerified ?? false
+                )
+                Self.log("[MCP] ExecutionLog: Copying model info from session")
+            }
+
             try executionLogRepository.save(executionLog)
             Self.log("[MCP] ExecutionLog auto-created: \(executionLog.id.value)")
 
