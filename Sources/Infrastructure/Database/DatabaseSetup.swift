@@ -624,6 +624,13 @@ public final class DatabaseSetup {
             }
         }
 
+        // v27: パスキーの平文保存（Coordinatorエクスポート用）
+        migrator.registerMigration("v27_credential_raw_passkey") { db in
+            try db.alter(table: "agent_credentials") { t in
+                t.add(column: "raw_passkey", .text) // NULLable: 既存データは後で再設定が必要
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -6,15 +6,17 @@ import CryptoKit
 
 /// エージェントの認証情報を表すエンティティ
 /// Passkeyをハッシュ化して保存し、認証時に検証する
+/// rawPasskeyも保存してCoordinatorエクスポート時に使用
 public struct AgentCredential: Identifiable, Equatable, Sendable {
     public let id: AgentCredentialID
     public let agentId: AgentID
     public let passkeyHash: String
     public let salt: String
+    public let rawPasskey: String?  // Coordinatorエクスポート用に平文も保存
     public let createdAt: Date
     public var lastUsedAt: Date?
 
-    /// 新しい認証情報を生成パスキーをハッシュ化
+    /// 新しい認証情報を生成（パスキーをハッシュ化、平文も保存）
     public init(
         id: AgentCredentialID = .generate(),
         agentId: AgentID,
@@ -25,6 +27,7 @@ public struct AgentCredential: Identifiable, Equatable, Sendable {
         self.agentId = agentId
         self.salt = Self.generateSalt()
         self.passkeyHash = Self.hashPasskey(rawPasskey, salt: self.salt)
+        self.rawPasskey = rawPasskey  // 平文も保存
         self.createdAt = createdAt
         self.lastUsedAt = nil
     }
@@ -35,6 +38,7 @@ public struct AgentCredential: Identifiable, Equatable, Sendable {
         agentId: AgentID,
         passkeyHash: String,
         salt: String,
+        rawPasskey: String?,
         createdAt: Date,
         lastUsedAt: Date?
     ) {
@@ -42,6 +46,7 @@ public struct AgentCredential: Identifiable, Equatable, Sendable {
         self.agentId = agentId
         self.passkeyHash = passkeyHash
         self.salt = salt
+        self.rawPasskey = rawPasskey
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
     }
@@ -61,6 +66,7 @@ public struct AgentCredential: Identifiable, Equatable, Sendable {
             agentId: agentId,
             passkeyHash: passkeyHash,
             salt: salt,
+            rawPasskey: rawPasskey,
             createdAt: createdAt,
             lastUsedAt: date
         )

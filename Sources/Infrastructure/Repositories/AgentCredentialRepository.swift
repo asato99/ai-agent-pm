@@ -15,6 +15,7 @@ struct AgentCredentialRecord: Codable, FetchableRecord, PersistableRecord {
     var agentId: String
     var passkeyHash: String
     var salt: String
+    var rawPasskey: String?  // Coordinatorエクスポート用に平文も保存
     var createdAt: Date
     var lastUsedAt: Date?
 
@@ -23,6 +24,7 @@ struct AgentCredentialRecord: Codable, FetchableRecord, PersistableRecord {
         case agentId = "agent_id"
         case passkeyHash = "passkey_hash"
         case salt
+        case rawPasskey = "raw_passkey"
         case createdAt = "created_at"
         case lastUsedAt = "last_used_at"
     }
@@ -33,6 +35,7 @@ struct AgentCredentialRecord: Codable, FetchableRecord, PersistableRecord {
             agentId: AgentID(value: agentId),
             passkeyHash: passkeyHash,
             salt: salt,
+            rawPasskey: rawPasskey,
             createdAt: createdAt,
             lastUsedAt: lastUsedAt
         )
@@ -44,6 +47,7 @@ struct AgentCredentialRecord: Codable, FetchableRecord, PersistableRecord {
             agentId: credential.agentId.value,
             passkeyHash: credential.passkeyHash,
             salt: credential.salt,
+            rawPasskey: credential.rawPasskey,
             createdAt: credential.createdAt,
             lastUsedAt: credential.lastUsedAt
         )
