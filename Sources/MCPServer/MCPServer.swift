@@ -1197,6 +1197,8 @@ final class MCPServer {
 
         // UC008: ブロックされたタスクをチェック（アクティブセッションより先にチェック）
         // 該当プロジェクトで該当エージェントにアサインされたblockedタスクがあれば停止
+        // ただし、自己ブロック（または下位ワーカーによるブロック）の場合は continue 可能
+        // 参照: docs/plan/BLOCKED_TASK_RECOVERY.md
         let tasks = try taskRepository.findByAssignee(id)
 
         // blockedタスクをチェック（stopアクション）
@@ -1204,12 +1206,35 @@ final class MCPServer {
             task.status == .blocked && task.projectId == projId
         }
         if let blocked = blockedTask {
-            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': stop (task '\(blocked.id.value)' is blocked)")
-            return [
-                "action": "stop",
-                "reason": "task_blocked",
-                "task_id": blocked.id.value
-            ]
+            // 自己ブロックかどうかをチェック
+            let isSelfBlocked: Bool
+            if let changedBy = blocked.statusChangedByAgentId {
+                // 自分がブロックした場合
+                if changedBy == id {
+                    isSelfBlocked = true
+                } else {
+                    // 下位ワーカーがブロックした場合もチェック
+                    let subordinates = try agentRepository.findByParent(id)
+                    isSelfBlocked = subordinates.contains { $0.id == changedBy }
+                }
+            } else {
+                // statusChangedByAgentId が nil の場合は自己ブロック扱い（後方互換性）
+                isSelfBlocked = true
+            }
+
+            if isSelfBlocked {
+                // 自己ブロックの場合は stop せず、continue 可能
+                // get_next_action で unblock_and_continue が返される
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': self-blocked task '\(blocked.id.value)' detected, allowing continue")
+            } else {
+                // 他者がブロックした場合は stop
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': stop (task '\(blocked.id.value)' is blocked by \(blocked.statusChangedByAgentId?.value ?? "unknown"))")
+                return [
+                    "action": "stop",
+                    "reason": "task_blocked",
+                    "task_id": blocked.id.value
+                ]
+            }
         }
 
         // Phase 4: (agent_id, project_id)単位でアクティブセッションをチェック
@@ -1820,8 +1845,9 @@ final class MCPServer {
         let pendingSubTasks = subTasks.filter { $0.status == .todo || $0.status == .backlog }
         let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
         let completedSubTasks = subTasks.filter { $0.status == .done }
+        let blockedSubTasks = subTasks.filter { $0.status == .blocked }
 
-        Self.log("[MCP] getWorkerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count)")
+        Self.log("[MCP] getWorkerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count), blocked=\(blockedSubTasks.count)")
 
         // 1. サブタスク未作成 → サブタスク作成フェーズへ
         if phase == "workflow:task_fetched" && subTasks.isEmpty {
@@ -1883,6 +1909,66 @@ final class MCPServer {
                     ],
                     "completed_subtasks": completedSubTasks.count
                 ]
+            }
+
+            // 完了ゲート: blocked サブタスクがある場合の処理
+            // 参照: docs/plan/BLOCKED_TASK_RECOVERY.md - Phase 1-5
+            // 全サブタスクが完了済みまたはブロック状態で、未着手・進行中がない場合
+            if !blockedSubTasks.isEmpty && pendingSubTasks.isEmpty && inProgressSubTasks.isEmpty {
+                // 自己ブロック（または下位ワーカーによるブロック）をチェック
+                let selfBlockedTasks = blockedSubTasks.filter { task in
+                    guard let changedBy = task.statusChangedByAgentId else {
+                        // statusChangedByAgentId が nil の場合は自己ブロック扱い（後方互換性）
+                        return true
+                    }
+                    return changedBy == mainTask.assigneeId
+                }
+
+                if !selfBlockedTasks.isEmpty {
+                    // 自己ブロックタスクがある → unblock を促す
+                    let blockedTaskInfo = selfBlockedTasks.map { task in
+                        [
+                            "id": task.id.value,
+                            "title": task.title,
+                            "blocked_reason": task.blockedReason ?? "No reason specified"
+                        ]
+                    }
+                    return [
+                        "action": "unblock_and_continue",
+                        "instruction": """
+                            以下のサブタスクがブロック状態です。
+                            これらは自分（または下位ワーカー）がブロックしたタスクです。
+                            update_task_status で status を 'in_progress' または 'todo' に変更してから作業を続けてください。
+                            ブロック理由を確認し、対処が完了したらステータスを更新してください。
+                            """,
+                        "state": "needs_unblock",
+                        "blocked_subtasks": blockedTaskInfo,
+                        "completed_subtasks": completedSubTasks.count,
+                        "total_subtasks": subTasks.count
+                    ]
+                } else {
+                    // 他者がブロックしたタスク → 待機を指示
+                    let blockedTaskInfo = blockedSubTasks.map { task in
+                        [
+                            "id": task.id.value,
+                            "title": task.title,
+                            "blocked_reason": task.blockedReason ?? "No reason specified",
+                            "blocked_by": task.statusChangedByAgentId?.value ?? "unknown"
+                        ]
+                    }
+                    return [
+                        "action": "wait_for_unblock",
+                        "instruction": """
+                            以下のサブタスクが他のエージェントによってブロックされています。
+                            ブロックを解除する権限がありません。
+                            ブロックしたエージェントまたは上位エージェントによる解除を待ってください。
+                            """,
+                        "state": "waiting_for_external_unblock",
+                        "blocked_subtasks": blockedTaskInfo,
+                        "completed_subtasks": completedSubTasks.count,
+                        "total_subtasks": subTasks.count
+                    ]
+                }
             }
 
             // 実行中のサブタスクがある → 続けて実行
@@ -1995,8 +2081,9 @@ final class MCPServer {
         let pendingSubTasks = subTasks.filter { $0.status == .todo || $0.status == .backlog }
         let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
         let completedSubTasks = subTasks.filter { $0.status == .done }
+        let blockedSubTasks = subTasks.filter { $0.status == .blocked }
 
-        Self.log("[MCP] getManagerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count)")
+        Self.log("[MCP] getManagerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count), blocked=\(blockedSubTasks.count)")
 
         // サブタスクがまだ作成されていない
         if phase == "workflow:task_fetched" && subTasks.isEmpty {
@@ -2057,6 +2144,45 @@ final class MCPServer {
                         "title": mainTask.title
                     ],
                     "completed_subtasks": completedSubTasks.count
+                ]
+            }
+
+            // 完了ゲート: blocked サブタスクがある場合の処理
+            // 参照: docs/plan/BLOCKED_TASK_RECOVERY.md - Phase 1-5
+            // 全サブタスクが完了済みまたはブロック状態で、未着手・進行中がない場合
+            if !blockedSubTasks.isEmpty && pendingSubTasks.isEmpty && inProgressSubTasks.isEmpty {
+                // Manager は Worker のブロックを解除する権限を持つ
+                // ただし、自己（または下位）がブロックしたタスクを優先的に表示
+                let selfBlockedTasks = blockedSubTasks.filter { task in
+                    guard let changedBy = task.statusChangedByAgentId else {
+                        return true
+                    }
+                    return changedBy == mainTask.assigneeId
+                }
+
+                // Manager は全ての blocked タスクを解除可能（自己ブロック優先）
+                let blockedTaskInfo = blockedSubTasks.map { task in
+                    [
+                        "id": task.id.value,
+                        "title": task.title,
+                        "blocked_reason": task.blockedReason ?? "No reason specified",
+                        "blocked_by": task.statusChangedByAgentId?.value ?? "unknown",
+                        "is_self_blocked": task.statusChangedByAgentId == mainTask.assigneeId || task.statusChangedByAgentId == nil
+                    ] as [String: Any]
+                }
+                return [
+                    "action": "unblock_and_continue",
+                    "instruction": """
+                        以下のサブタスクがブロック状態です。
+                        マネージャーとして、これらのブロックを解除してワーカーに作業を続行させてください。
+                        update_task_status で status を 'todo' に変更してください。
+                        その後、assign_task でワーカーに再割り当てするか、get_next_action で次のアクションを確認してください。
+                        """,
+                    "state": "needs_unblock",
+                    "blocked_subtasks": blockedTaskInfo,
+                    "self_blocked_count": selfBlockedTasks.count,
+                    "completed_subtasks": completedSubTasks.count,
+                    "total_subtasks": subTasks.count
                 ]
             }
 

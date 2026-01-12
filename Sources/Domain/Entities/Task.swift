@@ -21,6 +21,15 @@ public struct Task: Identifiable, Equatable, Sendable {
     public var updatedAt: Date
     public var completedAt: Date?
 
+    // MARK: - Status Change Tracking
+    /// 最後にステータスを変更したエージェント
+    /// 参照: docs/plan/BLOCKED_TASK_RECOVERY.md
+    public var statusChangedByAgentId: AgentID?
+    /// ステータス変更日時
+    public var statusChangedAt: Date?
+    /// ブロック理由（status == .blocked の場合のみ有効）
+    public var blockedReason: String?
+
     // MARK: - Lock Fields (Internal Audit)
     /// ロック状態（監査エージェントによる強制ロック）
     /// 参照: docs/requirements/AUDIT.md - ロック機能
@@ -45,6 +54,9 @@ public struct Task: Identifiable, Equatable, Sendable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         completedAt: Date? = nil,
+        statusChangedByAgentId: AgentID? = nil,
+        statusChangedAt: Date? = nil,
+        blockedReason: String? = nil,
         isLocked: Bool = false,
         lockedByAuditId: InternalAuditID? = nil,
         lockedAt: Date? = nil
@@ -63,6 +75,9 @@ public struct Task: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
+        self.statusChangedByAgentId = statusChangedByAgentId
+        self.statusChangedAt = statusChangedAt
+        self.blockedReason = blockedReason
         self.isLocked = isLocked
         self.lockedByAuditId = lockedByAuditId
         self.lockedAt = lockedAt

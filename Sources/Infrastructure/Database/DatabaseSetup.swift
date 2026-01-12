@@ -631,6 +631,18 @@ public final class DatabaseSetup {
             }
         }
 
+        // v28: ステータス変更追跡フィールド
+        // 参照: docs/plan/BLOCKED_TASK_RECOVERY.md
+        migrator.registerMigration("v28_status_change_tracking") { db in
+            try db.alter(table: "tasks") { t in
+                t.add(column: "status_changed_by_agent_id", .text)
+                    .references("agents", onDelete: .setNull)
+                t.add(column: "status_changed_at", .datetime)
+                t.add(column: "blocked_reason", .text)
+            }
+            try db.create(indexOn: "tasks", columns: ["status_changed_by_agent_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

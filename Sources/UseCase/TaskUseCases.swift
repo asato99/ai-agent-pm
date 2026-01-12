@@ -108,8 +108,24 @@ public struct UpdateTaskStatusUseCase: Sendable {
             try checkResourceAvailability(for: task)
         }
 
+        // ステータス変更権限チェック
+        // 参照: docs/plan/BLOCKED_TASK_RECOVERY.md
+        // 前回の更新者が自身または下位ワーカー以外の場合は変更不可
+        try validateStatusChangePermission(task: task, requestingAgentId: agentId)
+
         task.status = newStatus
         task.updatedAt = Date()
+
+        // ステータス変更追跡情報を記録
+        task.statusChangedByAgentId = agentId
+        task.statusChangedAt = Date()
+
+        // blockedReason の処理
+        if newStatus != .blocked {
+            task.blockedReason = nil
+        } else if task.blockedReason == nil {
+            task.blockedReason = reason
+        }
 
         if newStatus == .done {
             task.completedAt = Date()
@@ -291,6 +307,38 @@ public struct UpdateTaskStatusUseCase: Sendable {
                 currentCount: currentInProgressParentTasks
             )
         }
+    }
+
+    /// ステータス変更権限チェック
+    /// 参照: docs/plan/BLOCKED_TASK_RECOVERY.md
+    /// 前回の更新者が自身または下位ワーカー以外の場合は変更不可
+    private func validateStatusChangePermission(task: Task, requestingAgentId: AgentID?) throws {
+        // statusChangedByAgentId が未設定の場合は許可（後方互換性）
+        guard let lastChangedBy = task.statusChangedByAgentId else {
+            return
+        }
+
+        // リクエスト元エージェントが指定されていない場合も許可
+        // （UI操作など、エージェント以外からの変更を許可するため）
+        guard let requestingAgent = requestingAgentId else {
+            return
+        }
+
+        // 1. 自己変更の場合 → 許可
+        if lastChangedBy == requestingAgent {
+            return
+        }
+
+        // 2. 変更者が自身の下位ワーカーの場合 → 許可
+        let subordinates = try agentRepository.findByParent(requestingAgent)
+        if subordinates.contains(where: { $0.id == lastChangedBy }) {
+            return
+        }
+
+        // 3. それ以外 → 拒否
+        throw UseCaseError.validationFailed(
+            "Cannot change task status. Last status change by \(lastChangedBy.value). Only self or subordinate workers can modify."
+        )
     }
 
     /// UC008: サブタスクへのブロックカスケード

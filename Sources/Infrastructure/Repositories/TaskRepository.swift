@@ -25,6 +25,10 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
     var createdAt: Date
     var updatedAt: Date
     var completedAt: Date?
+    // Status change tracking
+    var statusChangedByAgentId: String?
+    var statusChangedAt: Date?
+    var blockedReason: String?
     // Lock fields
     var isLocked: Bool
     var lockedByAuditId: String?
@@ -45,6 +49,9 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
+        case statusChangedByAgentId = "status_changed_by_agent_id"
+        case statusChangedAt = "status_changed_at"
+        case blockedReason = "blocked_reason"
         case isLocked = "is_locked"
         case lockedByAuditId = "locked_by_audit_id"
         case lockedAt = "locked_at"
@@ -73,6 +80,9 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             createdAt: createdAt,
             updatedAt: updatedAt,
             completedAt: completedAt,
+            statusChangedByAgentId: statusChangedByAgentId.map { AgentID(value: $0) },
+            statusChangedAt: statusChangedAt,
+            blockedReason: blockedReason,
             isLocked: isLocked,
             lockedByAuditId: lockedByAuditId.map { InternalAuditID(value: $0) },
             lockedAt: lockedAt
@@ -103,6 +113,9 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             createdAt: task.createdAt,
             updatedAt: task.updatedAt,
             completedAt: task.completedAt,
+            statusChangedByAgentId: task.statusChangedByAgentId?.value,
+            statusChangedAt: task.statusChangedAt,
+            blockedReason: task.blockedReason,
             isLocked: task.isLocked,
             lockedByAuditId: task.lockedByAuditId?.value,
             lockedAt: task.lockedAt
