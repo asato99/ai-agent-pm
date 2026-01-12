@@ -95,7 +95,6 @@ CREATE TABLE agents (
     system_prompt TEXT,
     provider TEXT,
     model TEXT,
-    kick_command TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

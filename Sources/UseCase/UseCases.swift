@@ -159,7 +159,6 @@ public struct CreateAgentUseCase: Sendable {
         maxParallelTasks: Int = 1,
         systemPrompt: String? = nil,
         kickMethod: KickMethod = .cli,
-        kickCommand: String? = nil,
         authLevel: AuthLevel = .level0,
         passkey: String? = nil
     ) throws -> Agent {
@@ -179,7 +178,6 @@ public struct CreateAgentUseCase: Sendable {
             maxParallelTasks: maxParallelTasks,
             systemPrompt: systemPrompt,
             kickMethod: kickMethod,
-            kickCommand: kickCommand,
             authLevel: authLevel,
             passkey: passkey
         )

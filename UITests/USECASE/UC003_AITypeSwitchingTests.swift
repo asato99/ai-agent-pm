@@ -4,14 +4,13 @@
 // ========================================
 // 設計方針:
 // ========================================
-// - 異なるai_type/kickCommandを持つエージェントの検証
-// - ai_typeがget_agent_action APIで正しく返されることを確認
-// - kickCommandがai_typeより優先されることを確認
+// - 異なるaiTypeを持つエージェントの検証
+// - aiTypeがget_agent_action APIで正しく返されることを確認
 //
 // シードデータ:
 // - プロジェクト: UC003 AIType Test (prj_uc003, wd=/tmp/uc003)
-// - エージェント1: UC003 Sonnet Agent (agt_uc003_sonnet, aiType=claudeSonnet4_5, kickCommand=nil)
-// - エージェント2: UC003 Opus Agent (agt_uc003_opus, aiType=claudeOpus4, kickCommand="claude --model opus")
+// - エージェント1: UC003 Sonnet Agent (agt_uc003_sonnet, aiType=claudeSonnet4_5)
+// - エージェント2: UC003 Opus Agent (agt_uc003_opus, aiType=claudeOpus4)
 // - タスク1: Sonnet Task (tsk_uc003_sonnet)
 // - タスク2: Opus Task (tsk_uc003_opus)
 // ========================================

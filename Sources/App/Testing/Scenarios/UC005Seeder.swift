@@ -79,7 +79,6 @@ extension TestDataSeeder {
                 report_completedでタスクを完了してください。
                 """,
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
@@ -117,7 +116,6 @@ extension TestDataSeeder {
                 report_completedでタスクを完了してください。
                 """,
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()

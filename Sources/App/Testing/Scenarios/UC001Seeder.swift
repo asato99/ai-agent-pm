@@ -78,7 +78,6 @@ extension TestDataSeeder {
             capabilities: ["TypeScript", "Python", "Swift"],
             systemPrompt: "Claude Codeを使用して開発タスクを実行するエージェントです",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
@@ -99,7 +98,6 @@ extension TestDataSeeder {
             capabilities: ["TypeScript", "Python", "Swift"],
             systemPrompt: "Runner経由でClaude Codeを実行するテスト用エージェント",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()

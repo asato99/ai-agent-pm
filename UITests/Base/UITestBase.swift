@@ -20,7 +20,7 @@ enum UITestScenario: String {
     case internalAudit = "InternalAudit" // Internal Audit機能テスト用
     case uc001 = "UC001"           // UC001: エージェントによるタスク実行（Runner統合テスト用）
     case uc002 = "UC002"           // UC002: マルチエージェント協調（system_prompt差異検証）
-    case uc003 = "UC003"           // UC003: AIタイプ切り替え（kickCommand検証）
+    case uc003 = "UC003"           // UC003: AIタイプ切り替え（Sonnet/Opus検証）
     case uc004 = "UC004"           // UC004: 複数プロジェクト×同一エージェント
     case uc005 = "UC005"           // UC005: マネージャー→ワーカー委任
     case uc006 = "UC006"           // UC006: 複数ワーカーへのタスク割り当て

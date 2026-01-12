@@ -3,7 +3,7 @@
 # AIタイプ切り替え統合テスト
 #
 # 設計: 1プロジェクト + 2エージェント（Sonnet 4.5、Opus 4）+ 2タスク
-# - モデル指定とkickCommandの優先順位を検証
+# - 異なるモデル指定（aiType）によるCLI選択を検証
 #
 # フロー:
 #   1. アプリビルド
@@ -15,9 +15,8 @@
 #
 # アーキテクチャ（Phase 4 Coordinator）:
 #   - 単一のCoordinatorが全てのagentを管理
-#   - get_agent_action(agent_id, project_id)でモデル情報/kickCommandを取得
-#   - kickCommandがnilでなければkickCommandを優先
-#   - kickCommandがnilならモデル情報を使用してCLI起動
+#   - get_agent_action(agent_id, project_id)でモデル情報を取得
+#   - aiTypeに基づいてCLI選択
 #
 # ポイント:
 #   - Coordinatorが先に起動してソケット待機
@@ -156,8 +155,8 @@ echo "  Architecture: Phase 4 Coordinator"
 echo "  - Coordinator starts FIRST and waits for MCP socket"
 echo "  - App will start daemon, Coordinator will connect"
 echo "  - Agents:"
-echo "    - agt_uc003_sonnet: aiType=claudeSonnet4_5, kickCommand=nil"
-echo "    - agt_uc003_opus: aiType=claudeOpus4, kickCommand='claude --model opus'"
+echo "    - agt_uc003_sonnet: aiType=claudeSonnet4_5"
+echo "    - agt_uc003_opus: aiType=claudeOpus4"
 echo ""
 
 # Coordinator設定（2エージェントのpasskeyを管理）
@@ -217,7 +216,7 @@ echo -e "${YELLOW}Step 6: Running XCUITest (app + MCP auto-start + seed data + w
 echo "  This will:"
 echo "    1. Launch app with -UITesting -UITestScenario:UC003"
 echo "    2. App auto-starts MCP daemon (Coordinator will connect)"
-echo "    3. Seed test data (2 agents with different aiType/kickCommand)"
+echo "    3. Seed test data (2 agents with different aiType)"
 echo "    4. Change both task statuses: backlog → todo → in_progress via UI"
 echo "    5. Wait for Coordinator to spawn Agent Instances and create files (max 60s)"
 echo ""
@@ -269,7 +268,7 @@ if [ -f "$OPUS_OUTPUT" ]; then
     CONTENT=$(cat "$OPUS_OUTPUT")
     OPUS_CHARS=$(echo "$CONTENT" | wc -c | tr -d ' ')
     echo "Opus agent output: $OPUS_CHARS characters"
-    echo -e "${GREEN}✓ Opus agent (kickCommand) created output${NC}"
+    echo -e "${GREEN}✓ Opus agent (aiType=claudeOpus4) created output${NC}"
 else
     echo -e "${RED}✗ Opus agent output not found${NC}"
 fi
@@ -347,9 +346,8 @@ if [ "$SONNET_CREATED" == "true" ] && [ "$OPUS_CREATED" == "true" ]; then
     echo "Verified (Phase 4 Coordinator Architecture):"
     echo "  - Coordinator started FIRST and waited for MCP socket"
     echo "  - App started MCP daemon, Coordinator connected"
-    echo "  - Sonnet Agent (aiType=claudeSonnet4_5, kickCommand=nil): $SONNET_CHARS chars"
-    echo "  - Opus Agent (aiType=claudeOpus4, kickCommand='claude --model opus'): $OPUS_CHARS chars"
-    echo "  - kickCommand takes precedence when set"
+    echo "  - Sonnet Agent (aiType=claudeSonnet4_5): $SONNET_CHARS chars"
+    echo "  - Opus Agent (aiType=claudeOpus4): $OPUS_CHARS chars"
     echo ""
     echo "Model Verification (report_model tool):"
     if [ -n "$SONNET_MODEL_INFO" ]; then

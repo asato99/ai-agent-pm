@@ -80,7 +80,6 @@ extension TestDataSeeder {
             capabilities: ["TypeScript", "Python", "Swift"],
             systemPrompt: "Claude Codeを使用して開発タスクを実行するエージェントです",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
@@ -515,7 +514,6 @@ extension TestDataSeeder {
                 report_completedでタスクを完了してください。
                 """,
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
@@ -631,7 +629,6 @@ extension TestDataSeeder {
                 名前を聞かれたら「私の名前はchat-responderです」と答えてください。
                 """,
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
@@ -735,7 +732,6 @@ extension TestDataSeeder {
             capabilities: ["Test"],
             systemPrompt: "タイムアウトテスト用エージェント",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()

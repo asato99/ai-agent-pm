@@ -26,7 +26,7 @@ UC001（エージェントによるタスク実行）を完全にパスさせる
 ## Feature01: エージェントキック設定
 
 ### 概要
-エージェント管理画面でキック方法（起動コマンド/スクリプト）を設定できる。
+エージェント管理画面でキック方法（起動方式）を設定できる。
 
 ### テストケース
 
@@ -34,12 +34,13 @@ UC001（エージェントによるタスク実行）を完全にパスさせる
 |----|----------|----------|
 | F01-01 | testKickSettingsSectionExists | エージェントフォームに「実行設定」セクションが存在 |
 | F01-02 | testKickMethodPicker | 起動方式（CLI/Script/API/Notification）を選択可能 |
-| F01-03 | testKickCommandField | 起動コマンド入力フィールドが存在 |
 | F01-04 | testKickSettingsSaved | 設定が保存され、再表示時に反映されている |
 
 ### 関連UI変更
 - `AgentFormView`: 実行設定セクション追加
-- `Agent`エンティティ: `kickMethod`, `kickCommand` 属性追加
+- `Agent`エンティティ: `kickMethod` 属性追加
+
+**Note**: `kickCommand`は削除されました。エージェントの起動はCoordinatorが`aiType`に基づいて自動的に適切なCLIを選択します。
 
 ---
 

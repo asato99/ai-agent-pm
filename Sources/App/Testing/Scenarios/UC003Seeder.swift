@@ -11,15 +11,15 @@ extension TestDataSeeder {
 
     /// UC003用のテストデータを生成（AIタイプ切り替え検証）
     /// - 1つのプロジェクト
-    /// - 2つのエージェント（Claude標準、カスタムkickCommand）
+    /// - 2つのエージェント（Sonnet、Opus）
     /// - 各エージェントに1タスク
     ///
     /// 検証内容:
+    /// - 異なるaiTypeのエージェントが正しく動作すること
     /// - aiTypeがget_agent_action APIで正しく返されること
-    /// - kickCommandがaiTypeより優先されること
     func seedUC003Data() async throws {
         print("=== UC003 Test Data Configuration ===")
-        print("Design: 1 project + 2 agents (different aiType/kickCommand)")
+        print("Design: 1 project + 2 agents (different aiType)")
 
         guard let projectAgentAssignmentRepository = projectAgentAssignmentRepository else {
             print("⚠️ UC003: projectAgentAssignmentRepository not available")
@@ -47,7 +47,7 @@ extension TestDataSeeder {
         try await projectRepository.save(project)
         print("✅ UC003: Project created - \(project.name)")
 
-        // UC003用エージェント1: Claude Sonnet 4.5（kickCommand=nil）
+        // UC003用エージェント1: Claude Sonnet 4.5
         let sonnetAgentId = AgentID(value: "agt_uc003_sonnet")
         let sonnetAgent = Agent(
             id: sonnetAgentId,
@@ -61,15 +61,14 @@ extension TestDataSeeder {
             capabilities: ["TypeScript", "Python"],
             systemPrompt: "あなたは開発タスクを実行するAIエージェントです。指示されたファイルを作成してください。",
             kickMethod: .cli,
-            kickCommand: nil,  // kickCommand未設定 → aiTypeが使われる
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
         )
         try await agentRepository.save(sonnetAgent)
-        print("✅ UC003: Sonnet agent created - \(sonnetAgent.name) (aiType=claudeSonnet4_5, kickCommand=nil)")
+        print("✅ UC003: Sonnet agent created - \(sonnetAgent.name) (aiType=claudeSonnet4_5)")
 
-        // UC003用エージェント2: Claude Opus 4（カスタムkickCommand）
+        // UC003用エージェント2: Claude Opus 4
         let opusAgentId = AgentID(value: "agt_uc003_opus")
         let opusAgent = Agent(
             id: opusAgentId,
@@ -83,13 +82,12 @@ extension TestDataSeeder {
             capabilities: ["TypeScript", "Python"],
             systemPrompt: "あなたは開発タスクを実行するAIエージェントです。指示されたファイルを作成してください。",
             kickMethod: .cli,
-            kickCommand: "claude --model opus --dangerously-skip-permissions --max-turns 80",  // kickCommandが優先される
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
         )
         try await agentRepository.save(opusAgent)
-        print("✅ UC003: Opus agent created - \(opusAgent.name) (aiType=claudeOpus4, kickCommand includes --max-turns 50)")
+        print("✅ UC003: Opus agent created - \(opusAgent.name) (aiType=claudeOpus4)")
 
         // Runner認証用クレデンシャル
         if let credentialRepository = credentialRepository {

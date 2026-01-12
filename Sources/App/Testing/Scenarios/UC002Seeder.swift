@@ -50,7 +50,6 @@ extension TestDataSeeder {
             capabilities: ["Documentation", "Writing"],
             systemPrompt: "詳細で包括的なドキュメントを作成してください。背景、目的、使用例を必ず含めてください。",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
@@ -70,7 +69,6 @@ extension TestDataSeeder {
             capabilities: ["Documentation", "Writing"],
             systemPrompt: "簡潔に要点のみ記載してください。箇条書きで3項目以内にまとめてください。",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()

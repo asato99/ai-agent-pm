@@ -19,7 +19,6 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var capabilities: [String]
     public var systemPrompt: String?
     public var kickMethod: KickMethod
-    public var kickCommand: String?
     public var authLevel: AuthLevel
     public var passkey: String?
     public var status: AgentStatus
@@ -48,7 +47,6 @@ public struct Agent: Identifiable, Equatable, Sendable {
         capabilities: [String] = [],
         systemPrompt: String? = nil,
         kickMethod: KickMethod = .cli,
-        kickCommand: String? = nil,
         authLevel: AuthLevel = .level0,
         passkey: String? = nil,
         status: AgentStatus = .active,
@@ -70,7 +68,6 @@ public struct Agent: Identifiable, Equatable, Sendable {
         self.capabilities = capabilities
         self.systemPrompt = systemPrompt
         self.kickMethod = kickMethod
-        self.kickCommand = kickCommand
         self.authLevel = authLevel
         self.passkey = passkey
         self.status = status

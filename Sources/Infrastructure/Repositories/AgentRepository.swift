@@ -24,7 +24,6 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
     var capabilities: String?
     var systemPrompt: String?
     var kickMethod: String
-    var kickCommand: String?
     var authLevel: String
     var passkey: String?
     var status: String
@@ -48,7 +47,6 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
         case capabilities
         case systemPrompt = "system_prompt"
         case kickMethod = "kick_method"
-        case kickCommand = "kick_command"
         case authLevel = "auth_level"
         case passkey
         case status
@@ -80,7 +78,6 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             capabilities: caps,
             systemPrompt: systemPrompt,
             kickMethod: KickMethod(rawValue: kickMethod) ?? .cli,
-            kickCommand: kickCommand,
             authLevel: AuthLevel(rawValue: authLevel) ?? .level0,
             passkey: passkey,
             status: AgentStatus(rawValue: status) ?? .active,
@@ -112,7 +109,6 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
             capabilities: capsJson,
             systemPrompt: agent.systemPrompt,
             kickMethod: agent.kickMethod.rawValue,
-            kickCommand: agent.kickCommand,
             authLevel: agent.authLevel.rawValue,
             passkey: agent.passkey,
             status: agent.status.rawValue,

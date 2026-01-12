@@ -79,7 +79,6 @@ extension TestDataSeeder {
             capabilities: ["TypeScript", "Python", "Swift"],
             systemPrompt: "フロントエンドとバックエンド両方の開発を担当するエージェントです",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()

@@ -1373,11 +1373,6 @@ final class MCPServer {
         }
 
         // provider/model を返す（RunnerがCLIコマンドを選択するため）
-        // kickCommand があればそれを優先
-        if let kickCommand = agent.kickCommand, !kickCommand.isEmpty {
-            result["kick_command"] = kickCommand
-        }
-
         // provider と model を構造的に返す
         if let aiType = agent.aiType {
             result["provider"] = aiType.provider       // "claude", "gemini", "openai", "other"
@@ -2337,7 +2332,6 @@ final class MCPServer {
             "parent_agent_id": agent.parentAgentId?.value ?? NSNull(),
             "ai_type": agent.aiType?.rawValue ?? NSNull(),
             "kick_method": agent.kickMethod.rawValue,
-            "kick_command": agent.kickCommand ?? NSNull(),
             "max_parallel_tasks": agent.maxParallelTasks
         ]
     }

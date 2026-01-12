@@ -67,7 +67,6 @@ extension TestDataSeeder {
             capabilities: ["TaskDecomposition", "Delegation"],
             systemPrompt: "タスクを分解しワーカーに委譲するマネージャーエージェントです",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
@@ -90,7 +89,6 @@ extension TestDataSeeder {
             capabilities: ["Python", "Generation"],
             systemPrompt: "乱数生成を担当するワーカーエージェントです",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
@@ -113,7 +111,6 @@ extension TestDataSeeder {
             capabilities: ["Python", "Calculation"],
             systemPrompt: "計算処理を担当するワーカーエージェントです",
             kickMethod: .cli,
-            kickCommand: nil,
             status: .active,
             createdAt: Date(),
             updatedAt: Date()
