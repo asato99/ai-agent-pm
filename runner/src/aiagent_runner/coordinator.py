@@ -434,10 +434,18 @@ class Coordinator:
 
         # Add verbose flag for debugging if enabled
         if self.config.debug_mode:
-            cmd.append("--verbose")
+            if provider == "gemini":
+                cmd.append("--debug")
+            else:
+                cmd.append("--verbose")
 
         # Add prompt
-        cmd.extend(["-p", prompt])
+        # Gemini: uses positional argument for one-shot mode (-p is deprecated)
+        # Claude: uses -p flag
+        if provider == "gemini":
+            cmd.append(prompt)  # Positional argument at the end for one-shot mode
+        else:
+            cmd.extend(["-p", prompt])
 
         model_desc = f"{provider}/{model}" if model else provider
         logger.info(

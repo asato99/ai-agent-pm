@@ -18,6 +18,11 @@ ai_providers:
       - "--max-turns"
       - "50"
 
+  gemini:
+    cli_command: gemini
+    cli_args:
+      - "-y"  # YOLO mode: auto-approve all tool calls
+
 # Agents configuration
 # 本番環境では環境変数または別ファイルでpasskeyを管理
 # agents:
