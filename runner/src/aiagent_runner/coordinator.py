@@ -414,6 +414,12 @@ class Coordinator:
             "--mcp-config", mcp_config,
         ]
 
+        # Add model flag if specified
+        # This ensures the agent uses the model configured for its aiType
+        if model:
+            cmd.extend(["--model", model])
+            logger.debug(f"Using model: {model}")
+
         # Add verbose flag for debugging if enabled
         if self.config.debug_mode:
             cmd.append("--verbose")

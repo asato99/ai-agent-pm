@@ -1399,12 +1399,13 @@ final class MCPServer {
 
         // provider/model を返す（RunnerがCLIコマンドを選択するため）
         // provider と model を構造的に返す
+        // Note: modelId は Claude API に渡す完全なモデルID（例: claude-opus-4-20250514）
         if let aiType = agent.aiType {
             result["provider"] = aiType.provider       // "claude", "gemini", "openai", "other"
-            result["model"] = aiType.rawValue          // "claude-sonnet-4-5", "gemini-2.0-flash", etc.
+            result["model"] = aiType.modelId           // "claude-opus-4-20250514", "gemini-2.0-flash", etc.
         } else {
             result["provider"] = "claude"              // デフォルト
-            result["model"] = "claude-sonnet-4-5"      // デフォルト
+            result["model"] = "claude-sonnet-4-5-20250514"  // デフォルト
         }
 
         return result

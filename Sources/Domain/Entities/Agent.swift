@@ -201,10 +201,11 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
     }
 
     /// モデルID（API呼び出し用）
+    /// 参照: https://platform.claude.com/docs/en/about-claude/models/overview
     public var modelId: String {
         switch self {
         case .claudeOpus4: return "claude-opus-4-20250514"
-        case .claudeSonnet4_5: return "claude-sonnet-4-5-20250514"
+        case .claudeSonnet4_5: return "claude-sonnet-4-5-20250929"
         case .claudeSonnet4: return "claude-sonnet-4-20250514"
         case .gemini2Flash: return "gemini-2.0-flash"
         case .gemini2Pro: return "gemini-2.0-pro"

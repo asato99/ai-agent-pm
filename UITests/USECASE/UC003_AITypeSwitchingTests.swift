@@ -429,10 +429,9 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
     ///
     /// 各エージェントの実行ログに以下が記録されていることを検証:
     /// - reported_provider: "claude" (モデル提供元)
-    /// - reported_model: モデル名が記録されている（空でない）
-    ///
-    /// 注: model_verifiedの値はテスト環境では期待通りにならない可能性がある
-    /// （テスト環境では同一モデルが全エージェントを実行するため）
+    /// - reported_model: 期待されるモデル名と一致する
+    ///   - Sonnet Agent: "sonnet" を含む
+    ///   - Opus Agent: "opus" を含む
     private func verifyModelVerificationInDB() throws {
         let dbPath = "/tmp/AIAgentPM_UITest.db"
 
@@ -449,6 +448,9 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
                         "❌ Sonnet Agent: reported_modelが記録されていない")
         XCTAssertFalse(sonnetResult.model?.isEmpty ?? true,
                        "❌ Sonnet Agent: reported_modelが空")
+        // aiType=claudeSonnet4_5 のエージェントは sonnet モデルを使用すべき
+        XCTAssertTrue(sonnetResult.model?.lowercased().contains("sonnet") ?? false,
+                      "❌ Sonnet Agent: reported_modelに'sonnet'が含まれていない（実際: \(sonnetResult.model ?? "nil")）")
 
         // Opusエージェントのモデル検証
         let opusResult = queryExecutionLog(dbPath: dbPath, agentId: "agt_uc003_opus")
@@ -463,9 +465,12 @@ final class UC003_AITypeSwitchingTests: UC003UITestCase {
                         "❌ Opus Agent: reported_modelが記録されていない")
         XCTAssertFalse(opusResult.model?.isEmpty ?? true,
                        "❌ Opus Agent: reported_modelが空")
+        // aiType=claudeOpus4 のエージェントは opus モデルを使用すべき
+        XCTAssertTrue(opusResult.model?.lowercased().contains("opus") ?? false,
+                      "❌ Opus Agent: reported_modelに'opus'が含まれていない（実際: \(opusResult.model ?? "nil")）")
 
         // モデル検証結果のサマリー
-        print("  ✅ モデル検証メカニズムが正常に動作: 両エージェントのmodel infoがDBに記録済み")
+        print("  ✅ モデル検証: 両エージェントが正しいモデルを使用している")
     }
 
     /// SQLiteからexecution_logsをクエリ
