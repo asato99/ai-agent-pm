@@ -215,18 +215,12 @@ struct TaskBoardView: View {
             }
         }
         .onAppear {
-            // UIテスト時は外部DB更新を検出するためにポーリング
-            if AIAgentPMApp.isUITesting {
-                pollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-                    DebugLog.write("[TaskBoardView] Polling timer fired, calling loadTasks")
-                    AsyncTask { @MainActor in
-                        await taskStore.loadTasks()
-                        loadAgentSessionCounts()
-                        let statuses = taskStore.tasks.map { "\($0.id.value):\($0.status.rawValue)" }.joined(separator: ", ")
-                        DebugLog.write("[TaskBoardView] loadTasks completed: \(statuses)")
-                    }
+            // タスクとセッション数を定期的に更新
+            pollingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+                AsyncTask { @MainActor in
+                    await taskStore.loadTasks()
+                    loadAgentSessionCounts()
                 }
-                DebugLog.write("[TaskBoardView] UITesting polling started")
             }
         }
         .onDisappear {
