@@ -244,12 +244,20 @@ struct AgentDetailView: View {
         AsyncTask {
             do {
                 // パスキーを再生成
-                let newPasskey = UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(32)
+                let newPasskey = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(32))
                 var updatedAgent = agent!
-                updatedAgent.passkey = String(newPasskey)
+                updatedAgent.passkey = newPasskey
                 updatedAgent.updatedAt = Date()
 
                 try container.agentRepository.save(updatedAgent)
+
+                // AgentCredentialも作成/更新（認証とエクスポートに必要）
+                let credential = AgentCredential(
+                    agentId: updatedAgent.id,
+                    rawPasskey: newPasskey
+                )
+                try container.agentCredentialRepository.save(credential)
+
                 agent = updatedAgent
 
                 router.showAlert(.info(title: "Success", message: "Passkey updated"))
