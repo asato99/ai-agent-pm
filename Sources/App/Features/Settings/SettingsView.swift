@@ -466,10 +466,13 @@ private struct CoordinatorConfigExporter {
         let agents = try agentRepository.findAll()
 
         // エージェントとパスキーの情報を取得
+        // 1. AgentCredential.rawPasskey (優先)
+        // 2. Agent.passkey (フォールバック)
         var agentCredentials: [(AgentID, String?)] = []
         for agent in agents {
             let credential = try? agentCredentialRepository.findByAgentId(agent.id)
-            agentCredentials.append((agent.id, credential?.rawPasskey))
+            let passkey = credential?.rawPasskey ?? agent.passkey
+            agentCredentials.append((agent.id, passkey))
         }
 
         // MCPソケットパス
