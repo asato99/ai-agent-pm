@@ -88,6 +88,17 @@ class AIAgentPMUITestCase: XCTestCase {
             return false
         }
 
+        // 既存のアプリインスタンスを終了（古いプロセスが残っている場合の対策）
+        if app.state != .notRunning {
+            print("⚠️ App already running (state: \(app.state.rawValue)), terminating...")
+            do {
+                app.terminate()
+                Thread.sleep(forTimeInterval: 1.0)
+            } catch {
+                print("  Terminate error (ignored): \(error)")
+            }
+        }
+
         // アプリを起動
         print("🚀 Launching app...")
         app.launch()
@@ -121,8 +132,14 @@ class AIAgentPMUITestCase: XCTestCase {
     override func tearDownWithError() throws {
         // MCPデーモンがバックグラウンドで動作しているため、
         // 明示的にアプリを終了させてデーモン停止を待つ
-        if app != nil {
-            app.terminate()
+        if app != nil && app.state != .notRunning {
+            // terminateはエラーを投げることがあるので、無視する
+            // (XCUITestが古いPIDを参照している場合など)
+            do {
+                app.terminate()
+            } catch {
+                print("⚠️ App terminate error (ignored): \(error)")
+            }
             // デーモン停止のための猶予時間
             Thread.sleep(forTimeInterval: 2.0)
         }

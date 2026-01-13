@@ -227,9 +227,15 @@ echo "    5. Wait for Coordinator to spawn Agent Instances and create files (max
 echo ""
 
 cd "$PROJECT_ROOT"
+
+# Use a unique DerivedData path to avoid XCUITest caching issues with stale PIDs
+DERIVED_DATA_PATH="/tmp/XcodeDerivedData-UC002-$$"
+echo "  Using DerivedData: $DERIVED_DATA_PATH"
+
 xcodebuild test \
     -scheme AIAgentPM \
     -destination "platform=macOS" \
+    -derivedDataPath "$DERIVED_DATA_PATH" \
     -only-testing:AIAgentPMUITests/UC002_MultiAgentCollaborationTests/testMultiAgentIntegration_ChangeBothTasksToInProgress \
     2>&1 | tee /tmp/uc002_uitest.log | grep -E "(Test Case|passed|failed|✅|❌|error:)" || true
 

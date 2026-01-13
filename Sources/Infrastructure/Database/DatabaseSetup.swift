@@ -679,6 +679,33 @@ public final class DatabaseSetup {
             """)
         }
 
+        // v30: システムエージェント追加
+        // 参照: Sources/Domain/ValueObjects/IDs.swift - AgentID.systemUser, AgentID.systemAuto
+        // UIからのステータス変更時に status_changed_by_agent_id に設定される
+        migrator.registerMigration("v30_system_agents") { db in
+            // system:user - ユーザー（UI）からの操作を示す特別なエージェント
+            let now = ISO8601DateFormatter().string(from: Date())
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO agents (
+                    id, name, role, type, role_type, capabilities, system_prompt,
+                    status, created_at, updated_at, kick_method, provider
+                ) VALUES (
+                    'system:user', 'System User', 'UI操作を表す仮想エージェント', 'human', 'developer',
+                    '[]', NULL, 'inactive', '\(now)', '\(now)', 'none', NULL
+                )
+            """)
+            // system:auto - システム自動処理を示す特別なエージェント
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO agents (
+                    id, name, role, type, role_type, capabilities, system_prompt,
+                    status, created_at, updated_at, kick_method, provider
+                ) VALUES (
+                    'system:auto', 'System Auto', '自動処理を表す仮想エージェント', 'human', 'developer',
+                    '[]', NULL, 'inactive', '\(now)', '\(now)', 'none', NULL
+                )
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -3355,9 +3355,10 @@ final class MCPServer {
 
         // エラーメッセージをチャットに保存
         let message = ChatMessage(
-            role: .agent,
-            content: "⚠️ エラーが発生しました:\n\(errorMessage)",
-            agentId: agId
+            id: ChatMessageID(value: "err_\(UUID().uuidString)"),
+            sender: .system,
+            content: "⚠️ エージェントエラー:\n\(errorMessage)",
+            createdAt: Date()
         )
 
         try chatRepository.saveMessage(message, projectId: projId, agentId: agId)

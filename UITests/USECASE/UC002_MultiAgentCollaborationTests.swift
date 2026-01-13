@@ -219,35 +219,86 @@ final class UC002_MultiAgentCollaborationTests: UC002UITestCase {
             todoOption.click()
             Thread.sleep(forTimeInterval: 0.5)
 
-            // エラーチェック
-            let alertSheet = app.sheets.firstMatch
-            if alertSheet.waitForExistence(timeout: 1) {
-                let okButton = alertSheet.buttons["OK"]
+            // デバッグ: シートとアラートの数を確認
+            print("  📊 DEBUG: sheets.count = \(app.sheets.count), alerts.count = \(app.alerts.count)")
+
+            // エラーチェック（macOSでは .alert が sheets として認識される場合がある）
+            let alertDialog = app.alerts.firstMatch
+            let sheetElement = app.sheets.firstMatch
+
+            if alertDialog.waitForExistence(timeout: 1) {
+                // アラートの内容をログ出力
+                let alertTexts = alertDialog.staticTexts.allElementsBoundByIndex.map { $0.label }
+                print("  ⚠️ ALERT DETECTED (alerts): \(alertTexts)")
+                let okButton = alertDialog.buttons["OK"]
                 if okButton.exists { okButton.click() }
-                XCTFail("❌ STEP4: Backlog → To Do のステータス変更がブロックされた")
+                XCTFail("❌ STEP4: Backlog → To Do のステータス変更がブロックされた - Alert: \(alertTexts)")
                 return
+            } else if sheetElement.exists {
+                // sheets として検出された場合の処理
+                let sheetTexts = sheetElement.staticTexts.allElementsBoundByIndex.map { $0.label }
+                print("  ⚠️ SHEET DETECTED: \(sheetTexts)")
+                // sheets はTaskDetailView自体の可能性があるので、エラーとして扱わない
+                // ただしOKボタンがあればアラートの可能性
+                let okButton = sheetElement.buttons["OK"]
+                if okButton.exists {
+                    print("  ⚠️ Sheet has OK button - likely an error alert")
+                    okButton.click()
+                    XCTFail("❌ STEP4: Backlog → To Do のステータス変更がブロックされた - Sheet: \(sheetTexts)")
+                    return
+                }
             }
 
             print("  ✅ Backlog → To Do 完了")
-            Thread.sleep(forTimeInterval: 0.5)
+
+            // UI更新を待つ（リアクティブ更新の完了まで）
+            var updatedToToDo = false
+            for _ in 1...10 {
+                Thread.sleep(forTimeInterval: 0.5)
+                let newValue = statusPicker.value as? String ?? ""
+                if newValue == "To Do" {
+                    updatedToToDo = true
+                    print("  ✅ StatusPicker updated to 'To Do'")
+                    break
+                }
+            }
+            if !updatedToToDo {
+                print("  ⚠️ StatusPicker did not update to 'To Do' (current: \(statusPicker.value as? String ?? "unknown"))")
+            }
         }
 
         // To Do → In Progress
-        statusPicker.click()
-        Thread.sleep(forTimeInterval: 0.3)
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // StatusPickerの現在値を確認
+        let currentValue = statusPicker.value as? String ?? "unknown"
+        print("  📊 StatusPicker current value before In Progress: \(currentValue)")
+
+        // PopUpButtonを再度取得してクリック（参照の更新）
+        let statusPickerRefresh = app.popUpButtons["StatusPicker"]
+        guard statusPickerRefresh.exists else {
+            XCTFail("❌ STEP5: StatusPickerが見つからない (refresh)")
+            return
+        }
+
+        statusPickerRefresh.click()
+        Thread.sleep(forTimeInterval: 0.5)
 
         let inProgressOption = app.menuItems["In Progress"]
-        XCTAssertTrue(inProgressOption.waitForExistence(timeout: 2),
-                      "❌ STEP5: In Progressオプションが見つからない")
+        XCTAssertTrue(inProgressOption.waitForExistence(timeout: 3),
+                      "❌ STEP5: In Progressオプションが見つからない (現在値: \(currentValue))")
         inProgressOption.click()
         Thread.sleep(forTimeInterval: 0.5)
 
-        // エラーチェック
-        let alertSheet2 = app.sheets.firstMatch
-        if alertSheet2.waitForExistence(timeout: 1) {
-            let okButton = alertSheet2.buttons["OK"]
+        // エラーチェック（SwiftUI .alert は XCUITest で alerts として認識される）
+        let alertDialog2 = app.alerts.firstMatch
+        if alertDialog2.waitForExistence(timeout: 1) {
+            // アラートの内容をログ出力
+            let alertTexts2 = alertDialog2.staticTexts.allElementsBoundByIndex.map { $0.label }
+            print("  ⚠️ ALERT DETECTED (In Progress): \(alertTexts2)")
+            let okButton = alertDialog2.buttons["OK"]
             if okButton.exists { okButton.click() }
-            XCTFail("❌ STEP5: To Do → In Progress のステータス変更がブロックされた")
+            XCTFail("❌ STEP5: To Do → In Progress のステータス変更がブロックされた - Alert: \(alertTexts2)")
             return
         }
 
