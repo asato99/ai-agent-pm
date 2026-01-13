@@ -573,8 +573,7 @@ private struct CoordinatorConfigExporter {
               gemini:
                 cli_command: gemini
                 cli_args:
-                  - "--sandbox"
-                  - "false"
+                  - "-y"
 
             """
         case "openai":
