@@ -117,7 +117,8 @@ public struct UpdateTaskStatusUseCase: Sendable {
         task.updatedAt = Date()
 
         // ステータス変更追跡情報を記録
-        task.statusChangedByAgentId = agentId
+        // agentIdがnilの場合はUIからの操作として system:user を設定
+        task.statusChangedByAgentId = agentId ?? AgentID.systemUser
         task.statusChangedAt = Date()
 
         // blockedReason の処理

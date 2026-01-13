@@ -31,17 +31,18 @@ echo -e "${YELLOW}Step 1: Building release app...${NC}"
 rm -rf "${DIST_DIR}/${APP_NAME}.app"
 rm -rf "${DIST_DIR}/${APP_NAME}.app.dSYM"
 
-# Use xcodebuild to create proper app bundle (without clean to avoid directory issues)
+# Use xcodebuild to create proper app bundle (Universal Binary: arm64 + x86_64)
 xcodebuild -scheme AIAgentPM \
     -configuration Release \
     -derivedDataPath "${PROJECT_ROOT}/.build/DerivedData" \
-    -destination 'platform=macOS,arch=arm64' \
+    -destination 'platform=macOS' \
     build \
     CONFIGURATION_BUILD_DIR="${DIST_DIR}" \
     CODE_SIGN_IDENTITY="-" \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGNING_ALLOWED=NO \
-    ONLY_ACTIVE_ARCH=YES
+    ONLY_ACTIVE_ARCH=NO \
+    ARCHS="arm64 x86_64"
 
 if [ ! -d "${DIST_DIR}/${APP_NAME}.app" ]; then
     echo -e "${RED}Error: App build failed - ${APP_NAME}.app not found${NC}"
@@ -49,6 +50,42 @@ if [ ! -d "${DIST_DIR}/${APP_NAME}.app" ]; then
 fi
 
 echo -e "${GREEN}App built successfully${NC}"
+
+# Step 1.5: Build and embed MCP Server (Universal Binary)
+echo -e "${YELLOW}Step 1.5: Building MCP Server (Universal Binary)...${NC}"
+
+# Build MCP server for arm64
+echo "  Building for arm64..."
+swift build -c release --product mcp-server-pm --triple arm64-apple-macosx
+
+# Build MCP server for x86_64
+echo "  Building for x86_64..."
+swift build -c release --product mcp-server-pm --triple x86_64-apple-macosx
+
+MCP_SERVER_ARM64="${PROJECT_ROOT}/.build/arm64-apple-macosx/release/mcp-server-pm"
+MCP_SERVER_X86="${PROJECT_ROOT}/.build/x86_64-apple-macosx/release/mcp-server-pm"
+MCP_SERVER_DST="${DIST_DIR}/${APP_NAME}.app/Contents/MacOS/mcp-server-pm"
+
+if [ ! -f "${MCP_SERVER_ARM64}" ]; then
+    echo -e "${RED}Error: MCP server arm64 build failed${NC}"
+    exit 1
+fi
+
+if [ ! -f "${MCP_SERVER_X86}" ]; then
+    echo -e "${RED}Error: MCP server x86_64 build failed${NC}"
+    exit 1
+fi
+
+# Create Universal Binary using lipo
+echo "  Creating Universal Binary..."
+lipo -create -output "${MCP_SERVER_DST}" "${MCP_SERVER_ARM64}" "${MCP_SERVER_X86}"
+chmod +x "${MCP_SERVER_DST}"
+
+# Verify Universal Binary
+echo "  Verifying architectures:"
+lipo -info "${MCP_SERVER_DST}"
+
+echo -e "${GREEN}MCP Server (Universal) embedded in app bundle${NC}"
 
 # Step 2: Prepare DMG staging directory
 echo -e "${YELLOW}Step 2: Preparing DMG contents...${NC}"

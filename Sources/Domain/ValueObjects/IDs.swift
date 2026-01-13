@@ -17,6 +17,22 @@ public struct AgentID: Hashable, Codable, Sendable, CustomStringConvertible {
     }
 
     public var description: String { value }
+
+    // MARK: - System Identifiers
+    /// ユーザー（UI）からの操作を示す特別な識別子
+    public static let systemUser = AgentID(value: "system:user")
+    /// システム自動処理を示す特別な識別子
+    public static let systemAuto = AgentID(value: "system:auto")
+
+    /// システム識別子かどうかを判定
+    public var isSystemIdentifier: Bool {
+        value.hasPrefix("system:")
+    }
+
+    /// ユーザー操作による識別子かどうかを判定
+    public var isUserAction: Bool {
+        self == .systemUser
+    }
 }
 
 // MARK: - ProjectID
