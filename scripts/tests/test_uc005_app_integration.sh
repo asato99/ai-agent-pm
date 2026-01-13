@@ -200,9 +200,15 @@ echo "    5. Wait for Manager → Worker delegation → completion (max 240s)"
 echo ""
 
 cd "$PROJECT_ROOT"
+
+# Use a unique DerivedData path to avoid XCUITest caching issues with stale PIDs
+DERIVED_DATA_PATH="/tmp/XcodeDerivedData-UC005-$$"
+echo "  Using DerivedData: $DERIVED_DATA_PATH"
+
 xcodebuild test \
     -scheme AIAgentPM \
     -destination "platform=macOS" \
+    -derivedDataPath "$DERIVED_DATA_PATH" \
     -only-testing:AIAgentPMUITests/UC005_ManagerWorkerDelegationTests/testManagerWorkerDelegation_ChangeMainTaskToInProgress \
     2>&1 | tee /tmp/uc005_uitest.log | grep -E "(Test Case|passed|failed|✅|❌|error:)" || true
 
