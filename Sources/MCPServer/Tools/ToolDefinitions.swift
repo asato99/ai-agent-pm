@@ -26,6 +26,7 @@ enum ToolDefinitions {
             getAgentAction,
             registerExecutionLogFile,
             invalidateSession,
+            reportAgentError,
 
             // ========================================
             // Manager専用（session_token + hierarchy_type=manager）
@@ -758,6 +759,32 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["agent_id", "project_id"]
+        ]
+    ]
+
+    /// report_agent_error - エージェントエラーをチャットに報告
+    /// Coordinatorがエージェントプロセスがエラー終了した時に呼び出します。
+    /// 認証不要（Coordinator用API）。
+    static let reportAgentError: [String: Any] = [
+        "name": "report_agent_error",
+        "description": "エージェントのエラーをチャットに報告します。Coordinatorがエージェントプロセスのエラー終了時に呼び出します。認証不要。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "エージェントID"
+                ],
+                "project_id": [
+                    "type": "string",
+                    "description": "プロジェクトID"
+                ],
+                "error_message": [
+                    "type": "string",
+                    "description": "エラーメッセージ"
+                ]
+            ] as [String: Any],
+            "required": ["agent_id", "project_id", "error_message"]
         ]
     ]
 

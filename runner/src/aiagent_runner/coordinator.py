@@ -161,7 +161,7 @@ class Coordinator:
 
         # Step 3: Clean up finished processes, register log file paths, and invalidate sessions
         finished_instances = self._cleanup_finished()
-        for key, info in finished_instances:
+        for key, info, exit_code in finished_instances:
             # Register log file path (if available)
             if info.task_id and info.log_file_path:
                 try:
@@ -183,6 +183,29 @@ class Coordinator:
                     logger.error(
                         f"Error registering log file for {key.agent_id}/{key.project_id}: {e}"
                     )
+
+            # If process exited with error, report to chat
+            if exit_code != 0 and info.log_file_path:
+                error_msg = self._extract_error_from_log(info.log_file_path)
+                if error_msg:
+                    try:
+                        success = await self.mcp_client.report_agent_error(
+                            agent_id=key.agent_id,
+                            project_id=key.project_id,
+                            error_message=error_msg
+                        )
+                        if success:
+                            logger.info(
+                                f"Reported error for {key.agent_id}/{key.project_id}: {error_msg[:50]}..."
+                            )
+                        else:
+                            logger.warning(
+                                f"Failed to report error for {key.agent_id}/{key.project_id}"
+                            )
+                    except MCPError as e:
+                        logger.error(
+                            f"Error reporting error for {key.agent_id}/{key.project_id}: {e}"
+                        )
 
             # Invalidate session so shouldStart returns True for next instance
             try:
@@ -303,14 +326,14 @@ class Coordinator:
         del self._instances[key]
         logger.info(f"Instance {key.agent_id}/{key.project_id} stopped and removed")
 
-    def _cleanup_finished(self) -> list[tuple[AgentInstanceKey, AgentInstanceInfo]]:
+    def _cleanup_finished(self) -> list[tuple[AgentInstanceKey, AgentInstanceInfo, int]]:
         """Clean up finished Agent Instance processes.
 
         Returns:
-            List of (key, info) tuples for finished instances
+            List of (key, info, exit_code) tuples for finished instances
             that need log file path registration.
         """
-        finished: list[tuple[AgentInstanceKey, AgentInstanceInfo]] = []
+        finished: list[tuple[AgentInstanceKey, AgentInstanceInfo, int]] = []
         for key, info in self._instances.items():
             retcode = info.process.poll()
             if retcode is not None:
@@ -323,12 +346,55 @@ class Coordinator:
                         info.log_file_handle.close()
                     except Exception:
                         pass
-                finished.append((key, info))
+                finished.append((key, info, retcode))
 
-        for key, _ in finished:
+        for key, _, _ in finished:
             del self._instances[key]
 
         return finished
+
+    def _extract_error_from_log(self, log_file_path: str) -> Optional[str]:
+        """Extract error message from log file.
+
+        Looks for common error patterns in the last 50 lines of the log.
+
+        Args:
+            log_file_path: Path to the log file
+
+        Returns:
+            Error message if found, None otherwise
+        """
+        try:
+            with open(log_file_path, "r") as f:
+                lines = f.readlines()
+
+            # Check last 50 lines for errors
+            last_lines = lines[-50:] if len(lines) > 50 else lines
+
+            error_patterns = [
+                "[API Error:",
+                "Error:",
+                "ERROR:",
+                "error:",
+                "quota",
+                "rate limit",
+                "exhausted",
+                "unauthorized",
+                "authentication failed",
+            ]
+
+            for line in reversed(last_lines):
+                line_lower = line.lower()
+                for pattern in error_patterns:
+                    if pattern.lower() in line_lower:
+                        # Found an error line, return it (cleaned up)
+                        return line.strip()
+
+            # If no specific error found but process failed, return generic message
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to read log file {log_file_path}: {e}")
+            return None
 
     def _spawn_instance(
         self,

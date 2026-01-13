@@ -328,6 +328,36 @@ class MCPClient:
 
         return result.get("success", False)
 
+    async def report_agent_error(
+        self, agent_id: str, project_id: str, error_message: str
+    ) -> bool:
+        """Report agent error to chat.
+
+        Called by Coordinator when Agent Instance process exits with error.
+        The error message will be displayed in the chat.
+
+        Args:
+            agent_id: Agent ID
+            project_id: Project ID
+            error_message: Error message to display
+
+        Returns:
+            True if successful, False otherwise
+
+        Raises:
+            MCPError: If request fails or unauthorized
+        """
+        args = {
+            "agent_id": agent_id,
+            "project_id": project_id,
+            "error_message": error_message
+        }
+        if self._coordinator_token:
+            args["coordinator_token"] = self._coordinator_token
+        result = await self._call_tool("report_agent_error", args)
+
+        return result.get("success", False)
+
     # ==========================================================================
     # Phase 3/4: Agent Instance API
     # ==========================================================================

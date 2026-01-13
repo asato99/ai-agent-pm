@@ -356,6 +356,14 @@ final class MCPServer {
             }
             return try invalidateSession(agentId: agentId, projectId: projectId)
 
+        case "report_agent_error":
+            guard let agentId = arguments["agent_id"] as? String,
+                  let projectId = arguments["project_id"] as? String,
+                  let errorMessage = arguments["error_message"] as? String else {
+                throw MCPError.missingArguments(["agent_id", "project_id", "error_message"])
+            }
+            return try reportAgentError(agentId: agentId, projectId: projectId, errorMessage: errorMessage)
+
         // ========================================
         // Manager専用
         // ========================================
@@ -3185,6 +3193,32 @@ final class MCPServer {
             "agent_id": agentId,
             "project_id": projectId,
             "deleted_count": deletedCount
+        ]
+    }
+
+    /// エージェントエラーを報告（Coordinator用）
+    /// エージェントプロセスがエラー終了した場合、チャットにエラーメッセージを表示する
+    private func reportAgentError(agentId: String, projectId: String, errorMessage: String) throws -> [String: Any] {
+        Self.log("[MCP] reportAgentError called: agentId='\(agentId)', projectId='\(projectId)', error='\(errorMessage)'")
+
+        let agId = AgentID(value: agentId)
+        let projId = ProjectID(value: projectId)
+
+        // エラーメッセージをチャットに保存
+        let message = ChatMessage(
+            role: .agent,
+            content: "⚠️ エラーが発生しました:\n\(errorMessage)",
+            agentId: agId
+        )
+
+        try chatRepository.saveMessage(message, projectId: projId, agentId: agId)
+        Self.log("[MCP] Error message saved to chat: \(message.id.value)")
+
+        return [
+            "success": true,
+            "agent_id": agentId,
+            "project_id": projectId,
+            "message_id": message.id.value
         ]
     }
 
