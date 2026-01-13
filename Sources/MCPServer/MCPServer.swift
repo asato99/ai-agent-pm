@@ -1805,17 +1805,35 @@ final class MCPServer {
 
         // 1.6. Chat機能: purpose=chat の場合はチャット応答フローへ
         if session.purpose == .chat {
-            Self.log("[MCP] getNextAction: Chat session detected, directing to get_pending_messages")
-            return [
-                "action": "get_pending_messages",
-                "instruction": """
-                    チャットセッションです。
-                    get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
-                    メッセージに対する応答は respond_chat で送信してください。
-                    応答が完了したら logout を呼び出してセッションを終了してください。
-                    """,
-                "state": "chat_session"
-            ]
+            // 未読メッセージがあるか確認してからアクションを決定
+            let pendingMessages = try chatRepository.findUnreadUserMessages(
+                projectId: session.projectId,
+                agentId: session.agentId
+            )
+
+            if pendingMessages.isEmpty {
+                // 未読メッセージなし = チャット応答完了 → logout を指示
+                Self.log("[MCP] getNextAction: Chat session with no pending messages, directing to logout")
+                return [
+                    "action": "logout",
+                    "instruction": """
+                        チャット応答が完了しました。
+                        logout を呼び出してセッションを終了してください。
+                        """,
+                    "state": "chat_complete"
+                ]
+            } else {
+                Self.log("[MCP] getNextAction: Chat session detected with \(pendingMessages.count) pending message(s), directing to get_pending_messages")
+                return [
+                    "action": "get_pending_messages",
+                    "instruction": """
+                        チャットセッションです。
+                        get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
+                        メッセージに対する応答は respond_chat で送信してください。
+                        """,
+                    "state": "chat_session"
+                ]
+            }
         }
 
         // 2. メインタスク（in_progress 状態、parentTaskId = nil）を取得
@@ -2257,6 +2275,31 @@ final class MCPServer {
                 let subordinates = try agentRepository.findByParent(mainTask.assigneeId!)
                     .filter { $0.hierarchyType == .worker && $0.status == .active }
 
+                // 利用可能な Worker がいない場合、Manager 自身が作業を実行
+                if subordinates.isEmpty {
+                    Self.log("[MCP] No available workers, Manager will execute subtask directly")
+                    return [
+                        "action": "execute_subtask",
+                        "instruction": """
+                            利用可能な Worker がいないため、Manager として直接サブタスクを実行してください。
+                            以下のサブタスクの内容を実行し、完了したら update_task_status で
+                            ステータスを 'done' に変更してください。
+                            その後、get_next_action を呼び出して次のサブタスクを確認してください。
+                            """,
+                        "state": "manager_executing",
+                        "next_subtask": [
+                            "id": nextSubTask.id.value,
+                            "title": nextSubTask.title,
+                            "description": nextSubTask.description
+                        ],
+                        "reason": "no_available_workers",
+                        "progress": [
+                            "completed": completedSubTasks.count,
+                            "total": subTasks.count
+                        ]
+                    ]
+                }
+
                 return [
                     "action": "delegate",
                     "instruction": """
@@ -2308,16 +2351,54 @@ final class MCPServer {
             )
             try contextRepository.save(context)
 
+            // 下位エージェント（Worker）を取得
+            let subordinates = try agentRepository.findByParent(mainTask.assigneeId!)
+                .filter { $0.hierarchyType == .worker && $0.status == .active }
+
+            // 利用可能な Worker がいない場合
+            if subordinates.isEmpty {
+                Self.log("[MCP] No available workers after subtask creation, Manager will execute directly")
+                if let firstSubTask = pendingSubTasks.first {
+                    return [
+                        "action": "execute_subtask",
+                        "instruction": """
+                            利用可能な Worker がいないため、Manager として直接サブタスクを実行してください。
+                            以下のサブタスクの内容を実行し、完了したら update_task_status で
+                            ステータスを 'done' に変更してください。
+                            その後、get_next_action を呼び出して次のサブタスクを確認してください。
+                            """,
+                        "state": "manager_executing",
+                        "next_subtask": [
+                            "id": firstSubTask.id.value,
+                            "title": firstSubTask.title,
+                            "description": firstSubTask.description
+                        ],
+                        "reason": "no_available_workers",
+                        "subtasks": subTasks.map { [
+                            "id": $0.id.value,
+                            "title": $0.title
+                        ] as [String: Any] }
+                    ]
+                }
+            }
+
             return [
                 "action": "delegate",
                 "instruction": """
                     サブタスクを Worker に割り当ててください。
+                    assign_task ツールを使用して、task_id と assignee_id を指定してください。
                     割り当て後、get_next_action を呼び出してください。
                     """,
                 "state": "needs_delegation",
                 "subtasks": subTasks.map { [
                     "id": $0.id.value,
                     "title": $0.title
+                ] as [String: Any] },
+                "available_workers": subordinates.map { [
+                    "id": $0.id.value,
+                    "name": $0.name,
+                    "role": $0.role,
+                    "status": $0.status.rawValue
                 ] as [String: Any] }
             ]
         }
