@@ -465,6 +465,16 @@ private struct CoordinatorConfigExporter {
         // 全エージェントを取得
         let agents = try agentRepository.findAll()
 
+        // 使用されているプロバイダーを収集
+        var usedProviders: Set<String> = []
+        for agent in agents where agent.type == .ai {
+            if let provider = agent.provider {
+                usedProviders.insert(provider)
+            }
+        }
+        // デフォルトでclaudeを含める
+        usedProviders.insert("claude")
+
         // エージェントとパスキーの情報を取得 (AgentCredential.rawPasskey)
         var agentCredentials: [(AgentID, String?)] = []
         for agent in agents {
@@ -508,13 +518,15 @@ private struct CoordinatorConfigExporter {
 
         # AI providers configuration
         ai_providers:
-          claude:
-            cli_command: claude
-            cli_args:
-              - "--dangerously-skip-permissions"
-              - "--max-turns"
-              - "50"
 
+        """
+
+        // 各プロバイダーの設定を出力
+        for provider in usedProviders.sorted() {
+            yaml += generateProviderConfig(provider: provider)
+        }
+
+        yaml += """
         # Agent credentials
         agents:
 
@@ -541,6 +553,45 @@ private struct CoordinatorConfigExporter {
         """
 
         return yaml
+    }
+
+    /// プロバイダー別の設定を生成
+    private func generateProviderConfig(provider: String) -> String {
+        switch provider {
+        case "claude":
+            return """
+              claude:
+                cli_command: claude
+                cli_args:
+                  - "--dangerously-skip-permissions"
+                  - "--max-turns"
+                  - "50"
+
+            """
+        case "gemini":
+            return """
+              gemini:
+                cli_command: gemini
+                cli_args:
+                  - "--sandbox"
+                  - "false"
+
+            """
+        case "openai":
+            return """
+              openai:
+                cli_command: openai
+                cli_args: []
+
+            """
+        default:
+            return """
+              \(provider):
+                cli_command: \(provider)
+                cli_args: []
+
+            """
+        }
     }
 
     /// 設定ファイルを指定パスに保存
