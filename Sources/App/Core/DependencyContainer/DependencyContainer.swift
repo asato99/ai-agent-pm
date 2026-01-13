@@ -38,6 +38,7 @@ public final class DependencyContainer: ObservableObject {
     public let executionLogRepository: ExecutionLogRepository
     public let agentCredentialRepository: AgentCredentialRepository
     public let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository
+    public let agentSessionRepository: AgentSessionRepository
 
     // MARK: - File Storage
 
@@ -379,6 +380,7 @@ public final class DependencyContainer: ObservableObject {
         self.executionLogRepository = ExecutionLogRepository(database: database)
         self.agentCredentialRepository = AgentCredentialRepository(database: database)
         self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
+        self.agentSessionRepository = AgentSessionRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
         self.mcpDaemonManager = MCPDaemonManager()
 

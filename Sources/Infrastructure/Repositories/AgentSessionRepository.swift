@@ -165,4 +165,26 @@ public final class AgentSessionRepository: AgentSessionRepositoryProtocol, Senda
                 .deleteAll(db)
         }
     }
+
+    /// アクティブなセッション数をカウント（有効期限内のもの）
+    public func countActiveSessions(agentId: AgentID) throws -> Int {
+        try db.read { db in
+            try AgentSessionRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("expires_at") > Date())
+                .fetchCount(db)
+        }
+    }
+
+    /// アクティブなセッション一覧を取得（有効期限内のもの）
+    public func findActiveSessions(agentId: AgentID) throws -> [AgentSession] {
+        try db.read { db in
+            try AgentSessionRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("expires_at") > Date())
+                .order(Column("created_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
 }

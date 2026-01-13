@@ -166,6 +166,10 @@ public protocol AgentSessionRepositoryProtocol: Sendable {
     func deleteByToken(_ token: String) throws  // Phase 4: セッション終了用
     func deleteByAgentId(_ agentId: AgentID) throws
     func deleteExpired() throws
+    /// アクティブなセッション数をカウント（有効期限内のもの）
+    func countActiveSessions(agentId: AgentID) throws -> Int
+    /// アクティブなセッション一覧を取得（有効期限内のもの）
+    func findActiveSessions(agentId: AgentID) throws -> [AgentSession]
 }
 
 // MARK: - ExecutionLogRepositoryProtocol

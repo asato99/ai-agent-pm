@@ -45,6 +45,8 @@ struct AgentChatView: View {
     @State private var isWaitingForResponse = false
     @State private var errorMessage: String?
     @State private var pollingTimer: Timer?
+    @State private var activeSessions: [AgentSession] = []
+    @State private var showingSessionsPopover = false
 
     /// ポーリング間隔（秒）
     private let pollingInterval: TimeInterval = 3.0
@@ -98,6 +100,15 @@ struct AgentChatView: View {
                 }
 
                 Spacer()
+
+                // Instance badge with popover
+                instanceBadge
+                    .onTapGesture {
+                        showingSessionsPopover.toggle()
+                    }
+                    .popover(isPresented: $showingSessionsPopover) {
+                        ActiveSessionsPopover(sessions: activeSessions, agentName: agent.name)
+                    }
 
                 // Status badge
                 Text(agent.status.displayName)
@@ -210,6 +221,9 @@ struct AgentChatView: View {
 
             // メッセージを読み込み
             await loadMessages()
+
+            // アクティブセッションを読み込み
+            loadActiveSessions()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -325,13 +339,60 @@ struct AgentChatView: View {
         chatDebugLog("startPolling: interval=\(pollingInterval)s")
         pollingTimer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { _ in
             chatDebugLog("Polling timer fired")
-            AsyncTask { await loadMessages() }
+            AsyncTask {
+                await loadMessages()
+                await MainActor.run {
+                    loadActiveSessions()
+                }
+            }
         }
     }
 
     private func stopPolling() {
         pollingTimer?.invalidate()
         pollingTimer = nil
+    }
+
+    // MARK: - Instance Badge
+
+    private var instanceBadge: some View {
+        let count = activeSessions.count
+        return HStack(spacing: 2) {
+            if count == 0 {
+                Text("待機中")
+            } else if count == 1 {
+                Text("実行中")
+                Image(systemName: "bolt.fill")
+            } else {
+                Text("\(count) インスタンス")
+                Image(systemName: "bolt.fill")
+            }
+        }
+        .font(.caption2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(instanceColor.opacity(0.2))
+        .foregroundStyle(instanceColor)
+        .clipShape(Capsule())
+        .accessibilityIdentifier("InstanceBadge")
+    }
+
+    private var instanceColor: Color {
+        switch activeSessions.count {
+        case 0: return .secondary
+        case 1: return .green
+        default: return .orange
+        }
+    }
+
+    private func loadActiveSessions() {
+        do {
+            activeSessions = try container.agentSessionRepository.findActiveSessions(agentId: agentId)
+            chatDebugLog("loadActiveSessions: count=\(activeSessions.count)")
+        } catch {
+            chatDebugLog("loadActiveSessions error: \(error)")
+            activeSessions = []
+        }
     }
 
     // MARK: - Helpers
@@ -393,6 +454,123 @@ private struct WaitingForResponseView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("エージェントの応答を待っています")
         .accessibilityIdentifier("WaitingForResponseIndicator")
+    }
+}
+
+// MARK: - ActiveSessionsPopover
+
+/// アクティブセッションの詳細を表示するPopover
+private struct ActiveSessionsPopover: View {
+    let sessions: [AgentSession]
+    let agentName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                Text("アクティブセッション")
+                    .font(.headline)
+                Spacer()
+                Text("\(sessions.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.2))
+                    .clipShape(Capsule())
+            }
+
+            Divider()
+
+            if sessions.isEmpty {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 4) {
+                        Image(systemName: "moon.zzz")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                        Text("セッションなし")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 8)
+            } else {
+                ForEach(sessions, id: \.id) { session in
+                    sessionRow(session)
+                }
+            }
+        }
+        .padding()
+        .frame(minWidth: 280)
+        .accessibilityIdentifier("ActiveSessionsPopover")
+    }
+
+    private func sessionRow(_ session: AgentSession) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                // Purpose icon
+                Image(systemName: session.purpose == .chat ? "bubble.left.fill" : "checklist")
+                    .foregroundStyle(session.purpose == .chat ? .blue : .green)
+
+                // Purpose label
+                Text(session.purpose == .chat ? "Chat" : "Task")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                Spacer()
+
+                // Provider/Model info
+                if let provider = session.reportedProvider {
+                    Text(provider)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+            }
+
+            // Timing info
+            HStack {
+                Text("開始: \(timeAgo(from: session.createdAt))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text("有効期限: \(timeRemaining(until: session.expiresAt))")
+                    .font(.caption2)
+                    .foregroundStyle(session.expiresAt.timeIntervalSinceNow < 60 ? .orange : .secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func timeAgo(from date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 {
+            return "\(Int(interval))秒前"
+        } else if interval < 3600 {
+            return "\(Int(interval / 60))分前"
+        } else {
+            return "\(Int(interval / 3600))時間前"
+        }
+    }
+
+    private func timeRemaining(until date: Date) -> String {
+        let interval = date.timeIntervalSinceNow
+        if interval <= 0 {
+            return "期限切れ"
+        } else if interval < 60 {
+            return "\(Int(interval))秒"
+        } else if interval < 3600 {
+            return "\(Int(interval / 60))分"
+        } else {
+            return "\(Int(interval / 3600))時間"
+        }
     }
 }
 
