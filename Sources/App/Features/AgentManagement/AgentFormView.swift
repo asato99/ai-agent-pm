@@ -207,6 +207,8 @@ struct AgentFormView: View {
                         agent.roleType = roleType
                         agent.type = type
                         agent.aiType = aiType
+                        agent.provider = aiType?.provider
+                        agent.modelId = aiType?.modelId
                         agent.parentAgentId = parentAgentId
                         agent.maxParallelTasks = maxParallelTasks
                         agent.systemPrompt = systemPrompt.isEmpty ? nil : systemPrompt
