@@ -70,6 +70,7 @@ struct TaskBoardView: View {
 
     @State private var agents: [Agent] = []
     @State private var assignedAgents: [Agent] = []  // プロジェクトに割り当てられたエージェント
+    @State private var agentSessionCounts: [AgentID: Int] = [:]  // 各エージェントのアクティブセッション数
     @State private var templates: [WorkflowTemplate] = []
     @State private var project: Project?
     @State private var isLoading = false
@@ -136,6 +137,7 @@ struct TaskBoardView: View {
                     AssignedAgentsRow(
                         projectId: projectId,
                         agents: assignedAgents,
+                        sessionCounts: agentSessionCounts,
                         onAgentTap: { agentId in
                             router.selectChatWithAgent(agentId, in: projectId)
                         }
@@ -219,6 +221,7 @@ struct TaskBoardView: View {
                     DebugLog.write("[TaskBoardView] Polling timer fired, calling loadTasks")
                     AsyncTask { @MainActor in
                         await taskStore.loadTasks()
+                        loadAgentSessionCounts()
                         let statuses = taskStore.tasks.map { "\($0.id.value):\($0.status.rawValue)" }.joined(separator: ", ")
                         DebugLog.write("[TaskBoardView] loadTasks completed: \(statuses)")
                     }
@@ -243,6 +246,8 @@ struct TaskBoardView: View {
             agents = try container.getAgentsUseCase.execute()
             // プロジェクトに割り当てられたエージェントを取得
             assignedAgents = try container.projectAgentAssignmentRepository.findAgentsByProject(projectId)
+            // 各エージェントのセッション数を取得
+            loadAgentSessionCounts()
             templates = try container.listTemplatesUseCase.execute(
                 projectId: projectId,
                 includeArchived: false
@@ -250,6 +255,20 @@ struct TaskBoardView: View {
         } catch {
             router.showAlert(.error(message: error.localizedDescription))
         }
+    }
+
+    /// 各エージェントのアクティブセッション数を取得
+    private func loadAgentSessionCounts() {
+        var counts: [AgentID: Int] = [:]
+        for agent in assignedAgents {
+            do {
+                let count = try container.agentSessionRepository.countActiveSessions(agentId: agent.id)
+                counts[agent.id] = count
+            } catch {
+                counts[agent.id] = 0
+            }
+        }
+        agentSessionCounts = counts
     }
 
     private func loadTemplates() async {

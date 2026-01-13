@@ -9,6 +9,7 @@ import Domain
 struct AgentAvatarButton: View {
     let agent: Agent
     let projectId: ProjectID
+    let activeSessionCount: Int
     let onTap: () -> Void
 
     @State private var isHovered = false
@@ -50,37 +51,23 @@ struct AgentAvatarButton: View {
 
     // MARK: - Styling
 
+    /// セッション数に基づく色分け
+    /// - 0: グレー (待機中)
+    /// - 1: グリーン (実行中)
+    /// - 2+: オレンジ (複数実行中)
     private var statusColor: Color {
-        switch agent.status {
-        case .active:
-            return .green
-        case .inactive:
-            return .gray
-        case .suspended:
-            return .orange
-        case .archived:
-            return .secondary
+        switch activeSessionCount {
+        case 0: return .gray
+        case 1: return .green
+        default: return .orange
         }
     }
 
     private var backgroundColor: Color {
         if isHovered {
-            return statusBackgroundColor.opacity(0.3)
+            return statusColor.opacity(0.3)
         }
-        return statusBackgroundColor.opacity(0.1)
-    }
-
-    private var statusBackgroundColor: Color {
-        switch agent.status {
-        case .active:
-            return .green
-        case .inactive:
-            return .gray
-        case .suspended:
-            return .orange
-        case .archived:
-            return .secondary
-        }
+        return statusColor.opacity(0.1)
     }
 
     private var borderColor: Color {
@@ -94,6 +81,7 @@ struct AgentAvatarButton: View {
 #if DEBUG
 #Preview {
     HStack {
+        // 待機中 (0セッション)
         AgentAvatarButton(
             agent: Agent(
                 id: AgentID.generate(),
@@ -103,18 +91,35 @@ struct AgentAvatarButton: View {
                 status: .active
             ),
             projectId: ProjectID.generate(),
+            activeSessionCount: 0,
             onTap: {}
         )
 
+        // 実行中 (1セッション)
+        AgentAvatarButton(
+            agent: Agent(
+                id: AgentID.generate(),
+                name: "GPT-4",
+                role: "Reviewer",
+                type: .ai,
+                status: .active
+            ),
+            projectId: ProjectID.generate(),
+            activeSessionCount: 1,
+            onTap: {}
+        )
+
+        // 複数実行中 (2セッション)
         AgentAvatarButton(
             agent: Agent(
                 id: AgentID.generate(),
                 name: "Human User",
                 role: "Manager",
                 type: .human,
-                status: .inactive
+                status: .active
             ),
             projectId: ProjectID.generate(),
+            activeSessionCount: 2,
             onTap: {}
         )
     }

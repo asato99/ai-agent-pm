@@ -8,6 +8,7 @@ import Domain
 struct AssignedAgentsRow: View {
     let projectId: ProjectID
     let agents: [Agent]
+    let sessionCounts: [AgentID: Int]
     let onAgentTap: (AgentID) -> Void
 
     /// 表示上限
@@ -31,6 +32,7 @@ struct AssignedAgentsRow: View {
                         AgentAvatarButton(
                             agent: agent,
                             projectId: projectId,
+                            activeSessionCount: sessionCounts[agent.id] ?? 0,
                             onTap: { onAgentTap(agent.id) }
                         )
                     }
@@ -69,33 +71,38 @@ struct AssignedAgentsRow: View {
 
 #if DEBUG
 #Preview {
-    VStack(spacing: 20) {
-        // エージェントあり
+    let agent1 = AgentID.generate()
+    let agent2 = AgentID.generate()
+    let agent3 = AgentID.generate()
+
+    return VStack(spacing: 20) {
+        // エージェントあり (セッション数バリエーション)
         AssignedAgentsRow(
             projectId: ProjectID.generate(),
             agents: [
                 Agent(
-                    id: AgentID.generate(),
+                    id: agent1,
                     name: "Claude",
                     role: "Developer",
                     type: .ai,
                     status: .active
                 ),
                 Agent(
-                    id: AgentID.generate(),
+                    id: agent2,
                     name: "GPT-4",
                     role: "Reviewer",
                     type: .ai,
                     status: .active
                 ),
                 Agent(
-                    id: AgentID.generate(),
+                    id: agent3,
                     name: "Alice",
                     role: "Manager",
                     type: .human,
-                    status: .inactive
+                    status: .active
                 )
             ],
+            sessionCounts: [agent1: 0, agent2: 1, agent3: 2],
             onAgentTap: { _ in }
         )
 
@@ -103,6 +110,7 @@ struct AssignedAgentsRow: View {
         AssignedAgentsRow(
             projectId: ProjectID.generate(),
             agents: [],
+            sessionCounts: [:],
             onAgentTap: { _ in }
         )
     }
