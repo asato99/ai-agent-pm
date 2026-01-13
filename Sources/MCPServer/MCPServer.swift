@@ -1248,9 +1248,16 @@ final class MCPServer {
 
             switch blockType {
             case .selfBlocked, .subordinateBlocked:
-                // 自己ブロックの場合は stop せず、continue 可能
-                // get_next_action で再検討アクションが返される
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': self-blocked task '\(blocked.id.value)' detected, allowing continue")
+                // 自己ブロックの場合は stop せず、start を返してエージェントを起動
+                // get_next_action で unblock_and_continue アクションが返される
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': self-blocked task '\(blocked.id.value)' detected, starting for reconsideration")
+                return [
+                    "action": "start",
+                    "reason": "has_self_blocked_task",
+                    "task_id": blocked.id.value,
+                    "provider": agent.provider ?? "claude",
+                    "model": agent.modelId ?? "claude-sonnet-4-5-20250929"
+                ]
             case .userBlocked:
                 // ユーザーブロックは解除不可 → stop
                 Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': stop (task '\(blocked.id.value)' is blocked by user)")
