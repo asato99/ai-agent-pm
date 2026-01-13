@@ -1337,19 +1337,20 @@ final class MCPServer {
         if let pending = pendingPurpose {
             let now = Date()
 
-            // 案E: TTLチェック（設定された時間経過でタイムアウト）
-            if pending.isExpired(now: now, ttlSeconds: configuredTTL) {
+            // 起動済みチェック（started_atがあれば既に起動済み）
+            // 起動済みの場合はTTLチェックをスキップ（起動後のタイムアウトは別途検討）
+            if pending.startedAt != nil {
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose already STARTED at \(pending.startedAt!), returning hold")
+                hasPendingPurpose = false  // 起動済みなのでstartは返さない
+            }
+            // 未起動の場合: TTLチェック（設定された時間経過でタイムアウト）
+            else if pending.isExpired(now: now, ttlSeconds: configuredTTL) {
                 Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose EXPIRED (created: \(pending.createdAt), TTL: \(Int(configuredTTL))s)")
                 // 期限切れのpending purposeを削除
                 try pendingAgentPurposeRepository.delete(agentId: id, projectId: projId)
                 pendingPurposeExpired = true
             }
-            // 案C: 起動済みチェック（started_atがあれば既に起動済み）
-            else if pending.startedAt != nil {
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose already STARTED at \(pending.startedAt!), returning hold")
-                hasPendingPurpose = false  // 起動済みなのでstartは返さない
-            }
-            // 未起動 → startを返し、started_atを更新
+            // 未起動でTTL内 → startを返し、started_atを更新
             else {
                 Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose exists, marking as started")
                 hasPendingPurpose = true
