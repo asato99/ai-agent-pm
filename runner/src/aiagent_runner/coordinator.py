@@ -88,7 +88,7 @@ class Coordinator:
     def log_directory(self) -> Path:
         """Get log directory, creating if needed."""
         if self.config.log_directory:
-            log_dir = Path(self.config.log_directory)
+            log_dir = Path(self.config.log_directory).expanduser()
         else:
             log_dir = Path.home() / ".aiagent-coordinator" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
