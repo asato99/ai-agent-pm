@@ -271,8 +271,16 @@ final class MCPServer {
     private func identifyCaller(tool: String, arguments: [String: Any]) throws -> CallerType {
         // 1. Coordinator token チェック
         if let coordinatorToken = arguments["coordinator_token"] as? String {
-            let expectedToken = ProcessInfo.processInfo.environment["MCP_COORDINATOR_TOKEN"] ?? ""
-            if !expectedToken.isEmpty && coordinatorToken == expectedToken {
+            // DBを優先、環境変数をフォールバック
+            var expectedToken: String?
+            if let settings = try? appSettingsRepository.get() {
+                expectedToken = settings.coordinatorToken
+            }
+            if expectedToken == nil || expectedToken?.isEmpty == true {
+                expectedToken = ProcessInfo.processInfo.environment["MCP_COORDINATOR_TOKEN"]
+            }
+
+            if let expected = expectedToken, !expected.isEmpty, coordinatorToken == expected {
                 return .coordinator
             }
             throw MCPError.invalidCoordinatorToken
