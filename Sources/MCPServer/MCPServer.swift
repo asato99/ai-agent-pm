@@ -1869,10 +1869,23 @@ final class MCPServer {
             }
         }
 
-        // 2. メインタスク（in_progress 状態、parentTaskId = nil）を取得
+        // 2. メインタスク（in_progress 状態）を取得
+        // 階層タイプによって検索方法が異なる:
+        // - Manager: トップレベルタスク（parentTaskId == nil）を所有
+        // - Worker: 直接割り当てタスクまたは委任されたサブタスク（parentTaskId != nil の場合もある）
         let allTasks = try taskRepository.findByAssignee(agentId)
         let inProgressTasks = allTasks.filter { $0.status == .inProgress && $0.projectId == projectId }
-        let mainTask = inProgressTasks.first { $0.parentTaskId == nil }
+
+        let mainTask: Task?
+        switch agent.hierarchyType {
+        case .manager:
+            // Manager はトップレベルタスクを所有
+            mainTask = inProgressTasks.first { $0.parentTaskId == nil }
+        case .worker:
+            // Worker は直接割り当てタスクまたは Manager から委任されたサブタスクを持つ
+            // parentTaskId の有無は関係ない
+            mainTask = inProgressTasks.first
+        }
 
         guard let main = mainTask else {
             // メインタスクがない = get_my_task をまだ呼んでいない
