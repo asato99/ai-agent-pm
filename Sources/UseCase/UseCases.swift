@@ -143,9 +143,14 @@ public struct GetAgentsUseCase: Sendable {
 /// 要件: エージェントはプロジェクト非依存、階層構造をサポート
 public struct CreateAgentUseCase: Sendable {
     private let agentRepository: any AgentRepositoryProtocol
+    private let credentialRepository: (any AgentCredentialRepositoryProtocol)?
 
-    public init(agentRepository: any AgentRepositoryProtocol) {
+    public init(
+        agentRepository: any AgentRepositoryProtocol,
+        credentialRepository: (any AgentCredentialRepositoryProtocol)? = nil
+    ) {
         self.agentRepository = agentRepository
+        self.credentialRepository = credentialRepository
     }
 
     public func execute(
@@ -183,6 +188,13 @@ public struct CreateAgentUseCase: Sendable {
         )
 
         try agentRepository.save(agent)
+
+        // パスキーが設定されている場合はAgentCredentialも作成
+        if let passkey = passkey, !passkey.isEmpty, let credentialRepo = credentialRepository {
+            let credential = AgentCredential(agentId: agent.id, rawPasskey: passkey)
+            try credentialRepo.save(credential)
+        }
+
         return agent
     }
 }

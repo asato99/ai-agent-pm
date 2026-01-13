@@ -213,6 +213,12 @@ struct AgentFormView: View {
                         agent.authLevel = authLevel
                         agent.passkey = passkey.isEmpty ? nil : passkey
                         try container.agentRepository.save(agent)
+
+                        // パスキーが設定されている場合はAgentCredentialも作成/更新
+                        if !passkey.isEmpty {
+                            let credential = AgentCredential(agentId: agentId, rawPasskey: passkey)
+                            try container.agentCredentialRepository.save(credential)
+                        }
                     }
                 }
                 dismiss()

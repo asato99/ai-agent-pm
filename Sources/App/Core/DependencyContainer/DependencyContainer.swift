@@ -78,7 +78,10 @@ public final class DependencyContainer: ObservableObject {
     }()
 
     public lazy var createAgentUseCase: CreateAgentUseCase = {
-        CreateAgentUseCase(agentRepository: agentRepository)
+        CreateAgentUseCase(
+            agentRepository: agentRepository,
+            credentialRepository: agentCredentialRepository
+        )
     }()
 
     public lazy var getAgentProfileUseCase: GetAgentProfileUseCase = {
