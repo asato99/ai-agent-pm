@@ -89,8 +89,8 @@ struct AgentChatView: View {
             if let agent = agent {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
-                        Text(agent.type == .ai ? "🤖" : "👤")
-                            .font(.title3)
+                        // Session-based colored indicator
+                        agentIndicator(for: agent)
                         Text(agent.name)
                             .font(.headline)
                     }
@@ -109,15 +109,6 @@ struct AgentChatView: View {
                     .popover(isPresented: $showingSessionsPopover) {
                         ActiveSessionsPopover(sessions: activeSessions, agentName: agent.name)
                     }
-
-                // Status badge
-                Text(agent.status.displayName)
-                    .font(.caption2)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(statusColor(for: agent.status).opacity(0.2))
-                    .foregroundStyle(statusColor(for: agent.status))
-                    .clipShape(Capsule())
             } else {
                 ProgressView()
                     .controlSize(.small)
@@ -353,6 +344,27 @@ struct AgentChatView: View {
         pollingTimer = nil
     }
 
+    // MARK: - Agent Indicator
+
+    /// セッション状態に基づいて色分けされたエージェントアイコン
+    @ViewBuilder
+    private func agentIndicator(for agent: Agent) -> some View {
+        ZStack {
+            // Base icon
+            Image(systemName: agent.type == .ai ? "cpu" : "person.fill")
+                .font(.title3)
+                .foregroundStyle(instanceColor)
+
+            // Activity indicator (pulsing when active)
+            if activeSessions.count > 0 {
+                Circle()
+                    .fill(instanceColor)
+                    .frame(width: 8, height: 8)
+                    .offset(x: 10, y: -10)
+            }
+        }
+    }
+
     // MARK: - Instance Badge
 
     private var instanceBadge: some View {
@@ -392,17 +404,6 @@ struct AgentChatView: View {
         } catch {
             chatDebugLog("loadActiveSessions error: \(error)")
             activeSessions = []
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func statusColor(for status: AgentStatus) -> Color {
-        switch status {
-        case .active: return .green
-        case .inactive: return .gray
-        case .suspended: return .orange
-        case .archived: return .secondary
         }
     }
 }
