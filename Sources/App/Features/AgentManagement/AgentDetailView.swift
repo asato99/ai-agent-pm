@@ -252,6 +252,10 @@ struct AgentDetailView: View {
                 try container.agentRepository.save(updatedAgent)
 
                 // AgentCredentialも作成/更新（認証とエクスポートに必要）
+                // 既存のcredentialがあれば削除
+                if let existing = try container.agentCredentialRepository.findByAgentId(updatedAgent.id) {
+                    try container.agentCredentialRepository.delete(existing.id)
+                }
                 let credential = AgentCredential(
                     agentId: updatedAgent.id,
                     rawPasskey: newPasskey

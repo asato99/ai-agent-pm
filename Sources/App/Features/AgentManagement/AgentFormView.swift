@@ -216,6 +216,10 @@ struct AgentFormView: View {
 
                         // パスキーが設定されている場合はAgentCredentialも作成/更新
                         if !passkey.isEmpty {
+                            // 既存のcredentialがあれば削除
+                            if let existing = try container.agentCredentialRepository.findByAgentId(agentId) {
+                                try container.agentCredentialRepository.delete(existing.id)
+                            }
                             let credential = AgentCredential(agentId: agentId, rawPasskey: passkey)
                             try container.agentCredentialRepository.save(credential)
                         }
