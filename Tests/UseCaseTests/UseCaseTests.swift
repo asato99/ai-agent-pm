@@ -136,6 +136,18 @@ final class MockSessionRepository: SessionRepositoryProtocol {
     func save(_ session: Session) throws {
         sessions[session.id] = session
     }
+
+    func delete(_ id: SessionID) throws {
+        sessions.removeValue(forKey: id)
+    }
+
+    func findActiveByProject(_ projectId: ProjectID) throws -> [Session] {
+        sessions.values.filter { $0.projectId == projectId && $0.status == .active }
+    }
+
+    func findActiveByAgentAndProject(agentId: AgentID, projectId: ProjectID) throws -> [Session] {
+        sessions.values.filter { $0.agentId == agentId && $0.projectId == projectId && $0.status == .active }
+    }
 }
 
 final class MockContextRepository: ContextRepositoryProtocol {
@@ -385,6 +397,14 @@ final class MockAgentSessionRepository: AgentSessionRepositoryProtocol {
         for id in toDelete {
             sessions.removeValue(forKey: id)
         }
+    }
+
+    func countActiveSessions(agentId: AgentID) throws -> Int {
+        sessions.values.filter { $0.agentId == agentId && !$0.isExpired }.count
+    }
+
+    func findActiveSessions(agentId: AgentID) throws -> [AgentSession] {
+        Array(sessions.values.filter { $0.agentId == agentId && !$0.isExpired })
     }
 }
 
@@ -2790,5 +2810,148 @@ final class UseCaseTests: XCTestCase {
 
         XCTAssertEqual(logs.count, 1)
         XCTAssertEqual(logs.first?.status, .running)
+    }
+
+    // MARK: - Session Lifecycle Tests (セッション管理問題修正)
+
+    func testSessionRepositoryDeleteMethod() throws {
+        // SessionRepositoryProtocolにdeleteメソッドが存在すること
+        let session = Session(
+            id: SessionID.generate(),
+            projectId: ProjectID.generate(),
+            agentId: AgentID.generate()
+        )
+        sessionRepo.sessions[session.id] = session
+
+        // deleteメソッドが呼べること
+        try sessionRepo.delete(session.id)
+
+        // 削除後はnilになること
+        XCTAssertNil(sessionRepo.sessions[session.id])
+    }
+
+    func testSessionRepositoryFindActiveByProject() throws {
+        // プロジェクトIDでアクティブセッションを検索できること
+        let projectId = ProjectID.generate()
+        let agent1 = AgentID.generate()
+        let agent2 = AgentID.generate()
+
+        let session1 = Session(id: SessionID.generate(), projectId: projectId, agentId: agent1)
+        var session2 = Session(id: SessionID.generate(), projectId: projectId, agentId: agent2)
+        session2.end(status: .completed)
+
+        sessionRepo.sessions[session1.id] = session1
+        sessionRepo.sessions[session2.id] = session2
+
+        // findActiveByProjectメソッドが存在すること
+        let activeSessions = try sessionRepo.findActiveByProject(projectId)
+
+        XCTAssertEqual(activeSessions.count, 1)
+        XCTAssertEqual(activeSessions.first?.agentId, agent1)
+    }
+
+    func testEndActiveSessionsForAgent() throws {
+        // エージェントのアクティブセッションを全て終了できること
+        let projectId = ProjectID.generate()
+        let agentId = AgentID.generate()
+
+        // 複数のアクティブセッション
+        let session1 = Session(id: SessionID.generate(), projectId: projectId, agentId: agentId)
+        let session2 = Session(id: SessionID.generate(), projectId: projectId, agentId: agentId)
+        sessionRepo.sessions[session1.id] = session1
+        sessionRepo.sessions[session2.id] = session2
+
+        // EndActiveSessionsUseCaseでエージェントの全アクティブセッションを終了
+        let useCase = EndActiveSessionsUseCase(sessionRepository: sessionRepo)
+        let endedCount = try useCase.execute(agentId: agentId, projectId: projectId, status: .completed)
+
+        XCTAssertEqual(endedCount, 2)
+
+        // 全てのセッションが終了していること
+        let remaining = try sessionRepo.findActiveByProject(projectId)
+        XCTAssertEqual(remaining.count, 0)
+    }
+
+    func testReportCompletedEndsSession() throws {
+        // reportCompleted相当の処理でセッションが終了されること
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Worker")
+        agentRepo.agents[agent.id] = agent
+
+        // タスク（in_progress状態）
+        var task = Task(
+            id: TaskID.generate(),
+            projectId: project.id,
+            title: "Test Task",
+            status: .inProgress
+        )
+        task.assigneeId = agent.id
+        taskRepo.tasks[task.id] = task
+
+        // アクティブセッション
+        let session = Session(
+            id: SessionID.generate(),
+            projectId: project.id,
+            agentId: agent.id
+        )
+        sessionRepo.sessions[session.id] = session
+
+        // CompleteTaskWithSessionCleanupUseCaseでタスク完了とセッション終了を同時に行う
+        let useCase = CompleteTaskWithSessionCleanupUseCase(
+            taskRepository: taskRepo,
+            sessionRepository: sessionRepo,
+            eventRepository: eventRepo
+        )
+
+        let result = try useCase.execute(taskId: task.id, agentId: agent.id, result: .success)
+
+        // タスクがdoneになっていること
+        XCTAssertEqual(result.task.status, .done)
+
+        // セッションが終了していること
+        let remainingSession = try sessionRepo.findActive(agentId: agent.id)
+        XCTAssertNil(remainingSession, "タスク完了後、アクティブセッションは残らないはず")
+    }
+
+    func testReportBlockedEndsSession() throws {
+        // blocked報告でセッションが終了されること
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        projectRepo.projects[project.id] = project
+
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Worker")
+        agentRepo.agents[agent.id] = agent
+
+        var task = Task(
+            id: TaskID.generate(),
+            projectId: project.id,
+            title: "Test Task",
+            status: .inProgress
+        )
+        task.assigneeId = agent.id
+        taskRepo.tasks[task.id] = task
+
+        let session = Session(
+            id: SessionID.generate(),
+            projectId: project.id,
+            agentId: agent.id
+        )
+        sessionRepo.sessions[session.id] = session
+
+        let useCase = CompleteTaskWithSessionCleanupUseCase(
+            taskRepository: taskRepo,
+            sessionRepository: sessionRepo,
+            eventRepository: eventRepo
+        )
+
+        let result = try useCase.execute(taskId: task.id, agentId: agent.id, result: .blocked)
+
+        // タスクがblockedになっていること
+        XCTAssertEqual(result.task.status, .blocked)
+
+        // セッションが終了していること
+        let remainingSession = try sessionRepo.findActive(agentId: agent.id)
+        XCTAssertNil(remainingSession, "タスクblocked後、アクティブセッションは残らないはず")
     }
 }

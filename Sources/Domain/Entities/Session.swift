@@ -40,6 +40,14 @@ public struct Session: Identifiable, Equatable, Sendable {
         }
         return endedAt.timeIntervalSince(startedAt)
     }
+
+    /// セッションを終了する
+    /// - Parameter status: 終了ステータス（.completed または .abandoned）
+    public mutating func end(status: SessionStatus = .completed) {
+        guard self.status == .active else { return }
+        self.status = status
+        self.endedAt = Date()
+    }
 }
 
 // MARK: - SessionStatus

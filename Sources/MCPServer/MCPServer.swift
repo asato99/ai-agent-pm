@@ -1769,8 +1769,19 @@ final class MCPServer {
         try eventRepository.save(event)
 
         // Phase 4: セッションを無効化（削除）
+        // AgentSession（認証トークン）を削除
         try agentSessionRepository.deleteByToken(sessionToken)
-        Self.log("[MCP] reportCompleted: Session invalidated for agent '\(agentId)'")
+        Self.log("[MCP] reportCompleted: AgentSession invalidated for agent '\(agentId)'")
+
+        // ワークフローSession（作業セッション）も終了
+        let sessionStatus: SessionStatus = (result == "success") ? .completed : .abandoned
+        let endSessionsUseCase = EndActiveSessionsUseCase(sessionRepository: sessionRepository)
+        let endedSessionCount = try endSessionsUseCase.execute(
+            agentId: id,
+            projectId: projId,
+            status: sessionStatus
+        )
+        Self.log("[MCP] reportCompleted: \(endedSessionCount) workflow session(s) ended for agent '\(agentId)'")
 
         // Phase 4: 実行ログを完了（report_execution_completeの代替）
         // 最新の実行ログを取得して完了状態に更新
@@ -3355,13 +3366,23 @@ final class MCPServer {
             Self.log("[MCP] Deleted session: \(session.id.value)")
         }
 
-        Self.log("[MCP] invalidateSession completed: deleted \(deletedCount) session(s)")
+        Self.log("[MCP] invalidateSession completed: deleted \(deletedCount) AgentSession(s)")
+
+        // ワークフローSession（作業セッション）も終了（abandoned扱い）
+        let endSessionsUseCase = EndActiveSessionsUseCase(sessionRepository: sessionRepository)
+        let endedWorkflowSessionCount = try endSessionsUseCase.execute(
+            agentId: agId,
+            projectId: projId,
+            status: .abandoned
+        )
+        Self.log("[MCP] invalidateSession: \(endedWorkflowSessionCount) workflow session(s) ended")
 
         return [
             "success": true,
             "agent_id": agentId,
             "project_id": projectId,
-            "deleted_count": deletedCount
+            "deleted_agent_sessions": deletedCount,
+            "ended_workflow_sessions": endedWorkflowSessionCount
         ]
     }
 

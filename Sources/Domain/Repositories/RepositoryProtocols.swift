@@ -53,6 +53,12 @@ public protocol SessionRepositoryProtocol: Sendable {
     func findByProject(_ projectId: ProjectID) throws -> [Session]
     func findByAgent(_ agentId: AgentID) throws -> [Session]
     func save(_ session: Session) throws
+    /// セッションを削除
+    func delete(_ id: SessionID) throws
+    /// プロジェクト内のアクティブセッションを検索
+    func findActiveByProject(_ projectId: ProjectID) throws -> [Session]
+    /// エージェント×プロジェクトのアクティブセッションを検索
+    func findActiveByAgentAndProject(agentId: AgentID, projectId: ProjectID) throws -> [Session]
 }
 
 // MARK: - ContextRepositoryProtocol

@@ -102,4 +102,35 @@ public final class SessionRepository: SessionRepositoryProtocol, Sendable {
             try SessionRecord.fromDomain(session).save(db)
         }
     }
+
+    public func delete(_ id: SessionID) throws {
+        try db.write { db in
+            try SessionRecord
+                .filter(Column("id") == id.value)
+                .deleteAll(db)
+        }
+    }
+
+    public func findActiveByProject(_ projectId: ProjectID) throws -> [Session] {
+        try db.read { db in
+            try SessionRecord
+                .filter(Column("project_id") == projectId.value)
+                .filter(Column("status") == SessionStatus.active.rawValue)
+                .order(Column("started_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
+    public func findActiveByAgentAndProject(agentId: AgentID, projectId: ProjectID) throws -> [Session] {
+        try db.read { db in
+            try SessionRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("project_id") == projectId.value)
+                .filter(Column("status") == SessionStatus.active.rawValue)
+                .order(Column("started_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
 }
