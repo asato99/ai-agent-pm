@@ -167,6 +167,8 @@ public protocol AgentSessionRepositoryProtocol: Sendable {
     func findByAgentId(_ agentId: AgentID) throws -> [AgentSession]
     /// Phase 4: (agent_id, project_id) 単位でセッションを検索
     func findByAgentIdAndProjectId(_ agentId: AgentID, projectId: ProjectID) throws -> [AgentSession]
+    /// Feature 14: プロジェクトIDでセッションを検索（一時停止時のセッション有効期限短縮用）
+    func findByProjectId(_ projectId: ProjectID) throws -> [AgentSession]
     func save(_ session: AgentSession) throws
     func delete(_ id: AgentSessionID) throws
     func deleteByToken(_ token: String) throws  // Phase 4: セッション終了用

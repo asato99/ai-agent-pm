@@ -370,6 +370,10 @@ final class MockAgentSessionRepository: AgentSessionRepositoryProtocol {
         sessions.values.filter { $0.agentId == agentId && $0.projectId == projectId }
     }
 
+    func findByProjectId(_ projectId: ProjectID) throws -> [AgentSession] {
+        Array(sessions.values.filter { $0.projectId == projectId })
+    }
+
     func save(_ session: AgentSession) throws {
         sessions[session.id] = session
     }
@@ -3039,5 +3043,124 @@ final class UseCaseTests: XCTestCase {
         // セッションが終了していること
         let remainingSession = try sessionRepo.findActive(agentId: agent.id)
         XCTAssertNil(remainingSession, "タスクblocked後、アクティブセッションは残らないはず")
+    }
+
+    // MARK: - Feature 14: Project Pause Tests
+
+    /// PauseProjectUseCase: プロジェクトを一時停止する
+    func testPauseProjectUseCaseSuccess() throws {
+        // 前提: activeなプロジェクト
+        let project = Project(id: ProjectID.generate(), name: "TestProject", status: .active)
+        projectRepo.projects[project.id] = project
+
+        // アクティブセッション（有効期限を短縮される対象）
+        let agentId = AgentID.generate()
+        let originalExpiry = Date().addingTimeInterval(3600) // 1時間後
+        let session = AgentSession(
+            agentId: agentId,
+            projectId: project.id,
+            expiresAt: originalExpiry
+        )
+        agentSessionRepo.sessions[session.id] = session
+
+        // 実行
+        let useCase = PauseProjectUseCase(
+            projectRepository: projectRepo,
+            agentSessionRepository: agentSessionRepo
+        )
+        let result = try useCase.execute(projectId: project.id)
+
+        // 検証: プロジェクトがpausedになっている
+        XCTAssertEqual(result.status, .paused, "プロジェクトがpausedになるべき")
+
+        // 検証: セッションの有効期限が短縮されている（5分以内）
+        let updatedSession = try agentSessionRepo.findById(session.id)
+        XCTAssertNotNil(updatedSession)
+        let gracePeriod: TimeInterval = 5 * 60 // 5分
+        XCTAssertLessThanOrEqual(
+            updatedSession!.expiresAt.timeIntervalSinceNow,
+            gracePeriod,
+            "セッション有効期限が5分以内に短縮されるべき"
+        )
+    }
+
+    /// PauseProjectUseCase: 既にpausedのプロジェクトは何もしない
+    func testPauseProjectUseCaseAlreadyPaused() throws {
+        let project = Project(id: ProjectID.generate(), name: "TestProject", status: .paused)
+        projectRepo.projects[project.id] = project
+
+        let useCase = PauseProjectUseCase(
+            projectRepository: projectRepo,
+            agentSessionRepository: agentSessionRepo
+        )
+
+        // 既にpausedの場合はエラーにならず、そのまま返す
+        let result = try useCase.execute(projectId: project.id)
+        XCTAssertEqual(result.status, .paused)
+    }
+
+    /// PauseProjectUseCase: archivedプロジェクトは一時停止できない
+    func testPauseProjectUseCaseArchivedFails() throws {
+        let project = Project(id: ProjectID.generate(), name: "TestProject", status: .archived)
+        projectRepo.projects[project.id] = project
+
+        let useCase = PauseProjectUseCase(
+            projectRepository: projectRepo,
+            agentSessionRepository: agentSessionRepo
+        )
+
+        XCTAssertThrowsError(try useCase.execute(projectId: project.id)) { error in
+            guard case UseCaseError.invalidProjectStatus = error else {
+                XCTFail("invalidProjectStatusエラーが期待される")
+                return
+            }
+        }
+    }
+
+    /// ResumeProjectUseCase: 一時停止中のプロジェクトを再開する
+    func testResumeProjectUseCaseSuccess() throws {
+        // 前提: pausedなプロジェクト
+        let project = Project(id: ProjectID.generate(), name: "TestProject", status: .paused)
+        projectRepo.projects[project.id] = project
+
+        let beforeResume = Date()
+
+        // 実行
+        let useCase = ResumeProjectUseCase(projectRepository: projectRepo)
+        let result = try useCase.execute(projectId: project.id)
+
+        // 検証: プロジェクトがactiveになっている
+        XCTAssertEqual(result.status, .active, "プロジェクトがactiveになるべき")
+
+        // 検証: resumedAtが設定されている
+        XCTAssertNotNil(result.resumedAt, "resumedAtが設定されるべき")
+        XCTAssertGreaterThanOrEqual(result.resumedAt!, beforeResume, "resumedAtは再開時刻以降")
+    }
+
+    /// ResumeProjectUseCase: 既にactiveのプロジェクトは何もしない
+    func testResumeProjectUseCaseAlreadyActive() throws {
+        let project = Project(id: ProjectID.generate(), name: "TestProject", status: .active)
+        projectRepo.projects[project.id] = project
+
+        let useCase = ResumeProjectUseCase(projectRepository: projectRepo)
+        let result = try useCase.execute(projectId: project.id)
+
+        XCTAssertEqual(result.status, .active)
+        // resumedAtは更新されない（既にactiveなので）
+    }
+
+    /// ResumeProjectUseCase: archivedプロジェクトは再開できない
+    func testResumeProjectUseCaseArchivedFails() throws {
+        let project = Project(id: ProjectID.generate(), name: "TestProject", status: .archived)
+        projectRepo.projects[project.id] = project
+
+        let useCase = ResumeProjectUseCase(projectRepository: projectRepo)
+
+        XCTAssertThrowsError(try useCase.execute(projectId: project.id)) { error in
+            guard case UseCaseError.invalidProjectStatus = error else {
+                XCTFail("invalidProjectStatusエラーが期待される")
+                return
+            }
+        }
     }
 }

@@ -1193,9 +1193,19 @@ final class MCPServer {
         }
 
         // プロジェクトの存在確認
-        guard try projectRepository.findById(projId) != nil else {
+        guard let project = try projectRepository.findById(projId) else {
             Self.log("[MCP] shouldStart: Project '\(projectId)' not found")
             throw MCPError.projectNotFound(projectId)
+        }
+
+        // Feature 14: プロジェクト一時停止チェック
+        // pausedプロジェクトではタスク処理を停止（チャット・管理操作は継続）
+        if project.status == .paused {
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (project is paused)")
+            return [
+                "action": "hold",
+                "reason": "project_paused"
+            ]
         }
 
         // エージェントがプロジェクトに割り当てられているか確認

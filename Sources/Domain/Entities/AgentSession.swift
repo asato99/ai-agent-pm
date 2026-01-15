@@ -17,7 +17,8 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     public let agentId: AgentID
     /// Phase 4: セッションが紐づくプロジェクトID
     public let projectId: ProjectID
-    public let expiresAt: Date
+    /// Feature 14: セッション有効期限（一時停止時に短縮される可能性がある）
+    public var expiresAt: Date
     public let createdAt: Date
 
     // MARK: - Purpose Field

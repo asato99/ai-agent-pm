@@ -129,6 +129,17 @@ public final class AgentSessionRepository: AgentSessionRepositoryProtocol, Senda
         }
     }
 
+    /// Feature 14: プロジェクトIDでセッションを検索（一時停止時のセッション有効期限短縮用）
+    public func findByProjectId(_ projectId: ProjectID) throws -> [AgentSession] {
+        try db.read { db in
+            try AgentSessionRecord
+                .filter(Column("project_id") == projectId.value)
+                .order(Column("created_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
     public func save(_ session: AgentSession) throws {
         try db.write { db in
             try AgentSessionRecord.fromDomain(session).save(db)
