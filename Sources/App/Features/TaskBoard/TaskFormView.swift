@@ -25,6 +25,8 @@ struct TaskFormView: View {
     @State private var estimatedMinutes: Int?
     @State private var agents: [Agent] = []
     @State private var isSaving = false
+    // Feature 13: タスクステータス（編集時の再割り当て制限チェック用）
+    @State private var taskStatus: TaskStatus = .backlog
 
     var isValid: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -69,6 +71,8 @@ struct TaskFormView: View {
                             Text(agent.name).tag(agent.id as AgentID?)
                         }
                     }
+                    // Feature 13: in_progress/blocked タスクは担当変更不可
+                    .disabled(taskStatus == .inProgress || taskStatus == .blocked)
                     .accessibilityIdentifier("TaskAssigneePicker")
 
                     TextField("Estimated Minutes", value: $estimatedMinutes, format: .number)
@@ -116,6 +120,8 @@ struct TaskFormView: View {
                     assigneeId = task.assigneeId
                     estimatedMinutes = task.estimatedMinutes
                     targetProjectId = task.projectId
+                    // Feature 13: タスクステータスを保存（再割り当て制限チェック用）
+                    taskStatus = task.status
                 } else {
                     // Task not found, cannot load agents
                     return

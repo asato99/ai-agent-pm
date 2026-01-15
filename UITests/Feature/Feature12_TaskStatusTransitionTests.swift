@@ -53,14 +53,15 @@ final class TaskStatusTransitionTests: BasicDataUITestCase {
             return
         }
 
-        // === 検証1: ステータスピッカーでTo Doオプションが無効化されている ===
+        // === 検証1: ステータスピッカーでTo Doオプションが表示されない ===
+        // 実装: 有効な遷移先のみを表示（無効なオプションは非表示）
         let statusPicker = app.popUpButtons["StatusPicker"]
         statusPicker.click()
 
         let todoOption = app.menuItems["To Do"]
-        XCTAssertTrue(todoOption.waitForExistence(timeout: 3))
-        XCTAssertFalse(todoOption.isEnabled,
-                       "ステータスピッカー: in_progressタスクのTo Doオプションは無効化されるべき")
+        // To Doオプションは存在しないはず（有効な遷移先ではないため非表示）
+        XCTAssertFalse(todoOption.waitForExistence(timeout: 2),
+                       "ステータスピッカー: in_progressタスクのTo Doオプションは表示されないべき")
 
         // メニューを閉じる
         app.typeKey(.escape, modifierFlags: [])

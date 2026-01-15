@@ -5,6 +5,7 @@
 
 import SwiftUI
 import Domain
+import UseCase
 
 // Domain.Task と Swift.Task の名前衝突を解決
 private typealias AsyncTask = _Concurrency.Task
@@ -219,7 +220,13 @@ struct TaskDetailView: View {
                     get: { task.status },
                     set: { updateStatus($0) }
                 )) {
-                    ForEach(TaskStatus.allCases, id: \.self) { status in
+                    // 現在のステータスは常に表示（選択中の値として必要）
+                    Text(task.status.displayName).tag(task.status)
+                    // Feature 12: 有効な遷移先のみ表示
+                    ForEach(TaskStatus.allCases.filter { targetStatus in
+                        targetStatus != task.status &&
+                        UpdateTaskStatusUseCase.canTransition(from: task.status, to: targetStatus)
+                    }, id: \.self) { status in
                         Text(status.displayName).tag(status)
                     }
                 }

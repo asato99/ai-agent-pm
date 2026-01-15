@@ -35,6 +35,9 @@ public enum UseCaseError: Error, Sendable {
     // 実行ログエラー (Phase 3-3)
     case executionLogNotFound(ExecutionLogID)
     case invalidStateTransition(String)
+
+    // Feature 13: 担当エージェント再割り当て制限
+    case reassignmentNotAllowed(taskId: TaskID, status: TaskStatus)
 }
 
 extension UseCaseError: LocalizedError {
@@ -79,6 +82,8 @@ extension UseCaseError: LocalizedError {
             return "Execution log not found: \(id.value)"
         case .invalidStateTransition(let message):
             return "Invalid state transition: \(message)"
+        case .reassignmentNotAllowed(let taskId, let status):
+            return "Cannot reassign task \(taskId.value) in \(status.rawValue) status"
         }
     }
 }

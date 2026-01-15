@@ -809,6 +809,17 @@ final class UseCaseTests: XCTestCase {
         XCTAssertFalse(UpdateTaskStatusUseCase.canTransition(from: .cancelled, to: .todo))
         XCTAssertFalse(UpdateTaskStatusUseCase.canTransition(from: .backlog, to: .done))
         XCTAssertFalse(UpdateTaskStatusUseCase.canTransition(from: .todo, to: .todo)) // Same status
+
+        // Feature 12: 作業コンテキスト破棄防止のための遷移制限
+        // in_progress/blocked → todo/backlog は禁止（ExecutionLog/BlockLogが作成済みのため）
+        XCTAssertFalse(UpdateTaskStatusUseCase.canTransition(from: .inProgress, to: .todo),
+                       "in_progress→todo: 作業開始後のtodoへの後退は禁止")
+        XCTAssertFalse(UpdateTaskStatusUseCase.canTransition(from: .inProgress, to: .backlog),
+                       "in_progress→backlog: 作業開始後のbacklogへの後退は禁止")
+        XCTAssertFalse(UpdateTaskStatusUseCase.canTransition(from: .blocked, to: .todo),
+                       "blocked→todo: ブロック状態からtodoへの後退は禁止")
+        XCTAssertFalse(UpdateTaskStatusUseCase.canTransition(from: .blocked, to: .backlog),
+                       "blocked→backlog: ブロック状態からbacklogへの後退は禁止")
     }
 
     // MARK: - Task Assignment Tests (PRD: TASK_MANAGEMENT.md)
@@ -892,6 +903,81 @@ final class UseCaseTests: XCTestCase {
                 // Expected
             } else {
                 XCTFail("Expected agentNotFound error")
+            }
+        }
+    }
+
+    // Feature 13: 担当エージェント再割り当て制限
+    // 要件: docs/requirements/TASKS.md - in_progress/blocked タスクは担当変更不可
+
+    func testAssignTaskUseCaseInProgressReassignmentFails() throws {
+        // Feature 13: in_progressタスクの担当変更は禁止
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Worker")
+        let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Worker")
+        agentRepo.agents[agent1.id] = agent1
+        agentRepo.agents[agent2.id] = agent2
+
+        // in_progressステータスのタスク（既に担当者あり）
+        var task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", assigneeId: agent1.id)
+        task.status = .inProgress
+        taskRepo.tasks[task.id] = task
+
+        let useCase = AssignTaskUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo
+        )
+
+        // 別のエージェントへの再割り当ては失敗すべき
+        XCTAssertThrowsError(try useCase.execute(
+            taskId: task.id,
+            assigneeId: agent2.id,
+            actorAgentId: nil,
+            sessionId: nil
+        ), "in_progressタスクの担当変更は禁止") { error in
+            if case UseCaseError.reassignmentNotAllowed = error {
+                // Expected
+            } else {
+                XCTFail("Expected reassignmentNotAllowed error, got: \(error)")
+            }
+        }
+    }
+
+    func testAssignTaskUseCaseBlockedReassignmentFails() throws {
+        // Feature 13: blockedタスクの担当変更は禁止
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Worker")
+        let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Worker")
+        agentRepo.agents[agent1.id] = agent1
+        agentRepo.agents[agent2.id] = agent2
+
+        // blockedステータスのタスク（既に担当者あり）
+        var task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", assigneeId: agent1.id)
+        task.status = .blocked
+        taskRepo.tasks[task.id] = task
+
+        let useCase = AssignTaskUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo
+        )
+
+        // 別のエージェントへの再割り当ては失敗すべき
+        XCTAssertThrowsError(try useCase.execute(
+            taskId: task.id,
+            assigneeId: agent2.id,
+            actorAgentId: nil,
+            sessionId: nil
+        ), "blockedタスクの担当変更は禁止") { error in
+            if case UseCaseError.reassignmentNotAllowed = error {
+                // Expected
+            } else {
+                XCTFail("Expected reassignmentNotAllowed error, got: \(error)")
             }
         }
     }

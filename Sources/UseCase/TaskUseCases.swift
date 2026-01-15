@@ -399,8 +399,11 @@ public struct UpdateTaskStatusUseCase: Sendable {
             return true
         case (.todo, .inProgress), (.todo, .backlog), (.todo, .cancelled):
             return true
-        case (.inProgress, .done), (.inProgress, .blocked), (.inProgress, .todo):
+        // Feature 12: 作業コンテキスト破棄防止
+        // in_progress → todo/backlog は禁止（ExecutionLogが作成済みのため）
+        case (.inProgress, .done), (.inProgress, .blocked):
             return true
+        // Feature 12: blocked → todo/backlog は禁止（BlockLogが作成済みのため）
         case (.blocked, .inProgress), (.blocked, .cancelled):
             return true
         case (.done, _), (.cancelled, _):
@@ -439,14 +442,20 @@ public struct AssignTaskUseCase: Sendable {
             throw UseCaseError.taskNotFound(taskId)
         }
 
+        // Feature 13: 担当エージェント再割り当て制限
+        // in_progress/blocked タスクは担当変更不可（作業コンテキスト破棄防止）
+        let previousAssignee = task.assigneeId
+        let isReassignment = previousAssignee != nil && assigneeId != previousAssignee
+        if isReassignment && (task.status == .inProgress || task.status == .blocked) {
+            throw UseCaseError.reassignmentNotAllowed(taskId: taskId, status: task.status)
+        }
+
         // 割り当て先エージェントの存在確認
         if let assigneeId = assigneeId {
             guard try agentRepository.findById(assigneeId) != nil else {
                 throw UseCaseError.agentNotFound(assigneeId)
             }
         }
-
-        let previousAssignee = task.assigneeId
         task.assigneeId = assigneeId
         task.updatedAt = Date()
 
