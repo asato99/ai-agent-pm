@@ -28,6 +28,7 @@ enum UITestScenario: String {
     case uc008 = "UC008"           // UC008: タスクブロックによる作業中断
     case uc009 = "UC009"           // UC009: エージェントとのチャット通信
     case uc010 = "UC010"           // UC010: チャットタイムアウトエラー表示
+    case uc011 = "UC011"           // UC011: プロジェクト一時停止
 }
 
 // MARK: - Base Test Class
@@ -72,7 +73,7 @@ class AIAgentPMUITestCase: XCTestCase {
             print("⚠️ System dialog detected, attempting to dismiss...")
             // "許可しない" や "Don't Allow" などのボタンを探して押す
             for buttonLabel in ["許可しない", "Don't Allow", "OK", "閉じる", "Close", "Cancel", "キャンセル"] {
-                let button = alert.buttons[buttonLabel]
+                let button = alert.buttons[buttonLabel].firstMatch
                 if button.exists {
                     print("  Clicking '\(buttonLabel)' button")
                     button.click()
@@ -215,4 +216,9 @@ class UC009UITestCase: AIAgentPMUITestCase {
 /// UC010テスト用ベースクラス（チャットタイムアウトエラー表示テスト用）
 class UC010UITestCase: AIAgentPMUITestCase {
     override var testScenario: UITestScenario { .uc010 }
+}
+
+/// UC011テスト用ベースクラス（プロジェクト一時停止テスト用）
+class UC011UITestCase: AIAgentPMUITestCase {
+    override var testScenario: UITestScenario { .uc011 }
 }

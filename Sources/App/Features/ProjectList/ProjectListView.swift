@@ -3,6 +3,7 @@
 
 import SwiftUI
 import Domain
+import UseCase
 
 private typealias AsyncTask = _Concurrency.Task
 
@@ -404,11 +405,35 @@ struct AgentRow: View {
 struct ProjectRow: View {
     let project: Project
     @Environment(Router.self) var router
+    @EnvironmentObject var container: DependencyContainer
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(project.name)
-                .font(.headline)
+            HStack {
+                Text(project.name)
+                    .font(.headline)
+
+                Spacer()
+
+                // プロジェクトステータス表示
+                if project.status == .paused {
+                    Text("Paused")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.2))
+                        .cornerRadius(4)
+                } else {
+                    Text("Active")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.2))
+                        .cornerRadius(4)
+                }
+            }
 
             if !project.description.isEmpty {
                 Text(project.description)
@@ -425,6 +450,57 @@ struct ProjectRow: View {
                 Label("Edit", systemImage: "pencil")
             }
             .accessibilityIdentifier("EditProjectMenuItem")
+
+            Divider()
+
+            // 一時停止/再開ボタン
+            if project.status == .active {
+                Button {
+                    pauseProject()
+                } label: {
+                    Label("Pause", systemImage: "pause.circle")
+                }
+                .accessibilityIdentifier("PauseProjectMenuItem")
+            } else if project.status == .paused {
+                Button {
+                    resumeProject()
+                } label: {
+                    Label("Resume", systemImage: "play.circle")
+                }
+                .accessibilityIdentifier("ResumeProjectMenuItem")
+            }
+        }
+    }
+
+    private func pauseProject() {
+        AsyncTask {
+            do {
+                let useCase = PauseProjectUseCase(
+                    projectRepository: container.projectRepository,
+                    agentSessionRepository: container.agentSessionRepository
+                )
+                try await useCase.execute(projectId: project.id)
+                // UI更新は@Published経由で自動的に行われることを期待
+                // 必要であればNotificationCenterで通知
+                NotificationCenter.default.post(name: .testDataSeeded, object: nil)
+            } catch {
+                print("Failed to pause project: \(error)")
+            }
+        }
+    }
+
+    private func resumeProject() {
+        AsyncTask {
+            do {
+                let useCase = ResumeProjectUseCase(
+                    projectRepository: container.projectRepository
+                )
+                try await useCase.execute(projectId: project.id)
+                // UI更新
+                NotificationCenter.default.post(name: .testDataSeeded, object: nil)
+            } catch {
+                print("Failed to resume project: \(error)")
+            }
         }
     }
 }
