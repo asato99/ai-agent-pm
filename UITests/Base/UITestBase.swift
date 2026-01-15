@@ -115,7 +115,6 @@ class AIAgentPMUITestCase: XCTestCase {
             app.activate()
             Thread.sleep(forTimeInterval: 0.5)
 
-            // カラム幅を220pxに設定したため、5カラム（1100px）がデフォルトウィンドウに収まる
             Thread.sleep(forTimeInterval: 0.5)
         } else {
             // ウィンドウが見つからない場合
@@ -145,6 +144,7 @@ class AIAgentPMUITestCase: XCTestCase {
         }
         app = nil
     }
+
 }
 
 /// 空状態テスト用ベースクラス
