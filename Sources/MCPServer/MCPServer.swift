@@ -309,7 +309,8 @@ final class MCPServer {
     /// Toolを実行
     /// ステートレス設計: 必要なIDは全て引数として受け取る
     /// Phase 5: caller で認可済みの呼び出し元情報を受け取る
-    private func executeTool(name: String, arguments: [String: Any], caller: CallerType) throws -> Any {
+    /// Note: internal for @testable access in tests
+    func executeTool(name: String, arguments: [String: Any], caller: CallerType) throws -> Any {
         switch name {
         // ========================================
         // 未認証でも呼び出し可能
@@ -1742,6 +1743,10 @@ final class MCPServer {
         let previousStatus = task.status
         task.status = newStatus
         task.updatedAt = Date()
+        // Bug fix: statusChangedByAgentIdとstatusChangedAtを設定
+        // これにより、誰がステータスを変更したかを追跡可能にする
+        task.statusChangedByAgentId = id
+        task.statusChangedAt = Date()
         if newStatus == .done {
             task.completedAt = Date()
         }

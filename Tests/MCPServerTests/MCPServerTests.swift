@@ -961,3 +961,168 @@ final class ToolAuthorizationTests: XCTestCase {
         XCTAssertTrue(notSubordinate.errorDescription?.contains("wkr-1") ?? false)
     }
 }
+
+// MARK: - MCPServer Integration Tests
+
+import GRDB
+@testable import Infrastructure
+
+/// MCPServer統合テスト - reportCompletedのstatusChangedByAgentId設定バグ修正
+/// 参照: TDD RED-GREEN アプローチ
+final class MCPServerReportCompletedTests: XCTestCase {
+
+    var db: DatabaseQueue!
+    var mcpServer: MCPServer!
+    var taskRepository: TaskRepository!
+    var agentRepository: AgentRepository!
+    var projectRepository: ProjectRepository!
+    var agentCredentialRepository: AgentCredentialRepository!
+    var agentSessionRepository: AgentSessionRepository!
+    var projectAgentAssignmentRepository: ProjectAgentAssignmentRepository!
+
+    // テストデータ
+    let testAgentId = AgentID(value: "agt_test_worker")
+    let testProjectId = ProjectID(value: "prj_test")
+    let testTaskId = TaskID(value: "tsk_test")
+
+    override func setUpWithError() throws {
+        // テスト用インメモリDBを作成
+        let tempDir = FileManager.default.temporaryDirectory
+        let dbPath = tempDir.appendingPathComponent("test_mcp_\(UUID().uuidString).db").path
+        db = try DatabaseSetup.createDatabase(at: dbPath)
+
+        // リポジトリを初期化
+        taskRepository = TaskRepository(database: db)
+        agentRepository = AgentRepository(database: db)
+        projectRepository = ProjectRepository(database: db)
+        agentCredentialRepository = AgentCredentialRepository(database: db)
+        agentSessionRepository = AgentSessionRepository(database: db)
+        projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: db)
+
+        // MCPServerを初期化
+        mcpServer = MCPServer(database: db)
+
+        // テストデータを作成
+        try setupTestData()
+    }
+
+    override func tearDownWithError() throws {
+        db = nil
+        mcpServer = nil
+    }
+
+    private func setupTestData() throws {
+        // プロジェクトを作成
+        let project = Project(
+            id: testProjectId,
+            name: "Test Project",
+            description: "Integration test project"
+        )
+        try projectRepository.save(project)
+
+        // エージェントを作成（Worker）
+        let agent = Agent(
+            id: testAgentId,
+            name: "Test Worker",
+            role: "Worker agent for testing",
+            hierarchyType: .worker,
+            systemPrompt: "You are a test worker"
+        )
+        try agentRepository.save(agent)
+
+        // プロジェクトにエージェントを割り当て
+        _ = try projectAgentAssignmentRepository.assign(
+            projectId: testProjectId,
+            agentId: testAgentId
+        )
+
+        // エージェント認証情報を作成（rawPasskeyを使用）
+        let credential = AgentCredential(
+            agentId: testAgentId,
+            rawPasskey: "test_passkey_12345"
+        )
+        try agentCredentialRepository.save(credential)
+
+        // サブタスク付きのタスクを作成（in_progress状態）
+        // メインタスク
+        let mainTask = Task(
+            id: testTaskId,
+            projectId: testProjectId,
+            title: "Main Test Task",
+            description: "Main task for testing",
+            status: .inProgress,
+            priority: .medium,
+            assigneeId: testAgentId
+        )
+        try taskRepository.save(mainTask)
+
+        // サブタスク（完了済み - メインタスクの完了条件）
+        let subTask = Task(
+            id: TaskID.generate(),
+            projectId: testProjectId,
+            title: "Subtask 1",
+            description: "Completed subtask",
+            status: .done,
+            priority: .medium,
+            assigneeId: testAgentId,
+            parentTaskId: testTaskId
+        )
+        try taskRepository.save(subTask)
+    }
+
+    /// RED: reportCompletedがstatusChangedByAgentIdを設定することを検証
+    /// 期待: result="blocked"でタスクをブロック状態に変更した時、
+    ///       statusChangedByAgentIdに報告者のagentIdが設定される
+    func testReportCompletedSetsStatusChangedByAgentId() throws {
+        // Arrange: セッションを作成（認証状態をシミュレート）
+        let session = AgentSession(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            purpose: .task
+        )
+        try agentSessionRepository.save(session)
+
+        // Act: report_completedツールを呼び出し（result=blocked）
+        // MCPServerのexecuteToolを使用してreport_completedを実行
+        // Note: summaryを省略（contextテーブルのFK制約回避のため）
+        let arguments: [String: Any] = [
+            "session_token": session.token,
+            "result": "blocked"
+        ]
+
+        // CallerTypeを設定（Worker認証済み）
+        let caller = CallerType.worker(agentId: testAgentId, session: session)
+
+        // ツール実行
+        let result = try mcpServer.executeTool(
+            name: "report_completed",
+            arguments: arguments,
+            caller: caller
+        )
+
+        // Assert: タスクのstatusChangedByAgentIdが報告者のエージェントIDに設定されている
+        let updatedTask = try taskRepository.findById(testTaskId)
+        XCTAssertNotNil(updatedTask, "Task should exist after report_completed")
+        XCTAssertEqual(updatedTask?.status, .blocked, "Task status should be blocked")
+
+        // ★ これがREDになる検証ポイント ★
+        // 現在のバグ: statusChangedByAgentIdが設定されていない
+        XCTAssertEqual(
+            updatedTask?.statusChangedByAgentId,
+            testAgentId,
+            "statusChangedByAgentId should be set to the reporting agent's ID, not nil or system:user"
+        )
+
+        // statusChangedAtも設定されていることを確認
+        XCTAssertNotNil(
+            updatedTask?.statusChangedAt,
+            "statusChangedAt should be set when status is changed"
+        )
+
+        // 成功レスポンスの確認
+        if let resultDict = result as? [String: Any],
+           let successFlag = resultDict["success"] as? Bool {
+            XCTAssertTrue(successFlag, "report_completed should succeed")
+        }
+    }
+}
