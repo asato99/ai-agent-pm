@@ -109,12 +109,20 @@ public final class ExecutionLogRepository: ExecutionLogRepositoryProtocol, Senda
     }
 
     public func findByAgentId(_ agentId: AgentID) throws -> [ExecutionLog] {
+        try findByAgentId(agentId, limit: nil, offset: nil)
+    }
+
+    public func findByAgentId(_ agentId: AgentID, limit: Int?, offset: Int?) throws -> [ExecutionLog] {
         try db.read { db in
-            try ExecutionLogRecord
+            var query = ExecutionLogRecord
                 .filter(Column("agent_id") == agentId.value)
                 .order(Column("started_at").desc)
-                .fetchAll(db)
-                .map { $0.toDomain() }
+
+            if let limit = limit {
+                query = query.limit(limit, offset: offset ?? 0)
+            }
+
+            return try query.fetchAll(db).map { $0.toDomain() }
         }
     }
 

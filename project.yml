@@ -7,10 +7,74 @@ options:
   createIntermediateGroups: true
 
 packages:
-  AIAgentPM:
-    path: .
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 6.29.3
+  ArgumentParser:
+    url: https://github.com/apple/swift-argument-parser.git
+    version: 1.3.0
+  ViewInspector:
+    url: https://github.com/nalexn/ViewInspector.git
+    version: 0.10.0
 
 targets:
+  # Domain層（エンティティ、値オブジェクト、リポジトリプロトコル）
+  Domain:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/Domain
+        type: group
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.domain
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+        CODE_SIGN_IDENTITY: ""
+
+  # UseCase層（ビジネスロジック）
+  UseCase:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/UseCase
+        type: group
+    dependencies:
+      - target: Domain
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.usecase
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+        CODE_SIGN_IDENTITY: ""
+
+  # Infrastructure層（リポジトリ実装、DB）
+  Infrastructure:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/Infrastructure
+        type: group
+    dependencies:
+      - target: Domain
+      - package: GRDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.infrastructure
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+        CODE_SIGN_IDENTITY: ""
+
+  # メインアプリケーション
   AIAgentPMApp:
     type: application
     platform: macOS
@@ -18,12 +82,9 @@ targets:
       - path: Sources/App
         type: group
     dependencies:
-      - package: AIAgentPM
-        product: Domain
-      - package: AIAgentPM
-        product: UseCase
-      - package: AIAgentPM
-        product: Infrastructure
+      - target: Domain
+      - target: UseCase
+      - target: Infrastructure
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.app
@@ -34,6 +95,76 @@ targets:
         SWIFT_VERSION: "5.9"
         ENABLE_PREVIEWS: YES
 
+  # MCPサーバー（コマンドラインツール）
+  MCPServer:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/MCPServer
+        type: group
+    dependencies:
+      - target: Domain
+      - target: UseCase
+      - target: Infrastructure
+      - package: ArgumentParser
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.mcpserver
+        PRODUCT_NAME: mcp-server-pm
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+  # 単体テスト - Domain
+  DomainTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/DomainTests
+        type: group
+    dependencies:
+      - target: Domain
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.domaintests
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+
+  # 単体テスト - UseCase
+  UseCaseTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/UseCaseTests
+        type: group
+    dependencies:
+      - target: UseCase
+      - target: Domain
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.usecasetests
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+
+  # 単体テスト - Infrastructure
+  InfrastructureTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/InfrastructureTests
+        type: group
+    dependencies:
+      - target: Infrastructure
+      - target: Domain
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.infrastructuretests
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+
+  # UIテスト
   AIAgentPMUITests:
     type: bundle.ui-testing
     platform: macOS
@@ -56,6 +187,10 @@ schemes:
     build:
       targets:
         AIAgentPMApp: all
+        MCPServer: all
+        DomainTests: [test]
+        UseCaseTests: [test]
+        InfrastructureTests: [test]
         AIAgentPMUITests: [test]
     run:
       config: Debug
@@ -64,4 +199,7 @@ schemes:
       config: Debug
       gatherCoverageData: true
       targets:
+        - DomainTests
+        - UseCaseTests
+        - InfrastructureTests
         - AIAgentPMUITests

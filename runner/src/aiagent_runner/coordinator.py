@@ -94,6 +94,30 @@ class Coordinator:
         log_dir.mkdir(parents=True, exist_ok=True)
         return log_dir
 
+    def _get_log_directory(self, working_dir: Optional[str], agent_id: str) -> Path:
+        """Get log directory for an agent.
+
+        Args:
+            working_dir: Project working directory (None or empty string for fallback)
+            agent_id: Agent ID
+
+        Returns:
+            Path to log directory
+        """
+        if working_dir:
+            # プロジェクトのワーキングディレクトリ基準
+            log_dir = Path(working_dir) / ".aiagent" / "logs" / agent_id
+        else:
+            # フォールバック: アプリ管轄ディレクトリ
+            log_dir = (
+                Path.home()
+                / "Library" / "Application Support" / "AIAgentPM"
+                / "agent_logs" / agent_id
+            )
+
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return log_dir
+
     async def start(self) -> None:
         """Start the Coordinator loop.
 
@@ -442,9 +466,10 @@ class Coordinator:
         # Build prompt for the Agent Instance
         prompt = self._build_agent_prompt(agent_id, project_id, passkey)
 
-        # Generate log file path
+        # Generate log file path (use working_dir-based path for project context)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = self.log_directory / f"{agent_id}_{project_id}_{timestamp}.log"
+        log_dir = self._get_log_directory(working_dir, agent_id)
+        log_file = log_dir / f"{timestamp}.log"
 
         # Build MCP config for Agent Instance (Unix Socket transport)
         # Agent Instance connects to the SAME MCP daemon that the app started

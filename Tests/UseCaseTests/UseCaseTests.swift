@@ -427,6 +427,17 @@ final class MockExecutionLogRepository: ExecutionLogRepositoryProtocol {
         logs.values.filter { $0.agentId == agentId }.sorted { $0.startedAt > $1.startedAt }
     }
 
+    func findByAgentId(_ agentId: AgentID, limit: Int?, offset: Int?) throws -> [ExecutionLog] {
+        var result = logs.values.filter { $0.agentId == agentId }.sorted { $0.startedAt > $1.startedAt }
+        if let offset = offset {
+            result = Array(result.dropFirst(offset))
+        }
+        if let limit = limit {
+            result = Array(result.prefix(limit))
+        }
+        return result
+    }
+
     func findRunning(agentId: AgentID) throws -> [ExecutionLog] {
         logs.values.filter { $0.agentId == agentId && $0.status == .running }.sorted { $0.startedAt > $1.startedAt }
     }

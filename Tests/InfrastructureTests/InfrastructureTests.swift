@@ -1607,6 +1607,47 @@ final class InfrastructureTests: XCTestCase {
         }
     }
 
+    func testExecutionLogRepositoryFindByAgentIdWithPagination() throws {
+        // Given: エージェントに紐づく5件の実行ログを作成
+        let project = Project(id: ProjectID.generate(), name: "TestProject")
+        try projectRepo.save(project)
+        let agent = Agent(id: AgentID.generate(), name: "TestAgent", role: "Developer")
+        try agentRepo.save(agent)
+
+        var logs: [ExecutionLog] = []
+        for i in 1...5 {
+            let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task \(i)")
+            try taskRepo.save(task)
+            let log = ExecutionLog(taskId: task.id, agentId: agent.id)
+            try executionLogRepo.save(log)
+            logs.append(log)
+        }
+
+        // When: limit=2, offset=0 で取得
+        let page1 = try executionLogRepo.findByAgentId(agent.id, limit: 2, offset: 0)
+
+        // Then: 2件取得できる
+        XCTAssertEqual(page1.count, 2)
+
+        // When: limit=2, offset=2 で取得
+        let page2 = try executionLogRepo.findByAgentId(agent.id, limit: 2, offset: 2)
+
+        // Then: 2件取得できる
+        XCTAssertEqual(page2.count, 2)
+
+        // When: limit=2, offset=4 で取得
+        let page3 = try executionLogRepo.findByAgentId(agent.id, limit: 2, offset: 4)
+
+        // Then: 1件取得できる（残り1件のみ）
+        XCTAssertEqual(page3.count, 1)
+
+        // When: limit=nil（制限なし）で取得
+        let allLogs = try executionLogRepo.findByAgentId(agent.id, limit: nil, offset: nil)
+
+        // Then: 全5件取得できる
+        XCTAssertEqual(allLogs.count, 5)
+    }
+
     // MARK: - ProjectAgentAssignmentRepository Tests (UC004: 複数プロジェクト×同一エージェント)
     // 参照: docs/requirements/PROJECTS.md - エージェント割り当て
 

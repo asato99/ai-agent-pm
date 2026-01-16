@@ -188,6 +188,8 @@ public protocol ExecutionLogRepositoryProtocol: Sendable {
     func findById(_ id: ExecutionLogID) throws -> ExecutionLog?
     func findByTaskId(_ taskId: TaskID) throws -> [ExecutionLog]
     func findByAgentId(_ agentId: AgentID) throws -> [ExecutionLog]
+    /// ページネーション対応（UI実行履歴表示用）
+    func findByAgentId(_ agentId: AgentID, limit: Int?, offset: Int?) throws -> [ExecutionLog]
     func findRunning(agentId: AgentID) throws -> [ExecutionLog]
     /// 最新の実行ログを取得（Coordinator用：ログファイルパス登録用）
     func findLatestByAgentAndTask(agentId: AgentID, taskId: TaskID) throws -> ExecutionLog?
