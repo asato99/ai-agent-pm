@@ -1754,18 +1754,27 @@ final class MCPServer {
         try taskRepository.save(task)
 
         // コンテキストを保存（サマリーや次のステップがあれば）
+        // Bug fix: 有効なワークフローセッションを検索してそのIDを使用
+        // SessionID.generate()は外部キー制約違反を引き起こすため使用しない
         if summary != nil || nextSteps != nil {
-            let context = Context(
-                id: ContextID.generate(),
-                taskId: task.id,
-                sessionId: SessionID.generate(),
+            if let activeSession = try sessionRepository.findActiveByAgentAndProject(
                 agentId: id,
-                progress: summary,
-                findings: nil,
-                blockers: result == "blocked" ? summary : nil,
-                nextSteps: nextSteps
-            )
-            try contextRepository.save(context)
+                projectId: projId
+            ).first {
+                let context = Context(
+                    id: ContextID.generate(),
+                    taskId: task.id,
+                    sessionId: activeSession.id,
+                    agentId: id,
+                    progress: summary,
+                    findings: nil,
+                    blockers: result == "blocked" ? summary : nil,
+                    nextSteps: nextSteps
+                )
+                try contextRepository.save(context)
+            } else {
+                Self.log("[MCP] reportCompleted: Skipped context creation - no active workflow session")
+            }
         }
 
         // イベントを記録

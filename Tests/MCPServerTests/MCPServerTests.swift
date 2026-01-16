@@ -1125,4 +1125,51 @@ final class MCPServerReportCompletedTests: XCTestCase {
             XCTAssertTrue(successFlag, "report_completed should succeed")
         }
     }
+
+    /// Context作成時にFK制約違反が発生しないことを検証
+    /// Bug fix: SessionID.generate()ではなく、有効なワークフローセッションを使用
+    func testReportCompletedWithSummaryDoesNotCauseFKError() throws {
+        // Arrange: AgentSessionを作成
+        let agentSession = AgentSession(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            purpose: .task
+        )
+        try agentSessionRepository.save(agentSession)
+
+        // ワークフローセッションも作成（Context作成に必要）
+        let sessionRepository = SessionRepository(database: db)
+        let workflowSession = Session(
+            id: SessionID.generate(),
+            projectId: testProjectId,
+            agentId: testAgentId,
+            startedAt: Date()
+        )
+        try sessionRepository.save(workflowSession)
+
+        // Act: summaryを含めてreport_completedを呼び出し
+        let arguments: [String: Any] = [
+            "session_token": agentSession.token,
+            "result": "blocked",
+            "summary": "This is a test summary that should be saved to context"
+        ]
+
+        let caller = CallerType.worker(agentId: testAgentId, session: agentSession)
+
+        // Assert: FK制約違反なく成功すること
+        XCTAssertNoThrow(
+            try mcpServer.executeTool(
+                name: "report_completed",
+                arguments: arguments,
+                caller: caller
+            ),
+            "report_completed with summary should not throw FK constraint error"
+        )
+
+        // Contextが正しく保存されていることを確認
+        let contextRepository = ContextRepository(database: db)
+        let contexts = try contextRepository.findByTask(testTaskId)
+        XCTAssertFalse(contexts.isEmpty, "Context should be saved when summary is provided")
+        XCTAssertEqual(contexts.first?.sessionId, workflowSession.id, "Context should use the active workflow session ID")
+    }
 }
