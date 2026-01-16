@@ -40,6 +40,12 @@ DerivedData/
 # AI/IDE tools
 .gemini/
 .cursor/
+.serena/
+.ai-pm/
+
+# Local config
+coordinator.yaml
+~/
 
 # Secrets (should be stored securely, not in repo)
 PyPI-Recovery-Codes*
