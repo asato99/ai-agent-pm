@@ -1222,71 +1222,34 @@ final class MCPServer {
             ]
         }
 
-        // UC008: ブロックされたタスクをチェック（アクティブセッションより先にチェック）
+        // UC008: ブロックされたタスクをチェック
         // 該当プロジェクトで該当エージェントにアサインされたblockedタスクがあれば停止
         // ただし、自己ブロック（または下位ワーカーによるブロック）の場合は continue 可能
         // ユーザー（UI）によるブロックは解除不可として stop
         // 参照: docs/plan/BLOCKED_TASK_RECOVERY.md
         let tasks = try taskRepository.findByAssignee(id)
 
-        // blockedタスクをチェック（stopアクション）
+        // in_progressタスクがある場合はblockedタスクの起動チェックをスキップ
+        // 複数タスクが割り当てられている場合、実行中タスクを優先
+        let hasAnyInProgressTask = tasks.contains { $0.status == .inProgress && $0.projectId == projId }
+
+        // blockedタスクをチェック（in_progressタスクがない場合のみ）
+        // blockedタスクがあるだけでは起動しない（holdを返す）
+        // in_progressタスクがある場合のみ、そのタスクのために起動する
         let blockedTask = tasks.first { task in
             task.status == .blocked && task.projectId == projId
         }
-        if let blocked = blockedTask {
-            // ブロック種別を判定
-            let blockType: BlockType
-            if let changedBy = blocked.statusChangedByAgentId {
-                if changedBy.isUserAction {
-                    // ユーザー（UI）によるブロック → 解除不可
-                    blockType = .userBlocked
-                } else if changedBy == id {
-                    // 自分がブロックした場合
-                    blockType = .selfBlocked
-                } else {
-                    // 下位ワーカーがブロックした場合もチェック
-                    let subordinates = try agentRepository.findByParent(id)
-                    if subordinates.contains(where: { $0.id == changedBy }) {
-                        blockType = .subordinateBlocked
-                    } else {
-                        blockType = .otherBlocked
-                    }
-                }
-            } else {
-                // statusChangedByAgentId が nil の場合は自己ブロック扱い（後方互換性）
-                blockType = .selfBlocked
-            }
-
-            switch blockType {
-            case .selfBlocked, .subordinateBlocked:
-                // 自己ブロックの場合は stop せず、start を返してエージェントを起動
-                // get_next_action で unblock_and_continue アクションが返される
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': self-blocked task '\(blocked.id.value)' detected, starting for reconsideration")
-                return [
-                    "action": "start",
-                    "reason": "has_self_blocked_task",
-                    "task_id": blocked.id.value,
-                    "provider": agent.provider ?? "claude",
-                    "model": agent.modelId ?? "claude-sonnet-4-5-20250929"
-                ]
-            case .userBlocked:
-                // ユーザーブロックは解除不可 → stop
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': stop (task '\(blocked.id.value)' is blocked by user)")
-                return [
-                    "action": "stop",
-                    "reason": "task_blocked_by_user",
-                    "task_id": blocked.id.value,
-                    "message": "このタスクはユーザーによってブロックされています。ユーザーがブロックを解除するまで作業できません。"
-                ]
-            case .otherBlocked:
-                // 他者がブロックした場合は stop
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': stop (task '\(blocked.id.value)' is blocked by \(blocked.statusChangedByAgentId?.value ?? "unknown"))")
-                return [
-                    "action": "stop",
-                    "reason": "task_blocked",
-                    "task_id": blocked.id.value
-                ]
-            }
+        if let blocked = blockedTask, !hasAnyInProgressTask {
+            // blockedタスクがあるがin_progressタスクがない場合は起動しない
+            // マネージャーが下位ワーカーのblocked状態を検知して対処する
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (blocked task '\(blocked.id.value)' exists but no in_progress task)")
+            return [
+                "action": "hold",
+                "reason": "blocked_without_in_progress",
+                "task_id": blocked.id.value,
+                "provider": agent.provider ?? "claude",
+                "model": agent.modelId ?? "claude-sonnet-4-5-20250929"
+            ]
         }
 
         // Phase 4: (agent_id, project_id)単位でアクティブセッションをチェック
@@ -1317,11 +1280,34 @@ final class MCPServer {
         Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasInProgressTask=\(hasInProgressTask) (in_progress task: \(inProgressTask?.id.value ?? "none"))")
 
         // Manager の待機状態チェック
-        // Context.progress が "workflow:waiting_for_workers" の場合、動的計算で判断
+        // Context.progress に基づいて起動/待機を判断
         if agent.hierarchyType == .manager, let task = inProgressTask {
             let latestContext = try contextRepository.findLatest(taskId: task.id)
+            let progress = latestContext?.progress
 
-            if latestContext?.progress == "workflow:waiting_for_workers" {
+            // worker_blocked: ワーカーがブロックされた → 即座に起動して対処
+            if progress == "workflow:worker_blocked" {
+                Self.log("[MCP] getAgentAction: Manager has worker_blocked state, starting immediately to handle")
+                return [
+                    "action": "start",
+                    "reason": "worker_blocked",
+                    "task_id": task.id.value,
+                    "provider": agent.provider ?? "claude",
+                    "model": agent.modelId ?? "claude-sonnet-4-5-20250929"
+                ]
+            }
+
+            // handled_blocked: ブロック対処済み、進行中ワーカーなし → 再起動しない
+            if progress == "workflow:handled_blocked" {
+                Self.log("[MCP] getAgentAction: Manager has handled_blocked state, holding (no restart)")
+                return [
+                    "action": "hold",
+                    "reason": "handled_blocked"
+                ]
+            }
+
+            // waiting_for_workers: ワーカー完了待ち
+            if progress == "workflow:waiting_for_workers" {
                 Self.log("[MCP] getAgentAction: Manager is in waiting_for_workers state, checking subtasks")
 
                 // サブタスクの状態を動的に確認
@@ -1752,6 +1738,41 @@ final class MCPServer {
         }
 
         try taskRepository.save(task)
+
+        // ワーカーがブロック報告した場合、親タスク（マネージャー）のコンテキストを更新
+        // マネージャーが waiting_for_workers 状態の場合のみ更新
+        if newStatus == .blocked, let parentTaskId = task.parentTaskId {
+            if let parentTask = try taskRepository.findById(parentTaskId),
+               let parentAssigneeId = parentTask.assigneeId {
+                // 親タスクの最新コンテキストを確認
+                let parentLatestContext = try contextRepository.findLatest(taskId: parentTaskId)
+                if parentLatestContext?.progress == "workflow:waiting_for_workers" {
+                    // 親タスク（マネージャー）のアクティブセッションを検索
+                    if let parentSession = try sessionRepository.findActiveByAgentAndProject(
+                        agentId: parentAssigneeId,
+                        projectId: projId
+                    ).first {
+                        // 親タスクのコンテキストを worker_blocked に更新
+                        let parentContext = Context(
+                            id: ContextID.generate(),
+                            taskId: parentTaskId,
+                            sessionId: parentSession.id,
+                            agentId: parentAssigneeId,
+                            progress: "workflow:worker_blocked",
+                            findings: nil,
+                            blockers: "Subtask \(task.id.value) blocked: \(summary ?? "no reason")",
+                            nextSteps: nil
+                        )
+                        try contextRepository.save(parentContext)
+                        Self.log("[MCP] reportCompleted: Updated parent task context to worker_blocked for manager '\(parentAssigneeId.value)'")
+                    } else {
+                        Self.log("[MCP] reportCompleted: No active session for parent task manager, skipping context update")
+                    }
+                } else {
+                    Self.log("[MCP] reportCompleted: Parent task not in waiting_for_workers state, skipping context update")
+                }
+            }
+        }
 
         // コンテキストを保存（サマリーや次のステップがあれば）
         // Bug fix: 有効なワークフローセッションを検索してそのIDを使用
@@ -2306,12 +2327,39 @@ final class MCPServer {
                     }
                 }
 
+                // 状態遷移: worker_blocked → handled_blocked
+                // ブロック対処を返す際にコンテキストを更新して無限ループを防止
+                let latestContext = try contextRepository.findLatest(taskId: mainTask.id)
+                if latestContext?.progress == "workflow:worker_blocked" {
+                    // worker_blocked から handled_blocked に遷移
+                    // マネージャーが対処を試みた後、再起動されないようにする
+                    let workflowSession = Session(
+                        id: SessionID.generate(),
+                        projectId: mainTask.projectId,
+                        agentId: mainTask.assigneeId!,
+                        startedAt: Date(),
+                        status: .active
+                    )
+                    try sessionRepository.save(workflowSession)
+
+                    let context = Context(
+                        id: ContextID.generate(),
+                        taskId: mainTask.id,
+                        sessionId: workflowSession.id,
+                        agentId: mainTask.assigneeId!,
+                        progress: "workflow:handled_blocked",
+                        blockers: "Handling blocked subtasks: \(blockedSubTasks.map { $0.id.value }.joined(separator: ", "))"
+                    )
+                    try contextRepository.save(context)
+                    Self.log("[MCP] getManagerNextAction: Transitioned from worker_blocked to handled_blocked")
+                }
+
                 // Managerは全てのブロック状況を把握して対処を検討できる
-                // 自己/下位ブロック → 解除可能、ユーザー/他者ブロック → 解除不可だが状況把握は必要
+                // 自己/下位ブロック → 解除可能、ユーザー/他者ブロック → 解除不可だが自主判断で対処
                 return [
                     "action": "review_and_resolve_blocks",
                     "instruction": """
-                        以下のサブタスクがブロック状態です。マネージャーとして対処を検討してください。
+                        以下のサブタスクがブロック状態です。マネージャーとして自主的に対処を検討してください。
 
                         【ブロック種別と対応】
                         ■ 自己/下位ワーカーによるブロック（解除可能）:
@@ -2319,16 +2367,20 @@ final class MCPServer {
                           - 理由が解決済みなら update_task_status で 'todo' に変更
                           - assign_task でワーカーに再割り当て
 
-                        ■ ユーザーによるブロック（解除不可）:
+                        ■ ユーザーによるブロック:
                           - ユーザーが意図的にブロックしたタスクです
-                          - 解除する権限がありません
-                          - ユーザーの指示を待つか、メインタスクをブロックとして報告してください
+                          - 直接解除する権限はありませんが、以下の対処を自主的に検討してください:
+                            1. 別のワーカーへの再アサイン（assign_task）
+                            2. タスクの分割・再設計（新しいサブタスクを作成）
+                            3. 代替アプローチの検討
+                            4. ブロック理由に基づく問題解決
+                          - 対処不可能と判断した場合のみ、メインタスクをブロックとして報告
 
                         【最終判断】
-                        - 全てのサブタスクが完了できない場合:
+                        - 自主的な対処を試みた上で、それでも完了できない場合:
                           → メインタスク自体を blocked にして report_completed で報告
-                          → result は 'blocked'、summary にブロック理由を記載
-                        - 一部完了で継続不可の場合も同様に報告してください
+                          → result は 'blocked'、summary に試みた対処と残る問題を記載
+                        - すぐに諦めず、まず対処を試みてください
                         """,
                     "state": "needs_review",
                     "self_blocked_subtasks": selfBlockedTasks,

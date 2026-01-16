@@ -113,6 +113,9 @@ targets:
         PRODUCT_NAME: mcp-server-pm
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "@executable_path"
+          - "@executable_path/../Frameworks"
 
   # 単体テスト - Domain
   DomainTests:
@@ -164,6 +167,31 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
 
+  # 単体テスト - MCPServer
+  # Note: MCPServerはtoolタイプなので@testable importできない
+  # そのため、ソースファイルを直接テストターゲットに含める
+  MCPServerTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/MCPServerTests
+        type: group
+      - path: Sources/MCPServer
+        type: group
+        excludes:
+          - "main.swift"
+    dependencies:
+      - target: Infrastructure
+      - target: UseCase
+      - target: Domain
+      - package: ArgumentParser
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.mcpservertests
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+
   # UIテスト
   AIAgentPMUITests:
     type: bundle.ui-testing
@@ -191,6 +219,7 @@ schemes:
         DomainTests: [test]
         UseCaseTests: [test]
         InfrastructureTests: [test]
+        MCPServerTests: [test]
         AIAgentPMUITests: [test]
     run:
       config: Debug
@@ -202,4 +231,5 @@ schemes:
         - DomainTests
         - UseCaseTests
         - InfrastructureTests
+        - MCPServerTests
         - AIAgentPMUITests

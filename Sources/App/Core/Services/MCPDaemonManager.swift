@@ -125,10 +125,15 @@ public final class MCPDaemonManager: ObservableObject {
             return bundledPath
         }
 
-        // Fallback: Check alongside the app bundle (for development)
+        // Fallback: Check in the same Products/Debug directory as the app bundle (for Xcode development)
+        // App path: .../DerivedData/.../Build/Products/Debug/AIAgentPM.app/Contents/MacOS/AIAgentPM
+        // MCPServer path: .../DerivedData/.../Build/Products/Debug/mcp-server-pm
         if let execURL = Bundle.main.executableURL {
             let devPath = execURL
-                .deletingLastPathComponent()
+                .deletingLastPathComponent()  // AIAgentPM → MacOS
+                .deletingLastPathComponent()  // MacOS → Contents
+                .deletingLastPathComponent()  // Contents → AIAgentPM.app
+                .deletingLastPathComponent()  // AIAgentPM.app → Debug
                 .appendingPathComponent("mcp-server-pm")
                 .path
             debugLog(" Checking dev path: \(devPath)")
@@ -136,22 +141,6 @@ public final class MCPDaemonManager: ObservableObject {
                 debugLog(" Found executable at dev path")
                 return devPath
             }
-        }
-
-        // Fallback: Use swift build output (for development)
-        // Note: #file is resolved at compile time, so this path points to the original source location
-        // Path: Sources/App/Core/Services/MCPDaemonManager.swift
-        let projectRoot = URL(fileURLWithPath: #file)
-            .deletingLastPathComponent()  // MCPDaemonManager.swift → Services
-            .deletingLastPathComponent()  // Services → Core
-            .deletingLastPathComponent()  // Core → App
-            .deletingLastPathComponent()  // App → Sources
-            .deletingLastPathComponent()  // Sources → project root
-        let buildPath = projectRoot.appendingPathComponent(".build/debug/mcp-server-pm").path
-        debugLog(" Checking swift build path: \(buildPath)")
-        if FileManager.default.fileExists(atPath: buildPath) {
-            debugLog(" Found executable at swift build path")
-            return buildPath
         }
 
         // Final fallback
