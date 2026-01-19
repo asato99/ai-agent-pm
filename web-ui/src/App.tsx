@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { LoginPage, ProjectListPage } from '@/pages'
+import { LoginPage, ProjectListPage, TaskBoardPage } from '@/pages'
 import { ProtectedRoute } from '@/components/auth'
 
 function App() {
@@ -15,7 +15,14 @@ function App() {
           </ProtectedRoute>
         }
       />
-      <Route path="/projects/:id" element={<div>Task Board (TODO)</div>} />
+      <Route
+        path="/projects/:id"
+        element={
+          <ProtectedRoute>
+            <TaskBoardPage />
+          </ProtectedRoute>
+        }
+      />
       <Route path="*" element={<div>404 Not Found</div>} />
     </Routes>
   )

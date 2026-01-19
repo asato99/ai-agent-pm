@@ -1,5 +1,59 @@
 import { http, HttpResponse } from 'msw'
 
+interface Task {
+  id: string
+  projectId: string
+  title: string
+  description: string
+  status: string
+  priority: string
+  assigneeId: string | null
+  creatorId: string
+  dependencies: string[]
+  contexts: unknown[]
+  createdAt: string
+  updatedAt: string
+}
+
+// In-memory task store for E2E tests
+const initialTasks: Task[] = [
+  {
+    id: 'task-1',
+    projectId: 'project-1',
+    title: 'API実装',
+    description: 'REST APIエンドポイントの実装',
+    status: 'in_progress',
+    priority: 'high',
+    assigneeId: 'worker-1',
+    creatorId: 'manager-1',
+    dependencies: [],
+    contexts: [],
+    createdAt: '2024-01-10T00:00:00Z',
+    updatedAt: '2024-01-15T10:00:00Z',
+  },
+  {
+    id: 'task-2',
+    projectId: 'project-1',
+    title: 'DB設計',
+    description: 'データベーススキーマの設計',
+    status: 'done',
+    priority: 'medium',
+    assigneeId: 'worker-2',
+    creatorId: 'manager-1',
+    dependencies: [],
+    contexts: [],
+    createdAt: '2024-01-08T00:00:00Z',
+    updatedAt: '2024-01-12T14:00:00Z',
+  },
+]
+
+let tasks: Task[] = [...initialTasks]
+
+// Reset tasks to initial state (call between tests)
+export function resetMockTasks() {
+  tasks = [...initialTasks]
+}
+
 export const handlers = [
   // Auth
   http.post('/api/auth/login', async ({ request }) => {
@@ -15,7 +69,7 @@ export const handlers = [
           agentType: 'ai',
           status: 'active',
           hierarchyType: 'manager',
-          parentId: 'owner-1',
+          parentId: null,  // Top-level manager has no parent
         },
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       })
@@ -41,7 +95,7 @@ export const handlers = [
         agentType: 'ai',
         status: 'active',
         hierarchyType: 'manager',
-        parentId: 'owner-1',
+        parentId: null,  // Top-level manager has no parent
       })
     }
     return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
@@ -83,38 +137,89 @@ export const handlers = [
     ])
   }),
 
-  // Tasks
-  http.get('/api/projects/:projectId/tasks', () => {
-    return HttpResponse.json([
-      {
-        id: 'task-1',
-        projectId: 'project-1',
-        title: 'API実装',
-        description: 'REST APIエンドポイントの実装',
-        status: 'in_progress',
-        priority: 'high',
-        assigneeId: 'worker-1',
-        creatorId: 'manager-1',
-        dependencies: [],
-        contexts: [],
-        createdAt: '2024-01-10T00:00:00Z',
+  // Project detail
+  http.get('/api/projects/:projectId', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId } = params
+    if (projectId === 'project-1') {
+      return HttpResponse.json({
+        id: 'project-1',
+        name: 'ECサイト開発',
+        description: 'ECサイトの新規開発プロジェクト',
+        status: 'active',
+        createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-15T10:00:00Z',
-      },
-      {
-        id: 'task-2',
-        projectId: 'project-1',
-        title: 'DB設計',
-        description: 'データベーススキーマの設計',
-        status: 'done',
-        priority: 'medium',
-        assigneeId: 'worker-2',
-        creatorId: 'manager-1',
-        dependencies: [],
-        contexts: [],
-        createdAt: '2024-01-08T00:00:00Z',
-        updatedAt: '2024-01-12T14:00:00Z',
-      },
-    ])
+        taskCount: 12,
+        completedCount: 5,
+        inProgressCount: 3,
+        blockedCount: 1,
+        myTaskCount: 3,
+      })
+    }
+    return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
+
+  // Tasks - returns dynamic task list
+  http.get('/api/projects/:projectId/tasks', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId } = params
+    const projectTasks = tasks.filter(t => t.projectId === projectId)
+    return HttpResponse.json(projectTasks)
+  }),
+
+  // Create task - adds to dynamic task list
+  http.post('/api/projects/:projectId/tasks', async ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const body = (await request.json()) as {
+      title: string
+      description?: string
+      priority?: string
+    }
+    const { projectId } = params
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      projectId: projectId as string,
+      title: body.title,
+      description: body.description || '',
+      status: 'backlog',
+      priority: body.priority || 'medium',
+      assigneeId: null,
+      creatorId: 'manager-1',
+      dependencies: [],
+      contexts: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    tasks.push(newTask)
+    return HttpResponse.json(newTask)
+  }),
+
+  // Update task status
+  http.patch('/api/tasks/:taskId', async ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const body = (await request.json()) as { status?: string }
+    const { taskId } = params
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) {
+      return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+    }
+    if (body.status) {
+      task.status = body.status
+      task.updatedAt = new Date().toISOString()
+    }
+    return HttpResponse.json(task)
   }),
 
   // Assignable agents
@@ -127,7 +232,7 @@ export const handlers = [
         agentType: 'ai',
         status: 'active',
         hierarchyType: 'manager',
-        parentId: 'owner-1',
+        parentId: null,  // Top-level manager has no parent
       },
       {
         id: 'worker-1',

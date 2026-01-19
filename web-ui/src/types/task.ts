@@ -2,8 +2,9 @@ export type TaskStatus =
   | 'backlog'
   | 'todo'
   | 'in_progress'
-  | 'done'
   | 'blocked'
+  | 'done'
+  | 'cancelled'
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
 

@@ -1,6 +1,6 @@
 export type AgentType = 'ai' | 'human'
-export type AgentStatus = 'active' | 'inactive' | 'busy'
-export type HierarchyType = 'owner' | 'manager' | 'worker'
+export type AgentStatus = 'active' | 'inactive' | 'suspended' | 'archived'
+export type AgentHierarchyType = 'manager' | 'worker'
 
 export interface Agent {
   id: string
@@ -8,6 +8,6 @@ export interface Agent {
   role: string
   agentType: AgentType
   status: AgentStatus
-  hierarchyType: HierarchyType
+  hierarchyType: AgentHierarchyType
   parentId: string | null
 }

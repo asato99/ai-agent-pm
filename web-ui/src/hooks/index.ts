@@ -1,2 +1,4 @@
 export { useAuth } from './useAuth'
+export { useProject } from './useProject'
 export { useProjects } from './useProjects'
+export { useTasks } from './useTasks'
