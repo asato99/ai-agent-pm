@@ -26,6 +26,8 @@ public final class RESTServer {
     private let taskRepository: TaskRepository
     private let sessionRepository: AgentSessionRepository
     private let credentialRepository: AgentCredentialRepository
+    private let handoffRepository: HandoffRepository
+    private let eventRepository: EventRepository
 
     /// Initialize the REST server
     /// - Parameters:
@@ -43,6 +45,8 @@ public final class RESTServer {
         self.taskRepository = TaskRepository(database: database)
         self.sessionRepository = AgentSessionRepository(database: database)
         self.credentialRepository = AgentCredentialRepository(database: database)
+        self.handoffRepository = HandoffRepository(database: database)
+        self.eventRepository = EventRepository(database: database)
     }
 
     public func run() async throws {
@@ -279,6 +283,23 @@ public final class RESTServer {
         let agentRouter = protectedRouter.group("agents")
         agentRouter.get("assignable") { [self] request, context in
             try await listAssignableAgents(request: request, context: context)
+        }
+
+        // Handoffs
+        let handoffRouter = protectedRouter.group("handoffs")
+        handoffRouter.get { [self] request, context in
+            try await listHandoffs(request: request, context: context)
+        }
+        handoffRouter.post { [self] request, context in
+            try await createHandoff(request: request, context: context)
+        }
+        handoffRouter.post(":handoffId/accept") { [self] request, context in
+            try await acceptHandoff(request: request, context: context)
+        }
+
+        // Handoffs for a specific task
+        taskRouter.get(":taskId/handoffs") { [self] request, context in
+            try await listTaskHandoffs(request: request, context: context)
         }
     }
 
@@ -633,6 +654,154 @@ public final class RESTServer {
         return jsonResponse(dtos)
     }
 
+    // MARK: - Handoff Handlers
+
+    /// GET /api/handoffs - 自分宛ての未処理ハンドオフ一覧
+    private func listHandoffs(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let agentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        let handoffs = try handoffRepository.findPending(agentId: agentId)
+        let dtos = handoffs.map { HandoffDTO(from: $0) }
+        return jsonResponse(dtos)
+    }
+
+    /// POST /api/handoffs - ハンドオフ作成
+    private func createHandoff(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let agentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        // Parse request body
+        let body = try await request.body.collect(upTo: 1024 * 1024)
+        guard let data = body.getData(at: 0, length: body.readableBytes),
+              let createRequest = try? JSONDecoder().decode(CreateHandoffRequest.self, from: data) else {
+            return errorResponse(status: .badRequest, message: "Invalid request body")
+        }
+
+        // Validate summary
+        guard !createRequest.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return errorResponse(status: .badRequest, message: "Summary cannot be empty")
+        }
+
+        // Validate task exists
+        let taskId = TaskID(value: createRequest.taskId)
+        guard let task = try taskRepository.findById(taskId) else {
+            return errorResponse(status: .notFound, message: "Task not found")
+        }
+
+        // Validate toAgentId if provided
+        var toAgentId: AgentID? = nil
+        if let toAgentIdStr = createRequest.toAgentId {
+            toAgentId = AgentID(value: toAgentIdStr)
+            guard try agentRepository.findById(toAgentId!) != nil else {
+                return errorResponse(status: .badRequest, message: "Target agent not found")
+            }
+        }
+
+        // Create handoff
+        let handoff = Handoff(
+            id: HandoffID(value: UUID().uuidString),
+            taskId: taskId,
+            fromAgentId: agentId,
+            toAgentId: toAgentId,
+            summary: createRequest.summary,
+            context: createRequest.context,
+            recommendations: createRequest.recommendations
+        )
+
+        try handoffRepository.save(handoff)
+
+        // Record event
+        var metadata: [String: String] = [:]
+        if let toAgent = toAgentId {
+            metadata["to_agent_id"] = toAgent.value
+        }
+
+        let event = StateChangeEvent(
+            id: EventID(value: UUID().uuidString),
+            projectId: task.projectId,
+            entityType: .handoff,
+            entityId: handoff.id.value,
+            eventType: .created,
+            agentId: agentId,
+            metadata: metadata.isEmpty ? nil : metadata
+        )
+        try eventRepository.save(event)
+
+        var response = jsonResponse(HandoffDTO(from: handoff))
+        response.status = .created
+        return response
+    }
+
+    /// POST /api/handoffs/:handoffId/accept - ハンドオフ承認
+    private func acceptHandoff(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let agentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let handoffIdStr = context.parameters.get("handoffId") else {
+            return errorResponse(status: .badRequest, message: "Missing handoff ID")
+        }
+
+        let handoffId = HandoffID(value: handoffIdStr)
+        guard var handoff = try handoffRepository.findById(handoffId) else {
+            return errorResponse(status: .notFound, message: "Handoff not found")
+        }
+
+        // Check if already accepted
+        guard handoff.acceptedAt == nil else {
+            return errorResponse(status: .badRequest, message: "Handoff already accepted")
+        }
+
+        // Check if target agent matches (if specified)
+        if let targetAgentId = handoff.toAgentId {
+            guard targetAgentId == agentId else {
+                return errorResponse(status: .forbidden, message: "This handoff is not for you")
+            }
+        }
+
+        // Accept handoff
+        handoff.acceptedAt = Date()
+        try handoffRepository.save(handoff)
+
+        // Record event
+        guard let task = try taskRepository.findById(handoff.taskId) else {
+            return errorResponse(status: .internalServerError, message: "Task not found for handoff")
+        }
+
+        let event = StateChangeEvent(
+            id: EventID(value: UUID().uuidString),
+            projectId: task.projectId,
+            entityType: .handoff,
+            entityId: handoff.id.value,
+            eventType: .completed,
+            agentId: agentId,
+            previousState: "pending",
+            newState: "accepted"
+        )
+        try eventRepository.save(event)
+
+        return jsonResponse(HandoffDTO(from: handoff))
+    }
+
+    /// GET /api/tasks/:taskId/handoffs - タスクに関連するハンドオフ一覧
+    private func listTaskHandoffs(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let taskIdStr = context.parameters.get("taskId") else {
+            return errorResponse(status: .badRequest, message: "Missing task ID")
+        }
+
+        let taskId = TaskID(value: taskIdStr)
+        guard try taskRepository.findById(taskId) != nil else {
+            return errorResponse(status: .notFound, message: "Task not found")
+        }
+
+        let handoffs = try handoffRepository.findByTask(taskId)
+        let dtos = handoffs.map { HandoffDTO(from: $0) }
+        return jsonResponse(dtos)
+    }
+
     // MARK: - Helpers
 
     private func calculateTaskCounts(tasks: [Domain.Task], agentId: AgentID) -> (counts: TaskCounts, myTasks: Int) {
@@ -712,4 +881,42 @@ struct TaskPermissionsDTO: Encodable {
     let canReassign: Bool
     let validStatusTransitions: [String]
     let reason: String?
+}
+
+// MARK: - Handoff DTOs
+
+struct HandoffDTO: Encodable {
+    let id: String
+    let taskId: String
+    let fromAgentId: String
+    let toAgentId: String?
+    let summary: String
+    let context: String?
+    let recommendations: String?
+    let acceptedAt: String?
+    let createdAt: String
+    let isPending: Bool
+    let isTargeted: Bool
+
+    init(from handoff: Handoff) {
+        self.id = handoff.id.value
+        self.taskId = handoff.taskId.value
+        self.fromAgentId = handoff.fromAgentId.value
+        self.toAgentId = handoff.toAgentId?.value
+        self.summary = handoff.summary
+        self.context = handoff.context
+        self.recommendations = handoff.recommendations
+        self.acceptedAt = handoff.acceptedAt.map { ISO8601DateFormatter().string(from: $0) }
+        self.createdAt = ISO8601DateFormatter().string(from: handoff.createdAt)
+        self.isPending = handoff.isPending
+        self.isTargeted = handoff.isTargeted
+    }
+}
+
+struct CreateHandoffRequest: Decodable {
+    let taskId: String
+    let toAgentId: String?
+    let summary: String
+    let context: String?
+    let recommendations: String?
 }

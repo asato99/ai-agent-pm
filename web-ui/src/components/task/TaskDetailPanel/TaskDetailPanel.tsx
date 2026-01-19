@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '@/api/client'
-import { useTaskPermissions } from '@/hooks'
-import type { Task, TaskStatus } from '@/types'
+import { useTaskPermissions, useTaskHandoffs, useCreateHandoff, useAssignableAgents } from '@/hooks'
+import type { Task, TaskStatus, CreateHandoffInput } from '@/types'
 import { StatusPicker } from './StatusPicker'
+import { TaskEditForm } from '../TaskEditForm'
 
 interface TaskDetailPanelProps {
   task: Task | null
@@ -28,7 +29,15 @@ const priorityStyles: Record<string, string> = {
 export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps) {
   const queryClient = useQueryClient()
   const { permissions, isLoading: permissionsLoading } = useTaskPermissions(task?.id ?? null)
+  const { handoffs, isLoading: handoffsLoading } = useTaskHandoffs(task?.id ?? null)
+  const { agents } = useAssignableAgents()
+  const createHandoffMutation = useCreateHandoff()
   const [error, setError] = useState<string | null>(null)
+  const [isEditFormOpen, setIsEditFormOpen] = useState(false)
+  const [isHandoffFormOpen, setIsHandoffFormOpen] = useState(false)
+  const [handoffSummary, setHandoffSummary] = useState('')
+  const [handoffContext, setHandoffContext] = useState('')
+  const [handoffToAgentId, setHandoffToAgentId] = useState('')
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ taskId, status }: { taskId: string; status: TaskStatus }) => {
@@ -160,6 +169,139 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
               </div>
             </div>
           )}
+
+          {/* Handoffs Section */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-700">ハンドオフ履歴</h3>
+              <button
+                type="button"
+                onClick={() => setIsHandoffFormOpen(!isHandoffFormOpen)}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                {isHandoffFormOpen ? 'キャンセル' : '+ 新規ハンドオフ'}
+              </button>
+            </div>
+
+            {/* Create Handoff Form */}
+            {isHandoffFormOpen && (
+              <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      引き継ぎ先エージェント（任意）
+                    </label>
+                    <select
+                      value={handoffToAgentId}
+                      onChange={(e) => setHandoffToAgentId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                    >
+                      <option value="">指定しない（全員に公開）</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      サマリー <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={handoffSummary}
+                      onChange={(e) => setHandoffSummary(e.target.value)}
+                      placeholder="引き継ぎ内容の概要"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      コンテキスト（任意）
+                    </label>
+                    <textarea
+                      value={handoffContext}
+                      onChange={(e) => setHandoffContext(e.target.value)}
+                      placeholder="作業の背景や注意点など"
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!handoffSummary.trim()) return
+                      const input: CreateHandoffInput = {
+                        taskId: task.id,
+                        summary: handoffSummary,
+                        context: handoffContext || null,
+                        toAgentId: handoffToAgentId || null,
+                      }
+                      createHandoffMutation.mutate(input, {
+                        onSuccess: () => {
+                          setHandoffSummary('')
+                          setHandoffContext('')
+                          setHandoffToAgentId('')
+                          setIsHandoffFormOpen(false)
+                        },
+                        onError: (err) => {
+                          setError(err.message)
+                        },
+                      })
+                    }}
+                    disabled={!handoffSummary.trim() || createHandoffMutation.isPending}
+                    className="w-full px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm"
+                  >
+                    {createHandoffMutation.isPending ? '作成中...' : 'ハンドオフを作成'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Handoffs List */}
+            {handoffsLoading ? (
+              <div className="animate-pulse space-y-2">
+                <div className="h-16 bg-gray-200 rounded" />
+              </div>
+            ) : handoffs.length === 0 ? (
+              <p className="text-sm text-gray-500">ハンドオフ履歴はありません</p>
+            ) : (
+              <div className="space-y-2">
+                {handoffs.map((handoff) => (
+                  <div
+                    key={handoff.id}
+                    className={`p-3 rounded-lg border ${
+                      handoff.isPending ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-500">
+                        {new Date(handoff.createdAt).toLocaleString('ja-JP')}
+                      </span>
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded ${
+                          handoff.isPending
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-green-100 text-green-800'
+                        }`}
+                      >
+                        {handoff.isPending ? '保留中' : '承認済み'}
+                      </span>
+                    </div>
+                    <p className="text-sm font-medium text-gray-900">{handoff.summary}</p>
+                    {handoff.context && (
+                      <p className="text-xs text-gray-600 mt-1">{handoff.context}</p>
+                    )}
+                    <div className="text-xs text-gray-500 mt-1">
+                      From: {handoff.fromAgentId}
+                      {handoff.toAgentId && ` → To: ${handoff.toAgentId}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
@@ -171,8 +313,24 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
           >
             閉じる
           </button>
+          {permissions?.canEdit && (
+            <button
+              type="button"
+              onClick={() => setIsEditFormOpen(true)}
+              className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700"
+            >
+              編集
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Edit Form Modal */}
+      <TaskEditForm
+        task={task}
+        isOpen={isEditFormOpen}
+        onClose={() => setIsEditFormOpen(false)}
+      />
     </div>
   )
 }
