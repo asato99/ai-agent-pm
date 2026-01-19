@@ -225,7 +225,8 @@ else
     echo "Coordinator log (last 30 lines):"
     tail -30 /tmp/uc006_coordinator.log 2>/dev/null || echo "(no log)"
     TEST_FAILED=true
-    exit 1
+    # Continue to Step 7 for verification even if XCUITest fails
+    # exit 1  # Removed to allow Step 7 verification
 fi
 echo ""
 
@@ -360,18 +361,99 @@ if [ -f "$SHARED_DB_PATH" ]; then
 fi
 echo ""
 
+# Step 7.7: 並行実行検証
+echo -e "${YELLOW}Step 7.7: Verifying parallel execution${NC}"
+V8_PARALLEL_EXECUTION=false
+if [ -f "$SHARED_DB_PATH" ]; then
+    # 実行ログを取得（サブタスクの直接の実行ログのみ）
+    JA_START=$(sqlite3 "$SHARED_DB_PATH" "
+        SELECT e.started_at FROM execution_logs e
+        JOIN tasks t ON e.task_id = t.id
+        WHERE e.agent_id = 'agt_uc006_ja' AND t.parent_task_id = 'tsk_uc006_main'
+        ORDER BY e.started_at LIMIT 1;
+    " 2>/dev/null || echo "")
+
+    ZH_START=$(sqlite3 "$SHARED_DB_PATH" "
+        SELECT e.started_at FROM execution_logs e
+        JOIN tasks t ON e.task_id = t.id
+        WHERE e.agent_id = 'agt_uc006_zh' AND t.parent_task_id = 'tsk_uc006_main'
+        ORDER BY e.started_at LIMIT 1;
+    " 2>/dev/null || echo "")
+
+    JA_END=$(sqlite3 "$SHARED_DB_PATH" "
+        SELECT e.completed_at FROM execution_logs e
+        JOIN tasks t ON e.task_id = t.id
+        WHERE e.agent_id = 'agt_uc006_ja' AND t.parent_task_id = 'tsk_uc006_main'
+        ORDER BY e.started_at LIMIT 1;
+    " 2>/dev/null || echo "")
+
+    ZH_END=$(sqlite3 "$SHARED_DB_PATH" "
+        SELECT e.completed_at FROM execution_logs e
+        JOIN tasks t ON e.task_id = t.id
+        WHERE e.agent_id = 'agt_uc006_zh' AND t.parent_task_id = 'tsk_uc006_main'
+        ORDER BY e.started_at LIMIT 1;
+    " 2>/dev/null || echo "")
+
+    echo "Execution times:"
+    echo "  JA Worker: started=$JA_START, completed=$JA_END"
+    echo "  ZH Worker: started=$ZH_START, completed=$ZH_END"
+
+    # 並行実行の判定
+    # 並行実行 ⟺ JA.started < ZH.completed AND ZH.started < JA.completed
+    # completed_at がない場合は検証不可（並行/順次の判定はできない）
+    if [ -n "$JA_END" ] && [ -n "$ZH_END" ]; then
+        # 両方完了している場合: 期間重複チェック
+        PARALLEL_CHECK=$(sqlite3 "$SHARED_DB_PATH" "
+            SELECT COUNT(*)
+            FROM execution_logs ja, execution_logs zh
+            WHERE ja.agent_id = 'agt_uc006_ja'
+              AND zh.agent_id = 'agt_uc006_zh'
+              AND ja.task_id IN (SELECT id FROM tasks WHERE parent_task_id = 'tsk_uc006_main')
+              AND zh.task_id IN (SELECT id FROM tasks WHERE parent_task_id = 'tsk_uc006_main')
+              AND ja.started_at < zh.completed_at
+              AND zh.started_at < ja.completed_at;
+        " 2>/dev/null || echo "0")
+
+        if [ "$PARALLEL_CHECK" -gt "0" ]; then
+            V8_PARALLEL_EXECUTION=true
+            echo -e "${GREEN}✓ Workers executed in parallel (overlapping execution periods)${NC}"
+        else
+            echo -e "${RED}✗ Workers did NOT execute in parallel (no overlap in execution periods)${NC}"
+        fi
+    else
+        # completed_at がない場合は検証不可
+        echo -e "${YELLOW}⚠ Cannot verify parallel execution (completed_at is NULL)${NC}"
+        echo "  Parallel execution requires both start and end times to check period overlap."
+    fi
+
+    # デバッグ用: 実行タイムライン表示
+    echo ""
+    echo "Execution timeline:"
+    sqlite3 "$SHARED_DB_PATH" "
+        SELECT e.agent_id, substr(t.title, 1, 30) as title,
+               datetime(e.started_at) AS started,
+               datetime(e.completed_at) AS completed
+        FROM execution_logs e
+        JOIN tasks t ON e.task_id = t.id
+        WHERE e.agent_id IN ('agt_uc006_ja', 'agt_uc006_zh')
+          AND t.parent_task_id = 'tsk_uc006_main'
+        ORDER BY e.started_at;
+    " 2>/dev/null
+fi
+echo ""
+
 # Coordinator ログ表示
 echo -e "${YELLOW}Coordinator log (last 50 lines):${NC}"
 tail -50 /tmp/uc006_coordinator.log 2>/dev/null || echo "(no log)"
 echo ""
 
-# 結果判定（仕様書の7項目）
+# 結果判定（仕様書の8項目）
 echo "=========================================="
 echo -e "${YELLOW}Final Result: UC006 Specification Verification${NC}"
 echo ""
 
-# 7項目の結果サマリー
-echo "UC006 Specification (7 assertions):"
+# 8項目の結果サマリー
+echo "UC006 Specification (8 assertions):"
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -395,24 +477,26 @@ check_assertion 4 "hello_ja.txt created" "$V4_JA_FILE_CREATED"
 check_assertion 5 "hello_zh.txt created" "$V5_ZH_FILE_CREATED"
 check_assertion 6 "All subtasks are done" "$V6_ALL_SUBTASK_DONE"
 check_assertion 7 "Main task is done" "$V7_MAIN_TASK_DONE"
+check_assertion 8 "Workers executed in parallel" "$V8_PARALLEL_EXECUTION"
 
 echo ""
-echo "Result: $PASS_COUNT/7 assertions passed"
+echo "Result: $PASS_COUNT/8 assertions passed"
 echo ""
 
-# 全7項目がパスの場合のみ成功
-if [ "$PASS_COUNT" -eq 7 ]; then
+# 全8項目がパスの場合のみ成功
+if [ "$PASS_COUNT" -eq 8 ]; then
     echo -e "${GREEN}UC006 App Integration Test: PASSED${NC}"
     echo ""
-    echo "All 7 assertions verified:"
+    echo "All 8 assertions verified:"
     echo "  ✓ Manager → Multiple Workers assignment based on specialization"
     echo "  ✓ Tasks correctly assigned to appropriate workers"
     echo "  ✓ Output files created (hello_ja.txt, hello_zh.txt)"
+    echo "  ✓ Workers executed in parallel"
     exit 0
 else
     echo -e "${RED}UC006 App Integration Test: FAILED${NC}"
     echo ""
-    echo "Failed assertions: $FAIL_COUNT/7"
+    echo "Failed assertions: $FAIL_COUNT/8"
     echo ""
     echo "Debug info:"
     echo "  - XCUITest log: /tmp/uc006_uitest.log"

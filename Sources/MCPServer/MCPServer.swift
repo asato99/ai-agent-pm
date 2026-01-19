@@ -1670,6 +1670,7 @@ final class MCPServer {
         nextSteps: String?
     ) throws -> [String: Any] {
         Self.log("[MCP] reportCompleted called for agent: '\(agentId)', project: '\(projectId)', result: '\(result)'")
+        Self.log("[MCP] reportCompleted: Fetching assigned tasks...")
 
         let id = AgentID(value: agentId)
         let projId = ProjectID(value: projectId)
@@ -1842,8 +1843,15 @@ final class MCPServer {
         Self.log("[MCP] reportCompleted: \(endedSessionCount) workflow session(s) ended for agent '\(agentId)'")
 
         // Phase 4: 実行ログを完了（report_execution_completeの代替）
-        // 最新の実行ログを取得して完了状態に更新
-        if var executionLog = try executionLogRepository.findLatestByAgentAndTask(agentId: id, taskId: task.id) {
+        // エージェントの running 状態の実行ログを取得して完了状態に更新
+        // Note: findLatestByAgentAndTask(taskId: task.id) は使えない
+        //       task.id はワーカーが作成したサブサブタスクの可能性があり、
+        //       そのタスクには実行ログがない（実行ログは start_task で作成されるため）
+        // Bug fix: 全ての running 状態の実行ログを完了させる
+        // 同じエージェントが複数回 start_task を呼び出すと、複数の running ログが存在する可能性がある
+        let runningLogs = try executionLogRepository.findRunning(agentId: id)
+        Self.log("[MCP] reportCompleted: Found \(runningLogs.count) running execution logs for agent '\(agentId)'")
+        for var executionLog in runningLogs {
             let exitCode = result == "success" ? 0 : 1
             let duration = Date().timeIntervalSince(executionLog.startedAt)
             let errorMessage = result != "success" ? summary : nil
@@ -2304,12 +2312,13 @@ final class MCPServer {
         let completedSubTasks = subTasks.filter { $0.status == .done }
         let blockedSubTasks = subTasks.filter { $0.status == .blocked }
 
-        // 未割り当てサブタスク: マネージャーに割り当てられたままの pending タスク
+        // 未割り当てサブタスク: assigneeが未設定(nil)、またはマネージャーに割り当てられたままの pending タスク
         // これらはまずワーカーへの割り当て（assignee変更）が必要
-        let unassignedSubTasks = pendingSubTasks.filter { $0.assigneeId == mainTask.assigneeId }
+        let unassignedSubTasks = pendingSubTasks.filter { $0.assigneeId == nil || $0.assigneeId == mainTask.assigneeId }
 
         // ワーカー割り当て済みサブタスク: ワーカーに割り当て済みの pending タスク
-        let workerAssignedSubTasks = pendingSubTasks.filter { $0.assigneeId != mainTask.assigneeId }
+        // 注意: assigneeIdがnilの場合は「ワーカー割り当て済み」ではない
+        let workerAssignedSubTasks = pendingSubTasks.filter { $0.assigneeId != nil && $0.assigneeId != mainTask.assigneeId }
 
         // 実行可能サブタスク: ワーカー割り当て済み かつ 依存関係がクリアされたタスク
         // これらは in_progress に変更可能
@@ -3222,6 +3231,7 @@ final class MCPServer {
 
     /// update_task_status - タスクのステータスを更新
     /// UpdateTaskStatusUseCaseに委譲（カスケードブロック等のロジックを統一）
+    /// 参照: docs/design/EXECUTION_LOG_DESIGN.md - タスク完了時の実行ログ更新
     private func updateTaskStatus(taskId: String, status: String, reason: String?) throws -> [String: Any] {
         guard let newStatus = TaskStatus(rawValue: status) else {
             throw MCPError.invalidStatus(status)
@@ -3244,6 +3254,26 @@ final class MCPServer {
             )
 
             logDebug("Task \(taskId) status changed: \(result.previousStatus.rawValue) -> \(result.task.status.rawValue)")
+
+            // タスクが done に遷移した場合、対応する実行ログも完了させる
+            // これにより、report_completed を呼ばずに update_task_status で完了した場合も
+            // 実行ログが正しく完了状態になる
+            if newStatus == .done, let assigneeId = result.task.assigneeId {
+                if var executionLog = try executionLogRepository.findLatestByAgentAndTask(
+                    agentId: assigneeId,
+                    taskId: TaskID(value: taskId)
+                ), executionLog.status == .running {
+                    let duration = Date().timeIntervalSince(executionLog.startedAt)
+                    executionLog.complete(
+                        exitCode: 0,
+                        durationSeconds: duration,
+                        logFilePath: nil,
+                        errorMessage: nil
+                    )
+                    try executionLogRepository.save(executionLog)
+                    Self.log("[MCP] ExecutionLog auto-completed via update_task_status: \(executionLog.id.value)")
+                }
+            }
 
             return [
                 "success": true,
