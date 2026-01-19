@@ -2226,7 +2226,19 @@ final class MCPServer {
         let completedSubTasks = subTasks.filter { $0.status == .done }
         let blockedSubTasks = subTasks.filter { $0.status == .blocked }
 
-        Self.log("[MCP] getManagerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count), blocked=\(blockedSubTasks.count)")
+        // 依存関係が全て完了しているタスクのみを割り当て可能とする
+        let assignableSubTasks = pendingSubTasks.filter { task in
+            // 依存タスクがない場合は割り当て可能
+            if task.dependencies.isEmpty {
+                return true
+            }
+            // 全ての依存タスクがdoneの場合のみ割り当て可能
+            return task.dependencies.allSatisfy { depId in
+                subTasks.first { $0.id == depId }?.status == .done
+            }
+        }
+
+        Self.log("[MCP] getManagerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), assignable=\(assignableSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count), blocked=\(blockedSubTasks.count)")
 
         // サブタスクがまだ作成されていない
         if phase == "workflow:task_fetched" && subTasks.isEmpty {
@@ -2393,54 +2405,9 @@ final class MCPServer {
                 ]
             }
 
-            // 実行中のサブタスクがある → Worker の完了を待つ
-            // Context に waiting_for_workers を記録し、exit アクションを返す
-            // Coordinator が get_agent_action で待機状態を判断し、Worker 完了後に再起動する
-            if !inProgressSubTasks.isEmpty {
-                // 待機状態を Context に記録
-                let workflowSession = Session(
-                    id: SessionID.generate(),
-                    projectId: mainTask.projectId,
-                    agentId: mainTask.assigneeId!,
-                    startedAt: Date(),
-                    status: .active
-                )
-                try sessionRepository.save(workflowSession)
-
-                let context = Context(
-                    id: ContextID.generate(),
-                    taskId: mainTask.id,
-                    sessionId: workflowSession.id,
-                    agentId: mainTask.assigneeId!,
-                    progress: "workflow:waiting_for_workers"
-                )
-                try contextRepository.save(context)
-                Self.log("[MCP] Manager waiting for workers, saved context: waiting_for_workers")
-
-                return [
-                    "action": "exit",
-                    "instruction": """
-                        サブタスクを Worker に委譲しました。
-                        Worker の完了を待つため、ここでプロセスを終了してください。
-                        Coordinator が Worker 完了後に自動的に再起動します。
-                        """,
-                    "state": "waiting_for_workers",
-                    "reason": "subtasks_delegated_to_workers",
-                    "in_progress_subtasks": inProgressSubTasks.map { [
-                        "id": $0.id.value,
-                        "title": $0.title,
-                        "assignee_id": $0.assigneeId?.value ?? "unassigned"
-                    ] as [String: Any] },
-                    "progress": [
-                        "completed": completedSubTasks.count,
-                        "in_progress": inProgressSubTasks.count,
-                        "total": subTasks.count
-                    ]
-                ]
-            }
-
-            // 未割り当てのサブタスクがある → Worker に委譲
-            if let nextSubTask = pendingSubTasks.first {
+            // 実行状態（in_progress）に変更可能なタスクがあるか判定
+            // 判断基準: assignableSubTasks（依存関係がクリアされたto_doタスク）の有無
+            if !assignableSubTasks.isEmpty {
                 // 下位エージェント（Worker）を取得
                 let subordinates = try agentRepository.findByParent(mainTask.assigneeId!)
                     .filter { $0.hierarchyType == .worker && $0.status == .active }
@@ -2448,18 +2415,19 @@ final class MCPServer {
                 // 利用可能な Worker がいない場合、タスクを blocked 状態にする
                 if subordinates.isEmpty {
                     Self.log("[MCP] No available workers, blocking subtask")
+                    let firstSubTask = assignableSubTasks[0]
                     return [
                         "action": "block_subtask",
                         "instruction": """
                             利用可能な Worker がいません。
-                            update_task_status を使用して、サブタスク '\(nextSubTask.id.value)' のステータスを
+                            update_task_status を使用して、サブタスク '\(firstSubTask.id.value)' のステータスを
                             'blocked' に変更し、blocked_reason に '利用可能なWorkerがいません' と設定してください。
                             その後、logout を呼び出してセッションを終了してください。
                             """,
                         "state": "no_available_workers",
                         "subtask_to_block": [
-                            "id": nextSubTask.id.value,
-                            "title": nextSubTask.title
+                            "id": firstSubTask.id.value,
+                            "title": firstSubTask.title
                         ],
                         "reason": "no_available_workers",
                         "progress": [
@@ -2468,6 +2436,10 @@ final class MCPServer {
                         ]
                     ]
                 }
+
+                // 次の1件を割り当て
+                let nextSubTask = assignableSubTasks[0]
+                Self.log("[MCP] Delegating task '\(nextSubTask.id.value)' (assignable: \(assignableSubTasks.count), inProgress: \(inProgressSubTasks.count))")
 
                 return [
                     "action": "delegate",
@@ -2491,6 +2463,85 @@ final class MCPServer {
                     ] as [String: Any] },
                     "progress": [
                         "completed": completedSubTasks.count,
+                        "in_progress": inProgressSubTasks.count,
+                        "assignable": assignableSubTasks.count,
+                        "total": subTasks.count
+                    ]
+                ]
+            }
+
+            // 実行状態に変更可能なタスクがない → exit
+            // 待機状態を Context に記録
+            let workflowSession = Session(
+                id: SessionID.generate(),
+                projectId: mainTask.projectId,
+                agentId: mainTask.assigneeId!,
+                startedAt: Date(),
+                status: .active
+            )
+            try sessionRepository.save(workflowSession)
+
+            let waitingState = !inProgressSubTasks.isEmpty ? "workflow:waiting_for_workers" : "workflow:waiting_for_dependencies"
+            let context = Context(
+                id: ContextID.generate(),
+                taskId: mainTask.id,
+                sessionId: workflowSession.id,
+                agentId: mainTask.assigneeId!,
+                progress: waitingState
+            )
+            try contextRepository.save(context)
+
+            if !inProgressSubTasks.isEmpty {
+                Self.log("[MCP] No more assignable tasks, waiting for workers (inProgress: \(inProgressSubTasks.count), pending: \(pendingSubTasks.count))")
+                return [
+                    "action": "exit",
+                    "instruction": """
+                        現在実行状態に変更可能なサブタスクがありません。
+                        Worker の完了を待つため、ここでプロセスを終了してください。
+                        Coordinator が Worker 完了後に自動的に再起動します。
+                        """,
+                    "state": "waiting_for_workers",
+                    "reason": "no_assignable_tasks",
+                    "in_progress_subtasks": inProgressSubTasks.map { [
+                        "id": $0.id.value,
+                        "title": $0.title,
+                        "assignee_id": $0.assigneeId?.value ?? "unassigned"
+                    ] as [String: Any] },
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "in_progress": inProgressSubTasks.count,
+                        "pending": pendingSubTasks.count,
+                        "assignable": 0,
+                        "total": subTasks.count
+                    ]
+                ]
+            } else {
+                Self.log("[MCP] No assignable tasks due to unmet dependencies (pending: \(pendingSubTasks.count))")
+                let pendingWithDeps = pendingSubTasks.map { task -> [String: Any] in
+                    let unmetDeps = task.dependencies.filter { depId in
+                        subTasks.first { $0.id == depId }?.status != .done
+                    }
+                    return [
+                        "id": task.id.value,
+                        "title": task.title,
+                        "unmet_dependencies": unmetDeps.map { $0.value }
+                    ]
+                }
+                return [
+                    "action": "exit",
+                    "instruction": """
+                        現在実行状態に変更可能なサブタスクがありません。
+                        保留中のタスクは依存関係の完了を待っています。
+                        Worker の完了後に自動的に再起動します。
+                        """,
+                    "state": "waiting_for_dependencies",
+                    "reason": "dependencies_not_met",
+                    "pending_tasks_with_dependencies": pendingWithDeps,
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "in_progress": 0,
+                        "pending": pendingSubTasks.count,
+                        "assignable": 0,
                         "total": subTasks.count
                     ]
                 ]
@@ -2527,7 +2578,7 @@ final class MCPServer {
             // 利用可能な Worker がいない場合、タスクを blocked 状態にする
             if subordinates.isEmpty {
                 Self.log("[MCP] No available workers after subtask creation, blocking subtasks")
-                if let firstSubTask = pendingSubTasks.first {
+                if let firstSubTask = assignableSubTasks.first {
                     return [
                         "action": "block_subtask",
                         "instruction": """
@@ -2550,25 +2601,36 @@ final class MCPServer {
                 }
             }
 
-            return [
-                "action": "delegate",
-                "instruction": """
-                    サブタスクを Worker に割り当ててください。
-                    assign_task ツールを使用して、task_id と assignee_id を指定してください。
-                    割り当て後、get_next_action を呼び出してください。
-                    """,
-                "state": "needs_delegation",
-                "subtasks": subTasks.map { [
-                    "id": $0.id.value,
-                    "title": $0.title
-                ] as [String: Any] },
-                "available_workers": subordinates.map { [
-                    "id": $0.id.value,
-                    "name": $0.name,
-                    "role": $0.role,
-                    "status": $0.status.rawValue
-                ] as [String: Any] }
-            ]
+            // 実行状態に変更可能なタスクがあれば1件返す
+            if let nextSubTask = assignableSubTasks.first {
+                Self.log("[MCP] Delegating first task after subtask creation (assignable: \(assignableSubTasks.count))")
+                return [
+                    "action": "delegate",
+                    "instruction": """
+                        サブタスクを Worker に割り当ててください。
+                        assign_task ツールを使用して、task_id と assignee_id を指定してください。
+                        割り当て後、update_task_status でサブタスクのステータスを in_progress に変更してください。
+                        その後、get_next_action を呼び出してください。
+                        """,
+                    "state": "needs_delegation",
+                    "next_subtask": [
+                        "id": nextSubTask.id.value,
+                        "title": nextSubTask.title,
+                        "description": nextSubTask.description
+                    ],
+                    "available_workers": subordinates.map { [
+                        "id": $0.id.value,
+                        "name": $0.name,
+                        "role": $0.role,
+                        "status": $0.status.rawValue
+                    ] as [String: Any] },
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "assignable": assignableSubTasks.count,
+                        "total": subTasks.count
+                    ]
+                ]
+            }
         }
 
         // フォールバック
