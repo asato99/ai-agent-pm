@@ -48,7 +48,11 @@ export const handlers = [
   }),
 
   // Projects
-  http.get('/api/projects', () => {
+  http.get('/api/projects', ({ request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
     return HttpResponse.json([
       {
         id: 'project-1',
