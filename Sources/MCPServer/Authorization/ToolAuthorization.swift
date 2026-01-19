@@ -90,8 +90,9 @@ struct ToolAuthorization {
         // 認証済み共通（Manager + Worker）- サブタスク作成用
         "create_task": .authenticated,  // Workers can create sub-tasks for self-execution
 
-        // Worker専用
-        "report_completed": .workerOnly,
+        // 認証済み共通（Manager + Worker）- タスク完了報告
+        // Managerも自分のメインタスクを完了報告する必要がある
+        "report_completed": .authenticated,
 
         // 認証済み共通（Manager + Worker）
         "report_model": .authenticated,

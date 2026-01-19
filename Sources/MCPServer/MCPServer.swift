@@ -2304,19 +2304,40 @@ final class MCPServer {
         let completedSubTasks = subTasks.filter { $0.status == .done }
         let blockedSubTasks = subTasks.filter { $0.status == .blocked }
 
-        // 依存関係が全て完了しているタスクのみを割り当て可能とする
-        let assignableSubTasks = pendingSubTasks.filter { task in
-            // 依存タスクがない場合は割り当て可能
+        // 未割り当てサブタスク: マネージャーに割り当てられたままの pending タスク
+        // これらはまずワーカーへの割り当て（assignee変更）が必要
+        let unassignedSubTasks = pendingSubTasks.filter { $0.assigneeId == mainTask.assigneeId }
+
+        // ワーカー割り当て済みサブタスク: ワーカーに割り当て済みの pending タスク
+        let workerAssignedSubTasks = pendingSubTasks.filter { $0.assigneeId != mainTask.assigneeId }
+
+        // 実行可能サブタスク: ワーカー割り当て済み かつ 依存関係がクリアされたタスク
+        // これらは in_progress に変更可能
+        let executableSubTasks = workerAssignedSubTasks.filter { task in
+            // 依存タスクがない場合は実行可能
             if task.dependencies.isEmpty {
                 return true
             }
-            // 全ての依存タスクがdoneの場合のみ割り当て可能
+            // 全ての依存タスクがdoneの場合のみ実行可能
             return task.dependencies.allSatisfy { depId in
                 subTasks.first { $0.id == depId }?.status == .done
             }
         }
 
-        Self.log("[MCP] getManagerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), assignable=\(assignableSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count), blocked=\(blockedSubTasks.count)")
+        Self.log("[MCP] getManagerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), unassigned=\(unassignedSubTasks.count), workerAssigned=\(workerAssignedSubTasks.count), executable=\(executableSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count), blocked=\(blockedSubTasks.count)")
+
+        // DEBUG: 各サブタスクの詳細をログ出力（バグ調査用）
+        for task in subTasks {
+            let depsStr = task.dependencies.map { $0.value }.joined(separator: ", ")
+            let depsStatus = task.dependencies.map { depId -> String in
+                if let depTask = subTasks.first(where: { $0.id == depId }) {
+                    return "\(depId.value)=\(depTask.status.rawValue)"
+                } else {
+                    return "\(depId.value)=NOT_IN_SUBTASKS"
+                }
+            }.joined(separator: ", ")
+            Self.log("[MCP] DEBUG subtask: id=\(task.id.value), status=\(task.status.rawValue), assignee=\(task.assigneeId?.value ?? "nil"), deps=[\(depsStr)], depsStatus=[\(depsStatus)]")
+        }
 
         // サブタスクがまだ作成されていない
         if phase == "workflow:task_fetched" && subTasks.isEmpty {
@@ -2483,9 +2504,9 @@ final class MCPServer {
                 ]
             }
 
-            // 実行状態（in_progress）に変更可能なタスクがあるか判定
-            // 判断基準: assignableSubTasks（依存関係がクリアされたto_doタスク）の有無
-            if !assignableSubTasks.isEmpty {
+            // Phase 1: 未割り当てタスクをワーカーに割り当て（assignee変更のみ）
+            // 全てのサブタスクがワーカーに割り当てられるまで繰り返す
+            if !unassignedSubTasks.isEmpty {
                 // 下位エージェント（Worker）を取得
                 let subordinates = try agentRepository.findByParent(mainTask.assigneeId!)
                     .filter { $0.hierarchyType == .worker && $0.status == .active }
@@ -2493,7 +2514,7 @@ final class MCPServer {
                 // 利用可能な Worker がいない場合、タスクを blocked 状態にする
                 if subordinates.isEmpty {
                     Self.log("[MCP] No available workers, blocking subtask")
-                    let firstSubTask = assignableSubTasks[0]
+                    let firstSubTask = unassignedSubTasks[0]
                     return [
                         "action": "block_subtask",
                         "instruction": """
@@ -2515,19 +2536,19 @@ final class MCPServer {
                     ]
                 }
 
-                // 次の1件を割り当て
-                let nextSubTask = assignableSubTasks[0]
-                Self.log("[MCP] Delegating task '\(nextSubTask.id.value)' (assignable: \(assignableSubTasks.count), inProgress: \(inProgressSubTasks.count))")
+                // 次の1件を割り当て（assigneeの変更のみ、in_progressにはしない）
+                let nextSubTask = unassignedSubTasks[0]
+                Self.log("[MCP] Assigning task '\(nextSubTask.id.value)' to worker (unassigned: \(unassignedSubTasks.count), executable: \(executableSubTasks.count))")
 
                 return [
-                    "action": "delegate",
+                    "action": "assign",
                     "instruction": """
                         次のサブタスクを Worker に割り当ててください。
                         assign_task ツールを使用して、task_id と assignee_id を指定してください。
-                        割り当て後、update_task_status でサブタスクのステータスを in_progress に変更してください。
-                        その後、get_next_action を呼び出してください。
+                        【重要】この段階では in_progress に変更しないでください。割り当てのみ行います。
+                        割り当て後、get_next_action を呼び出してください。
                         """,
-                    "state": "needs_delegation",
+                    "state": "needs_assignment",
                     "next_subtask": [
                         "id": nextSubTask.id.value,
                         "title": nextSubTask.title,
@@ -2541,8 +2562,38 @@ final class MCPServer {
                     ] as [String: Any] },
                     "progress": [
                         "completed": completedSubTasks.count,
+                        "unassigned": unassignedSubTasks.count,
+                        "worker_assigned": workerAssignedSubTasks.count,
+                        "executable": executableSubTasks.count,
                         "in_progress": inProgressSubTasks.count,
-                        "assignable": assignableSubTasks.count,
+                        "total": subTasks.count
+                    ]
+                ]
+            }
+
+            // Phase 2: 実行可能タスクを in_progress に変更
+            // 全て割り当て済みで、依存関係がクリアされたタスクがある場合
+            if !executableSubTasks.isEmpty {
+                let nextSubTask = executableSubTasks[0]
+                Self.log("[MCP] Starting task '\(nextSubTask.id.value)' (executable: \(executableSubTasks.count), inProgress: \(inProgressSubTasks.count))")
+
+                return [
+                    "action": "start_task",
+                    "instruction": """
+                        次のサブタスクを実行開始してください。
+                        update_task_status でサブタスクのステータスを in_progress に変更してください。
+                        その後、get_next_action を呼び出してください。
+                        """,
+                    "state": "needs_start",
+                    "next_subtask": [
+                        "id": nextSubTask.id.value,
+                        "title": nextSubTask.title,
+                        "assignee_id": nextSubTask.assigneeId?.value ?? "unknown"
+                    ],
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "executable": executableSubTasks.count,
+                        "in_progress": inProgressSubTasks.count,
                         "total": subTasks.count
                     ]
                 ]
@@ -2588,13 +2639,12 @@ final class MCPServer {
                     "progress": [
                         "completed": completedSubTasks.count,
                         "in_progress": inProgressSubTasks.count,
-                        "pending": pendingSubTasks.count,
-                        "assignable": 0,
+                        "worker_assigned_waiting": workerAssignedSubTasks.count,
                         "total": subTasks.count
                     ]
                 ]
             } else {
-                Self.log("[MCP] No assignable tasks due to unmet dependencies (pending: \(pendingSubTasks.count))")
+                Self.log("[MCP] No executable tasks due to unmet dependencies (workerAssigned: \(workerAssignedSubTasks.count))")
                 let pendingWithDeps = pendingSubTasks.map { task -> [String: Any] in
                     let unmetDeps = task.dependencies.filter { depId in
                         subTasks.first { $0.id == depId }?.status != .done
@@ -2618,8 +2668,7 @@ final class MCPServer {
                     "progress": [
                         "completed": completedSubTasks.count,
                         "in_progress": 0,
-                        "pending": pendingSubTasks.count,
-                        "assignable": 0,
+                        "worker_assigned_waiting": workerAssignedSubTasks.count,
                         "total": subTasks.count
                     ]
                 ]
@@ -2656,7 +2705,7 @@ final class MCPServer {
             // 利用可能な Worker がいない場合、タスクを blocked 状態にする
             if subordinates.isEmpty {
                 Self.log("[MCP] No available workers after subtask creation, blocking subtasks")
-                if let firstSubTask = assignableSubTasks.first {
+                if let firstSubTask = unassignedSubTasks.first {
                     return [
                         "action": "block_subtask",
                         "instruction": """
@@ -2679,18 +2728,18 @@ final class MCPServer {
                 }
             }
 
-            // 実行状態に変更可能なタスクがあれば1件返す
-            if let nextSubTask = assignableSubTasks.first {
-                Self.log("[MCP] Delegating first task after subtask creation (assignable: \(assignableSubTasks.count))")
+            // Phase 1: 未割り当てタスクをワーカーに割り当て（assignee変更のみ）
+            if let nextSubTask = unassignedSubTasks.first {
+                Self.log("[MCP] Assigning first task after subtask creation (unassigned: \(unassignedSubTasks.count))")
                 return [
-                    "action": "delegate",
+                    "action": "assign",
                     "instruction": """
                         サブタスクを Worker に割り当ててください。
                         assign_task ツールを使用して、task_id と assignee_id を指定してください。
-                        割り当て後、update_task_status でサブタスクのステータスを in_progress に変更してください。
-                        その後、get_next_action を呼び出してください。
+                        【重要】この段階では in_progress に変更しないでください。割り当てのみ行います。
+                        割り当て後、get_next_action を呼び出してください。
                         """,
-                    "state": "needs_delegation",
+                    "state": "needs_assignment",
                     "next_subtask": [
                         "id": nextSubTask.id.value,
                         "title": nextSubTask.title,
@@ -2704,7 +2753,7 @@ final class MCPServer {
                     ] as [String: Any] },
                     "progress": [
                         "completed": completedSubTasks.count,
-                        "assignable": assignableSubTasks.count,
+                        "unassigned": unassignedSubTasks.count,
                         "total": subTasks.count
                     ]
                 ]

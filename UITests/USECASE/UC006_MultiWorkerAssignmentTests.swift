@@ -56,8 +56,8 @@ final class UC006_MultiWorkerAssignmentTests: UC006UITestCase {
 
         var mainTaskDone = false
 
-        // 最大120秒（10秒間隔で12回）待機
-        for i in 1...12 {
+        // 最大180秒（10秒間隔で18回）待機
+        for i in 1...18 {
             if try checkTaskStatusIsDone(taskId: taskId, taskTitle: taskTitle) {
                 print("✅ メインタスクがDoneになりました")
                 mainTaskDone = true
