@@ -42,6 +42,7 @@ DerivedData/
 .cursor/
 .serena/
 .ai-pm/
+.playwright-mcp/
 
 # Local config
 coordinator.yaml
