@@ -262,8 +262,14 @@ public final class RESTServer {
 
         // Direct task access
         let taskRouter = protectedRouter.group("tasks")
+        taskRouter.get(":taskId") { [self] request, context in
+            try await getTask(request: request, context: context)
+        }
         taskRouter.patch(":taskId") { [self] request, context in
             try await updateTask(request: request, context: context)
+        }
+        taskRouter.delete(":taskId") { [self] request, context in
+            try await deleteTask(request: request, context: context)
         }
 
         // Agents
@@ -346,9 +352,32 @@ public final class RESTServer {
         }
 
         let tasks = try taskRepository.findByProject(projectId, status: nil)
-        let dtos = tasks.map { TaskDTO(from: $0) }
+
+        // Phase 4: 逆依存関係を計算
+        let dependentTasksMap = calculateDependentTasks(tasks: tasks)
+
+        let dtos = tasks.map { task in
+            TaskDTO(from: task, dependentTasks: dependentTasksMap[task.id.value])
+        }
 
         return jsonResponse(dtos)
+    }
+
+    /// Phase 4: 逆依存関係マップを生成
+    /// key: taskId, value: このタスクに依存しているタスクIDの配列
+    private func calculateDependentTasks(tasks: [Domain.Task]) -> [String: [String]] {
+        var result: [String: [String]] = [:]
+
+        for task in tasks {
+            for depId in task.dependencies {
+                if result[depId.value] == nil {
+                    result[depId.value] = []
+                }
+                result[depId.value]?.append(task.id.value)
+            }
+        }
+
+        return result
     }
 
     private func createTask(request: Request, context: AuthenticatedContext) async throws -> Response {
@@ -390,6 +419,26 @@ public final class RESTServer {
         return response
     }
 
+    /// GET /api/tasks/:taskId - タスク詳細取得
+    private func getTask(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let taskIdStr = context.parameters.get("taskId") else {
+            return errorResponse(status: .badRequest, message: "Missing task ID")
+        }
+
+        let taskId = TaskID(value: taskIdStr)
+        guard let task = try taskRepository.findById(taskId) else {
+            return errorResponse(status: .notFound, message: "Task not found")
+        }
+
+        // Phase 4: 逆依存関係を取得
+        let allTasks = try taskRepository.findByProject(task.projectId, status: nil)
+        let dependentTasks = allTasks
+            .filter { $0.dependencies.contains(taskId) }
+            .map { $0.id.value }
+
+        return jsonResponse(TaskDTO(from: task, dependentTasks: dependentTasks))
+    }
+
     private func updateTask(request: Request, context: AuthenticatedContext) async throws -> Response {
         guard let taskIdStr = context.parameters.get("taskId") else {
             return errorResponse(status: .badRequest, message: "Missing task ID")
@@ -417,6 +466,12 @@ public final class RESTServer {
         if let statusStr = updateRequest.status,
            let status = TaskStatus(rawValue: statusStr) {
             task.status = status
+            // Phase 3: blockedに変更時、blockedReasonも一緒に設定
+            if status == .blocked {
+                task.blockedReason = updateRequest.blockedReason
+            } else {
+                task.blockedReason = nil
+            }
         }
         if let priorityStr = updateRequest.priority,
            let priority = TaskPriority(rawValue: priorityStr) {
@@ -426,13 +481,49 @@ public final class RESTServer {
             task.assigneeId = assigneeIdStr.isEmpty ? nil : AgentID(value: assigneeIdStr)
         }
         if let deps = updateRequest.dependencies {
-            task.dependencies = deps.map { TaskID(value: $0) }
+            // Phase 4: 循環依存チェック
+            let newDeps = deps.map { TaskID(value: $0) }
+            if newDeps.contains(taskId) {
+                return errorResponse(status: .badRequest, message: "Self-reference not allowed in dependencies")
+            }
+            task.dependencies = newDeps
+        }
+        // Phase 2: 時間追跡フィールド
+        if let estimatedMinutes = updateRequest.estimatedMinutes {
+            task.estimatedMinutes = estimatedMinutes > 0 ? estimatedMinutes : nil
+        }
+        if let actualMinutes = updateRequest.actualMinutes {
+            task.actualMinutes = actualMinutes > 0 ? actualMinutes : nil
+        }
+        // Phase 3: blockedReasonは単独でも更新可能（ステータス変更なしの場合）
+        if task.status == .blocked, let reason = updateRequest.blockedReason {
+            task.blockedReason = reason
         }
         task.updatedAt = Date()
 
         try taskRepository.save(task)
 
         return jsonResponse(TaskDTO(from: task))
+    }
+
+    /// DELETE /api/tasks/:taskId - タスク削除（cancelled状態に変更）
+    private func deleteTask(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let taskIdStr = context.parameters.get("taskId") else {
+            return errorResponse(status: .badRequest, message: "Missing task ID")
+        }
+
+        let taskId = TaskID(value: taskIdStr)
+        guard var task = try taskRepository.findById(taskId) else {
+            return errorResponse(status: .notFound, message: "Task not found")
+        }
+
+        // タスクをcancelled状態に変更（論理削除）
+        task.status = .cancelled
+        task.updatedAt = Date()
+
+        try taskRepository.save(task)
+
+        return Response(status: .noContent)
     }
 
     // MARK: - Agent Handlers

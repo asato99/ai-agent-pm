@@ -99,4 +99,32 @@ test.describe('タスクボード', () => {
 
     await expect(page).toHaveURL('/projects')
   })
+
+  test('タスクを削除できる', async ({ page }) => {
+    const taskBoard = new TaskBoardPage(page)
+
+    // タスクカードが表示されていることを確認
+    await expect(taskBoard.getTaskCard('API実装')).toBeVisible()
+
+    // タスクカードのメニューボタンを直接取得してクリック
+    const taskCard = taskBoard.getTaskCard('API実装')
+    const menuButton = taskCard.getByRole('button', { name: 'メニュー' })
+    await expect(menuButton).toBeVisible()
+    await menuButton.click()
+
+    // メニューが表示されるのを待つ
+    const deleteMenuItem = page.getByRole('menuitem', { name: '削除' })
+    await expect(deleteMenuItem).toBeVisible()
+    await deleteMenuItem.click()
+
+    // 確認ダイアログが表示されるのを待つ
+    const confirmDialog = page.getByRole('dialog')
+    await expect(confirmDialog).toBeVisible()
+
+    // 確認ダイアログ内の削除ボタンをクリック
+    await confirmDialog.getByRole('button', { name: '削除' }).click()
+
+    // タスクが画面から消える（cancelledステータスになり、カンバンに表示されなくなる）
+    await expect(taskBoard.getTaskCard('API実装')).not.toBeVisible()
+  })
 })

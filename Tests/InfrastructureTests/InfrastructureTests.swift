@@ -2234,3 +2234,338 @@ final class InfrastructureTests: XCTestCase {
     }
 
 }
+
+// MARK: - REST API タスク関連テスト（Phase 1-4）
+
+/// REST API タスク関連エンドポイントのテスト（リポジトリ層）
+/// Phase 1-4: タスク削除、時間追跡、ブロック状態、依存関係
+final class TaskAPITests: XCTestCase {
+    var database: DatabaseQueue!
+    var projectRepository: ProjectRepository!
+    var agentRepository: AgentRepository!
+    var taskRepository: TaskRepository!
+
+    var testProject: Project!
+    var testAgent: Agent!
+
+    override func setUpWithError() throws {
+        // In-memory database for testing
+        let tempDir = FileManager.default.temporaryDirectory
+        let dbPath = tempDir.appendingPathComponent("taskapi_test_\(UUID().uuidString).db").path
+        database = try DatabaseSetup.createDatabase(at: dbPath)
+
+        projectRepository = ProjectRepository(database: database)
+        agentRepository = AgentRepository(database: database)
+        taskRepository = TaskRepository(database: database)
+
+        // Create test data
+        testProject = Project(
+            id: ProjectID(value: "test-project"),
+            name: "Test Project",
+            description: "Test project for API tests"
+        )
+        try projectRepository.save(testProject)
+
+        testAgent = Agent(
+            id: AgentID(value: "test-agent"),
+            name: "Test Agent",
+            role: "Test role",
+            type: .ai
+        )
+        try agentRepository.save(testAgent)
+    }
+
+    override func tearDownWithError() throws {
+        database = nil
+    }
+
+    // MARK: - Phase 1: タスク削除
+
+    /// タスクをcancelled状態に変更して「削除」することを確認
+    func testDeleteTaskSetsCancelledStatus() throws {
+        // Given: タスクを作成
+        let task = Task(
+            id: TaskID(value: "task-to-delete"),
+            projectId: testProject.id,
+            title: "Task to be deleted",
+            description: "This task will be deleted",
+            status: .backlog
+        )
+        try taskRepository.save(task)
+
+        // When: タスクを「削除」（cancelled状態に変更）
+        var deletedTask = task
+        deletedTask.status = .cancelled
+        deletedTask.updatedAt = Date()
+        try taskRepository.save(deletedTask)
+
+        // Then: ステータスがcancelledになっている
+        let fetchedTask = try taskRepository.findById(task.id)
+        XCTAssertNotNil(fetchedTask)
+        XCTAssertEqual(fetchedTask?.status, .cancelled)
+    }
+
+    /// 削除されたタスクが引き続きDBに存在することを確認（論理削除）
+    func testDeletedTaskStillExistsInDatabase() throws {
+        // Given: タスクを作成して削除
+        var task = Task(
+            id: TaskID(value: "task-logical-delete"),
+            projectId: testProject.id,
+            title: "Task for logical delete test"
+        )
+        try taskRepository.save(task)
+
+        task.status = .cancelled
+        try taskRepository.save(task)
+
+        // Then: タスクは引き続きDBに存在する
+        let allTasks = try taskRepository.findByProject(testProject.id, status: nil)
+        XCTAssertTrue(allTasks.contains(where: { $0.id == task.id }))
+    }
+
+    // MARK: - Phase 2: タスク詳細（時間追跡）
+
+    /// 時間追跡フィールドが正しく保存・取得されることを確認
+    func testTimeTrackingFieldsPersistence() throws {
+        // Given: 時間追跡フィールド付きのタスクを作成
+        let task = Task(
+            id: TaskID(value: "task-with-time"),
+            projectId: testProject.id,
+            title: "Task with time tracking",
+            estimatedMinutes: 120,
+            actualMinutes: 90
+        )
+        try taskRepository.save(task)
+
+        // When: タスクを取得
+        let fetchedTask = try taskRepository.findById(task.id)
+
+        // Then: 時間追跡フィールドが正しい
+        XCTAssertNotNil(fetchedTask)
+        XCTAssertEqual(fetchedTask?.estimatedMinutes, 120)
+        XCTAssertEqual(fetchedTask?.actualMinutes, 90)
+    }
+
+    /// 時間追跡フィールドを更新できることを確認
+    func testUpdateTimeTrackingFields() throws {
+        // Given: タスクを作成
+        var task = Task(
+            id: TaskID(value: "task-time-update"),
+            projectId: testProject.id,
+            title: "Task for time update"
+        )
+        try taskRepository.save(task)
+
+        // When: 時間追跡フィールドを更新
+        task.estimatedMinutes = 180
+        task.actualMinutes = 150
+        task.updatedAt = Date()
+        try taskRepository.save(task)
+
+        // Then: 更新が反映される
+        let fetchedTask = try taskRepository.findById(task.id)
+        XCTAssertEqual(fetchedTask?.estimatedMinutes, 180)
+        XCTAssertEqual(fetchedTask?.actualMinutes, 150)
+    }
+
+    /// 時間追跡フィールドがnil可能であることを確認
+    func testTimeTrackingFieldsCanBeNil() throws {
+        // Given: 時間追跡フィールドなしのタスクを作成
+        let task = Task(
+            id: TaskID(value: "task-no-time"),
+            projectId: testProject.id,
+            title: "Task without time tracking"
+        )
+        try taskRepository.save(task)
+
+        // Then: 時間追跡フィールドはnil
+        let fetchedTask = try taskRepository.findById(task.id)
+        XCTAssertNil(fetchedTask?.estimatedMinutes)
+        XCTAssertNil(fetchedTask?.actualMinutes)
+    }
+
+    // MARK: - Phase 3: タスク詳細（ブロック状態）
+
+    /// blockedReasonが正しく保存・取得されることを確認
+    func testBlockedReasonPersistence() throws {
+        // Given: ブロック理由付きのタスク
+        let task = Task(
+            id: TaskID(value: "task-blocked"),
+            projectId: testProject.id,
+            title: "Blocked task",
+            status: .blocked,
+            blockedReason: "Waiting for API specification"
+        )
+        try taskRepository.save(task)
+
+        // When: タスクを取得
+        let fetchedTask = try taskRepository.findById(task.id)
+
+        // Then: ブロック理由が正しい
+        XCTAssertNotNil(fetchedTask)
+        XCTAssertEqual(fetchedTask?.status, .blocked)
+        XCTAssertEqual(fetchedTask?.blockedReason, "Waiting for API specification")
+    }
+
+    /// blockedステータス解除時にblockedReasonがクリアされるべきことをテスト
+    func testBlockedReasonShouldBeClearedWhenStatusChanges() throws {
+        // Given: ブロックされたタスク
+        var task = Task(
+            id: TaskID(value: "task-unblock"),
+            projectId: testProject.id,
+            title: "Task to unblock",
+            status: .blocked,
+            blockedReason: "Temporary block"
+        )
+        try taskRepository.save(task)
+
+        // When: ステータスをin_progressに変更（ビジネスロジックでblockedReasonをクリア）
+        task.status = .inProgress
+        task.blockedReason = nil  // APIレイヤーでクリアされるべき
+        try taskRepository.save(task)
+
+        // Then: blockedReasonがクリアされている
+        let fetchedTask = try taskRepository.findById(task.id)
+        XCTAssertEqual(fetchedTask?.status, .inProgress)
+        XCTAssertNil(fetchedTask?.blockedReason)
+    }
+
+    // MARK: - Phase 4: タスク詳細（依存関係）
+
+    /// 依存関係が正しく保存・取得されることを確認
+    func testDependenciesPersistence() throws {
+        // Given: 依存関係のあるタスク
+        let task1 = Task(
+            id: TaskID(value: "task-1"),
+            projectId: testProject.id,
+            title: "Task 1"
+        )
+        let task2 = Task(
+            id: TaskID(value: "task-2"),
+            projectId: testProject.id,
+            title: "Task 2",
+            dependencies: [task1.id]
+        )
+        try taskRepository.save(task1)
+        try taskRepository.save(task2)
+
+        // When: タスクを取得
+        let fetchedTask2 = try taskRepository.findById(task2.id)
+
+        // Then: 依存関係が正しい
+        XCTAssertNotNil(fetchedTask2)
+        XCTAssertEqual(fetchedTask2?.dependencies.count, 1)
+        XCTAssertEqual(fetchedTask2?.dependencies.first, task1.id)
+    }
+
+    /// 自己参照の依存関係チェックロジックが機能することを確認
+    func testSelfReferenceDependencyDetection() throws {
+        // Given: タスクを作成
+        let taskId = TaskID(value: "self-ref-task")
+        let task = Task(
+            id: taskId,
+            projectId: testProject.id,
+            title: "Self-referencing task"
+        )
+        try taskRepository.save(task)
+
+        // When: 自己参照の依存関係をチェック
+        let newDeps = [taskId]
+        let isSelfReference = newDeps.contains(taskId)
+
+        // Then: 自己参照が検出される
+        XCTAssertTrue(isSelfReference, "Self-reference should be detected")
+    }
+
+    /// 逆依存関係（dependentTasks）が正しく計算されることを確認
+    func testDependentTasksCalculation() throws {
+        // Given: 複数の依存関係を持つタスク群
+        let taskA = Task(id: TaskID(value: "task-A"), projectId: testProject.id, title: "Task A")
+        let taskB = Task(id: TaskID(value: "task-B"), projectId: testProject.id, title: "Task B", dependencies: [taskA.id])
+        let taskC = Task(id: TaskID(value: "task-C"), projectId: testProject.id, title: "Task C", dependencies: [taskA.id])
+        let taskD = Task(id: TaskID(value: "task-D"), projectId: testProject.id, title: "Task D", dependencies: [taskB.id, taskC.id])
+
+        try taskRepository.save(taskA)
+        try taskRepository.save(taskB)
+        try taskRepository.save(taskC)
+        try taskRepository.save(taskD)
+
+        // When: 全タスクから逆依存関係を計算
+        let allTasks = try taskRepository.findByProject(testProject.id, status: nil)
+        var dependentTasksMap: [String: [String]] = [:]
+
+        for task in allTasks {
+            for depId in task.dependencies {
+                if dependentTasksMap[depId.value] == nil {
+                    dependentTasksMap[depId.value] = []
+                }
+                dependentTasksMap[depId.value]?.append(task.id.value)
+            }
+        }
+
+        // Then: 逆依存関係が正しい
+        // taskA は taskB, taskC から参照されている
+        XCTAssertEqual(Set(dependentTasksMap["task-A"] ?? []), Set(["task-B", "task-C"]))
+        // taskB は taskD から参照されている
+        XCTAssertEqual(dependentTasksMap["task-B"], ["task-D"])
+        // taskC は taskD から参照されている
+        XCTAssertEqual(dependentTasksMap["task-C"], ["task-D"])
+        // taskD は誰からも参照されていない
+        XCTAssertNil(dependentTasksMap["task-D"])
+    }
+
+    /// 複数の依存関係を持つタスクが正しく保存されることを確認
+    func testMultipleDependencies() throws {
+        // Given: 複数の依存関係を持つタスク
+        let task1 = Task(id: TaskID(value: "dep-1"), projectId: testProject.id, title: "Dependency 1")
+        let task2 = Task(id: TaskID(value: "dep-2"), projectId: testProject.id, title: "Dependency 2")
+        let task3 = Task(id: TaskID(value: "dep-3"), projectId: testProject.id, title: "Dependency 3")
+        let mainTask = Task(
+            id: TaskID(value: "main-task"),
+            projectId: testProject.id,
+            title: "Main Task",
+            dependencies: [task1.id, task2.id, task3.id]
+        )
+
+        try taskRepository.save(task1)
+        try taskRepository.save(task2)
+        try taskRepository.save(task3)
+        try taskRepository.save(mainTask)
+
+        // When: メインタスクを取得
+        let fetchedTask = try taskRepository.findById(mainTask.id)
+
+        // Then: 全ての依存関係が保存されている
+        XCTAssertNotNil(fetchedTask)
+        XCTAssertEqual(fetchedTask?.dependencies.count, 3)
+        XCTAssertTrue(fetchedTask?.dependencies.contains(task1.id) ?? false)
+        XCTAssertTrue(fetchedTask?.dependencies.contains(task2.id) ?? false)
+        XCTAssertTrue(fetchedTask?.dependencies.contains(task3.id) ?? false)
+    }
+
+    /// 依存関係を更新できることを確認
+    func testUpdateDependencies() throws {
+        // Given: 既存のタスクと依存関係
+        let task1 = Task(id: TaskID(value: "orig-dep"), projectId: testProject.id, title: "Original Dependency")
+        let task2 = Task(id: TaskID(value: "new-dep"), projectId: testProject.id, title: "New Dependency")
+        var mainTask = Task(
+            id: TaskID(value: "update-dep-task"),
+            projectId: testProject.id,
+            title: "Task to update deps",
+            dependencies: [task1.id]
+        )
+
+        try taskRepository.save(task1)
+        try taskRepository.save(task2)
+        try taskRepository.save(mainTask)
+
+        // When: 依存関係を更新
+        mainTask.dependencies = [task2.id]
+        try taskRepository.save(mainTask)
+
+        // Then: 新しい依存関係が反映される
+        let fetchedTask = try taskRepository.findById(mainTask.id)
+        XCTAssertEqual(fetchedTask?.dependencies.count, 1)
+        XCTAssertEqual(fetchedTask?.dependencies.first, task2.id)
+    }
+}

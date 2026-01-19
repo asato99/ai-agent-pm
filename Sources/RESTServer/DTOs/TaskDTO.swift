@@ -14,11 +14,15 @@ public struct TaskDTO: Codable {
     let priority: String
     let assigneeId: String?
     let dependencies: [String]
+    let dependentTasks: [String]?  // Phase 4: 逆依存関係（このタスクに依存するタスク）
     let parentTaskId: String?
+    let estimatedMinutes: Int?     // Phase 2: 見積もり時間（分）
+    let actualMinutes: Int?        // Phase 2: 実績時間（分）
+    let blockedReason: String?     // Phase 3: ブロック理由
     let createdAt: String
     let updatedAt: String
 
-    init(from task: Task) {
+    init(from task: Task, dependentTasks: [String]? = nil) {
         self.id = task.id.value
         self.projectId = task.projectId.value
         self.title = task.title
@@ -27,7 +31,11 @@ public struct TaskDTO: Codable {
         self.priority = task.priority.rawValue
         self.assigneeId = task.assigneeId?.value
         self.dependencies = task.dependencies.map { $0.value }
+        self.dependentTasks = dependentTasks
         self.parentTaskId = task.parentTaskId?.value
+        self.estimatedMinutes = task.estimatedMinutes
+        self.actualMinutes = task.actualMinutes
+        self.blockedReason = task.blockedReason
         self.createdAt = ISO8601DateFormatter().string(from: task.createdAt)
         self.updatedAt = ISO8601DateFormatter().string(from: task.updatedAt)
     }
@@ -50,4 +58,7 @@ public struct UpdateTaskRequest: Decodable {
     public let priority: String?
     public let assigneeId: String?
     public let dependencies: [String]?
+    public let estimatedMinutes: Int?    // Phase 2: 見積もり時間（分）
+    public let actualMinutes: Int?       // Phase 2: 実績時間（分）
+    public let blockedReason: String?    // Phase 3: ブロック理由
 }

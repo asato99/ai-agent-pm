@@ -222,6 +222,23 @@ export const handlers = [
     return HttpResponse.json(task)
   }),
 
+  // Delete task (logical deletion - sets status to 'cancelled')
+  http.delete('/api/tasks/:taskId', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { taskId } = params
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) {
+      return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+    }
+    // Logical deletion: set status to 'cancelled'
+    task.status = 'cancelled'
+    task.updatedAt = new Date().toISOString()
+    return new HttpResponse(null, { status: 204 })
+  }),
+
   // Assignable agents
   http.get('/api/agents/assignable', () => {
     return HttpResponse.json([

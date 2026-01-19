@@ -111,4 +111,10 @@ export class TaskBoardPage extends BasePage {
   async closeModal() {
     await this.page.getByRole('button', { name: '閉じる' }).click()
   }
+
+  async openTaskMenu(taskTitle: string) {
+    const taskCard = this.getTaskCard(taskTitle)
+    const menuButton = taskCard.getByRole('button', { name: 'メニュー' })
+    await menuButton.click()
+  }
 }
