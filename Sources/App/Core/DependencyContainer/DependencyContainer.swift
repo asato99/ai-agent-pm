@@ -60,6 +60,7 @@ public final class DependencyContainer: ObservableObject {
     // MARK: - Services
 
     public let mcpDaemonManager: MCPDaemonManager
+    public let webServerManager: WebServerManager
 
     // MARK: - Use Cases (Project)
 
@@ -386,6 +387,7 @@ public final class DependencyContainer: ObservableObject {
         self.agentSessionRepository = AgentSessionRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
         self.mcpDaemonManager = MCPDaemonManager()
+        self.webServerManager = WebServerManager()
 
         // File Storage (ファイルベースストレージ)
         self.projectDirectoryManager = ProjectDirectoryManager()

@@ -38,6 +38,9 @@ public final class Router {
     /// MCP Server管理画面を表示中かどうか
     public var showingMCPServer: Bool = false
 
+    /// Web Server管理画面を表示中かどうか
+    public var showingWebServer: Bool = false
+
     /// 詳細ビューのリフレッシュ用ID（選択のたびに変更してビューを再作成）
     public var detailRefreshId: UUID = UUID()
 
@@ -162,6 +165,7 @@ public final class Router {
         selectedChatProjectId = nil
         showingInternalAudits = false
         showingMCPServer = false
+        showingWebServer = false
     }
 
     /// タスクを選択
@@ -221,6 +225,17 @@ public final class Router {
     /// MCP Server管理画面を表示
     public func showMCPServer() {
         showingMCPServer = true
+        showingWebServer = false
+        selectedProject = nil
+        selectedTask = nil
+        selectedAgent = nil
+        showingInternalAudits = false
+    }
+
+    /// Web Server管理画面を表示
+    public func showWebServer() {
+        showingWebServer = true
+        showingMCPServer = false
         selectedProject = nil
         selectedTask = nil
         selectedAgent = nil

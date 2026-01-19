@@ -58,6 +58,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 appDebugLog("Failed to start MCP daemon: \(error)")
                 #endif
             }
+
+            // Auto-start Web Server
+            do {
+                try await container.webServerManager.start(databasePath: container.databasePath)
+                #if DEBUG
+                appDebugLog("Web server started successfully")
+                #endif
+            } catch {
+                #if DEBUG
+                appDebugLog("Failed to start Web server: \(error)")
+                #endif
+            }
         }
     }
 
@@ -66,14 +78,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Stop MCP daemon on app quit (skip during UITest to let Coordinator use the daemon)
+        // Stop servers on app quit (skip during UITest to let Coordinator use the daemon)
         if !CommandLine.arguments.contains("-UITesting") {
             _Concurrency.Task { @MainActor in
                 await DependencyContainer.shared?.mcpDaemonManager.stop()
-                NSLog("[AppDelegate] MCP daemon stopped")
+                await DependencyContainer.shared?.webServerManager.stop()
+                NSLog("[AppDelegate] MCP daemon and Web server stopped")
             }
         } else {
-            NSLog("[AppDelegate] UITesting mode - keeping daemon running for Coordinator")
+            NSLog("[AppDelegate] UITesting mode - keeping servers running for Coordinator")
         }
     }
 }

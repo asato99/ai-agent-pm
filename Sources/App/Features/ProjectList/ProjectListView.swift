@@ -130,12 +130,18 @@ struct ProjectListView: View {
             }
             .accessibilityIdentifier("InternalAuditsSection")
 
-            // MCP Server Section
+            // System Section (MCP Server & Web Server)
             Section {
                 MCPServerRowView(daemonManager: container.mcpDaemonManager)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         router.showMCPServer()
+                    }
+
+                WebServerRowView(serverManager: container.webServerManager)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        router.showWebServer()
                     }
             } header: {
                 Label("System", systemImage: "gearshape.2")

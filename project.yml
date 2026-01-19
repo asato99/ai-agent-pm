@@ -16,6 +16,9 @@ packages:
   ViewInspector:
     url: https://github.com/nalexn/ViewInspector.git
     version: 0.10.0
+  Hummingbird:
+    url: https://github.com/hummingbird-project/hummingbird.git
+    from: 2.0.0
 
 targets:
   # Domain層（エンティティ、値オブジェクト、リポジトリプロトコル）
@@ -111,6 +114,28 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.mcpserver
         PRODUCT_NAME: mcp-server-pm
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "@executable_path"
+          - "@executable_path/../Frameworks"
+
+  # RESTサーバー（コマンドラインツール - web-ui向け）
+  RESTServer:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/RESTServer
+        type: group
+    dependencies:
+      - target: Domain
+      - target: UseCase
+      - target: Infrastructure
+      - package: Hummingbird
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.restserver
+        PRODUCT_NAME: rest-server-pm
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         LD_RUNPATH_SEARCH_PATHS:
@@ -216,6 +241,7 @@ schemes:
       targets:
         AIAgentPMApp: all
         MCPServer: all
+        RESTServer: all
         DomainTests: [test]
         UseCaseTests: [test]
         InfrastructureTests: [test]

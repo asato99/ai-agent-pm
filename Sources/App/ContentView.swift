@@ -20,9 +20,11 @@ struct ContentView: View {
             // サイドバー: プロジェクトリスト
             ProjectListView()
         } content: {
-            // コンテンツ: タスクボード or Internal Audits or MCP Server or エージェント管理
+            // コンテンツ: タスクボード or Internal Audits or MCP Server or Web Server or エージェント管理
             if router.showingMCPServer {
                 MCPServerView(daemonManager: container.mcpDaemonManager)
+            } else if router.showingWebServer {
+                WebServerView(serverManager: container.webServerManager)
             } else if router.showingInternalAudits {
                 InternalAuditListView()
             } else if let projectId = router.selectedProject {
