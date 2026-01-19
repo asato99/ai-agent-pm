@@ -456,6 +456,8 @@ public final class RESTServer {
             return errorResponse(status: .badRequest, message: "Invalid request body")
         }
 
+        let loggedInAgentId = context.agentId
+
         // Apply updates by direct property assignment (Task has var properties)
         if let title = updateRequest.title {
             task.title = title
@@ -463,23 +465,63 @@ public final class RESTServer {
         if let description = updateRequest.description {
             task.description = description
         }
+
+        // ステータス変更の処理
         if let statusStr = updateRequest.status,
-           let status = TaskStatus(rawValue: statusStr) {
-            task.status = status
+           let newStatus = TaskStatus(rawValue: statusStr) {
+            // 1. ステータス遷移検証
+            guard UpdateTaskStatusUseCase.canTransition(from: task.status, to: newStatus) else {
+                return errorResponse(
+                    status: .badRequest,
+                    message: "Invalid status transition: \(task.status.rawValue) -> \(newStatus.rawValue)"
+                )
+            }
+
+            // 2. 権限検証（自分または下位エージェントが最後に変更したタスクのみ変更可能）
+            if let lastChangedBy = task.statusChangedByAgentId {
+                let subordinates = try agentRepository.findByParent(loggedInAgentId)
+                let canChange = lastChangedBy == loggedInAgentId ||
+                               subordinates.contains { $0.id == lastChangedBy }
+                guard canChange else {
+                    return errorResponse(
+                        status: .forbidden,
+                        message: "Cannot change status. Last changed by \(lastChangedBy.value). Only self or subordinate workers can modify."
+                    )
+                }
+            }
+
+            task.status = newStatus
+            task.statusChangedByAgentId = loggedInAgentId
+            task.statusChangedAt = Date()
+
             // Phase 3: blockedに変更時、blockedReasonも一緒に設定
-            if status == .blocked {
+            if newStatus == .blocked {
                 task.blockedReason = updateRequest.blockedReason
             } else {
                 task.blockedReason = nil
             }
         }
+
         if let priorityStr = updateRequest.priority,
            let priority = TaskPriority(rawValue: priorityStr) {
             task.priority = priority
         }
+
+        // 担当者変更の処理
         if let assigneeIdStr = updateRequest.assigneeId {
-            task.assigneeId = assigneeIdStr.isEmpty ? nil : AgentID(value: assigneeIdStr)
+            let newAssigneeId = assigneeIdStr.isEmpty ? nil : AgentID(value: assigneeIdStr)
+            // 担当者変更時の制限チェック（in_progress/blocked タスクは変更不可）
+            if newAssigneeId != task.assigneeId {
+                guard task.status != .inProgress && task.status != .blocked else {
+                    return errorResponse(
+                        status: .badRequest,
+                        message: "Cannot reassign task in \(task.status.rawValue) status. Work context must be preserved."
+                    )
+                }
+            }
+            task.assigneeId = newAssigneeId
         }
+
         if let deps = updateRequest.dependencies {
             // Phase 4: 循環依存チェック
             let newDeps = deps.map { TaskID(value: $0) }

@@ -17,7 +17,6 @@ interface KanbanBoardProps {
   tasks: Task[]
   onTaskMove: (taskId: string, newStatus: TaskStatus) => void
   onTaskClick: (taskId: string) => void
-  onTaskDelete?: (taskId: string) => void
 }
 
 interface ColumnConfig {
@@ -33,7 +32,7 @@ const columns: ColumnConfig[] = [
   { status: 'blocked', label: 'Blocked' },
 ]
 
-export function KanbanBoard({ tasks, onTaskMove, onTaskClick, onTaskDelete }: KanbanBoardProps) {
+export function KanbanBoard({ tasks, onTaskMove, onTaskClick }: KanbanBoardProps) {
   const [activeTask, setActiveTask] = useState<Task | null>(null)
 
   const sensors = useSensors(
@@ -106,7 +105,6 @@ export function KanbanBoard({ tasks, onTaskMove, onTaskClick, onTaskDelete }: Ka
                 key={task.id}
                 task={task}
                 onClick={onTaskClick}
-                onDelete={onTaskDelete}
               />
             ))}
           </DroppableColumn>

@@ -45,18 +45,6 @@ export function TaskBoardPage() {
     },
   })
 
-  const deleteTaskMutation = useMutation({
-    mutationFn: async (taskId: string) => {
-      const result = await api.delete(`/tasks/${taskId}`)
-      if (result.error) {
-        throw new Error(result.error.message)
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks', projectId] })
-    },
-  })
-
   const handleTaskMove = (taskId: string, newStatus: TaskStatus) => {
     updateTaskStatusMutation.mutate({ taskId, status: newStatus })
   }
@@ -71,10 +59,6 @@ export function TaskBoardPage() {
 
   const handleCreateTask = (data: { title: string; description: string; priority: TaskPriority }) => {
     createTaskMutation.mutate(data)
-  }
-
-  const handleTaskDelete = (taskId: string) => {
-    deleteTaskMutation.mutate(taskId)
   }
 
   const isLoading = projectLoading || tasksLoading
@@ -125,7 +109,6 @@ export function TaskBoardPage() {
           tasks={tasks}
           onTaskMove={handleTaskMove}
           onTaskClick={handleTaskClick}
-          onTaskDelete={handleTaskDelete}
         />
       </main>
 

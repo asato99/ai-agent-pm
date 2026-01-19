@@ -5,10 +5,9 @@ import { TaskCard } from '../TaskCard'
 interface DraggableTaskCardProps {
   task: Task
   onClick: (taskId: string) => void
-  onDelete?: (taskId: string) => void
 }
 
-export function DraggableTaskCard({ task, onClick, onDelete }: DraggableTaskCardProps) {
+export function DraggableTaskCard({ task, onClick }: DraggableTaskCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   })
@@ -28,7 +27,7 @@ export function DraggableTaskCard({ task, onClick, onDelete }: DraggableTaskCard
       {...listeners}
       {...attributes}
     >
-      <TaskCard task={task} onClick={onClick} onDelete={onDelete} />
+      <TaskCard task={task} onClick={onClick} />
     </div>
   )
 }
