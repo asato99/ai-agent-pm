@@ -1,499 +1,453 @@
-# Web UI 機能拡張プラン
+# Web UI 機能拡張プラン（改訂版）
 
 ## 概要
 
 macOSアプリ（AIAgentPM）の機能をweb-uiに展開するための実装計画。
-REST APIエンドポイントとReactコンポーネントの追加を行う。
+**macOSアプリの挙動を正確に再現**し、適切な**権限モデル**を実装する。
 
 ---
 
-## スコープ
+## 設計原則
 
-### 対象機能
+### 1. macOSアプリとの整合性
 
-| # | 機能 | 優先度 | 依存関係 |
-|---|------|--------|----------|
-| 1 | タスク削除 | 高 | なし |
-| 2 | タスク詳細（時間追跡） | 高 | なし |
-| 3 | タスク詳細（ブロック状態） | 高 | なし |
-| 4 | タスク詳細（依存関係） | 中 | なし |
-| 5 | ハンドオフ | 中 | 依存関係 |
-| 6 | チャット | 中 | なし |
-| 7 | ワークフローテンプレート | 低 | なし |
+web-uiはmacOSアプリと**同一の挙動**を提供する。独自機能の追加は行わない。
 
-### 対象外
+| 機能 | macOSアプリ | web-ui（実装目標） |
+|------|------------|-------------------|
+| タスクカードタップ | 詳細画面へ遷移 | 詳細パネル表示 |
+| タスクドラッグ | ステータス変更 | ステータス変更 |
+| タスクカードメニュー | **なし** | **なし**（削除） |
+| ステータス変更 | ピッカーで選択 | ピッカーで選択 |
+| タスク削除 | **なし**（cancelledへ変更） | **なし**（ピッカーでcancelled選択） |
+| 編集ボタン | TaskDetailViewツールバー | TaskDetailPanelヘッダー |
+| Handoffボタン | TaskDetailViewツールバー | TaskDetailPanelヘッダー |
 
-- プロジェクト管理（作成/削除/更新）
-- エージェント一覧管理
+### 2. 権限モデル
+
+**ユーザー＝ログインエージェント**として扱い、以下の権限ルールを適用する。
+
+#### ステータス変更権限
+
+参照: `UpdateTaskStatusUseCase.validateStatusChangePermission()`
+
+```
+statusChangedByAgentId が...
+  - 未設定 → 許可（後方互換性）
+  - 自分自身 → 許可
+  - 自分の下位エージェント → 許可
+  - 上記以外 → 拒否（403 Forbidden）
+```
+
+#### 担当者変更制限
+
+参照: `AssignTaskUseCase`
+
+```
+タスクステータスが...
+  - in_progress → 担当者変更不可（作業コンテキスト破棄防止）
+  - blocked → 担当者変更不可
+  - その他 → 担当者変更可能
+```
+
+#### ステータス遷移制限
+
+参照: `UpdateTaskStatusUseCase.canTransition()`
+
+```
+有効な遷移のみ許可（ホワイトリスト方式）
+backlog → todo → in_progress → done
+                      ↓
+                  cancelled（任意のステータスから）
+                  blocked（in_progressから）
+```
 
 ---
 
-## Phase 1: タスク削除 ✅
+## Phase 1: タスクカード修正 🔴 要対応
 
-### 概要
+### 現状の問題
 
-タスクを削除（cancelled状態に変更）する機能。
+- ❌ メニューボタンを追加（macOSアプリにはない）
+- ❌ 削除確認ダイアログを実装（不要）
+- ❌ DELETE API直接呼び出し（macOSアプリは使用しない）
 
-### REST API
+### 修正内容
 
+**TaskCard.tsx**:
+```tsx
+// 削除: メニューボタン、削除確認ダイアログ
+// 維持: タップで詳細表示、ドラッグでステータス変更
+export function TaskCard({ task, onClick }: TaskCardProps) {
+  return (
+    <div onClick={() => onClick?.(task.id)}>
+      <h4>{task.title}</h4>
+      <PriorityBadge priority={task.priority} />
+      {task.assigneeName && <span>{task.assigneeName}</span>}
+    </div>
+  )
+}
 ```
-DELETE /api/tasks/:taskId
-```
 
-**レスポンス**: 204 No Content
+**TaskBoard.tsx**:
+- ドラッグ&ドロップは維持
+- 遷移失敗時はAPIエラーをトースト表示
 
-**実装場所**: `Sources/RESTServer/RESTServer.swift`
+### テスト修正
+
+**task-board.spec.ts**:
+- ❌ 削除テストを削除
+- ✅ ドラッグ&ドロップでの無効な遷移をテスト
+
+---
+
+## Phase 2: REST API 権限チェック追加 🔴 要対応
+
+### 現状の問題
+
+`RESTServer.swift` の `updateTask()`:
+- ❌ 権限チェックなし
+- ❌ ステータス遷移検証なし
+- ❌ 担当者変更制限なし
+
+### 修正内容
+
+**RESTServer.swift**:
 
 ```swift
-// Routes/TaskRoutes
-taskRouter.delete(":taskId") { [self] request, context in
-    try await deleteTask(request: request, context: context)
-}
-```
-
-### 実装状況
-
-- ✅ DELETE `/api/tasks/:taskId` 実装完了
-- ✅ Web UI（TaskCard削除メニュー）実装完了 (2026-01-19)
-
-### Web UI
-
-**コンポーネント**: `TaskBoardCard.tsx`
-
-```tsx
-// 削除ボタン追加
-<DropdownMenuItem onClick={handleDelete}>
-  <Trash2 className="h-4 w-4 mr-2" />
-  Delete
-</DropdownMenuItem>
-```
-
-**実装内容**:
-1. TaskBoardCardに削除メニュー追加
-2. 確認ダイアログ表示
-3. API呼び出し
-4. 状態更新（React Query invalidation）
-
----
-
-## Phase 2: タスク詳細（時間追跡） ✅
-
-### 概要
-
-タスクの見積もり時間と実績時間を表示・編集する機能。
-
-### 実装状況
-
-- ✅ TaskDTO拡張（estimatedMinutes, actualMinutes）
-- ✅ PATCH `/api/tasks/:taskId` 拡張完了
-- ✅ GET `/api/tasks/:taskId` 実装完了
-- ⬜ Web UI（TaskDetailPanel）
-
-### データモデル
-
-| フィールド | 型 | 説明 |
-|-----------|-----|------|
-| estimatedMinutes | Int? | 見積もり時間（分） |
-| actualMinutes | Int? | 実績時間（分） |
-
-### REST API
-
-**GET /api/tasks/:taskId** レスポンス拡張:
-
-```json
-{
-  "id": "task_001",
-  "estimatedMinutes": 120,
-  "actualMinutes": 90,
-  ...
-}
-```
-
-**PATCH /api/tasks/:taskId** リクエスト拡張:
-
-```json
-{
-  "estimatedMinutes": 120,
-  "actualMinutes": 90
-}
-```
-
-### Web UI
-
-**コンポーネント**: `TaskDetailPanel.tsx` (新規)
-
-```tsx
-<div className="space-y-4">
-  <div>
-    <Label>Estimated Time</Label>
-    <TimeInput value={task.estimatedMinutes} onChange={...} />
-  </div>
-  <div>
-    <Label>Actual Time</Label>
-    <TimeInput value={task.actualMinutes} onChange={...} />
-  </div>
-</div>
-```
-
----
-
-## Phase 3: タスク詳細（ブロック状態） ✅
-
-### 概要
-
-タスクのブロック状態と理由を表示・編集する機能。
-
-### 実装状況
-
-- ✅ TaskDTO拡張（blockedReason）
-- ✅ PATCH `/api/tasks/:taskId` 拡張完了（blockedReasonサポート）
-- ⬜ Web UI（TaskBoardCardツールチップ、TaskDetailPanel）
-
-### データモデル
-
-| フィールド | 型 | 説明 |
-|-----------|-----|------|
-| blockReason | String? | ブロック理由 |
-
-### REST API
-
-**PATCH /api/tasks/:taskId** リクエスト拡張:
-
-```json
-{
-  "status": "blocked",
-  "blockReason": "Waiting for API specification"
-}
-```
-
-### Web UI
-
-**TaskBoardCard.tsx** 修正:
-- ブロック状態の場合、理由をツールチップで表示
-
-**TaskDetailPanel.tsx** 追加:
-- ステータスがblockedの場合、理由入力フィールド表示
-
-### ビジネスロジック（UC008準拠）
-
-- ブロック時のカスケード処理（サブタスクも連動）
-- エージェントセッション無効化
-
----
-
-## Phase 4: タスク詳細（依存関係） ✅
-
-### 概要
-
-タスク間の依存関係を表示・編集する機能。
-
-### 実装状況
-
-- ✅ TaskDTO拡張（dependentTasks追加）
-- ✅ GET `/api/projects/:projectId/tasks` 拡張（逆依存関係含む）
-- ✅ GET `/api/tasks/:taskId` 実装（逆依存関係含む）
-- ✅ PATCH `/api/tasks/:taskId` 拡張（循環依存・自己参照チェック）
-- ⬜ Web UI（DependencySelector、TaskList）
-
-### REST API
-
-**GET /api/projects/:projectId/tasks** レスポンス拡張:
-
-```json
-{
-  "id": "task_001",
-  "dependencies": ["task_000"],
-  "dependentTasks": ["task_002", "task_003"],
-  ...
-}
-```
-
-**PATCH /api/tasks/:taskId** リクエスト拡張:
-
-```json
-{
-  "dependencies": ["task_000", "task_001"]
-}
-```
-
-### Web UI
-
-**TaskDetailPanel.tsx** 追加:
-
-```tsx
-<div>
-  <Label>Dependencies</Label>
-  <DependencySelector
-    currentDependencies={task.dependencies}
-    availableTasks={allTasks}
-    onChange={handleDependenciesChange}
-  />
-</div>
-
-<div>
-  <Label>Dependent Tasks</Label>
-  <TaskList tasks={dependentTasks} readonly />
-</div>
-```
-
-**バリデーション**:
-- 循環依存チェック
-- 自己参照禁止
-
----
-
-## Phase 5: ハンドオフ
-
-### 概要
-
-in_progress/blockedタスクを別エージェントに正式に委任する機能。
-
-### データモデル
-
-**Handoff**:
-
-| フィールド | 型 | 説明 |
-|-----------|-----|------|
-| id | HandoffID | 一意識別子 |
-| taskId | TaskID | 対象タスク |
-| fromAgentId | AgentID | 委任元 |
-| toAgentId | AgentID | 委任先 |
-| context | String | 引き継ぎコンテキスト |
-| createdAt | Date | 作成日時 |
-
-### REST API
-
-```
-POST /api/tasks/:taskId/handoff
-```
-
-**リクエスト**:
-```json
-{
-  "toAgentId": "agent_002",
-  "context": "API implementation completed, needs testing"
-}
-```
-
-**レスポンス**: 201 Created
-
-### Web UI
-
-**TaskDetailPanel.tsx** 追加:
-
-```tsx
-{(task.status === 'in_progress' || task.status === 'blocked') && (
-  <Button onClick={() => setShowHandoffDialog(true)}>
-    Handoff to another agent
-  </Button>
-)}
-
-<HandoffDialog
-  open={showHandoffDialog}
-  task={task}
-  assignableAgents={agents}
-  onSubmit={handleHandoff}
-/>
-```
-
----
-
-## Phase 6: チャット（UC009準拠）
-
-### 概要
-
-ユーザーがエージェントにチャットでメッセージを送信し、応答を受け取る機能。
-
-### REST API
-
-```
-GET /api/projects/:projectId/agents/:agentId/chat
-POST /api/projects/:projectId/agents/:agentId/chat
-```
-
-**GET レスポンス**:
-```json
-{
-  "messages": [
-    {
-      "id": "msg_001",
-      "sender": "user",
-      "content": "あなたの名前を教えてください",
-      "createdAt": "2026-01-19T10:00:00Z"
-    },
-    {
-      "id": "msg_002",
-      "sender": "agent",
-      "content": "私の名前はbackend-devです",
-      "createdAt": "2026-01-19T10:00:30Z"
+private func updateTask(request: Request, context: AuthenticatedContext) async throws -> Response {
+    let loggedInAgentId = context.agentId  // ログイン中のエージェント
+
+    guard var task = try taskRepository.findById(taskId) else {
+        return errorResponse(status: .notFound, message: "Task not found")
     }
-  ]
+
+    // ステータス変更時の権限チェック
+    if let newStatusStr = updateRequest.status,
+       let newStatus = TaskStatus(rawValue: newStatusStr) {
+
+        // 1. 遷移検証
+        guard UpdateTaskStatusUseCase.canTransition(from: task.status, to: newStatus) else {
+            return errorResponse(status: .badRequest,
+                message: "Invalid transition: \(task.status.rawValue) -> \(newStatus)")
+        }
+
+        // 2. 権限検証（自分または下位エージェントのみ）
+        if let lastChangedBy = task.statusChangedByAgentId {
+            let subordinates = try agentRepository.findByParent(loggedInAgentId)
+            let canChange = lastChangedBy == loggedInAgentId ||
+                           subordinates.contains { $0.id == lastChangedBy }
+            guard canChange else {
+                return errorResponse(status: .forbidden,
+                    message: "Cannot change status. Last changed by \(lastChangedBy.value)")
+            }
+        }
+
+        task.status = newStatus
+        task.statusChangedByAgentId = loggedInAgentId
+        task.statusChangedAt = Date()
+    }
+
+    // 担当者変更時の制限チェック
+    if let newAssigneeId = updateRequest.assigneeId,
+       task.assigneeId?.value != newAssigneeId {
+        guard task.status != .inProgress && task.status != .blocked else {
+            return errorResponse(status: .badRequest,
+                message: "Cannot reassign task in \(task.status.rawValue) status")
+        }
+    }
+
+    // ... 以降の更新処理
 }
 ```
 
-**POST リクエスト**:
+### 新規API
+
+**GET /api/tasks/:taskId/permissions**
+
+ログイン中のエージェントがそのタスクに対して持つ権限を返す。
+
 ```json
 {
-  "content": "あなたの名前を教えてください"
+  "canEdit": true,
+  "canChangeStatus": true,
+  "canReassign": false,
+  "validStatusTransitions": ["done", "blocked", "cancelled"],
+  "reason": "Task is in_progress, reassignment disabled"
 }
 ```
 
-### Web UI
+---
 
-**AgentChatPanel.tsx** (新規):
+## Phase 3: TaskDetailPanel 実装
+
+### 概要
+
+macOSアプリの`TaskDetailView`に相当するコンポーネント。
+
+### 実装内容
+
+**TaskDetailPanel.tsx**:
 
 ```tsx
-export function AgentChatPanel({ projectId, agentId }) {
-  const { data: messages } = useQuery(['chat', projectId, agentId], fetchMessages);
-  const sendMessage = useMutation(postMessage);
+export function TaskDetailPanel({ taskId, onClose }: Props) {
+  const { data: task } = useQuery(['task', taskId], () => getTask(taskId))
+  const { data: permissions } = useQuery(['task-permissions', taskId],
+    () => getTaskPermissions(taskId))
 
   return (
-    <div className="flex flex-col h-full">
-      <ChatMessageList messages={messages} />
-      <ChatInput onSend={(content) => sendMessage.mutate({ content })} />
-    </div>
-  );
+    <Panel>
+      <Header>
+        <Title>{task.title}</Title>
+        <Actions>
+          <Button onClick={openEditForm} disabled={!permissions?.canEdit}>
+            <PencilIcon /> Edit
+          </Button>
+          <Button onClick={openHandoff}>
+            <ArrowsIcon /> Handoff
+          </Button>
+        </Actions>
+      </Header>
+
+      <Content>
+        {/* ステータスピッカー（有効な遷移のみ表示） */}
+        <StatusPicker
+          value={task.status}
+          validTransitions={permissions?.validStatusTransitions}
+          disabled={!permissions?.canChangeStatus}
+          onChange={handleStatusChange}
+        />
+
+        {/* ブロック理由（blocked時のみ） */}
+        {task.status === 'blocked' && (
+          <BlockedReasonField value={task.blockedReason} />
+        )}
+
+        {/* その他の詳細 */}
+        <Field label="Priority">{task.priority}</Field>
+        <Field label="Assignee">{task.assigneeName}</Field>
+        <Field label="Description">{task.description}</Field>
+
+        {/* 依存関係 */}
+        <DependencyList
+          dependencies={task.dependencies}
+          dependentTasks={task.dependentTasks}
+        />
+
+        {/* 時間追跡 */}
+        <TimeTracking
+          estimated={task.estimatedMinutes}
+          actual={task.actualMinutes}
+        />
+      </Content>
+    </Panel>
+  )
 }
 ```
 
-**アクセス方法**:
-- TaskBoardヘッダーのエージェントアバタークリック
-- 第3カラムにAgentChatPanelを表示
+### UI要素
 
-### バックエンド実装
-
-**ファイルベース（UC009準拠）**:
-- `{workingDirectory}/.ai-pm/agents/{agentId}/chat.jsonl`
-- POSTでメッセージ追記 + `pending_agent_purposes` に `purpose="chat"` 記録
+| 要素 | 編集可否 | 備考 |
+|------|---------|------|
+| ステータスピッカー | ✅ | 有効な遷移のみ表示、権限チェック |
+| ブロック理由 | ✅ | blocked時のみ表示 |
+| 優先度 | ❌ | 表示のみ（編集フォームで変更） |
+| 担当者 | ❌ | 表示のみ（編集フォームで変更） |
+| 説明 | ❌ | 表示のみ（編集フォームで変更） |
+| 依存関係 | ❌ | 表示のみ（編集フォームで変更） |
+| 時間追跡 | ❌ | 表示のみ（編集フォームで変更） |
 
 ---
 
-## Phase 7: ワークフローテンプレート
+## Phase 4: 編集フォーム実装
 
-### 概要
+### TaskEditForm.tsx
 
-一連のタスクをテンプレートとして定義し、繰り返し適用できる機能。
+macOSアプリの`TaskFormView`に相当。
 
-### REST API
+```tsx
+export function TaskEditForm({ taskId, onClose }: Props) {
+  const { data: task } = useQuery(['task', taskId])
+  const { data: permissions } = useQuery(['task-permissions', taskId])
+  const { data: agents } = useQuery(['assignable-agents'])
 
-```
-GET    /api/projects/:projectId/templates
-POST   /api/projects/:projectId/templates
-GET    /api/projects/:projectId/templates/:templateId
-PATCH  /api/projects/:projectId/templates/:templateId
-DELETE /api/projects/:projectId/templates/:templateId
-POST   /api/projects/:projectId/templates/:templateId/instantiate
-```
+  return (
+    <Dialog>
+      <Form onSubmit={handleSubmit}>
+        <Field label="Title" required>
+          <Input value={title} onChange={setTitle} />
+        </Field>
 
-**インスタンス化リクエスト**:
-```json
-{
-  "variables": {
-    "feature_name": "ログイン機能",
-    "module": "認証"
-  },
-  "assignments": {
-    "1": "agent_001",
-    "2": "agent_002"
-  }
+        <Field label="Description">
+          <Textarea value={description} onChange={setDescription} />
+        </Field>
+
+        <Field label="Priority">
+          <PriorityPicker value={priority} onChange={setPriority} />
+        </Field>
+
+        <Field label="Assignee">
+          <AgentPicker
+            value={assigneeId}
+            agents={agents}
+            onChange={setAssigneeId}
+            disabled={!permissions?.canReassign}
+          />
+          {!permissions?.canReassign && (
+            <HelpText>
+              作業中/ブロック中のタスクは担当者を変更できません
+            </HelpText>
+          )}
+        </Field>
+
+        <Field label="Dependencies">
+          <DependencySelector
+            value={dependencies}
+            onChange={setDependencies}
+          />
+        </Field>
+
+        <Field label="Estimated Time">
+          <TimeInput value={estimatedMinutes} onChange={setEstimatedMinutes} />
+        </Field>
+
+        <Actions>
+          <Button type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit">Save</Button>
+        </Actions>
+      </Form>
+    </Dialog>
+  )
 }
 ```
 
-### Web UI
+---
 
-**TemplateListPanel.tsx** (新規):
-- テンプレート一覧表示
-- 新規作成、編集、アーカイブ、インスタンス化
+## Phase 5: Handoff実装
 
-**TemplateFormDialog.tsx** (新規):
-- テンプレート名、説明、変数定義
-- タスク一覧（ドラッグ&ドロップ順序変更）
+### HandoffDialog.tsx
 
-**InstantiateDialog.tsx** (新規):
-- 変数入力フォーム
-- プレビュー表示
-- エージェントアサイン
+```tsx
+export function HandoffDialog({ taskId, onClose }: Props) {
+  const { data: task } = useQuery(['task', taskId])
+  const { data: agents } = useQuery(['assignable-agents'])
+
+  return (
+    <Dialog>
+      <Form onSubmit={handleHandoff}>
+        <Field label="委任先エージェント">
+          <AgentPicker
+            value={toAgentId}
+            agents={agents.filter(a => a.id !== task.assigneeId)}
+            onChange={setToAgentId}
+          />
+        </Field>
+
+        <Field label="引き継ぎコンテキスト">
+          <Textarea
+            value={context}
+            onChange={setContext}
+            placeholder="作業の進捗や注意点を記載..."
+          />
+        </Field>
+
+        <Actions>
+          <Button type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit">Handoff</Button>
+        </Actions>
+      </Form>
+    </Dialog>
+  )
+}
+```
+
+### REST API
+
+**POST /api/tasks/:taskId/handoff**
+
+```json
+// Request
+{
+  "toAgentId": "agent-2",
+  "context": "API実装完了、テストが必要"
+}
+
+// Response: 201 Created
+{
+  "handoffId": "handoff-1",
+  "taskId": "task-1",
+  "fromAgentId": "agent-1",
+  "toAgentId": "agent-2",
+  "context": "...",
+  "createdAt": "..."
+}
+```
 
 ---
 
 ## 実装優先順位
 
-### Sprint 1（高優先度）
+### Sprint 1: 修正フェーズ（必須）
 
-1. ✅ タスク削除 API ~~+ UI~~ (API完了 2026-01-19)
-2. ✅ タスク詳細（時間追跡） API ~~+ UI~~ (API完了 2026-01-19)
-3. ✅ タスク詳細（ブロック状態） API ~~+ UI~~ (API完了 2026-01-19)
+1. **TaskCard修正**: メニューボタン・削除機能を削除
+2. **REST API権限チェック**: ステータス変更・担当者変更の権限検証
+3. **E2Eテスト修正**: 削除テストを削除、権限エラーテストを追加
 
-### Sprint 2（中優先度）
+### Sprint 2: 詳細画面フェーズ
 
-4. ✅ タスク詳細（依存関係） API ~~+ UI~~ (API完了 2026-01-19)
-5. ハンドオフ API + UI
-6. チャット API + UI
+4. **TaskDetailPanel**: ステータスピッカー、基本情報表示
+5. **TaskEditForm**: タスク編集フォーム
+6. **権限API**: GET /api/tasks/:taskId/permissions
 
-### Sprint 3（低優先度）
+### Sprint 3: 高度な機能
 
-7. ワークフローテンプレート API + UI
+7. **Handoff**: 委任機能
+8. **依存関係UI**: DependencySelector
+9. **時間追跡UI**: TimeInput
 
 ---
 
 ## ファイル構成
 
-### REST API（Swift）
+### 削除対象
+
+```
+web-ui/src/components/task/TaskCard/
+├── TaskCard.tsx  # メニュー・削除関連コードを削除
+```
+
+### 修正対象
 
 ```
 Sources/RESTServer/
-├── RESTServer.swift           # 既存（拡張）
-├── Routes/
-│   ├── TaskRoutes.swift       # 新規
-│   ├── HandoffRoutes.swift    # 新規
-│   ├── ChatRoutes.swift       # 新規
-│   └── TemplateRoutes.swift   # 新規
-└── DTOs/
-    ├── TaskDTO.swift          # 既存（拡張）
-    ├── HandoffDTO.swift       # 新規
-    ├── ChatDTO.swift          # 新規
-    └── TemplateDTO.swift      # 新規
+└── RESTServer.swift  # 権限チェック追加
+
+web-ui/src/components/task/
+├── TaskCard/TaskCard.tsx  # シンプル化
+└── TaskBoard/TaskBoard.tsx  # エラーハンドリング改善
+
+web-ui/e2e/tests/
+└── task-board.spec.ts  # 削除テストを削除
 ```
 
-### Web UI（React）
+### 新規作成
 
 ```
-web-ui/src/
-├── components/
-│   ├── task/
-│   │   ├── TaskDetailPanel.tsx    # 新規
-│   │   ├── DependencySelector.tsx # 新規
-│   │   └── TimeInput.tsx          # 新規
-│   ├── chat/
-│   │   ├── AgentChatPanel.tsx     # 新規
-│   │   ├── ChatMessageList.tsx    # 新規
-│   │   └── ChatInput.tsx          # 新規
-│   ├── handoff/
-│   │   └── HandoffDialog.tsx      # 新規
-│   └── template/
-│       ├── TemplateListPanel.tsx  # 新規
-│       ├── TemplateFormDialog.tsx # 新規
-│       └── InstantiateDialog.tsx  # 新規
-├── api/
-│   ├── tasks.ts               # 既存（拡張）
-│   ├── chat.ts                # 新規
-│   ├── handoff.ts             # 新規
-│   └── templates.ts           # 新規
-└── types/
-    └── index.ts               # 拡張
+web-ui/src/components/task/
+├── TaskDetailPanel/
+│   ├── TaskDetailPanel.tsx
+│   ├── StatusPicker.tsx
+│   └── BlockedReasonField.tsx
+├── TaskEditForm/
+│   ├── TaskEditForm.tsx
+│   ├── DependencySelector.tsx
+│   └── TimeInput.tsx
+└── HandoffDialog/
+    └── HandoffDialog.tsx
+
+web-ui/src/api/
+└── tasks.ts  # getTaskPermissions追加
 ```
-
----
-
-## 参考ドキュメント
-
-| 機能 | 参考 |
-|------|------|
-| タスク仕様 | docs/requirements/TASKS.md |
-| ブロック | docs/usecase/UC008_TaskBlocking.md |
-| 依存関係 | docs/usecase/UC007_DependentTaskExecution.md |
-| チャット | docs/usecase/UC009_ChatCommunication.md |
-| ワークフローテンプレート | docs/requirements/WORKFLOW_TEMPLATES.md |
 
 ---
 
@@ -502,7 +456,6 @@ web-ui/src/
 | 日付 | 内容 |
 |------|------|
 | 2026-01-19 | 初版作成 |
-| 2026-01-19 | Internal Auditをスコープから除外 |
-| 2026-01-19 | Phase 1-4 REST API実装完了（タスク削除、時間追跡、ブロック状態、依存関係） |
-| 2026-01-19 | Phase 1-4 リポジトリ層テスト追加（12テストケース） |
-| 2026-01-19 | Phase 1 Web UI実装完了（タスク削除メニュー、E2Eテスト追加） |
+| 2026-01-19 | Phase 1-4 REST API実装完了（権限チェックなし） |
+| 2026-01-19 | Phase 1 Web UI実装（TaskCard削除メニュー）← **要撤回** |
+| 2026-01-19 | **改訂版作成**: macOSアプリとの整合性を重視した再設計 |
