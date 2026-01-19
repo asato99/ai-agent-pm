@@ -47,3 +47,11 @@ export interface UpdateTaskInput {
   assigneeId?: string | null
   dependencies?: string[]
 }
+
+export interface TaskPermissions {
+  canEdit: boolean
+  canChangeStatus: boolean
+  canReassign: boolean
+  validStatusTransitions: TaskStatus[]
+  reason: string | null
+}

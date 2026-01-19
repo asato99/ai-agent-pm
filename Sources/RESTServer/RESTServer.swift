@@ -271,6 +271,9 @@ public final class RESTServer {
         taskRouter.delete(":taskId") { [self] request, context in
             try await deleteTask(request: request, context: context)
         }
+        taskRouter.get(":taskId/permissions") { [self] request, context in
+            try await getTaskPermissions(request: request, context: context)
+        }
 
         // Agents
         let agentRouter = protectedRouter.group("agents")
@@ -568,6 +571,59 @@ public final class RESTServer {
         return Response(status: .noContent)
     }
 
+    /// GET /api/tasks/:taskId/permissions - タスク権限取得
+    private func getTaskPermissions(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let loggedInAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let taskIdStr = context.parameters.get("taskId") else {
+            return errorResponse(status: .badRequest, message: "Missing task ID")
+        }
+
+        let taskId = TaskID(value: taskIdStr)
+        guard let task = try taskRepository.findById(taskId) else {
+            return errorResponse(status: .notFound, message: "Task not found")
+        }
+
+        // 1. ステータス変更権限をチェック
+        var canChangeStatus = true
+        var statusChangeReason: String? = nil
+
+        if let lastChangedBy = task.statusChangedByAgentId {
+            let subordinates = try agentRepository.findByParent(loggedInAgentId)
+            let isSelfOrSubordinate = lastChangedBy == loggedInAgentId ||
+                                     subordinates.contains { $0.id == lastChangedBy }
+            if !isSelfOrSubordinate {
+                canChangeStatus = false
+                statusChangeReason = "Last changed by \(lastChangedBy.value). Only self or subordinate workers can modify."
+            }
+        }
+
+        // 2. 有効なステータス遷移を計算
+        let allStatuses: [TaskStatus] = [.backlog, .todo, .inProgress, .blocked, .done, .cancelled]
+        let validTransitions = allStatuses.filter { newStatus in
+            UpdateTaskStatusUseCase.canTransition(from: task.status, to: newStatus)
+        }.map { $0.rawValue }
+
+        // 3. 担当者変更権限をチェック
+        let canReassign = task.status != .inProgress && task.status != .blocked
+        let reassignReason = canReassign ? nil : "Task is \(task.status.rawValue), reassignment disabled"
+
+        // 4. 編集権限（現時点では常にtrue、将来的に拡張可能）
+        let canEdit = true
+
+        let permissions = TaskPermissionsDTO(
+            canEdit: canEdit,
+            canChangeStatus: canChangeStatus,
+            canReassign: canReassign,
+            validStatusTransitions: validTransitions,
+            reason: statusChangeReason ?? reassignReason
+        )
+
+        return jsonResponse(permissions)
+    }
+
     // MARK: - Agent Handlers
 
     private func listAssignableAgents(request: Request, context: AuthenticatedContext) async throws -> Response {
@@ -646,4 +702,14 @@ struct LoginResponse: Encodable {
     let sessionToken: String
     let agent: AgentDTO
     let expiresAt: String
+}
+
+// MARK: - Task Permissions DTO
+
+struct TaskPermissionsDTO: Encodable {
+    let canEdit: Bool
+    let canChangeStatus: Bool
+    let canReassign: Bool
+    let validStatusTransitions: [String]
+    let reason: String?
 }
