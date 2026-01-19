@@ -1675,14 +1675,27 @@ final class MCPServer {
         let projId = ProjectID(value: projectId)
 
         // Phase 4: in_progress 状態のタスクを該当プロジェクトでフィルタリング
-        let tasks = try taskRepository.findByAssignee(id)
-        guard var task = tasks.first(where: { $0.status == .inProgress && $0.projectId == projId }) else {
+        let allAssignedTasks = try taskRepository.findByAssignee(id)
+        Self.log("[MCP] reportCompleted: Found \(allAssignedTasks.count) assigned tasks for agent '\(agentId)'")
+        for t in allAssignedTasks {
+            Self.log("[MCP] reportCompleted:   - \(t.id.value) status=\(t.status.rawValue) project=\(t.projectId.value) parent=\(t.parentTaskId?.value ?? "nil")")
+        }
+        let inProgressTasks = allAssignedTasks.filter { $0.status == .inProgress && $0.projectId == projId }
+        Self.log("[MCP] reportCompleted: Found \(inProgressTasks.count) in_progress tasks in project '\(projectId)'")
+        guard var task = inProgressTasks.first else {
             Self.log("[MCP] reportCompleted: No in_progress task for agent '\(agentId)' in project '\(projectId)'")
             return [
                 "success": false,
                 "error": "No in_progress task found for this agent"
             ]
         }
+
+        // Worker（parentTaskId != nil）の場合、すべてのin_progressタスクを完了させる
+        // これはManagerが複数のサブタスクを同じWorkerに割り当てた場合に対応
+        let additionalInProgressTasks = inProgressTasks.dropFirst()
+
+        // Workerに割り当てられた未着手（todo）タスクも収集（後で完了させる）
+        let pendingTodoTasks = allAssignedTasks.filter { $0.status == .todo && $0.projectId == projId && $0.parentTaskId != nil }
 
         // サブタスク作成を強制: メインタスク（parentTaskId=nil）の場合、サブタスクが必要
         if task.parentTaskId == nil {
@@ -1846,9 +1859,40 @@ final class MCPServer {
 
         Self.log("[MCP] reportCompleted: Task \(task.id.value) status changed to \(newStatus.rawValue)")
 
+        // 追加のin_progressタスクも完了させる（Managerが複数タスクを割り当てた場合）
+        Self.log("[MCP] reportCompleted: Processing \(additionalInProgressTasks.count) additional in_progress tasks")
+        for var additionalTask in additionalInProgressTasks {
+            Self.log("[MCP] reportCompleted: Checking additional task \(additionalTask.id.value) parentTaskId=\(additionalTask.parentTaskId?.value ?? "nil")")
+            if additionalTask.parentTaskId != nil {  // Workerタスクのみ
+                additionalTask.status = newStatus
+                additionalTask.updatedAt = Date()
+                additionalTask.statusChangedByAgentId = id
+                additionalTask.statusChangedAt = Date()
+                if newStatus == .done {
+                    additionalTask.completedAt = Date()
+                }
+                try taskRepository.save(additionalTask)
+                Self.log("[MCP] reportCompleted: Additional in_progress task \(additionalTask.id.value) also marked as \(newStatus.rawValue)")
+            }
+        }
+
+        // 未着手（todo）タスクもすべて完了させる（Workerがセッション終了後に新タスクを受け取らないように）
+        for var todoTask in pendingTodoTasks {
+            todoTask.status = newStatus
+            todoTask.updatedAt = Date()
+            todoTask.statusChangedByAgentId = id
+            todoTask.statusChangedAt = Date()
+            if newStatus == .done {
+                todoTask.completedAt = Date()
+            }
+            try taskRepository.save(todoTask)
+            Self.log("[MCP] reportCompleted: Pending todo task \(todoTask.id.value) also marked as \(newStatus.rawValue)")
+        }
+
         return [
             "success": true,
-            "instruction": "タスクが完了しました。セッションを終了しました。"
+            "action": "exit",
+            "instruction": "タスクが完了しました。プロセスを終了してください。"
         ]
     }
 
@@ -1988,8 +2032,22 @@ final class MCPServer {
 
         Self.log("[MCP] getWorkerNextAction: subTasks=\(subTasks.count), pending=\(pendingSubTasks.count), inProgress=\(inProgressSubTasks.count), completed=\(completedSubTasks.count), blocked=\(blockedSubTasks.count)")
 
+        // 委譲タスク判定: createdByAgentId != assigneeId → 他のエージェントから委譲されたタスク
+        // 委譲タスクはサブタスクに分解できるが、自己作成タスクはさらに分解しない（無限ネスト防止）
+        let isDelegatedTask: Bool
+        if let createdBy = mainTask.createdByAgentId, let assignee = mainTask.assigneeId {
+            isDelegatedTask = createdBy != assignee
+        } else {
+            // createdByAgentId が nil の場合は、既存データ（マイグレーション前）
+            // 後方互換性のため parentTaskId == nil で判定
+            isDelegatedTask = mainTask.parentTaskId == nil
+        }
+        Self.log("[MCP] getWorkerNextAction: isDelegatedTask=\(isDelegatedTask), createdBy=\(mainTask.createdByAgentId?.value ?? "nil"), assignee=\(mainTask.assigneeId?.value ?? "nil")")
+
         // 1. サブタスク未作成 → サブタスク作成フェーズへ
-        if phase == "workflow:task_fetched" && subTasks.isEmpty {
+        // 委譲タスク（他のエージェントから割り当てられた）場合はサブタスク作成可能
+        // 自己作成タスク（自分で作成した）場合は実際の作業を行うべき（無限ネスト防止）
+        if phase == "workflow:task_fetched" && subTasks.isEmpty && isDelegatedTask {
             // サブタスク作成フェーズを記録
             // Note: Context.sessionId は sessions テーブルを参照するため、
             // 先に Session を作成してからその ID を使用する
@@ -2022,6 +2080,26 @@ final class MCPServer {
                     サブタスク作成後、get_next_action を呼び出してください。
                     """,
                 "state": "needs_subtask_creation",
+                "task": [
+                    "id": mainTask.id.value,
+                    "title": mainTask.title,
+                    "description": mainTask.description
+                ]
+            ]
+        }
+
+        // 1.5. 自己作成タスク（自分で作成した）で子タスクがない場合
+        // → 実際の作業を行う（さらなる分解は不要、無限ネスト防止）
+        if !isDelegatedTask && subTasks.isEmpty {
+            return [
+                "action": "work",
+                "instruction": """
+                    このタスクを直接実行してください。
+                    タスクの内容に従って作業を行い、完了したら
+                    update_task_status で status を 'done' に変更してください。
+                    その後 get_next_action を呼び出してください。
+                    """,
+                "state": "execute_task",
                 "task": [
                     "id": mainTask.id.value,
                     "title": mainTask.title,
@@ -2953,7 +3031,23 @@ final class MCPServer {
             }
         }
 
+        // 作成者のエージェントを取得してhierarchyTypeを確認
+        let creatorAgent = try agentRepository.findById(agentId)
+
+        // assigneeId の決定:
+        // - Manager: nil（assign_task で明示的に割り当てる必要がある）
+        // - Worker: 自分自身（自己作成タスクは自分で実行する）
+        // これにより、Workerが作成したサブタスクは自動的に自分にアサインされる
+        let assigneeId: AgentID?
+        if let agent = creatorAgent, agent.hierarchyType == .worker {
+            assigneeId = agentId
+            Self.log("[MCP] Worker creating task - auto-assigning to self")
+        } else {
+            assigneeId = nil
+        }
+
         // 新しいタスクを作成
+        // createdByAgentId: タスク作成者を記録（委譲タスク判別用）
         let newTask = Task(
             id: TaskID.generate(),
             projectId: projectId,
@@ -2961,7 +3055,8 @@ final class MCPServer {
             description: description,
             status: .todo,
             priority: taskPriority,
-            assigneeId: agentId,
+            assigneeId: assigneeId,
+            createdByAgentId: agentId,
             dependencies: taskDependencies,
             parentTaskId: parentId
         )
@@ -2969,7 +3064,17 @@ final class MCPServer {
         try taskRepository.save(newTask)
 
         let depsStr = taskDependencies.map { $0.value }.joined(separator: ", ")
-        Self.log("[MCP] Task created: \(newTask.id.value) (parent: \(parentTaskId ?? "none"), dependencies: [\(depsStr)])")
+        Self.log("[MCP] Task created: \(newTask.id.value) (parent: \(parentTaskId ?? "none"), dependencies: [\(depsStr)], assignee: \(assigneeId?.value ?? "nil"))")
+
+        // 作成者に応じた instruction を決定
+        let instruction: String
+        if assigneeId != nil {
+            // Worker の場合: タスクは既に自分にアサインされている
+            instruction = "サブタスクが作成され、あなたに自動的に割り当てられました。全てのサブタスク作成後、get_next_action を呼び出してください。"
+        } else {
+            // Manager の場合: assign_task で Worker に割り当てが必要
+            instruction = "サブタスクが作成されました。assign_task で適切なワーカーに割り当て、update_task_status で in_progress に変更してください。未割り当てのままのタスクは実行されません。"
+        }
 
         return [
             "success": true,
@@ -2979,11 +3084,11 @@ final class MCPServer {
                 "description": newTask.description,
                 "status": newTask.status.rawValue,
                 "priority": newTask.priority.rawValue,
-                "assignee_id": agentId.value,
+                "assignee_id": assigneeId?.value as Any,
                 "parent_task_id": parentTaskId as Any,
                 "dependencies": taskDependencies.map { $0.value }
             ],
-            "instruction": "サブタスクが作成されました。assign_taskで適切なワーカーに割り当ててください。"
+            "instruction": instruction
         ]
     }
 

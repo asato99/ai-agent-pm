@@ -197,6 +197,10 @@ extension TestDataSeeder {
             description: """
                 【タスク指示】
                 hello.txt を日本語と中国語に翻訳してください。
+
+                【出力ファイル】
+                - 日本語翻訳: hello_ja.txt
+                - 中国語翻訳: hello_zh.txt
                 """,
             status: .backlog,
             priority: .high,

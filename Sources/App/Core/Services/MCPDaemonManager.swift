@@ -255,6 +255,14 @@ public final class MCPDaemonManager: ObservableObject {
                 "HOME": NSHomeDirectory(),
                 "TMPDIR": NSTemporaryDirectory()
             ]
+
+            // When running from DerivedData, set DYLD_FRAMEWORK_PATH to find frameworks
+            // (frameworks are in the same directory as the binary, not in a subdirectory)
+            let daemonDir = URL(fileURLWithPath: daemonToRun).deletingLastPathComponent().path
+            if daemonDir.contains("DerivedData") {
+                environment["DYLD_FRAMEWORK_PATH"] = daemonDir
+                debugLog(" Setting DYLD_FRAMEWORK_PATH=\(daemonDir)")
+            }
             if let databasePath = databasePath {
                 environment["AIAGENTPM_DB_PATH"] = databasePath
                 debugLog(" Setting AIAGENTPM_DB_PATH=\(databasePath)")

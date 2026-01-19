@@ -706,6 +706,16 @@ public final class DatabaseSetup {
             """)
         }
 
+        // v31: タスク作成者追跡フィールド
+        // 委譲タスク判別用: createdByAgentId != assigneeId → 委譲されたタスク
+        migrator.registerMigration("v31_task_created_by") { db in
+            try db.alter(table: "tasks") { t in
+                t.add(column: "created_by_agent_id", .text)
+                    .references("agents", onDelete: .setNull)
+            }
+            try db.create(indexOn: "tasks", columns: ["created_by_agent_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

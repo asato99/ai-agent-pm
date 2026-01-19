@@ -13,6 +13,9 @@ public struct Task: Identifiable, Equatable, Sendable {
     public var status: TaskStatus
     public var priority: TaskPriority
     public var assigneeId: AgentID?
+    /// タスクを作成したエージェント
+    /// 委譲タスク判別用: createdByAgentId != assigneeId → 委譲されたタスク
+    public var createdByAgentId: AgentID?
     public var dependencies: [TaskID]
     public var parentTaskId: TaskID?
     public var estimatedMinutes: Int?
@@ -47,6 +50,7 @@ public struct Task: Identifiable, Equatable, Sendable {
         status: TaskStatus = .backlog,
         priority: TaskPriority = .medium,
         assigneeId: AgentID? = nil,
+        createdByAgentId: AgentID? = nil,
         dependencies: [TaskID] = [],
         parentTaskId: TaskID? = nil,
         estimatedMinutes: Int? = nil,
@@ -68,6 +72,7 @@ public struct Task: Identifiable, Equatable, Sendable {
         self.status = status
         self.priority = priority
         self.assigneeId = assigneeId
+        self.createdByAgentId = createdByAgentId
         self.dependencies = dependencies
         self.parentTaskId = parentTaskId
         self.estimatedMinutes = estimatedMinutes
