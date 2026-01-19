@@ -98,8 +98,10 @@ public final class WebServerManager: ObservableObject {
     /// Whether to skip timers (for UI testing)
     private let skipTimers: Bool
 
-    /// Server port
-    public let port: Int = 8080
+    /// Server port (read from AppConfig)
+    public var port: Int {
+        AppConfig.WebServer.port
+    }
 
     // MARK: - Path Properties
 
@@ -113,15 +115,17 @@ public final class WebServerManager: ObservableObject {
         AppConfig.appSupportDirectory.appendingPathComponent("webserver.log").path
     }
 
-    /// Web UI static files directory
-    public var webUIPath: String {
-        // Check bundled resources first
+    /// Web UI static files directory (bundled in app resources)
+    public var webUIPath: String? {
+        // Check bundled resources (web-ui folder in app bundle)
         if let bundledPath = Bundle.main.resourceURL?.appendingPathComponent("web-ui").path,
            FileManager.default.fileExists(atPath: bundledPath) {
+            debugLog("Found web-ui in bundle: \(bundledPath)")
             return bundledPath
         }
-        // Fallback to app support directory
-        return AppConfig.appSupportDirectory.appendingPathComponent("web-ui").path
+
+        debugLog("Web UI files not found in bundle. Run 'npm run build' in web-ui/ and rebuild the app.")
+        return nil
     }
 
     /// Path to rest-server-pm executable
@@ -234,6 +238,19 @@ public final class WebServerManager: ObservableObject {
             ]
             environment["AIAGENTPM_DB_PATH"] = dbPath
             debugLog("Setting AIAGENTPM_DB_PATH=\(dbPath)")
+
+            // Set port
+            let serverPort = AppConfig.WebServer.port
+            environment[AppConfig.WebServer.portEnvKey] = "\(serverPort)"
+            debugLog("Setting \(AppConfig.WebServer.portEnvKey)=\(serverPort)")
+
+            // Set web-ui path if available
+            if let webUI = webUIPath {
+                environment["AIAGENTPM_WEBUI_PATH"] = webUI
+                debugLog("Setting AIAGENTPM_WEBUI_PATH=\(webUI)")
+            } else {
+                debugLog("Web UI path not found, static file serving will be disabled")
+            }
 
             process.environment = environment
             debugLog("Launching web server from: \(execPath)")

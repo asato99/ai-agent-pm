@@ -88,6 +88,23 @@ targets:
       - target: Domain
       - target: UseCase
       - target: Infrastructure
+      - target: RESTServer
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+    postCompileScripts:
+      # Copy web-ui/dist to app bundle as "web-ui"
+      - name: Copy Web UI Files
+        script: |
+          if [ -d "${PROJECT_DIR}/web-ui/dist" ]; then
+            mkdir -p "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/web-ui"
+            cp -R "${PROJECT_DIR}/web-ui/dist/"* "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/web-ui/"
+            echo "Copied web-ui/dist to app bundle"
+          else
+            echo "Warning: web-ui/dist not found. Run 'npm run build' in web-ui/ first."
+          fi
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.app

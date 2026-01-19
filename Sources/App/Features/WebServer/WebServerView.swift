@@ -228,7 +228,7 @@ public struct WebServerView: View {
 
                 pathRow(label: "PID File", path: serverManager.pidPath)
                 pathRow(label: "Log File", path: serverManager.logPath)
-                pathRow(label: "Web UI Files", path: serverManager.webUIPath)
+                pathRow(label: "Web UI Files", path: serverManager.webUIPath ?? "(Not bundled)")
             }
             .padding(.vertical, 4)
         } label: {

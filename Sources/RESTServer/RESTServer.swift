@@ -8,6 +8,12 @@ import Infrastructure
 import UseCase
 import Domain
 
+// Debug logging helper
+private func debugLog(_ message: String) {
+    let line = "[RESTServer] \(message)\n"
+    FileHandle.standardError.write(line.data(using: .utf8)!)
+}
+
 /// REST API Server for web-ui
 public final class RESTServer {
     private let database: DatabaseQueue
@@ -40,11 +46,15 @@ public final class RESTServer {
     }
 
     public func run() async throws {
+        debugLog("run() starting")
+
         // Create router with custom context
         let router = Router(context: AuthenticatedContext.self)
+        debugLog("Router created")
 
         // Add CORS middleware
         router.add(middleware: CORSMiddleware())
+        debugLog("CORS middleware added")
 
         // Health check
         router.get("health") { _, _ in
@@ -54,84 +64,79 @@ public final class RESTServer {
                 body: .init(byteBuffer: .init(string: "{\"status\":\"ok\"}"))
             )
         }
+        debugLog("Health route registered")
 
         // API routes
         let apiRouter = router.group("api")
+        debugLog("API group created")
 
         // Auth routes (no auth required for login)
         registerAuthRoutes(router: apiRouter)
+        debugLog("Auth routes registered")
 
         // Protected routes need auth middleware
         registerProtectedRoutes(router: apiRouter)
+        debugLog("Protected routes registered")
 
         // Static file serving for web-ui (if enabled)
         if let webUIPath = webUIPath {
-            print("[rest-server-pm] Static files enabled from: \(webUIPath)")
-            registerStaticFileRoutes(router: router, webUIPath: webUIPath)
+            debugLog("Static files will be enabled from: \(webUIPath)")
+
+            // Serve index.html at root
+            router.get("/") { _, _ in
+                debugLog("Root GET handler called")
+                return self.serveFile(at: "\(webUIPath)/index.html")
+            }
+            debugLog("Root route registered")
+
+            // Serve assets with catch-all pattern
+            router.get("/assets/**") { request, context in
+                let pathComponents = context.parameters.getCatchAll()
+                let path = pathComponents.joined(separator: "/")
+                debugLog("Assets handler called for: \(path)")
+                return self.serveFile(at: "\(webUIPath)/assets/\(path)")
+            }
+            debugLog("Assets route registered")
+
+            // Catch-all for files and SPA (must be after specific routes)
+            router.get("/**") { request, context in
+                let pathComponents = context.parameters.getCatchAll()
+                let path = pathComponents.joined(separator: "/")
+                debugLog("Catch-all handler for: \(path)")
+
+                // Check if file exists
+                let filePath = "\(webUIPath)/\(path)"
+                if FileManager.default.fileExists(atPath: filePath) {
+                    var isDirectory: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory),
+                       !isDirectory.boolValue {
+                        debugLog("Serving file: \(filePath)")
+                        return self.serveFile(at: filePath)
+                    }
+                }
+
+                // SPA fallback
+                debugLog("SPA fallback: index.html")
+                return self.serveFile(at: "\(webUIPath)/index.html")
+            }
+            debugLog("Catch-all route registered")
+        } else {
+            debugLog("No webUIPath provided, static files disabled")
         }
 
+        debugLog("Creating Application...")
         // Create and run application
         let app = Application(
             router: router,
             configuration: .init(address: .hostname("127.0.0.1", port: port))
         )
 
-        print("[rest-server-pm] Server listening on http://127.0.0.1:\(port)")
+        debugLog("Server about to start on http://127.0.0.1:\(port)")
         try await app.runService()
+        debugLog("Server stopped")
     }
 
     // MARK: - Static File Serving
-
-    private func registerStaticFileRoutes(router: Router<AuthenticatedContext>, webUIPath: String) {
-        let basePath = webUIPath
-
-        // Root path serves index.html
-        router.get("/") { _, _ in
-            return self.serveFile(at: "\(basePath)/index.html")
-        }
-
-        // Serve assets directory (JS, CSS, images)
-        router.get("assets/{path+}") { request, context in
-            let path = context.parameters.get("path") ?? ""
-            return self.serveFile(at: "\(basePath)/assets/\(path)")
-        }
-
-        // Serve specific static files
-        router.get("{file}") { request, context in
-            guard let file = context.parameters.get("file") else {
-                return self.serveFile(at: "\(basePath)/index.html")
-            }
-
-            // Check if it's a static file (has extension)
-            if file.contains(".") {
-                let filePath = "\(basePath)/\(file)"
-                if FileManager.default.fileExists(atPath: filePath) {
-                    return self.serveFile(at: filePath)
-                }
-            }
-
-            // For SPA routing, return index.html for non-API, non-file paths
-            return self.serveFile(at: "\(basePath)/index.html")
-        }
-
-        // Catch-all for SPA routes (e.g., /projects/123)
-        router.get("{path+}") { request, context in
-            let path = context.parameters.get("path") ?? ""
-            let pathComponents = path.split(separator: "/")
-
-            // Skip API routes (handled by API router)
-            if pathComponents.first == "api" || pathComponents.first == "health" {
-                return Response(status: .notFound)
-            }
-            let filePath = "\(basePath)/\(path)"
-            if FileManager.default.fileExists(atPath: filePath) {
-                return self.serveFile(at: filePath)
-            }
-
-            // SPA fallback: return index.html
-            return self.serveFile(at: "\(basePath)/index.html")
-        }
-    }
 
     private func serveFile(at path: String) -> Response {
         guard let data = FileManager.default.contents(atPath: path) else {

@@ -33,6 +33,11 @@ struct SettingsView: View {
                 Label("Database", systemImage: "internaldrive")
             }
 
+            WebServerSettingsView()
+            .tabItem {
+                Label("Web Server", systemImage: "network")
+            }
+
             MCPSettingsView()
             .tabItem {
                 Label("MCP Server", systemImage: "server.rack")
@@ -163,6 +168,230 @@ struct DatabaseSettingsView: View {
 
     private func importData() {
         // TODO: Implement data import
+    }
+}
+
+// MARK: - Web Server Settings
+
+struct WebServerSettingsView: View {
+    @EnvironmentObject var container: DependencyContainer
+
+    @State private var portText: String = ""
+    @State private var currentPort: Int = AppConfig.WebServer.defaultPort
+    @State private var isServerRunning = false
+    @State private var isRestarting = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    @State private var portChanged = false
+
+    private var enteredPort: Int? {
+        Int(portText)
+    }
+
+    private var isValidPort: Bool {
+        guard let port = enteredPort else { return false }
+        return AppConfig.WebServer.isValidPort(port)
+    }
+
+    var body: some View {
+        Form {
+            Section("Server Status") {
+                LabeledContent("Status") {
+                    HStack {
+                        Circle()
+                            .fill(isServerRunning ? .green : .gray)
+                            .frame(width: 8, height: 8)
+                        Text(isServerRunning ? "Running" : "Stopped")
+                    }
+                }
+
+                LabeledContent("URL") {
+                    if isServerRunning {
+                        Link("http://127.0.0.1:\(currentPort)",
+                             destination: URL(string: "http://127.0.0.1:\(currentPort)")!)
+                            .font(.caption)
+                    } else {
+                        Text("—")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section("Port Configuration") {
+                HStack {
+                    TextField("Port", text: $portText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 100)
+                        .onChange(of: portText) { _, newValue in
+                            // Only allow numeric input
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue {
+                                portText = filtered
+                            }
+                            checkPortChanged()
+                        }
+
+                    if !isValidPort && !portText.isEmpty {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                            .help("Port must be between 1024 and 65535")
+                    } else if portChanged && isValidPort {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(.blue)
+                            .help("Restart required to apply changes")
+                    }
+                }
+
+                Text("Valid range: 1024 - 65535 (default: \(AppConfig.WebServer.defaultPort))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("Save & Restart") {
+                        saveAndRestart()
+                    }
+                    .disabled(!isValidPort || !portChanged || isRestarting)
+
+                    Button("Reset to Default") {
+                        resetToDefault()
+                    }
+                    .disabled(currentPort == AppConfig.WebServer.defaultPort && !portChanged)
+
+                    if isRestarting {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .padding(.leading, 8)
+                    }
+                }
+            }
+
+            Section("Server Control") {
+                HStack {
+                    Button(isServerRunning ? "Stop Server" : "Start Server") {
+                        toggleServer()
+                    }
+                    .disabled(isRestarting)
+
+                    Button("Restart Server") {
+                        restartServer()
+                    }
+                    .disabled(!isServerRunning || isRestarting)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .task {
+            loadSettings()
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+
+    private func loadSettings() {
+        currentPort = AppConfig.WebServer.port
+        portText = "\(currentPort)"
+        isServerRunning = container.webServerManager.status == .running
+        portChanged = false
+    }
+
+    private func checkPortChanged() {
+        guard let port = enteredPort else {
+            portChanged = false
+            return
+        }
+        portChanged = port != currentPort
+    }
+
+    private func saveAndRestart() {
+        guard let port = enteredPort, isValidPort else { return }
+
+        isRestarting = true
+
+        // Save to UserDefaults
+        AppConfig.WebServer.setPort(port)
+        currentPort = port
+        portChanged = false
+
+        // Restart server
+        AsyncTask {
+            do {
+                await container.webServerManager.stop()
+                try await AsyncTask.sleep(nanoseconds: 500_000_000)
+                try await container.webServerManager.start()
+                await MainActor.run {
+                    isServerRunning = container.webServerManager.status == .running
+                    isRestarting = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to restart server: \(error.localizedDescription)"
+                    showError = true
+                    isRestarting = false
+                    isServerRunning = container.webServerManager.status == .running
+                }
+            }
+        }
+    }
+
+    private func resetToDefault() {
+        AppConfig.WebServer.resetPort()
+        currentPort = AppConfig.WebServer.defaultPort
+        portText = "\(currentPort)"
+        portChanged = false
+
+        // Restart if running
+        if isServerRunning {
+            restartServer()
+        }
+    }
+
+    private func toggleServer() {
+        isRestarting = true
+
+        AsyncTask {
+            do {
+                if isServerRunning {
+                    await container.webServerManager.stop()
+                } else {
+                    try await container.webServerManager.start()
+                }
+                await MainActor.run {
+                    isServerRunning = container.webServerManager.status == .running
+                    isRestarting = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to \(isServerRunning ? "stop" : "start") server: \(error.localizedDescription)"
+                    showError = true
+                    isRestarting = false
+                }
+            }
+        }
+    }
+
+    private func restartServer() {
+        isRestarting = true
+
+        AsyncTask {
+            do {
+                try await container.webServerManager.restart()
+                await MainActor.run {
+                    isServerRunning = container.webServerManager.status == .running
+                    isRestarting = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to restart server: \(error.localizedDescription)"
+                    showError = true
+                    isRestarting = false
+                    isServerRunning = container.webServerManager.status == .running
+                }
+            }
+        }
     }
 }
 

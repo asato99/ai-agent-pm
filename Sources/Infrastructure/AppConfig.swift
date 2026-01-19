@@ -50,4 +50,51 @@ public enum AppConfig {
         public static let id = "prj_default"
         public static let name = "Default Project"
     }
+
+    /// Web Server設定
+    public enum WebServer {
+        /// ポート設定用の環境変数名
+        public static let portEnvKey = "AIAGENTPM_WEBSERVER_PORT"
+
+        /// ポート設定用のUserDefaultsキー
+        public static let portUserDefaultsKey = "webServerPort"
+
+        /// デフォルトのポート番号
+        public static let defaultPort = 8080
+
+        /// 実際に使用するポート番号
+        /// 優先順位: 環境変数 > UserDefaults > デフォルト値
+        public static var port: Int {
+            // 1. 環境変数を優先
+            if let envPort = ProcessInfo.processInfo.environment[portEnvKey],
+               let port = Int(envPort), isValidPort(port) {
+                return port
+            }
+
+            // 2. UserDefaultsを確認
+            let userDefaultsPort = UserDefaults.standard.integer(forKey: portUserDefaultsKey)
+            if userDefaultsPort != 0 && isValidPort(userDefaultsPort) {
+                return userDefaultsPort
+            }
+
+            // 3. デフォルト値
+            return defaultPort
+        }
+
+        /// ポートをUserDefaultsに保存
+        public static func setPort(_ port: Int) {
+            guard isValidPort(port) else { return }
+            UserDefaults.standard.set(port, forKey: portUserDefaultsKey)
+        }
+
+        /// ポートをデフォルトにリセット
+        public static func resetPort() {
+            UserDefaults.standard.removeObject(forKey: portUserDefaultsKey)
+        }
+
+        /// 有効なポート番号か確認
+        public static func isValidPort(_ port: Int) -> Bool {
+            return port >= 1024 && port <= 65535
+        }
+    }
 }
