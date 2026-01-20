@@ -87,6 +87,30 @@ test.describe('全下位エージェント表示', () => {
     await expect(projectList.getAgentCard('Worker 1')).toBeVisible()
     await expect(projectList.getAgentCard('Worker 2')).toBeVisible()
   })
+
+  test('オーナーは孫エージェント（Worker）の詳細画面を表示できる', async ({ page }) => {
+    // owner-1 → manager-1 → worker-1
+    // owner-1 should be able to view worker-1 detail (grandchild)
+    const loginPage = new LoginPage(page)
+    await loginPage.goto()
+    await loginPage.login('owner-1', 'test-passkey')
+    await expect(page).toHaveURL('/projects')
+
+    const projectList = new ProjectListPage(page)
+
+    // Wait for agent cards to load
+    await expect(projectList.agentCards.first()).toBeVisible({ timeout: 10000 })
+
+    // Click on Worker 1 (grandchild of owner-1)
+    await projectList.getAgentCard('Worker 1').click()
+
+    // Should navigate to agent detail page without error
+    await expect(page).toHaveURL(/\/agents\/worker-1/)
+
+    // Should show agent detail form (not error)
+    await expect(page.getByText('エージェント詳細')).toBeVisible()
+    await expect(page.getByLabel('名前')).toBeVisible()
+  })
 })
 
 test.describe('エージェント詳細', () => {

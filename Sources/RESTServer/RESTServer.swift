@@ -903,16 +903,16 @@ final class RESTServer {
         return jsonResponse(dto)
     }
 
-    /// Check if current agent can access target agent (self or subordinate)
+    /// Check if current agent can access target agent (self or any descendant)
     private func canAccessAgent(currentAgentId: AgentID, targetAgentId: AgentID) throws -> Bool {
         // Self access is always allowed
         if currentAgentId == targetAgentId {
             return true
         }
 
-        // Check if target is a subordinate
-        let subordinates = try agentRepository.findByParent(currentAgentId)
-        return subordinates.contains { $0.id == targetAgentId }
+        // Check if target is a descendant (includes grandchildren, etc.)
+        let allDescendants = try agentRepository.findAllDescendants(currentAgentId)
+        return allDescendants.contains { $0.id == targetAgentId }
     }
 
     // MARK: - Handoff Handlers
