@@ -28,8 +28,8 @@ const columns: ColumnConfig[] = [
   { status: 'backlog', label: 'Backlog' },
   { status: 'todo', label: 'Todo' },
   { status: 'in_progress', label: 'In Progress' },
-  { status: 'done', label: 'Done' },
   { status: 'blocked', label: 'Blocked' },
+  { status: 'done', label: 'Done' },
 ]
 
 export function KanbanBoard({ tasks, onTaskMove, onTaskClick }: KanbanBoardProps) {
