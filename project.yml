@@ -244,6 +244,7 @@ targets:
   # 単体テスト - RESTServer
   # Note: RESTServerはtoolタイプなので@testable importできない
   # そのため、ソースファイルを直接テストターゲットに含める
+  # RESTServerはMCPServerの型を使用するため、MCPServerソースも含める
   RESTServerTests:
     type: bundle.unit-test
     platform: macOS
@@ -254,11 +255,17 @@ targets:
         type: group
         excludes:
           - "main.swift"
+      - path: Sources/MCPServer
+        type: group
+        excludes:
+          - "main.swift"
+          - "App.swift"
     dependencies:
       - target: Infrastructure
       - target: UseCase
       - target: Domain
       - package: Hummingbird
+      - package: ArgumentParser
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.restservertests
