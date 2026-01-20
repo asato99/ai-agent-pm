@@ -10,6 +10,31 @@ from aiagent_runner.coordinator import Coordinator
 from aiagent_runner.coordinator_config import CoordinatorConfig
 
 
+class TestCoordinatorConfig:
+    """Tests for CoordinatorConfig multi-device features."""
+
+    def test_config_with_root_agent_id(self):
+        """Should accept root_agent_id for multi-device operation."""
+        config = CoordinatorConfig(
+            agents={},
+            mcp_socket_path="/tmp/test.sock",
+            root_agent_id="human-frontend-lead",
+            polling_interval=5,
+            max_concurrent=1
+        )
+        assert config.root_agent_id == "human-frontend-lead"
+
+    def test_config_without_root_agent_id(self):
+        """Should allow root_agent_id to be None (local operation)."""
+        config = CoordinatorConfig(
+            agents={},
+            mcp_socket_path="/tmp/test.sock",
+            polling_interval=5,
+            max_concurrent=1
+        )
+        assert config.root_agent_id is None
+
+
 class TestCoordinatorGetLogDirectory:
     """Tests for Coordinator._get_log_directory()."""
 

@@ -455,3 +455,59 @@ public struct GetAgentSessionsUseCase: Sendable {
         try sessionRepository.findByAgent(agentId)
     }
 }
+
+// MARK: - Phase 3.1: Managed Agents UseCase
+
+/// 管轄AIエージェント取得ユースケース
+/// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ3.1
+///
+/// humanエージェントを起点として、その配下のAIエージェントのみを取得する。
+/// humanエージェントの配下に別のhumanエージェントがいる場合、そこで区切る。
+///
+/// 例: human-A → ai-1, ai-2, human-B → ai-3
+/// - human-Aの管轄: [ai-1, ai-2]（human-Bとai-3は含まない）
+/// - human-Bの管轄: [ai-3]
+public struct GetManagedAgentsUseCase: Sendable {
+    private let agentRepository: any AgentRepositoryProtocol
+
+    public init(agentRepository: any AgentRepositoryProtocol) {
+        self.agentRepository = agentRepository
+    }
+
+    /// 指定したhumanエージェントの管轄下にあるAIエージェントを取得
+    /// - Parameter rootAgentId: 起点となるhumanエージェントのID
+    /// - Returns: 管轄下のAIエージェント一覧
+    /// - Throws: rootMustBeHuman - 起点エージェントがhumanでない場合
+    public func execute(rootAgentId: AgentID) throws -> [Agent] {
+        guard let rootAgent = try agentRepository.findById(rootAgentId) else {
+            throw UseCaseError.agentNotFound(rootAgentId)
+        }
+
+        guard rootAgent.type == .human else {
+            throw UseCaseError.validationFailed("Root agent must be of type human")
+        }
+
+        var result: [Agent] = []
+        try traverse(rootAgentId, into: &result)
+        return result
+    }
+
+    /// 再帰的に配下のエージェントを走査
+    /// humanエージェントに到達したらそこで区切る（その配下は含めない）
+    private func traverse(_ agentId: AgentID, into result: inout [Agent]) throws {
+        let children = try agentRepository.findByParent(agentId)
+
+        for child in children {
+            if child.type == .human {
+                // humanエージェントで区切り（そのエージェントもその配下も含めない）
+                continue
+            }
+
+            // AIエージェントは結果に追加
+            result.append(child)
+
+            // さらにその配下も走査
+            try traverse(child.id, into: &result)
+        }
+    }
+}

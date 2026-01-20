@@ -248,3 +248,31 @@ public protocol AppSettingsRepositoryProtocol: Sendable {
     /// アプリケーション設定を保存
     func save(_ settings: AppSettings) throws
 }
+
+// MARK: - AgentWorkingDirectoryRepositoryProtocol
+
+/// エージェントのワーキングディレクトリ設定リポジトリのプロトコル
+/// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.1
+/// マルチデバイス環境でエージェントごと、プロジェクトごとのワーキングディレクトリを管理
+public protocol AgentWorkingDirectoryRepositoryProtocol: Sendable {
+    /// IDで検索
+    func findById(_ id: AgentWorkingDirectoryID) throws -> AgentWorkingDirectory?
+
+    /// エージェント×プロジェクトで検索（一意）
+    func findByAgentAndProject(agentId: AgentID, projectId: ProjectID) throws -> AgentWorkingDirectory?
+
+    /// エージェントの全ワーキングディレクトリ設定を取得
+    func findByAgent(_ agentId: AgentID) throws -> [AgentWorkingDirectory]
+
+    /// プロジェクトの全ワーキングディレクトリ設定を取得
+    func findByProject(_ projectId: ProjectID) throws -> [AgentWorkingDirectory]
+
+    /// 保存（作成または更新）
+    func save(_ workingDirectory: AgentWorkingDirectory) throws
+
+    /// 削除
+    func delete(_ id: AgentWorkingDirectoryID) throws
+
+    /// エージェント×プロジェクトで削除
+    func deleteByAgentAndProject(agentId: AgentID, projectId: ProjectID) throws
+}

@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppHeader } from '@/components/layout'
 import { KanbanBoard, CreateTaskModal, TaskDetailPanel } from '@/components/task'
+import { WorkingDirectorySettings } from '@/components/project'
 import { useProject } from '@/hooks/useProject'
 import { useTasks } from '@/hooks/useTasks'
 import { api } from '@/api/client'
@@ -105,6 +106,15 @@ export function TaskBoardPage() {
             タスク作成
           </button>
         </div>
+
+        {/* Phase 2.4: マルチデバイス対応 - ワーキングディレクトリ設定 */}
+        {projectId && (
+          <WorkingDirectorySettings
+            projectId={projectId}
+            currentWorkingDirectory={project?.myWorkingDirectory}
+          />
+        )}
+
         <KanbanBoard
           tasks={tasks}
           onTaskMove={handleTaskMove}

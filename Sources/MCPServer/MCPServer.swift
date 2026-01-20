@@ -3,9 +3,9 @@
 // 参照: docs/prd/MCP_DESIGN.md - MCP Tool/Resource/Prompt設計
 
 import Foundation
-import GRDB
 import Domain
 import Infrastructure
+import GRDB  // Explicit import for DatabaseQueue type
 import UseCase
 
 /// MCPサーバーのメイン実装（ステートレス設計）
@@ -13,7 +13,7 @@ import UseCase
 ///
 /// IDはサーバー起動時ではなく、各ツール呼び出し時に引数として受け取る。
 /// キック時にプロンプトでID情報を提供し、LLM（Claude Code）が橋渡しする。
-final class MCPServer {
+public final class MCPServer {
     private let transport: MCPTransport
 
     // Repositories
@@ -42,11 +42,27 @@ final class MCPServer {
     // アプリ設定リポジトリ（TTL設定など）
     private let appSettingsRepository: AppSettingsRepository
 
+    // Phase 2.3: マルチデバイス対応 - ワーキングディレクトリリポジトリ
+    // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.3
+    private let agentWorkingDirectoryRepository: AgentWorkingDirectoryRepository
+
     private let debugMode: Bool
 
     /// ステートレス設計: DBパスのみで初期化（stdio用）
     convenience init(database: DatabaseQueue) {
         self.init(database: database, transport: StdioTransport())
+    }
+
+    /// HTTP Transport用ファクトリメソッド
+    /// REST API経由でMCPを呼び出す際に使用
+    /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
+    ///
+    /// - Parameter databasePath: データベースファイルへのパス
+    /// - Returns: HTTP用に構成されたMCPServerインスタンス
+    /// - Throws: データベース作成に失敗した場合
+    public static func createForHTTPTransport(databasePath: String) throws -> MCPServer {
+        let database = try DatabaseSetup.createDatabase(at: databasePath)
+        return MCPServer(database: database, transport: NullTransport())
     }
 
     /// カスタムトランスポートで初期化（デーモンモード用）
@@ -75,6 +91,8 @@ final class MCPServer {
         self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
         // アプリ設定リポジトリ
         self.appSettingsRepository = AppSettingsRepository(database: database)
+        // Phase 2.3: ワーキングディレクトリリポジトリ
+        self.agentWorkingDirectoryRepository = AgentWorkingDirectoryRepository(database: database)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
 
         // 起動時ログ（常に出力）- ファイルとstderrの両方に出力
@@ -158,6 +176,26 @@ final class MCPServer {
                 // エラーが発生しても接続を維持
             }
         }
+    }
+
+    // MARK: - HTTP Transport
+
+    /// HTTP経由でJSON-RPCリクエストを処理
+    /// REST API の /mcp エンドポイントから呼び出される
+    /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
+    ///
+    /// - Parameter request: JSON-RPCリクエスト
+    /// - Returns: JSON-RPCレスポンス（通知の場合もレスポンスを返す）
+    public func processHTTPRequest(_ request: JSONRPCRequest) -> JSONRPCResponse {
+        logDebug("[HTTP] Processing request: \(request.method)")
+
+        // handleRequestを呼び出し、nilの場合は空のレスポンスを返す
+        if let response = handleRequest(request) {
+            return response
+        }
+
+        // 通知（id == nil）の場合は成功レスポンスを返す
+        return JSONRPCResponse(id: request.id, result: ["acknowledged": true])
     }
 
     // MARK: - Request Handling
@@ -333,7 +371,9 @@ final class MCPServer {
             return try listManagedAgents()
 
         case "list_active_projects_with_agents":
-            return try listActiveProjectsWithAgents()
+            // Phase 2.3: オプションのagent_idパラメータをサポート
+            let agentId = arguments["agent_id"] as? String
+            return try listActiveProjectsWithAgents(agentId: agentId)
 
         case "get_agent_action":
             guard let agentId = arguments["agent_id"] as? String,
@@ -2960,8 +3000,11 @@ final class MCPServer {
     /// list_active_projects_with_agents - アクティブプロジェクトと割り当てエージェント一覧
     /// 参照: docs/requirements/PROJECTS.md - MCP API
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.3
     /// Runnerがポーリング対象を決定するために使用
-    private func listActiveProjectsWithAgents() throws -> [String: Any] {
+    /// - Parameter agentId: オプション。指定された場合、そのエージェントのAgentWorkingDirectoryを参照して
+    ///                     プロジェクトごとのworking_directoryを解決（マルチデバイス対応）
+    private func listActiveProjectsWithAgents(agentId: String? = nil) throws -> [String: Any] {
         // アクティブなプロジェクトのみ取得
         let allProjects = try projectRepository.findAll()
         let activeProjects = allProjects.filter { $0.status == .active }
@@ -2971,13 +3014,26 @@ final class MCPServer {
         for project in activeProjects {
             // 各プロジェクトに割り当てられたエージェントを取得
             let agents = try projectAgentAssignmentRepository.findAgentsByProject(project.id)
-            let agentIds = agents.map { $0.id.value }
+            let agentIdsList = agents.map { $0.id.value }
+
+            // Phase 2.3: working_directoryの解決
+            // 優先順位: AgentWorkingDirectory > Project.workingDirectory
+            var workingDirectory = project.workingDirectory ?? ""
+            if let humanAgentIdStr = agentId {
+                let humanAgentId = AgentID(value: humanAgentIdStr)
+                if let agentWorkingDir = try agentWorkingDirectoryRepository.findByAgentAndProject(
+                    agentId: humanAgentId,
+                    projectId: project.id
+                ) {
+                    workingDirectory = agentWorkingDir.workingDirectory
+                }
+            }
 
             let projectEntry: [String: Any] = [
                 "project_id": project.id.value,
                 "project_name": project.name,
-                "working_directory": project.workingDirectory ?? "",
-                "agents": agentIds
+                "working_directory": workingDirectory,
+                "agents": agentIdsList
             ]
             projectsWithAgents.append(projectEntry)
         }

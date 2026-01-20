@@ -29,10 +29,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# HTTP transport for remote MCP connections (multi-device operation)
+http = [
+    "aiohttp>=3.9",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
+    "aiohttp>=3.9",  # For testing HTTP transport
 ]
 
 [project.scripts]

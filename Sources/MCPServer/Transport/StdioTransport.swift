@@ -117,29 +117,4 @@ final class StdioTransport: MCPTransport {
 }
 
 // MARK: - TransportError
-
-enum TransportError: Error, CustomStringConvertible {
-    case invalidHeader(String)
-    case invalidContentLength(String)
-    case incompleteRead
-    case endOfInput
-    case invalidJSON(Error)
-    case encodingFailed
-
-    var description: String {
-        switch self {
-        case .invalidHeader(let header):
-            return "Invalid header: \(header)"
-        case .invalidContentLength(let value):
-            return "Invalid Content-Length: \(value)"
-        case .incompleteRead:
-            return "Incomplete read"
-        case .endOfInput:
-            return "End of input"
-        case .invalidJSON(let error):
-            return "Invalid JSON: \(error)"
-        case .encodingFailed:
-            return "Encoding failed"
-        }
-    }
-}
+// TransportErrorはTransport.swiftで定義されています

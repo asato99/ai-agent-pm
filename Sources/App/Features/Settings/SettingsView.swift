@@ -6,6 +6,7 @@ import AppKit
 import UniformTypeIdentifiers
 import Domain
 import Infrastructure
+import UseCase
 
 // Swift.Task と Domain.Task の名前衝突を解決
 private typealias AsyncTask = _Concurrency.Task
@@ -183,6 +184,8 @@ struct WebServerSettingsView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var portChanged = false
+    @State private var allowRemoteAccess = false
+    @State private var remoteAccessChanged = false
 
     private var enteredPort: Int? {
         Int(portText)
@@ -191,6 +194,33 @@ struct WebServerSettingsView: View {
     private var isValidPort: Bool {
         guard let port = enteredPort else { return false }
         return AppConfig.WebServer.isValidPort(port)
+    }
+
+    private var localIPAddress: String {
+        // Get local IP address for display
+        var address = "unknown"
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else {
+            return address
+        }
+        defer { freeifaddrs(ifaddr) }
+
+        for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let flags = Int32(ptr.pointee.ifa_flags)
+            let addr = ptr.pointee.ifa_addr.pointee
+
+            guard (flags & (IFF_UP|IFF_RUNNING|IFF_LOOPBACK)) == (IFF_UP|IFF_RUNNING),
+                  addr.sa_family == UInt8(AF_INET) else { continue }
+
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
+                          &hostname, socklen_t(hostname.count),
+                          nil, 0, NI_NUMERICHOST) == 0 {
+                address = String(cString: hostname)
+                break
+            }
+        }
+        return address
     }
 
     var body: some View {
@@ -207,9 +237,17 @@ struct WebServerSettingsView: View {
 
                 LabeledContent("URL") {
                     if isServerRunning {
-                        Link("http://127.0.0.1:\(currentPort)",
-                             destination: URL(string: "http://127.0.0.1:\(currentPort)")!)
-                            .font(.caption)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Link("http://127.0.0.1:\(currentPort)",
+                                 destination: URL(string: "http://127.0.0.1:\(currentPort)")!)
+                                .font(.caption)
+                            if allowRemoteAccess {
+                                Link("http://\(localIPAddress):\(currentPort)",
+                                     destination: URL(string: "http://\(localIPAddress):\(currentPort)")!)
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
                     } else {
                         Text("—")
                             .foregroundStyle(.secondary)
@@ -265,6 +303,42 @@ struct WebServerSettingsView: View {
                 }
             }
 
+            Section("Remote Access") {
+                Toggle("Allow Remote Access", isOn: $allowRemoteAccess)
+                    .onChange(of: allowRemoteAccess) { _, newValue in
+                        checkRemoteAccessChanged(newValue)
+                    }
+
+                if allowRemoteAccess {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("Server will be accessible from other devices on the local network")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if remoteAccessChanged {
+                    HStack {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(.blue)
+                        Text("Restart required to apply changes")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+
+                    Button("Save & Restart") {
+                        saveRemoteAccessAndRestart()
+                    }
+                    .disabled(isRestarting)
+                }
+
+                Text("When enabled, the REST API binds to 0.0.0.0, allowing access from other devices. When disabled, it binds to 127.0.0.1 (localhost only).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Server Control") {
                 HStack {
                     Button(isServerRunning ? "Stop Server" : "Start Server") {
@@ -283,6 +357,7 @@ struct WebServerSettingsView: View {
         .padding()
         .task {
             loadSettings()
+            await loadRemoteAccessSetting()
         }
         .alert("Error", isPresented: $showError) {
             Button("OK") { }
@@ -393,6 +468,63 @@ struct WebServerSettingsView: View {
             }
         }
     }
+
+    // MARK: - Remote Access Settings
+
+    @MainActor
+    private func loadRemoteAccessSetting() async {
+        do {
+            let settings = try container.appSettingsRepository.get()
+            allowRemoteAccess = settings.allowRemoteAccess
+            remoteAccessChanged = false
+        } catch {
+            NSLog("[WebServerSettingsView] Failed to load remote access setting: \(error)")
+        }
+    }
+
+    private func checkRemoteAccessChanged(_ newValue: Bool) {
+        AsyncTask {
+            do {
+                let settings = try container.appSettingsRepository.get()
+                await MainActor.run {
+                    remoteAccessChanged = newValue != settings.allowRemoteAccess
+                }
+            } catch {
+                NSLog("[WebServerSettingsView] Failed to check remote access setting: \(error)")
+            }
+        }
+    }
+
+    private func saveRemoteAccessAndRestart() {
+        isRestarting = true
+
+        AsyncTask {
+            do {
+                // Save the setting
+                var settings = try container.appSettingsRepository.get()
+                settings = settings.withAllowRemoteAccess(allowRemoteAccess)
+                try container.appSettingsRepository.save(settings)
+
+                // Restart server
+                await container.webServerManager.stop()
+                try await AsyncTask.sleep(nanoseconds: 500_000_000)
+                try await container.webServerManager.start()
+
+                await MainActor.run {
+                    isServerRunning = container.webServerManager.status == .running
+                    isRestarting = false
+                    remoteAccessChanged = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to save and restart: \(error.localizedDescription)"
+                    showError = true
+                    isRestarting = false
+                    isServerRunning = container.webServerManager.status == .running
+                }
+            }
+        }
+    }
 }
 
 // MARK: - MCP Settings
@@ -407,6 +539,7 @@ struct MCPSettingsView: View {
     @State private var isLoading = false
     @State private var showCopiedToast = false
     @State private var pendingPurposeTTLSeconds: Int = 300
+    @State private var showExportSheet = false
 
     var body: some View {
         Form {
@@ -437,13 +570,17 @@ struct MCPSettingsView: View {
 
             Section("Coordinator Configuration") {
                 Button("Export Coordinator Config...") {
-                    exportCoordinatorConfig()
+                    showExportSheet = true
                 }
                 .help("Export coordinator.yaml for the Runner/Coordinator")
 
                 Text("Exports a YAML configuration file for the Coordinator with all agent passkeys and settings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            .sheet(isPresented: $showExportSheet) {
+                CoordinatorExportSheet()
+                    .environmentObject(container)
             }
 
             Section("Claude Code Configuration") {
@@ -651,7 +788,131 @@ struct MCPSettingsView: View {
         }
     }
 
-    private func exportCoordinatorConfig() {
+}
+
+// MARK: - Phase 3.2: Coordinator Export Sheet
+
+/// Coordinator設定エクスポートシート
+/// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ3.2
+struct CoordinatorExportSheet: View {
+    @EnvironmentObject var container: DependencyContainer
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var humanAgents: [Agent] = []
+    @State private var selectedAgentId: AgentID?
+    @State private var managedAgents: [Agent] = []
+    @State private var isExporting = false
+    @State private var exportAll = true
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Export Coordinator Configuration")
+                .font(.headline)
+
+            Form {
+                Section("Export Scope") {
+                    Picker("Scope", selection: $exportAll) {
+                        Text("All Agents").tag(true)
+                        Text("Specific Human Agent's Scope").tag(false)
+                    }
+                    .pickerStyle(.radioGroup)
+                    .onChange(of: exportAll) { _, newValue in
+                        if newValue {
+                            selectedAgentId = nil
+                            managedAgents = []
+                        }
+                    }
+
+                    if !exportAll {
+                        Picker("Root Agent", selection: $selectedAgentId) {
+                            Text("Select a human agent...").tag(nil as AgentID?)
+                            ForEach(humanAgents, id: \.id) { agent in
+                                Text("\(agent.name) (\(agent.id.value))").tag(agent.id as AgentID?)
+                            }
+                        }
+                        .onChange(of: selectedAgentId) { _, newValue in
+                            loadManagedAgents(for: newValue)
+                        }
+
+                        if !managedAgents.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Managed AI Agents:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                ForEach(managedAgents, id: \.id) { agent in
+                                    HStack {
+                                        Circle()
+                                            .fill(.blue)
+                                            .frame(width: 6, height: 6)
+                                        Text(agent.name)
+                                            .font(.caption)
+                                        Text("(\(agent.id.value))")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        } else if selectedAgentId != nil {
+                            Text("No managed AI agents found")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .italic()
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+
+            HStack {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("Export...") {
+                    exportConfig()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!exportAll && selectedAgentId == nil)
+            }
+            .padding()
+        }
+        .frame(width: 450, height: 400)
+        .padding()
+        .task {
+            loadHumanAgents()
+        }
+    }
+
+    private func loadHumanAgents() {
+        do {
+            let allAgents = try container.agentRepository.findByType(.human)
+            humanAgents = allAgents.sorted { $0.name < $1.name }
+        } catch {
+            NSLog("[CoordinatorExportSheet] Failed to load human agents: \(error)")
+        }
+    }
+
+    private func loadManagedAgents(for agentId: AgentID?) {
+        guard let agentId = agentId else {
+            managedAgents = []
+            return
+        }
+
+        do {
+            let useCase = GetManagedAgentsUseCase(agentRepository: container.agentRepository)
+            managedAgents = try useCase.execute(rootAgentId: agentId)
+        } catch {
+            NSLog("[CoordinatorExportSheet] Failed to load managed agents: \(error)")
+            managedAgents = []
+        }
+    }
+
+    private func exportConfig() {
         let savePanel = NSSavePanel()
         savePanel.title = "Export Coordinator Configuration"
         savePanel.nameFieldStringValue = "coordinator.yaml"
@@ -668,10 +929,15 @@ struct MCPSettingsView: View {
             )
 
             do {
-                try exporter.exportToFile(url: url)
+                try exporter.exportToFile(
+                    url: url,
+                    rootAgentId: exportAll ? nil : selectedAgentId,
+                    managedAgents: exportAll ? nil : managedAgents
+                )
                 NSWorkspace.shared.activateFileViewerSelecting([url])
+                dismiss()
             } catch {
-                NSLog("[MCPSettingsView] Failed to export coordinator config: \(error)")
+                NSLog("[CoordinatorExportSheet] Failed to export coordinator config: \(error)")
             }
         }
     }
@@ -680,23 +946,32 @@ struct MCPSettingsView: View {
 // MARK: - Coordinator Config Exporter
 
 /// Coordinator設定ファイルをエクスポートするサービス
+/// Phase 3.2: root_agent_id対応
 private struct CoordinatorConfigExporter {
     let agentRepository: AgentRepositoryProtocol
     let agentCredentialRepository: AgentCredentialRepositoryProtocol
     let appSettingsRepository: AppSettingsRepository
 
     /// 設定ファイルの内容を生成
-    func generateConfig() throws -> String {
+    /// - Parameters:
+    ///   - rootAgentId: 起点となるhumanエージェントのID（nilの場合は全エージェント）
+    ///   - managedAgents: 管轄AIエージェント（rootAgentIdが指定されている場合に使用）
+    func generateConfig(rootAgentId: AgentID? = nil, managedAgents: [Agent]? = nil) throws -> String {
         // 設定を取得
         let settings = try appSettingsRepository.get()
         let coordinatorToken = settings.coordinatorToken ?? ""
 
-        // 全エージェントを取得
-        let agents = try agentRepository.findAll()
+        // エクスポート対象のエージェントを決定
+        let targetAgents: [Agent]
+        if let managedAgents = managedAgents {
+            targetAgents = managedAgents
+        } else {
+            targetAgents = try agentRepository.findAll()
+        }
 
         // エージェントとパスキーの情報を取得 (AgentCredential.rawPasskey)
         var agentCredentials: [(AgentID, String?)] = []
-        for agent in agents {
+        for agent in targetAgents {
             let credential = try? agentCredentialRepository.findByAgentId(agent.id)
             agentCredentials.append((agent.id, credential?.rawPasskey))
         }
@@ -714,6 +989,15 @@ private struct CoordinatorConfigExporter {
         max_concurrent: 3
 
         """
+
+        // Phase 3.2: Root Agent ID（指定されている場合）
+        if let rootAgentId = rootAgentId {
+            yaml += """
+            # Root agent for multi-device operation
+            root_agent_id: \(rootAgentId.value)
+
+            """
+        }
 
         // Coordinator Token
         if !coordinatorToken.isEmpty {
@@ -778,8 +1062,8 @@ private struct CoordinatorConfigExporter {
     }
 
     /// 設定ファイルを指定パスに保存
-    func exportToFile(url: URL) throws {
-        let content = try generateConfig()
+    func exportToFile(url: URL, rootAgentId: AgentID? = nil, managedAgents: [Agent]? = nil) throws {
+        let content = try generateConfig(rootAgentId: rootAgentId, managedAgents: managedAgents)
         try content.write(to: url, atomically: true, encoding: .utf8)
     }
 }

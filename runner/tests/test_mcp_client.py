@@ -69,6 +69,27 @@ class TestMCPClientInit:
             elif "MCP_COORDINATOR_TOKEN" in os.environ:
                 del os.environ["MCP_COORDINATOR_TOKEN"]
 
+    def test_init_http_transport(self):
+        """Should use HTTP transport for http:// URLs."""
+        client = MCPClient("http://192.168.1.100:8080/mcp")
+        assert client._use_http is True
+        assert client._url == "http://192.168.1.100:8080/mcp"
+        assert client.socket_path is None  # No Unix socket for HTTP
+
+    def test_init_https_transport(self):
+        """Should use HTTP transport for https:// URLs."""
+        client = MCPClient("https://api.example.com/mcp")
+        assert client._use_http is True
+        assert client._url == "https://api.example.com/mcp"
+        assert client.socket_path is None  # No Unix socket for HTTPS
+
+    def test_init_unix_socket_transport(self):
+        """Should use Unix socket transport for file paths."""
+        client = MCPClient("/tmp/test.sock")
+        assert client._use_http is False
+        assert client._url == "/tmp/test.sock"
+        assert client.socket_path == "/tmp/test.sock"
+
 
 class TestMCPClientAuthenticate:
     """Tests for MCPClient.authenticate()."""

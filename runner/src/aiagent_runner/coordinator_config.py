@@ -34,18 +34,28 @@ class CoordinatorConfig:
 
     Unlike the old Runner which was tied to a single (agent_id, project_id),
     the Coordinator manages ALL agent-project combinations dynamically.
+
+    Multi-device operation:
+    - When root_agent_id is set, the Coordinator authenticates as that human agent
+    - This enables per-agent working directory resolution for remote operation
+    - See: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md
     """
     # Polling settings
     polling_interval: int = 10
     max_concurrent: int = 3
 
-    # MCP connection (Unix socket - used by both Coordinator and Agent Instances)
-    # All components connect to the SAME daemon started by the app
+    # MCP connection (Unix socket or HTTP URL - used by both Coordinator and Agent Instances)
+    # Unix socket: ~/Library/Application Support/AIAgentPM/mcp.sock
+    # HTTP URL: http://hostname:port/mcp
     mcp_socket_path: Optional[str] = None
 
     # Phase 5: Coordinator token for Coordinator-only API authorization
     # Reference: Sources/MCPServer/Authorization/ToolAuthorization.swift
     coordinator_token: Optional[str] = None
+
+    # Multi-device: Root agent ID for authentication
+    # When set, Coordinator authenticates as this human agent to get proper working directories
+    root_agent_id: Optional[str] = None
 
     # AI providers (how to launch each AI type)
     ai_providers: dict[str, AIProviderConfig] = field(default_factory=dict)
@@ -91,11 +101,20 @@ class CoordinatorConfig:
         ```yaml
         polling_interval: 10
         max_concurrent: 3
+
+        # MCP connection: Unix socket (local) or HTTP URL (remote)
+        # Local: ~/Library/Application Support/AIAgentPM/mcp.sock
+        # Remote: http://192.168.1.100:8080/mcp
         mcp_socket_path: ~/Library/Application Support/AIAgentPM/mcp.sock
 
         # Phase 5: Coordinator token for Coordinator-only API calls
         # Can also be set via MCP_COORDINATOR_TOKEN environment variable
         coordinator_token: ${MCP_COORDINATOR_TOKEN}
+
+        # Multi-device operation: Root agent for authentication
+        # When set, Coordinator authenticates as this human agent
+        # This enables per-agent working directory resolution
+        root_agent_id: human-frontend-lead
 
         ai_providers:
           claude:
@@ -153,6 +172,7 @@ class CoordinatorConfig:
             max_concurrent=data.get("max_concurrent", 3),
             mcp_socket_path=data.get("mcp_socket_path"),
             coordinator_token=coordinator_token,
+            root_agent_id=data.get("root_agent_id"),
             ai_providers=ai_providers,
             agents=agents,
             log_directory=data.get("log_directory"),

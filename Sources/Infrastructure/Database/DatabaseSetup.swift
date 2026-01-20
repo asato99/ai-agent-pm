@@ -716,6 +716,40 @@ public final class DatabaseSetup {
             try db.create(indexOn: "tasks", columns: ["created_by_agent_id"])
         }
 
+        // v32: リモートアクセス設定
+        // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.1
+        // REST APIを0.0.0.0にバインドしてLAN内の別端末からアクセス可能にする
+        migrator.registerMigration("v32_allow_remote_access") { db in
+            try db.alter(table: "app_settings") { t in
+                t.add(column: "allow_remote_access", .boolean).defaults(to: false)
+            }
+        }
+
+        // v33: エージェントワーキングディレクトリ設定
+        // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.1
+        // エージェントごと、プロジェクトごとのワーキングディレクトリを管理
+        migrator.registerMigration("v33_agent_working_directories") { db in
+            try db.create(table: "agent_working_directories", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("project_id", .text).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("working_directory", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            // (agent_id, project_id) の組み合わせで一意制約
+            try db.create(
+                index: "idx_agent_working_directories_unique",
+                on: "agent_working_directories",
+                columns: ["agent_id", "project_id"],
+                unique: true
+            )
+            try db.create(indexOn: "agent_working_directories", columns: ["agent_id"])
+            try db.create(indexOn: "agent_working_directories", columns: ["project_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

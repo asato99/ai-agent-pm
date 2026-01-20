@@ -129,6 +129,10 @@ class Coordinator:
         )
         logger.info(f"Configured agents: {list(self.config.agents.keys())}")
 
+        # Multi-device: Log root_agent_id if set
+        if self.config.root_agent_id:
+            logger.info(f"Multi-device mode: root_agent_id={self.config.root_agent_id}")
+
         self._running = True
 
         while self._running:
@@ -168,8 +172,11 @@ class Coordinator:
             return
 
         # Step 2: Get active projects with agents
+        # Multi-device: Pass root_agent_id for working directory resolution
         try:
-            projects = await self.mcp_client.list_active_projects_with_agents()
+            projects = await self.mcp_client.list_active_projects_with_agents(
+                root_agent_id=self.config.root_agent_id
+            )
         except MCPError as e:
             logger.error(f"Failed to get project list: {e}")
             return

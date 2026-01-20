@@ -104,12 +104,18 @@ enum ToolDefinitions {
     /// list_active_projects_with_agents - アクティブなプロジェクトと割り当てエージェント一覧を取得
     /// 参照: docs/requirements/PROJECTS.md - MCP API
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.3
     static let listActiveProjectsWithAgents: [String: Any] = [
         "name": "list_active_projects_with_agents",
-        "description": "アクティブなプロジェクト一覧と、各プロジェクトに割り当てられたエージェントを取得します。Runnerがポーリング対象を決定するために使用します。",
+        "description": "アクティブなプロジェクト一覧と、各プロジェクトに割り当てられたエージェントを取得します。Runnerがポーリング対象を決定するために使用します。agent_idを指定すると、そのエージェントのマルチデバイス用ワーキングディレクトリ設定を参照してworking_directoryを解決します。",
         "inputSchema": [
             "type": "object",
-            "properties": [:] as [String: Any],
+            "properties": [
+                "agent_id": [
+                    "type": "string",
+                    "description": "（オプション）マルチデバイス対応のためにワーキングディレクトリを解決するエージェントID。指定しない場合はプロジェクトのデフォルトworking_directoryを使用。"
+                ] as [String: Any]
+            ] as [String: Any],
             "required": [] as [String]
         ]
     ]

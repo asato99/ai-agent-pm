@@ -15,4 +15,6 @@ export interface ProjectSummary extends Project {
   inProgressCount: number
   blockedCount: number
   myTaskCount: number
+  /** ログイン中エージェントのこのプロジェクトでのワーキングディレクトリ（Phase 2.4: マルチデバイス対応） */
+  myWorkingDirectory?: string
 }

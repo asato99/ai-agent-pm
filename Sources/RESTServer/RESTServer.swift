@@ -7,6 +7,7 @@ import GRDB
 import Infrastructure
 import UseCase
 import Domain
+// MCPServer types are compiled directly in this target (not imported as module)
 
 // Debug logging helper
 private func debugLog(_ message: String) {
@@ -28,6 +29,16 @@ public final class RESTServer {
     private let credentialRepository: AgentCredentialRepository
     private let handoffRepository: HandoffRepository
     private let eventRepository: EventRepository
+    private let appSettingsRepository: AppSettingsRepository
+    /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.2
+    private let workingDirectoryRepository: AgentWorkingDirectoryRepository
+
+    // MCP Server for HTTP transport
+    // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
+    // MCPServerのソースファイルが直接コンパイルされるため、internal initにアクセス可能
+    private lazy var mcpServer: MCPServer = {
+        return MCPServer(database: database, transport: NullTransport())
+    }()
 
     /// Initialize the REST server
     /// - Parameters:
@@ -47,18 +58,24 @@ public final class RESTServer {
         self.credentialRepository = AgentCredentialRepository(database: database)
         self.handoffRepository = HandoffRepository(database: database)
         self.eventRepository = EventRepository(database: database)
+        self.appSettingsRepository = AppSettingsRepository(database: database)
+        self.workingDirectoryRepository = AgentWorkingDirectoryRepository(database: database)
     }
 
     public func run() async throws {
         debugLog("run() starting")
 
+        // Load settings for remote access configuration
+        let settings = try appSettingsRepository.get()
+        let allowRemoteAccess = settings.allowRemoteAccess
+
         // Create router with custom context
         let router = Router(context: AuthenticatedContext.self)
         debugLog("Router created")
 
-        // Add CORS middleware
-        router.add(middleware: CORSMiddleware())
-        debugLog("CORS middleware added")
+        // Add CORS middleware with remote access configuration
+        router.add(middleware: CORSMiddleware(allowRemoteAccess: allowRemoteAccess))
+        debugLog("CORS middleware added (allowRemoteAccess: \(allowRemoteAccess))")
 
         // Health check
         router.get("health") { _, _ in
@@ -81,6 +98,11 @@ public final class RESTServer {
         // Protected routes need auth middleware
         registerProtectedRoutes(router: apiRouter)
         debugLog("Protected routes registered")
+
+        // MCP HTTP Transport endpoint (coordinator_token auth)
+        // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
+        registerMCPRoutes(router: router)
+        debugLog("MCP routes registered")
 
         // API catch-all for unmatched routes (must be registered LAST on apiRouter)
         // This ensures API routes return proper JSON 404 instead of falling through to static file handler
@@ -150,13 +172,20 @@ public final class RESTServer {
         }
 
         debugLog("Creating Application...")
+
+        // Determine bind address based on allowRemoteAccess setting (already loaded above)
+        let bindAddress = allowRemoteAccess ? "0.0.0.0" : "127.0.0.1"
+
         // Create and run application
         let app = Application(
             router: router,
-            configuration: .init(address: .hostname("127.0.0.1", port: port))
+            configuration: .init(address: .hostname(bindAddress, port: port))
         )
 
-        debugLog("Server about to start on http://127.0.0.1:\(port)")
+        debugLog("Server about to start on http://\(bindAddress):\(port)")
+        if allowRemoteAccess {
+            debugLog("⚠️ Remote access enabled - server is accessible from LAN")
+        }
         try await app.runService()
         debugLog("Server stopped")
     }
@@ -276,6 +305,15 @@ public final class RESTServer {
             try await getProject(request: request, context: context)
         }
 
+        // Phase 2.2: Working Directory management endpoints
+        // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.2
+        projectRouter.put(":projectId/my-working-directory") { [self] request, context in
+            try await setMyWorkingDirectory(request: request, context: context)
+        }
+        projectRouter.delete(":projectId/my-working-directory") { [self] request, context in
+            try await deleteMyWorkingDirectory(request: request, context: context)
+        }
+
         // Tasks under projects
         let projectTaskRouter = projectRouter.group(":projectId").group("tasks")
         projectTaskRouter.get { [self] request, context in
@@ -392,9 +430,84 @@ public final class RESTServer {
 
         let tasks = try taskRepository.findByProject(projectId, status: nil)
         let counts = calculateTaskCounts(tasks: tasks, agentId: agentId)
-        let summary = ProjectSummaryDTO(from: project, taskCounts: counts.counts, myTaskCount: counts.myTasks)
+
+        // Phase 2.2: ログイン中エージェントのワーキングディレクトリを取得
+        let workingDirectory = try workingDirectoryRepository.findByAgentAndProject(agentId: agentId, projectId: projectId)
+        let summary = ProjectSummaryDTO(
+            from: project,
+            taskCounts: counts.counts,
+            myTaskCount: counts.myTasks,
+            myWorkingDirectory: workingDirectory?.workingDirectory
+        )
 
         return jsonResponse(summary)
+    }
+
+    /// PUT /api/projects/:projectId/my-working-directory - ワーキングディレクトリを設定
+    /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.2
+    private func setMyWorkingDirectory(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let agentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let projectIdStr = context.parameters.get("projectId") else {
+            return errorResponse(status: .badRequest, message: "Missing project ID")
+        }
+
+        let projectId = ProjectID(value: projectIdStr)
+        guard try projectRepository.findById(projectId) != nil else {
+            return errorResponse(status: .notFound, message: "Project not found")
+        }
+
+        // Parse request body
+        let body = try await request.body.collect(upTo: 1024 * 1024)
+        guard let data = body.getData(at: 0, length: body.readableBytes),
+              let setRequest = try? JSONDecoder().decode(SetWorkingDirectoryRequest.self, from: data) else {
+            return errorResponse(status: .badRequest, message: "Invalid request body")
+        }
+
+        // Validate working directory is not empty
+        let workingDir = setRequest.workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !workingDir.isEmpty else {
+            return errorResponse(status: .badRequest, message: "Working directory cannot be empty")
+        }
+
+        // Check if already exists and update, or create new
+        if var existing = try workingDirectoryRepository.findByAgentAndProject(agentId: agentId, projectId: projectId) {
+            existing.updateWorkingDirectory(workingDir)
+            try workingDirectoryRepository.save(existing)
+            return jsonResponse(WorkingDirectoryDTO(workingDirectory: existing.workingDirectory))
+        } else {
+            let newEntry = AgentWorkingDirectory.create(
+                agentId: agentId,
+                projectId: projectId,
+                workingDirectory: workingDir
+            )
+            try workingDirectoryRepository.save(newEntry)
+            var response = jsonResponse(WorkingDirectoryDTO(workingDirectory: newEntry.workingDirectory))
+            response.status = .created
+            return response
+        }
+    }
+
+    /// DELETE /api/projects/:projectId/my-working-directory - ワーキングディレクトリ設定を削除
+    /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.2
+    private func deleteMyWorkingDirectory(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let agentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let projectIdStr = context.parameters.get("projectId") else {
+            return errorResponse(status: .badRequest, message: "Missing project ID")
+        }
+
+        let projectId = ProjectID(value: projectIdStr)
+        guard try projectRepository.findById(projectId) != nil else {
+            return errorResponse(status: .notFound, message: "Project not found")
+        }
+
+        try workingDirectoryRepository.deleteByAgentAndProject(agentId: agentId, projectId: projectId)
+        return Response(status: .noContent)
     }
 
     // MARK: - Task Handlers
@@ -892,6 +1005,98 @@ public final class RESTServer {
             body: .init(byteBuffer: .init(string: json))
         )
     }
+
+    // MARK: - MCP HTTP Transport
+
+    /// MCP HTTP Transport エンドポイントを登録
+    /// リモートCoordinatorからMCPサーバーにアクセス可能にする
+    /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
+    private func registerMCPRoutes(router: Router<AuthenticatedContext>) {
+        // POST /mcp - JSON-RPC over HTTP
+        router.post("mcp") { [self] request, context in
+            try await handleMCPRequest(request: request, context: context)
+        }
+    }
+
+    /// MCP JSON-RPCリクエストを処理
+    /// Authorization: Bearer <coordinator_token> で認証
+    private func handleMCPRequest(request: Request, context: AuthenticatedContext) async throws -> Response {
+        // 1. coordinator_token認証
+        guard let authHeader = request.headers[.authorization],
+              authHeader.hasPrefix("Bearer ") else {
+            debugLog("[MCP HTTP] Missing or invalid Authorization header")
+            return errorResponse(status: .unauthorized, message: "Authorization header required")
+        }
+
+        let coordinatorToken = String(authHeader.dropFirst("Bearer ".count))
+
+        // DBの設定を優先、環境変数をフォールバック
+        var expectedToken: String?
+        if let settings = try? appSettingsRepository.get() {
+            expectedToken = settings.coordinatorToken
+        }
+        if expectedToken == nil || expectedToken?.isEmpty == true {
+            expectedToken = ProcessInfo.processInfo.environment["COORDINATOR_TOKEN"]
+        }
+
+        guard let expected = expectedToken, !expected.isEmpty, coordinatorToken == expected else {
+            debugLog("[MCP HTTP] Invalid coordinator_token")
+            return errorResponse(status: .unauthorized, message: "Invalid coordinator token")
+        }
+
+        // 2. リクエストボディをパース
+        let body = try await request.body.collect(upTo: 1024 * 1024) // 1MB limit
+        guard let data = body.getData(at: 0, length: body.readableBytes) else {
+            debugLog("[MCP HTTP] Empty request body")
+            return jsonRPCErrorResponse(id: nil, error: JSONRPCError.invalidRequest)
+        }
+
+        // 3. JSONRPCRequestをデコード
+        let jsonRPCRequest: JSONRPCRequest
+        do {
+            jsonRPCRequest = try JSONDecoder().decode(JSONRPCRequest.self, from: data)
+        } catch {
+            debugLog("[MCP HTTP] JSON parse error: \(error)")
+            return jsonRPCErrorResponse(id: nil, error: JSONRPCError.parseError)
+        }
+
+        debugLog("[MCP HTTP] Request: \(jsonRPCRequest.method)")
+
+        // 4. MCPServerで処理
+        let response = mcpServer.processHTTPRequest(jsonRPCRequest)
+
+        // 5. レスポンスをJSON化して返す
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let responseData = try encoder.encode(response)
+
+        return Response(
+            status: .ok,
+            headers: [.contentType: "application/json"],
+            body: .init(byteBuffer: .init(data: responseData))
+        )
+    }
+
+    /// JSON-RPCエラーレスポンスを生成
+    private func jsonRPCErrorResponse(id: RequestID?, error: JSONRPCError) -> Response {
+        let response = JSONRPCResponse(id: id, error: error)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+
+        guard let data = try? encoder.encode(response) else {
+            return Response(
+                status: .internalServerError,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: .init(string: "{\"error\":\"Internal Server Error\"}"))
+            )
+        }
+
+        return Response(
+            status: .ok, // JSON-RPC always returns 200, errors are in the body
+            headers: [.contentType: "application/json"],
+            body: .init(byteBuffer: .init(data: data))
+        )
+    }
 }
 
 // MARK: - Auth DTOs
@@ -953,4 +1158,15 @@ struct CreateHandoffRequest: Decodable {
     let summary: String
     let context: String?
     let recommendations: String?
+}
+
+// MARK: - Working Directory DTOs
+// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.2
+
+struct SetWorkingDirectoryRequest: Decodable {
+    let workingDirectory: String
+}
+
+struct WorkingDirectoryDTO: Encodable {
+    let workingDirectory: String
 }

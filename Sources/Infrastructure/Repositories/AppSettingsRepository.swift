@@ -14,6 +14,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
     var id: String
     var coordinatorToken: String?
     var pendingPurposeTTLSeconds: Int
+    var allowRemoteAccess: Bool
     var createdAt: Date
     var updatedAt: Date
 
@@ -21,6 +22,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
         case id
         case coordinatorToken = "coordinator_token"
         case pendingPurposeTTLSeconds = "pending_purpose_ttl_seconds"
+        case allowRemoteAccess = "allow_remote_access"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -30,6 +32,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
             id: id,
             coordinatorToken: coordinatorToken,
             pendingPurposeTTLSeconds: pendingPurposeTTLSeconds,
+            allowRemoteAccess: allowRemoteAccess,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -40,6 +43,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
             id: settings.id,
             coordinatorToken: settings.coordinatorToken,
             pendingPurposeTTLSeconds: settings.pendingPurposeTTLSeconds,
+            allowRemoteAccess: settings.allowRemoteAccess,
             createdAt: settings.createdAt,
             updatedAt: settings.updatedAt
         )

@@ -22,6 +22,11 @@ public struct AppSettings: Sendable {
     /// エージェント起動理由（chat/task）が有効な期間
     public var pendingPurposeTTLSeconds: Int
 
+    /// リモートアクセス許可フラグ
+    /// trueの場合、REST APIが0.0.0.0にバインドされ、LAN内の別端末からアクセス可能になる
+    /// デフォルト: false（127.0.0.1のみ）
+    public var allowRemoteAccess: Bool
+
     public let createdAt: Date
     public var updatedAt: Date
 
@@ -30,12 +35,14 @@ public struct AppSettings: Sendable {
         id: String = singletonId,
         coordinatorToken: String? = nil,
         pendingPurposeTTLSeconds: Int = defaultPendingPurposeTTLSeconds,
+        allowRemoteAccess: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
         self.id = id
         self.coordinatorToken = coordinatorToken
         self.pendingPurposeTTLSeconds = pendingPurposeTTLSeconds
+        self.allowRemoteAccess = allowRemoteAccess
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -53,6 +60,7 @@ public struct AppSettings: Sendable {
             id: self.id,
             coordinatorToken: token,
             pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
+            allowRemoteAccess: self.allowRemoteAccess,
             createdAt: self.createdAt,
             updatedAt: Date()
         )
@@ -64,6 +72,7 @@ public struct AppSettings: Sendable {
             id: self.id,
             coordinatorToken: nil,
             pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
+            allowRemoteAccess: self.allowRemoteAccess,
             createdAt: self.createdAt,
             updatedAt: Date()
         )
@@ -75,6 +84,19 @@ public struct AppSettings: Sendable {
             id: self.id,
             coordinatorToken: self.coordinatorToken,
             pendingPurposeTTLSeconds: seconds,
+            allowRemoteAccess: self.allowRemoteAccess,
+            createdAt: self.createdAt,
+            updatedAt: Date()
+        )
+    }
+
+    /// リモートアクセス設定を更新
+    public func withAllowRemoteAccess(_ allow: Bool) -> AppSettings {
+        return AppSettings(
+            id: self.id,
+            coordinatorToken: self.coordinatorToken,
+            pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
+            allowRemoteAccess: allow,
             createdAt: self.createdAt,
             updatedAt: Date()
         )

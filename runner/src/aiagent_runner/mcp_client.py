@@ -2,6 +2,7 @@
 # MCP client for communication with AI Agent PM server
 # Reference: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-5
 # Reference: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+# Reference: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - Phase 4.3
 
 import asyncio
 import json
@@ -10,6 +11,13 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+
+# HTTP transport support (optional dependency)
+try:
+    import aiohttp
+    HAS_AIOHTTP = True
+except ImportError:
+    HAS_AIOHTTP = False
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +103,14 @@ class MCPClient:
     """Client for MCP server communication.
 
     Handles authentication, task retrieval, and execution reporting.
+
+    Supports two transport modes:
+    - Unix socket: For local connections (default)
+    - HTTP: For remote connections (multi-device operation)
+
+    The transport is automatically selected based on the URL:
+    - http:// or https:// → HTTP transport
+    - Everything else → Unix socket transport
     """
 
     def __init__(
@@ -105,15 +121,30 @@ class MCPClient:
         """Initialize MCP client.
 
         Args:
-            socket_path: Path to MCP Unix socket. Defaults to standard location.
+            socket_path: Path to MCP Unix socket, or HTTP URL for remote connections.
+                        Unix socket: ~/Library/Application Support/AIAgentPM/mcp.sock
+                        HTTP URL: http://hostname:port/mcp
+                        Defaults to standard Unix socket location.
             coordinator_token: Token for Coordinator-only API calls (Phase 5).
                               If not provided, reads from MCP_COORDINATOR_TOKEN env var.
         """
-        # Always expand tilde in socket path
-        if socket_path:
-            self.socket_path = os.path.expanduser(socket_path)
+        # Determine transport type based on URL scheme
+        if socket_path and socket_path.startswith(("http://", "https://")):
+            self._url = socket_path
+            self._use_http = True
+            logger.info(f"Using HTTP transport: {self._url}")
         else:
-            self.socket_path = self._default_socket_path()
+            # Unix socket path - expand tilde
+            if socket_path:
+                self._url = os.path.expanduser(socket_path)
+            else:
+                self._url = self._default_socket_path()
+            self._use_http = False
+            logger.info(f"Using Unix socket transport: {self._url}")
+
+        # Backward compatibility
+        self.socket_path = self._url if not self._use_http else None
+
         self._session_token: Optional[str] = None
         # Phase 5: Coordinator token for Coordinator-only API calls
         self._coordinator_token = coordinator_token or os.environ.get("MCP_COORDINATOR_TOKEN")
@@ -125,6 +156,26 @@ class MCPClient:
         )
 
     async def _call_tool(self, tool_name: str, args: dict) -> dict:
+        """Call an MCP tool via Unix socket or HTTP.
+
+        Automatically selects the transport based on the URL scheme.
+
+        Args:
+            tool_name: Name of the tool to call
+            args: Arguments for the tool
+
+        Returns:
+            Tool result as dictionary
+
+        Raises:
+            MCPError: If communication fails
+        """
+        if self._use_http:
+            return await self._call_tool_http(tool_name, args)
+        else:
+            return await self._call_tool_unix(tool_name, args)
+
+    async def _call_tool_unix(self, tool_name: str, args: dict) -> dict:
         """Call an MCP tool via Unix socket.
 
         Args:
@@ -138,9 +189,9 @@ class MCPClient:
             MCPError: If communication fails
         """
         try:
-            reader, writer = await asyncio.open_unix_connection(self.socket_path)
+            reader, writer = await asyncio.open_unix_connection(self._url)
         except (ConnectionRefusedError, FileNotFoundError) as e:
-            raise MCPError(f"Cannot connect to MCP server at {self.socket_path}: {e}")
+            raise MCPError(f"Cannot connect to MCP server at {self._url}: {e}")
 
         try:
             request = json.dumps({
@@ -155,25 +206,88 @@ class MCPClient:
             response = await reader.readline()
             data = json.loads(response)
 
-            if "error" in data:
-                raise MCPError(data["error"].get("message", "Unknown error"))
-
-            # Parse MCP protocol response format
-            # MCP returns: {"result": {"content": [{"type": "text", "text": "JSON"}]}}
-            result = data.get("result", {})
-            content = result.get("content", [])
-            if content and isinstance(content, list) and len(content) > 0:
-                first_content = content[0]
-                if isinstance(first_content, dict) and first_content.get("type") == "text":
-                    text = first_content.get("text", "{}")
-                    try:
-                        return json.loads(text)
-                    except json.JSONDecodeError:
-                        return {"text": text}
-            return result
+            return self._parse_response(data)
         finally:
             writer.close()
             await writer.wait_closed()
+
+    async def _call_tool_http(self, tool_name: str, args: dict) -> dict:
+        """Call an MCP tool via HTTP.
+
+        Args:
+            tool_name: Name of the tool to call
+            args: Arguments for the tool
+
+        Returns:
+            Tool result as dictionary
+
+        Raises:
+            MCPError: If communication fails or aiohttp is not installed
+        """
+        if not HAS_AIOHTTP:
+            raise MCPError(
+                "HTTP transport requires aiohttp. Install with: pip install aiohttp"
+            )
+
+        request_body = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": args},
+            "id": 1
+        }
+
+        headers = {"Content-Type": "application/json"}
+
+        # Add coordinator token as Authorization header if available
+        if self._coordinator_token:
+            headers["Authorization"] = f"Bearer {self._coordinator_token}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self._url,
+                    json=request_body,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status != 200:
+                        text = await response.text()
+                        raise MCPError(f"HTTP {response.status}: {text}")
+
+                    data = await response.json()
+                    return self._parse_response(data)
+
+        except aiohttp.ClientError as e:
+            raise MCPError(f"Cannot connect to MCP server at {self._url}: {e}")
+
+    def _parse_response(self, data: dict) -> dict:
+        """Parse MCP JSON-RPC response.
+
+        Args:
+            data: Raw JSON-RPC response
+
+        Returns:
+            Parsed tool result
+
+        Raises:
+            MCPError: If response contains an error
+        """
+        if "error" in data:
+            raise MCPError(data["error"].get("message", "Unknown error"))
+
+        # Parse MCP protocol response format
+        # MCP returns: {"result": {"content": [{"type": "text", "text": "JSON"}]}}
+        result = data.get("result", {})
+        content = result.get("content", [])
+        if content and isinstance(content, list) and len(content) > 0:
+            first_content = content[0]
+            if isinstance(first_content, dict) and first_content.get("type") == "text":
+                text = first_content.get("text", "{}")
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    return {"text": text}
+        return result
 
     # ==========================================================================
     # Phase 4: Coordinator API
@@ -202,12 +316,21 @@ class MCPClient:
             timestamp=result.get("timestamp")
         )
 
-    async def list_active_projects_with_agents(self) -> list[ProjectWithAgents]:
+    async def list_active_projects_with_agents(
+        self, root_agent_id: Optional[str] = None
+    ) -> list[ProjectWithAgents]:
         """Get all active projects with their assigned agents.
 
         The Coordinator calls this to discover what (agent_id, project_id)
         combinations exist and need to be monitored.
         Phase 5: Requires coordinator_token for authorization.
+
+        Multi-device operation:
+        When root_agent_id is specified, the server uses that agent's
+        working directories instead of the project defaults.
+
+        Args:
+            root_agent_id: Optional human agent ID for working directory resolution
 
         Returns:
             List of ProjectWithAgents
@@ -221,6 +344,12 @@ class MCPClient:
             logger.debug("list_active_projects_with_agents: passing coordinator_token")
         else:
             logger.warning("list_active_projects_with_agents: NO coordinator_token set!")
+
+        # Multi-device: Pass root_agent_id for working directory resolution
+        if root_agent_id:
+            args["root_agent_id"] = root_agent_id
+            logger.debug(f"list_active_projects_with_agents: passing root_agent_id={root_agent_id}")
+
         result = await self._call_tool("list_active_projects_with_agents", args)
         logger.debug(f"list_active_projects_with_agents result: {result}")
 

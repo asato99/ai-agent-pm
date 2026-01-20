@@ -24,6 +24,7 @@ public struct ProjectDTO: Codable {
 }
 
 /// Project summary with task counts for REST API
+/// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.2
 public struct ProjectSummaryDTO: Codable {
     let id: String
     let name: String
@@ -36,8 +37,10 @@ public struct ProjectSummaryDTO: Codable {
     let inProgressCount: Int
     let blockedCount: Int
     let myTaskCount: Int
+    /// ログイン中エージェントのこのプロジェクトでのワーキングディレクトリ（設定されている場合）
+    let myWorkingDirectory: String?
 
-    init(from project: Project, taskCounts: TaskCounts, myTaskCount: Int) {
+    init(from project: Project, taskCounts: TaskCounts, myTaskCount: Int, myWorkingDirectory: String? = nil) {
         self.id = project.id.value
         self.name = project.name
         self.description = project.description ?? ""
@@ -49,6 +52,7 @@ public struct ProjectSummaryDTO: Codable {
         self.inProgressCount = taskCounts.inProgress
         self.blockedCount = taskCounts.blocked
         self.myTaskCount = myTaskCount
+        self.myWorkingDirectory = myWorkingDirectory
     }
 }
 

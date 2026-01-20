@@ -6,11 +6,18 @@ import Foundation
 // MARK: - JSON-RPC Request
 
 /// JSON-RPCリクエスト
-struct JSONRPCRequest: Codable {
-    let jsonrpc: String
-    let id: RequestID?
-    let method: String
-    let params: [String: AnyCodable]?
+public struct JSONRPCRequest: Codable, Sendable {
+    public let jsonrpc: String
+    public let id: RequestID?
+    public let method: String
+    public let params: [String: AnyCodable]?
+
+    public init(jsonrpc: String = "2.0", id: RequestID? = nil, method: String, params: [String: AnyCodable]? = nil) {
+        self.jsonrpc = jsonrpc
+        self.id = id
+        self.method = method
+        self.params = params
+    }
 
     enum CodingKeys: String, CodingKey {
         case jsonrpc, id, method, params
@@ -18,11 +25,11 @@ struct JSONRPCRequest: Codable {
 }
 
 /// リクエストIDの型（intまたはstring）
-enum RequestID: Codable, Equatable {
+public enum RequestID: Codable, Equatable, Sendable {
     case int(Int)
     case string(String)
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let intValue = try? container.decode(Int.self) {
             self = .int(intValue)
@@ -36,7 +43,7 @@ enum RequestID: Codable, Equatable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .int(let value):
@@ -50,20 +57,20 @@ enum RequestID: Codable, Equatable {
 // MARK: - JSON-RPC Response
 
 /// JSON-RPCレスポンス
-struct JSONRPCResponse: Codable {
-    let jsonrpc: String
-    let id: RequestID?
-    let result: AnyCodable?
-    let error: JSONRPCError?
+public struct JSONRPCResponse: Codable, Sendable {
+    public let jsonrpc: String
+    public let id: RequestID?
+    public let result: AnyCodable?
+    public let error: JSONRPCError?
 
-    init(id: RequestID?, result: Any) {
+    public init(id: RequestID?, result: Any) {
         self.jsonrpc = "2.0"
         self.id = id
         self.result = AnyCodable(result)
         self.error = nil
     }
 
-    init(id: RequestID?, error: JSONRPCError) {
+    public init(id: RequestID?, error: JSONRPCError) {
         self.jsonrpc = "2.0"
         self.id = id
         self.result = nil
@@ -72,36 +79,38 @@ struct JSONRPCResponse: Codable {
 }
 
 /// JSON-RPCエラー
-struct JSONRPCError: Codable {
-    let code: Int
-    let message: String
-    let data: AnyCodable?
+public struct JSONRPCError: Codable, Sendable {
+    public let code: Int
+    public let message: String
+    public let data: AnyCodable?
 
-    init(code: Int, message: String, data: Any? = nil) {
+    public init(code: Int, message: String, data: Any? = nil) {
         self.code = code
         self.message = message
         self.data = data.map { AnyCodable($0) }
     }
 
     // 標準エラーコード
-    static let parseError = JSONRPCError(code: -32700, message: "Parse error")
-    static let invalidRequest = JSONRPCError(code: -32600, message: "Invalid Request")
-    static let methodNotFound = JSONRPCError(code: -32601, message: "Method not found")
-    static let invalidParams = JSONRPCError(code: -32602, message: "Invalid params")
-    static let internalError = JSONRPCError(code: -32603, message: "Internal error")
+    public static let parseError = JSONRPCError(code: -32700, message: "Parse error")
+    public static let invalidRequest = JSONRPCError(code: -32600, message: "Invalid Request")
+    public static let methodNotFound = JSONRPCError(code: -32601, message: "Method not found")
+    public static let invalidParams = JSONRPCError(code: -32602, message: "Invalid params")
+    public static let internalError = JSONRPCError(code: -32603, message: "Internal error")
 }
 
 // MARK: - AnyCodable
 
 /// 任意のCodable値をラップするヘルパー
-struct AnyCodable: Codable {
-    let value: Any
+/// JSONシリアライズ可能な値（文字列、数値、Bool、配列、辞書、null）のみを扱うため
+/// @unchecked Sendableを使用（JSONデータは作成後イミュータブル）
+public struct AnyCodable: Codable, @unchecked Sendable {
+    public let value: Any
 
-    init(_ value: Any) {
+    public init(_ value: Any) {
         self.value = value
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
 
         if container.decodeNil() {
@@ -126,7 +135,7 @@ struct AnyCodable: Codable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
 
         switch value {
@@ -156,7 +165,7 @@ struct AnyCodable: Codable {
 
 // MARK: - AnyCodable Helpers
 
-extension AnyCodable {
+public extension AnyCodable {
     /// 文字列として取得
     var stringValue: String? {
         value as? String

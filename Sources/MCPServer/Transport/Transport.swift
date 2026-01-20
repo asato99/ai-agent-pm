@@ -3,6 +3,7 @@
 // 参照: docs/architecture/MCP_SERVER.md
 
 import Foundation
+import Infrastructure
 
 /// MCPトランスポート層のプロトコル
 /// stdio（Claude Code用）とUnixソケット（Runner用）の両方をサポート
@@ -15,4 +16,63 @@ protocol MCPTransport {
 
     /// ログを出力
     func log(_ message: String)
+}
+
+// MARK: - TransportError
+
+/// トランスポート層で発生するエラー
+enum TransportError: Error, CustomStringConvertible {
+    case invalidHeader(String)
+    case invalidContentLength(String)
+    case incompleteRead
+    case endOfInput
+    case invalidJSON(Error)
+    case encodingFailed
+
+    var description: String {
+        switch self {
+        case .invalidHeader(let header):
+            return "Invalid header: \(header)"
+        case .invalidContentLength(let value):
+            return "Invalid Content-Length: \(value)"
+        case .incompleteRead:
+            return "Incomplete read"
+        case .endOfInput:
+            return "End of input"
+        case .invalidJSON(let error):
+            return "Invalid JSON: \(error)"
+        case .encodingFailed:
+            return "Encoding failed"
+        }
+    }
+}
+
+// MARK: - NullTransport (HTTP用)
+
+/// HTTPトランスポート用のダミートランスポート
+/// HTTPモードではread/writeは使用されず、processHTTPRequestで直接処理される
+/// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
+final class NullTransport: MCPTransport {
+    func readMessage() throws -> JSONRPCRequest {
+        throw TransportError.endOfInput
+    }
+
+    func writeMessage(_ response: JSONRPCResponse) throws {
+        // HTTP mode uses direct request/response, not transport
+    }
+
+    func log(_ message: String) {
+        // ファイルにログ出力
+        let logPath = AppConfig.appSupportDirectory.appendingPathComponent("mcp-server.log").path
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let logLine = "[\(timestamp)] [HTTP] \(message)\n"
+
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            handle.seekToEndOfFile()
+            handle.write(logLine.data(using: .utf8)!)
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: logPath, contents: logLine.data(using: .utf8), attributes: nil)
+        }
+    }
 }

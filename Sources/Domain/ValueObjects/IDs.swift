@@ -270,3 +270,21 @@ public struct ChatMessageID: Hashable, Codable, Sendable, CustomStringConvertibl
 
     public var description: String { value }
 }
+
+// MARK: - AgentWorkingDirectoryID
+
+/// エージェントのワーキングディレクトリ設定の一意識別子
+/// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md
+public struct AgentWorkingDirectoryID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> AgentWorkingDirectoryID {
+        AgentWorkingDirectoryID(value: "awd_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}

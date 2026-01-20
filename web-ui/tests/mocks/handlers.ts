@@ -49,9 +49,13 @@ const initialTasks: Task[] = [
 
 let tasks: Task[] = [...initialTasks]
 
+// Phase 2.4: In-memory working directory store for E2E tests
+const projectWorkingDirectories = new Map<string, string>()
+
 // Reset tasks to initial state (call between tests)
 export function resetMockTasks() {
   tasks = [...initialTasks]
+  projectWorkingDirectories.clear()
 }
 
 export const handlers = [
@@ -145,6 +149,8 @@ export const handlers = [
     }
     const { projectId } = params
     if (projectId === 'project-1') {
+      // Check if there's a working directory set for this project
+      const workingDir = projectWorkingDirectories.get(projectId as string)
       return HttpResponse.json({
         id: 'project-1',
         name: 'ECサイト開発',
@@ -157,9 +163,33 @@ export const handlers = [
         inProgressCount: 3,
         blockedCount: 1,
         myTaskCount: 3,
+        myWorkingDirectory: workingDir || null,
       })
     }
     return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
+
+  // Phase 2.4: Set working directory
+  http.put('/api/projects/:projectId/my-working-directory', async ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId } = params
+    const body = (await request.json()) as { workingDirectory: string }
+    projectWorkingDirectories.set(projectId as string, body.workingDirectory)
+    return HttpResponse.json({ workingDirectory: body.workingDirectory })
+  }),
+
+  // Phase 2.4: Delete working directory
+  http.delete('/api/projects/:projectId/my-working-directory', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId } = params
+    projectWorkingDirectories.delete(projectId as string)
+    return new HttpResponse(null, { status: 204 })
   }),
 
   // Tasks - returns dynamic task list
