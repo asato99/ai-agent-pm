@@ -28,10 +28,24 @@ if command -v xcodegen &> /dev/null; then
     xcodegen generate
 fi
 
-# 3. macOSアプリビルド
+# 3. MCPサーバービルド
+echo ""
+echo "🔌 Building MCP server..."
+xcodebuild -scheme MCPServer -destination 'platform=macOS' build 2>&1 | tail -3
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "❌ MCP server build failed"
+    exit 1
+fi
+echo "✅ MCP server built"
+
+# 4. macOSアプリビルド
 echo ""
 echo "🍎 Building macOS app..."
-xcodebuild -scheme AIAgentPM -destination 'platform=macOS' build | grep -E "(Build|error:|warning:.*error|✓)"
+xcodebuild -scheme AIAgentPM -destination 'platform=macOS' build 2>&1 | tail -5
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "❌ App build failed"
+    exit 1
+fi
 
 echo ""
 echo "✅ Build complete!"

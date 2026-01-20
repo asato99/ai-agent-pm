@@ -114,7 +114,7 @@ echo -e "${YELLOW}Step 5: Starting MCP daemon${NC}"
 # MCPServerをビルドして最新バイナリを使用
 echo "Building mcp-server-pm..."
 cd "$PROJECT_ROOT"
-swift build --product mcp-server-pm 2>&1 || {
+xcodebuild -scheme MCPServer -destination 'platform=macOS' build 2>&1 || {
     echo -e "${RED}Failed to build mcp-server-pm${NC}"
     exit 1
 }

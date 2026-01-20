@@ -60,7 +60,7 @@ echo ""
 # Step 1: MCPサーバービルド
 echo -e "${YELLOW}Step 1: Building MCP server${NC}"
 cd "$PROJECT_ROOT"
-swift build --product mcp-server-pm 2>&1 | tail -3 || {
+xcodebuild -scheme MCPServer -destination 'platform=macOS' build 2>&1 | tail -3 || {
     echo -e "${RED}Failed to build MCP server${NC}"
     exit 1
 }

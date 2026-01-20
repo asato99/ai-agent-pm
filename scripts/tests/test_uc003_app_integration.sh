@@ -118,7 +118,7 @@ echo -e "${YELLOW}Step 3: Building MCP server${NC}"
 cd "$PROJECT_ROOT"
 
 # MCPサーバービルド
-swift build --product mcp-server-pm 2>&1 | tail -3 || {
+xcodebuild -scheme MCPServer -destination 'platform=macOS' build 2>&1 | tail -3 || {
     echo -e "${RED}Failed to build MCP server${NC}"
     exit 1
 }
