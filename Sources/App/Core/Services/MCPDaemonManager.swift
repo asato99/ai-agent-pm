@@ -208,35 +208,9 @@ public final class MCPDaemonManager: ObservableObject {
             }
             debugLog(" Executable found at: \(execPath)")
 
-            // Determine which daemon binary to use
-            // Running from .build directory can cause dyld blocking issues
-            // If a pre-copied stable binary exists in Application Support, use that instead
-            let stableDaemonPath = AppConfig.appSupportDirectory.appendingPathComponent("mcp-server-pm").path
-            debugLog(" Stable daemon path: \(stableDaemonPath)")
-
-            // Check if stable binary exists, if so use it (avoids blocking issue)
-            // If running from .build directory, copying would block, so we skip the copy
-            // and just use the original location if stable doesn't exist
-            var daemonToRun: String
-            if FileManager.default.fileExists(atPath: stableDaemonPath) {
-                debugLog(" Using existing stable binary at: \(stableDaemonPath)")
-                daemonToRun = stableDaemonPath
-            } else if execPath.contains(".build/") {
-                // Running from build directory - file ops will block, use original directly
-                // Note: This may cause dyld blocking, but at least we log it
-                debugLog(" WARNING: No stable binary exists and source is in .build directory")
-                debugLog(" File operations on .build may block. Consider pre-copying the daemon:")
-                debugLog("   cp '\(execPath)' '\(stableDaemonPath)'")
-                daemonToRun = execPath
-            } else {
-                // Not in .build directory, safe to use directly
-                debugLog(" Using daemon from: \(execPath)")
-                daemonToRun = execPath
-            }
-
             // Launch daemon process directly with minimal environment
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: daemonToRun)
+            process.executableURL = URL(fileURLWithPath: execPath)
             process.arguments = ["daemon"]
 
             // Redirect all standard I/O to prevent blocking
@@ -258,7 +232,7 @@ public final class MCPDaemonManager: ObservableObject {
 
             // When running from DerivedData, set DYLD_FRAMEWORK_PATH to find frameworks
             // (frameworks are in the same directory as the binary, not in a subdirectory)
-            let daemonDir = URL(fileURLWithPath: daemonToRun).deletingLastPathComponent().path
+            let daemonDir = URL(fileURLWithPath: execPath).deletingLastPathComponent().path
             if daemonDir.contains("DerivedData") {
                 environment["DYLD_FRAMEWORK_PATH"] = daemonDir
                 debugLog(" Setting DYLD_FRAMEWORK_PATH=\(daemonDir)")
@@ -289,7 +263,7 @@ public final class MCPDaemonManager: ObservableObject {
             }
             process.environment = environment
             debugLog(" Using minimal environment: \(environment.keys.sorted())")
-            debugLog(" Launching daemon from: \(stableDaemonPath)")
+            debugLog(" Launching daemon from: \(execPath)")
 
             try process.run()
             // The process forks, so daemonProcess will exit quickly
