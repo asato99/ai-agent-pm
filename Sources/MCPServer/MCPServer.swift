@@ -444,6 +444,21 @@ public final class MCPServer {
                 dependencies: dependencies
             )
 
+        case "create_tasks_batch":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let parentTaskId = arguments["parent_task_id"] as? String,
+                  let tasks = arguments["tasks"] as? [[String: Any]] else {
+                throw MCPError.missingArguments(["parent_task_id", "tasks"])
+            }
+            return try createTasksBatch(
+                agentId: session.agentId,
+                projectId: session.projectId,
+                parentTaskId: parentTaskId,
+                tasks: tasks
+            )
+
         case "assign_task":
             guard case .manager(_, let session) = caller else {
                 throw ToolAuthorizationError.managerRequired("assign_task")
@@ -2121,10 +2136,12 @@ public final class MCPServer {
                 "action": "create_subtasks",
                 "instruction": """
                     タスクを2〜5個のサブタスクに分解してください。
-                    create_task ツールを使用して、具体的で実行可能なサブタスクを作成してください。
-                    各サブタスクには parent_task_id として '\(mainTask.id.value)' を指定してください。
+                    create_tasks_batch ツールを使用して、一度に全てのサブタスクを作成してください。
+                    parent_task_id には '\(mainTask.id.value)' を指定してください。
+                    各タスクには local_id（例: "task_1", "generator"）を付けてください。
                     タスク間に順序関係がある場合（例: タスクBがタスクAの出力を使用する）、
-                    後続タスクの dependencies に先行タスクのIDを指定してください。
+                    後続タスクの dependencies に先行タスクの local_id を指定してください。
+                    システムが local_id を実際のタスクIDに自動変換します。
                     サブタスク作成後、get_next_action を呼び出してください。
                     """,
                 "state": "needs_subtask_creation",
@@ -2415,10 +2432,12 @@ public final class MCPServer {
                 "action": "create_subtasks",
                 "instruction": """
                     タスクを2〜5個のサブタスクに分解してください。
-                    create_task ツールを使用して、具体的で実行可能なサブタスクを作成してください。
-                    各サブタスクには parent_task_id として '\(mainTask.id.value)' を指定してください。
+                    create_tasks_batch ツールを使用して、一度に全てのサブタスクを作成してください。
+                    parent_task_id には '\(mainTask.id.value)' を指定してください。
+                    各タスクには local_id（例: "task_1", "generator"）を付けてください。
                     タスク間に順序関係がある場合（例: タスクBがタスクAの出力を使用する）、
-                    後続タスクの dependencies に先行タスクのIDを指定してください。
+                    後続タスクの dependencies に先行タスクの local_id を指定してください。
+                    システムが local_id を実際のタスクIDに自動変換します。
                     サブタスク作成後、get_next_action を呼び出してください。
                     """,
                 "state": "needs_subtask_creation",
@@ -3202,6 +3221,123 @@ public final class MCPServer {
                 "parent_task_id": parentTaskId as Any,
                 "dependencies": taskDependencies.map { $0.value }
             ],
+            "instruction": instruction
+        ]
+    }
+
+    /// create_tasks_batch - 複数タスクを依存関係付きで一括作成
+    /// ローカル参照ID（local_id）を使ってバッチ内でタスク間の依存関係を指定可能
+    /// システムがlocal_idを実際のタスクIDに解決する
+    private func createTasksBatch(
+        agentId: AgentID,
+        projectId: ProjectID,
+        parentTaskId: String,
+        tasks: [[String: Any]]
+    ) throws -> [String: Any] {
+        Self.log("[MCP] createTasksBatch: agentId=\(agentId.value), projectId=\(projectId.value), parentTaskId=\(parentTaskId), taskCount=\(tasks.count)")
+
+        // 親タスクの検証
+        let parentId = TaskID(value: parentTaskId)
+        guard try taskRepository.findById(parentId) != nil else {
+            throw MCPError.taskNotFound(parentTaskId)
+        }
+
+        // 作成者のエージェントを取得してhierarchyTypeを確認
+        let creatorAgent = try agentRepository.findById(agentId)
+        let isWorker = creatorAgent?.hierarchyType == .worker
+
+        // assigneeIdの決定（Worker の場合は自分自身）
+        let assigneeId: AgentID? = isWorker ? agentId : nil
+
+        // Phase 1: 全タスクを作成し、local_id → real_id のマッピングを構築
+        var localIdToRealId: [String: TaskID] = [:]
+        var createdTasks: [(Task, [String])] = []  // (task, local_dependencies)
+
+        for taskDef in tasks {
+            guard let localId = taskDef["local_id"] as? String,
+                  let title = taskDef["title"] as? String,
+                  let description = taskDef["description"] as? String else {
+                throw MCPError.validationError("Each task must have local_id, title, and description")
+            }
+
+            // 優先度のパース
+            let taskPriority: TaskPriority
+            if let priorityStr = taskDef["priority"] as? String,
+               let parsed = TaskPriority(rawValue: priorityStr) {
+                taskPriority = parsed
+            } else {
+                taskPriority = .medium
+            }
+
+            // ローカル依存関係を保存（後で解決する）
+            let localDependencies = taskDef["dependencies"] as? [String] ?? []
+
+            // タスクを作成（依存関係は後で設定）
+            let newTask = Task(
+                id: TaskID.generate(),
+                projectId: projectId,
+                title: title,
+                description: description,
+                status: .todo,
+                priority: taskPriority,
+                assigneeId: assigneeId,
+                createdByAgentId: agentId,
+                dependencies: [],  // 後で設定
+                parentTaskId: parentId
+            )
+
+            localIdToRealId[localId] = newTask.id
+            createdTasks.append((newTask, localDependencies))
+
+            Self.log("[MCP] createTasksBatch: Created task local_id=\(localId) → real_id=\(newTask.id.value)")
+        }
+
+        // Phase 2: ローカル依存関係を実際のTaskIDに解決して保存
+        var savedTasks: [[String: Any]] = []
+
+        for (var task, localDependencies) in createdTasks {
+            var resolvedDependencies: [TaskID] = []
+
+            for localDep in localDependencies {
+                guard let realId = localIdToRealId[localDep] else {
+                    throw MCPError.validationError("Unknown dependency local_id: \(localDep)")
+                }
+                resolvedDependencies.append(realId)
+            }
+
+            // 依存関係を設定
+            task.dependencies = resolvedDependencies
+
+            // タスクを保存
+            try taskRepository.save(task)
+
+            let depsStr = resolvedDependencies.map { $0.value }.joined(separator: ", ")
+            Self.log("[MCP] createTasksBatch: Saved task \(task.id.value) with dependencies: [\(depsStr)]")
+
+            savedTasks.append([
+                "id": task.id.value,
+                "title": task.title,
+                "description": task.description,
+                "status": task.status.rawValue,
+                "priority": task.priority.rawValue,
+                "assignee_id": assigneeId?.value as Any,
+                "dependencies": resolvedDependencies.map { $0.value }
+            ])
+        }
+
+        // 作成者に応じた instruction を決定
+        let instruction: String
+        if isWorker {
+            instruction = "\(tasks.count)個のサブタスクが作成され、あなたに自動的に割り当てられました。get_next_action を呼び出してください。"
+        } else {
+            instruction = "\(tasks.count)個のサブタスクが作成されました。assign_task で適切なワーカーに割り当ててください。"
+        }
+
+        return [
+            "success": true,
+            "tasks": savedTasks,
+            "task_count": savedTasks.count,
+            "local_id_to_real_id": localIdToRealId.mapValues { $0.value },
             "instruction": instruction
         ]
     }

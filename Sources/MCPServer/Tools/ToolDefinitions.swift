@@ -34,6 +34,7 @@ enum ToolDefinitions {
             listSubordinates,      // NEW: 下位エージェント一覧
             getSubordinateProfile, // NEW: 下位エージェント詳細
             createTask,
+            createTasksBatch,      // NEW: 依存関係付き一括タスク作成
             assignTask,
 
             // ========================================
@@ -458,6 +459,62 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "title", "description"]
+        ]
+    ]
+
+    /// create_tasks_batch - 複数タスクを依存関係付きで一括作成
+    /// ローカル参照ID（local_id）を使って、バッチ内でタスク間の依存関係を指定可能
+    static let createTasksBatch: [String: Any] = [
+        "name": "create_tasks_batch",
+        "description": """
+            複数のサブタスクを一括で作成します。各タスクにlocal_idを指定し、dependenciesでそのlocal_idを参照することで、
+            バッチ内のタスク間の依存関係を設定できます。システムがlocal_idを実際のタスクIDに解決します。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "parent_task_id": [
+                    "type": "string",
+                    "description": "親タスクID（全てのサブタスクに共通）"
+                ],
+                "tasks": [
+                    "type": "array",
+                    "description": "作成するタスクの配列",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "local_id": [
+                                "type": "string",
+                                "description": "バッチ内でこのタスクを参照するためのローカルID（例: 'task_1', 'generator'）"
+                            ],
+                            "title": [
+                                "type": "string",
+                                "description": "タスクタイトル"
+                            ],
+                            "description": [
+                                "type": "string",
+                                "description": "タスク詳細"
+                            ],
+                            "priority": [
+                                "type": "string",
+                                "description": "優先度",
+                                "enum": ["low", "medium", "high", "urgent"]
+                            ],
+                            "dependencies": [
+                                "type": "array",
+                                "items": ["type": "string"],
+                                "description": "依存タスクのlocal_id配列（バッチ内の他タスクを参照）"
+                            ]
+                        ] as [String: Any],
+                        "required": ["local_id", "title", "description"]
+                    ] as [String: Any]
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "parent_task_id", "tasks"]
         ]
     ]
 

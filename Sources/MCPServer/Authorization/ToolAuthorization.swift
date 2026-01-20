@@ -89,6 +89,7 @@ struct ToolAuthorization {
 
         // 認証済み共通（Manager + Worker）- サブタスク作成用
         "create_task": .authenticated,  // Workers can create sub-tasks for self-execution
+        "create_tasks_batch": .authenticated,  // Batch creation with local dependency references
 
         // 認証済み共通（Manager + Worker）- タスク完了報告
         // Managerも自分のメインタスクを完了報告する必要がある
