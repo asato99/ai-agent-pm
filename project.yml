@@ -138,17 +138,24 @@ targets:
           - "@executable_path/../Frameworks"
 
   # RESTサーバー（コマンドラインツール - web-ui向け）
+  # MCPServerのソースを含めてMCP HTTP Transportを実装
   RESTServer:
     type: tool
     platform: macOS
     sources:
       - path: Sources/RESTServer
         type: group
+      - path: Sources/MCPServer
+        type: group
+        excludes:
+          - "main.swift"
+          - "App.swift"
     dependencies:
       - target: Domain
       - target: UseCase
       - target: Infrastructure
       - package: Hummingbird
+      - package: ArgumentParser
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.restserver

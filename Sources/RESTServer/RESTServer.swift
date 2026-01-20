@@ -16,7 +16,7 @@ private func debugLog(_ message: String) {
 }
 
 /// REST API Server for web-ui
-public final class RESTServer {
+final class RESTServer {
     private let database: DatabaseQueue
     private let port: Int
     private let webUIPath: String?
@@ -45,7 +45,7 @@ public final class RESTServer {
     ///   - database: Database connection
     ///   - port: HTTP port (default: 8080)
     ///   - webUIPath: Path to web-ui static files directory (optional, enables static file serving)
-    public init(database: DatabaseQueue, port: Int = 8080, webUIPath: String? = nil) {
+    init(database: DatabaseQueue, port: Int = 8080, webUIPath: String? = nil) {
         self.database = database
         self.port = port
         self.webUIPath = webUIPath
@@ -62,7 +62,7 @@ public final class RESTServer {
         self.workingDirectoryRepository = AgentWorkingDirectoryRepository(database: database)
     }
 
-    public func run() async throws {
+    func run() async throws {
         debugLog("run() starting")
 
         // Load settings for remote access configuration
