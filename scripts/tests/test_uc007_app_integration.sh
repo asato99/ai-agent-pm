@@ -223,13 +223,10 @@ if grep -q "Test Suite 'UC007_DependentTaskExecutionTests' passed" /tmp/uc007_ui
 elif grep -q "passed" /tmp/uc007_uitest.log; then
     echo -e "${GREEN}✓ XCUITest passed${NC}"
 else
-    echo -e "${RED}✗ XCUITest failed${NC}"
-    grep -E "(error:|failed|FAIL)" /tmp/uc007_uitest.log | tail -20
-    echo ""
-    echo "Coordinator log (last 30 lines):"
-    tail -30 /tmp/uc007_coordinator.log 2>/dev/null || echo "(no log)"
+    echo -e "${RED}✗ XCUITest failed (continuing to DB verification...)${NC}"
+    grep -E "(error:|failed|FAIL)" /tmp/uc007_uitest.log | tail -10
     TEST_FAILED=true
-    exit 1
+    # Continue to Step 7 for DB verification even if XCUITest failed
 fi
 echo ""
 
@@ -397,12 +394,42 @@ echo ""
 
 # Step 7.6: 実行ログ検証
 echo -e "${YELLOW}Step 7.6: Verifying execution logs${NC}"
+V10_SINGLE_SESSION=false  # 10. 各タスクが1セッションで完了していること
 if [ -f "$SHARED_DB_PATH" ]; then
     EXEC_LOG_COUNT=$(sqlite3 "$SHARED_DB_PATH" "SELECT COUNT(*) FROM execution_logs;" 2>/dev/null || echo "0")
     echo "Execution log records: $EXEC_LOG_COUNT"
     if [ "$EXEC_LOG_COUNT" -gt "0" ]; then
         echo -e "${GREEN}✓ Execution logs created${NC}"
         sqlite3 "$SHARED_DB_PATH" "SELECT id, task_id, agent_id, status, started_at FROM execution_logs ORDER BY started_at;" 2>/dev/null
+    fi
+    echo ""
+
+    # 10. Workerエージェントの各タスクに対して、複数のExecutionLogがないか確認
+    # Managerは設計上複数セッションで動作する（サブタスク作成→終了→ワーカー完了後再起動→完了報告）
+    # Workerのみ複数セッションがあれば予期しない再起動を示す
+    echo "Checking for multiple sessions per task+agent (Workers only, excluding Manager)..."
+    MULTI_SESSION_COUNT=$(sqlite3 "$SHARED_DB_PATH" "
+        SELECT COUNT(*) FROM (
+            SELECT task_id, agent_id, COUNT(*) as cnt
+            FROM execution_logs
+            WHERE agent_id NOT LIKE '%manager%'
+            GROUP BY task_id, agent_id
+            HAVING cnt > 1
+        );
+    " 2>/dev/null || echo "0")
+
+    if [ "$MULTI_SESSION_COUNT" -eq "0" ]; then
+        V10_SINGLE_SESSION=true
+        echo -e "${GREEN}  ✓ [10] Worker tasks completed in single session (no unexpected restarts)${NC}"
+    else
+        echo -e "${RED}  ✗ [10] Worker tasks were restarted! Multiple sessions detected:${NC}"
+        sqlite3 "$SHARED_DB_PATH" "
+            SELECT task_id, agent_id, COUNT(*) as session_count
+            FROM execution_logs
+            WHERE agent_id NOT LIKE '%manager%'
+            GROUP BY task_id, agent_id
+            HAVING session_count > 1;
+        " 2>/dev/null
     fi
 fi
 echo ""
@@ -412,13 +439,13 @@ echo -e "${YELLOW}Coordinator log (last 50 lines):${NC}"
 tail -50 /tmp/uc007_coordinator.log 2>/dev/null || echo "(no log)"
 echo ""
 
-# 結果判定（仕様書の9項目）
+# 結果判定（仕様書の10項目）
 echo "=========================================="
 echo -e "${YELLOW}Final Result: UC007 Specification Verification${NC}"
 echo ""
 
-# 9項目の結果サマリー
-echo "UC007 Specification (9 assertions):"
+# 10項目の結果サマリー
+echo "UC007 Specification (10 assertions):"
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -444,26 +471,28 @@ check_assertion 6 "result.txt created" "$V6_RESULT_FILE_CREATED"
 check_assertion 7 "Calculation correct (seed × 2 == result)" "$V7_CALCULATION_CORRECT"
 check_assertion 8 "Execution order correct (generator before calculator)" "$V8_EXECUTION_ORDER"
 check_assertion 9 "All tasks are done" "$V9_ALL_TASKS_DONE"
+check_assertion 10 "Worker tasks completed in single session (no unexpected restarts)" "$V10_SINGLE_SESSION"
 
 echo ""
-echo "Result: $PASS_COUNT/9 assertions passed"
+echo "Result: $PASS_COUNT/10 assertions passed"
 echo ""
 
-# 全9項目がパスの場合のみ成功
-if [ "$PASS_COUNT" -eq 9 ]; then
+# 全10項目がパスの場合のみ成功
+if [ "$PASS_COUNT" -eq 10 ]; then
     echo -e "${GREEN}UC007 App Integration Test: PASSED${NC}"
     echo ""
-    echo "All 9 assertions verified:"
+    echo "All 10 assertions verified:"
     echo "  ✓ Manager → Workers assignment with dependency"
     echo "  ✓ Dependency correctly set in DB"
     echo "  ✓ Execution order: Generator completed before Calculator started"
     echo "  ✓ Calculation integrity: seed × 2 == result"
     echo "  ✓ Output files created (seed.txt, result.txt)"
+    echo "  ✓ Worker tasks completed in single session (Manager may have multiple as designed)"
     exit 0
 else
     echo -e "${RED}UC007 App Integration Test: FAILED${NC}"
     echo ""
-    echo "Failed assertions: $FAIL_COUNT/9"
+    echo "Failed assertions: $FAIL_COUNT/10"
     echo ""
     echo "Debug info:"
     echo "  - XCUITest log: /tmp/uc007_uitest.log"
