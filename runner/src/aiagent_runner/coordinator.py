@@ -671,15 +671,41 @@ Begin by calling `authenticate`.
 async def run_coordinator_async(config: CoordinatorConfig) -> None:
     """Run the Coordinator asynchronously.
 
+    Acquires a lock to prevent multiple Coordinator instances from running
+    with the same configuration simultaneously.
+
     Args:
         config: Coordinator configuration
+
+    Raises:
+        SystemExit: If another Coordinator instance is already running.
     """
-    coordinator = Coordinator(config)
-    await coordinator.start()
+    from aiagent_runner.lock import CoordinatorLock, CoordinatorAlreadyRunningError
+
+    # Use config_path for lock, fallback to a default identifier
+    lock_identifier = config.config_path or "default"
+    lock = CoordinatorLock(config_path=lock_identifier)
+
+    try:
+        lock.acquire()
+        logger.info(f"Acquired coordinator lock: {lock.lock_file_path}")
+    except CoordinatorAlreadyRunningError as e:
+        logger.error(str(e))
+        raise SystemExit(1)
+
+    try:
+        coordinator = Coordinator(config)
+        await coordinator.start()
+    finally:
+        lock.release()
+        logger.info("Released coordinator lock")
 
 
 def run_coordinator(config: CoordinatorConfig) -> None:
     """Run the Coordinator synchronously.
+
+    Acquires a lock to prevent multiple Coordinator instances from running
+    with the same configuration simultaneously.
 
     Args:
         config: Coordinator configuration
