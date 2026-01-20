@@ -336,4 +336,122 @@ export const handlers = [
       },
     ])
   }),
+
+  // Subordinate agents
+  http.get('/api/agents/subordinates', ({ request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    return HttpResponse.json([
+      {
+        id: 'worker-1',
+        name: 'Worker 1',
+        role: 'Backend Developer',
+        agentType: 'ai',
+        status: 'active',
+        hierarchyType: 'worker',
+        parentAgentId: 'manager-1',
+      },
+      {
+        id: 'worker-2',
+        name: 'Worker 2',
+        role: 'Frontend Developer',
+        agentType: 'ai',
+        status: 'inactive',
+        hierarchyType: 'worker',
+        parentAgentId: 'manager-1',
+      },
+    ])
+  }),
+
+  // Agent detail
+  http.get('/api/agents/:agentId', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { agentId } = params
+    if (agentId === 'worker-1') {
+      return HttpResponse.json({
+        id: 'worker-1',
+        name: 'Worker 1',
+        role: 'Backend Developer',
+        agentType: 'ai',
+        status: 'active',
+        hierarchyType: 'worker',
+        parentAgentId: 'manager-1',
+        roleType: 'general',
+        maxParallelTasks: 3,
+        capabilities: ['coding', 'testing'],
+        systemPrompt: 'You are a backend developer.',
+        kickMethod: 'mcp',
+        provider: 'anthropic',
+        modelId: 'claude-3-sonnet',
+        isLocked: false,
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-15T10:00:00Z',
+      })
+    }
+    if (agentId === 'worker-locked') {
+      return HttpResponse.json({
+        id: 'worker-locked',
+        name: 'Locked Worker',
+        role: 'Developer',
+        agentType: 'ai',
+        status: 'active',
+        hierarchyType: 'worker',
+        parentAgentId: 'manager-1',
+        roleType: 'general',
+        maxParallelTasks: 1,
+        capabilities: [],
+        systemPrompt: null,
+        kickMethod: 'cli',
+        provider: null,
+        modelId: null,
+        isLocked: true,
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-15T10:00:00Z',
+      })
+    }
+    if (agentId === 'unknown-agent') {
+      return HttpResponse.json({ message: 'Agent not found' }, { status: 404 })
+    }
+    return HttpResponse.json({ message: 'Forbidden' }, { status: 403 })
+  }),
+
+  // Update agent
+  http.patch('/api/agents/:agentId', async ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { agentId } = params
+    if (agentId === 'worker-locked') {
+      return HttpResponse.json({ message: 'Agent is currently locked' }, { status: 423 })
+    }
+    if (agentId === 'worker-1') {
+      const body = (await request.json()) as Record<string, unknown>
+      return HttpResponse.json({
+        id: 'worker-1',
+        name: body.name ?? 'Worker 1',
+        role: body.role ?? 'Backend Developer',
+        agentType: 'ai',
+        status: body.status ?? 'active',
+        hierarchyType: 'worker',
+        parentAgentId: 'manager-1',
+        roleType: 'general',
+        maxParallelTasks: body.maxParallelTasks ?? 3,
+        capabilities: body.capabilities ?? ['coding', 'testing'],
+        systemPrompt: body.systemPrompt ?? 'You are a backend developer.',
+        kickMethod: 'mcp',
+        provider: 'anthropic',
+        modelId: 'claude-3-sonnet',
+        isLocked: false,
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: new Date().toISOString(),
+      })
+    }
+    return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
 ]

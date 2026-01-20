@@ -22,6 +22,7 @@ public protocol AgentRepositoryProtocol: Sendable {
     func findAll() throws -> [Agent]
     func findByType(_ type: AgentType) throws -> [Agent]
     func findByParent(_ parentAgentId: AgentID?) throws -> [Agent]
+    func findAllDescendants(_ parentAgentId: AgentID) throws -> [Agent]
     func findRootAgents() throws -> [Agent]
     func findLocked(byAuditId: InternalAuditID?) throws -> [Agent]
     func save(_ agent: Agent) throws

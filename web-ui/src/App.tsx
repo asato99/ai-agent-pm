@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { LoginPage, ProjectListPage, TaskBoardPage } from '@/pages'
+import { LoginPage, ProjectListPage, TaskBoardPage, AgentDetailPage } from '@/pages'
 import { ProtectedRoute } from '@/components/auth'
 
 function App() {
@@ -20,6 +20,14 @@ function App() {
         element={
           <ProtectedRoute>
             <TaskBoardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/agents/:agentId"
+        element={
+          <ProtectedRoute>
+            <AgentDetailPage />
           </ProtectedRoute>
         }
       />

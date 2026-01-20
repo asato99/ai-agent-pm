@@ -47,6 +47,20 @@ final class MockAgentRepository: AgentRepositoryProtocol {
         agents.values.filter { $0.parentAgentId == parentAgentId }
     }
 
+    func findAllDescendants(_ parentAgentId: AgentID) throws -> [Agent] {
+        var allDescendants: [Agent] = []
+        var queue = [parentAgentId]
+
+        while !queue.isEmpty {
+            let currentId = queue.removeFirst()
+            let children = try findByParent(currentId)
+            allDescendants.append(contentsOf: children)
+            queue.append(contentsOf: children.map { $0.id })
+        }
+
+        return allDescendants
+    }
+
     func findRootAgents() throws -> [Agent] {
         agents.values.filter { $0.parentAgentId == nil }
     }

@@ -349,6 +349,16 @@ final class RESTServer {
         agentRouter.get("assignable") { [self] request, context in
             try await listAssignableAgents(request: request, context: context)
         }
+        agentRouter.get("subordinates") { [self] request, context in
+            try await listSubordinates(request: request, context: context)
+        }
+        agentRouter.get(":agentId") { [self] request, context in
+            try await getAgent(request: request, context: context)
+        }
+        agentRouter.patch(":agentId") { [self] request, context in
+            try await updateAgent(request: request, context: context)
+        }
+        debugLog("Agent routes registered: GET/assignable, GET/subordinates, GET/:agentId, PATCH/:agentId")
 
         // Handoffs
         let handoffRouter = protectedRouter.group("handoffs")
@@ -799,6 +809,110 @@ final class RESTServer {
         let assignable = agents.filter { $0.status == .active }
         let dtos = assignable.map { AgentDTO(from: $0) }
         return jsonResponse(dtos)
+    }
+
+    /// GET /api/agents/subordinates - 全下位エージェント一覧（再帰的に取得）
+    private func listSubordinates(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let agentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        // 直下だけでなく、全ての下位エージェントを再帰的に取得
+        let subordinates = try agentRepository.findAllDescendants(agentId)
+        let dtos = subordinates.map { AgentDTO(from: $0) }
+        return jsonResponse(dtos)
+    }
+
+    /// GET /api/agents/:agentId - エージェント詳細取得（自分または部下のみ）
+    private func getAgent(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let targetAgentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Agent ID is required")
+        }
+        let targetAgentId = AgentID(value: targetAgentIdStr)
+
+        // Verify permission: self or subordinate
+        guard try canAccessAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId) else {
+            return errorResponse(status: .forbidden, message: "You can only view yourself or your subordinates")
+        }
+
+        guard let agent = try agentRepository.findById(targetAgentId) else {
+            return errorResponse(status: .notFound, message: "Agent not found")
+        }
+
+        let dto = AgentDetailDTO(from: agent)
+        return jsonResponse(dto)
+    }
+
+    /// PATCH /api/agents/:agentId - エージェント更新（自分または部下のみ）
+    private func updateAgent(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let targetAgentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Agent ID is required")
+        }
+        let targetAgentId = AgentID(value: targetAgentIdStr)
+
+        // Verify permission: self or subordinate
+        guard try canAccessAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId) else {
+            return errorResponse(status: .forbidden, message: "You can only update yourself or your subordinates")
+        }
+
+        guard var agent = try agentRepository.findById(targetAgentId) else {
+            return errorResponse(status: .notFound, message: "Agent not found")
+        }
+
+        // Check if agent is locked (423 Locked)
+        if agent.isLocked {
+            return errorResponse(status: HTTPResponse.Status(code: 423), message: "Agent is currently locked")
+        }
+
+        // Parse update request
+        let updateRequest = try await request.decode(as: UpdateAgentRequest.self, context: context)
+
+        // Apply updates
+        if let name = updateRequest.name {
+            agent.name = name
+        }
+        if let role = updateRequest.role {
+            agent.role = role
+        }
+        if let maxParallelTasks = updateRequest.maxParallelTasks {
+            agent.maxParallelTasks = maxParallelTasks
+        }
+        if let capabilities = updateRequest.capabilities {
+            agent.capabilities = capabilities
+        }
+        if let systemPrompt = updateRequest.systemPrompt {
+            agent.systemPrompt = systemPrompt
+        }
+        if let statusStr = updateRequest.status,
+           let status = AgentStatus(rawValue: statusStr) {
+            agent.status = status
+        }
+
+        agent.updatedAt = Date()
+        try agentRepository.save(agent)
+
+        let dto = AgentDetailDTO(from: agent)
+        return jsonResponse(dto)
+    }
+
+    /// Check if current agent can access target agent (self or subordinate)
+    private func canAccessAgent(currentAgentId: AgentID, targetAgentId: AgentID) throws -> Bool {
+        // Self access is always allowed
+        if currentAgentId == targetAgentId {
+            return true
+        }
+
+        // Check if target is a subordinate
+        let subordinates = try agentRepository.findByParent(currentAgentId)
+        return subordinates.contains { $0.id == targetAgentId }
     }
 
     // MARK: - Handoff Handlers

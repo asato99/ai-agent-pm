@@ -7,6 +7,8 @@ export class ProjectListPage {
   readonly agentName: Locator
   readonly logoutButton: Locator
   readonly archivedSection: Locator
+  readonly agentCards: Locator
+  readonly subordinatesSection: Locator
 
   constructor(page: Page) {
     this.page = page
@@ -15,6 +17,8 @@ export class ProjectListPage {
     this.agentName = page.getByTestId('agent-name')
     this.logoutButton = page.getByRole('button', { name: 'ログアウト' })
     this.archivedSection = page.getByTestId('archived-projects')
+    this.agentCards = page.locator('[data-testid="agent-card"]')
+    this.subordinatesSection = page.getByText('部下エージェント').locator('..')
   }
 
   async goto() {
@@ -33,5 +37,15 @@ export class ProjectListPage {
 
   async toggleArchivedSection() {
     await this.archivedSection.getByRole('button').click()
+  }
+
+  getAgentCard(agentName: string): Locator {
+    return this.page.locator(`[data-testid="agent-card"]`, {
+      has: this.page.getByText(agentName),
+    })
+  }
+
+  async clickAgent(agentName: string) {
+    await this.getAgentCard(agentName).click()
   }
 }

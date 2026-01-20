@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { AppHeader } from '@/components/layout'
 import { useProjects } from '@/hooks/useProjects'
 import { ProjectCard } from '@/components/project'
+import { AgentListSection } from '@/components/agent'
 
 export function ProjectListPage() {
   const navigate = useNavigate()
@@ -47,6 +48,8 @@ export function ProjectListPage() {
             </div>
           )}
         </div>
+
+        <AgentListSection />
       </main>
     </div>
   )

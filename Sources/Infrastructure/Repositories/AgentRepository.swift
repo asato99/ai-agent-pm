@@ -185,6 +185,20 @@ public final class AgentRepository: AgentRepositoryProtocol, Sendable {
         }
     }
 
+    public func findAllDescendants(_ parentAgentId: AgentID) throws -> [Agent] {
+        var allDescendants: [Agent] = []
+        var queue = [parentAgentId]
+
+        while !queue.isEmpty {
+            let currentId = queue.removeFirst()
+            let children = try findByParent(currentId)
+            allDescendants.append(contentsOf: children)
+            queue.append(contentsOf: children.map { $0.id })
+        }
+
+        return allDescendants
+    }
+
     public func findRootAgents() throws -> [Agent] {
         try findByParent(nil)
     }
