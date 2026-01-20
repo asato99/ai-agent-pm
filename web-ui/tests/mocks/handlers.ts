@@ -203,6 +203,41 @@ export const handlers = [
     return HttpResponse.json(newTask)
   }),
 
+  // Get task permissions
+  http.get('/api/tasks/:taskId/permissions', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { taskId } = params
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) {
+      return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+    }
+
+    // Return permissions - for mock, allow all edits
+    const canReassign = task.status !== 'in_progress' && task.status !== 'blocked'
+    const allStatuses = ['backlog', 'todo', 'in_progress', 'blocked', 'done', 'cancelled']
+
+    return HttpResponse.json({
+      canEdit: true,
+      canChangeStatus: true,
+      canReassign: canReassign,
+      validStatusTransitions: allStatuses,
+      reason: canReassign ? null : `Task is ${task.status}, reassignment disabled`,
+    })
+  }),
+
+  // Get task handoffs
+  http.get('/api/tasks/:taskId/handoffs', ({ request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    // Return empty handoffs for mock
+    return HttpResponse.json([])
+  }),
+
   // Update task status
   http.patch('/api/tasks/:taskId', async ({ params, request }) => {
     const authHeader = request.headers.get('Authorization')
