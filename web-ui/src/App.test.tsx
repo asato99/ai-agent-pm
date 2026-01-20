@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '../tests/test-utils'
 import App from './App'
 
-// useAuth をモック
+// Mock useAuth
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({
     isAuthenticated: false,

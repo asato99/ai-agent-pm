@@ -5,8 +5,8 @@ import { useAgent, useUpdateAgent } from '@/hooks'
 import type { AgentStatus, UpdateAgentRequest } from '@/types'
 
 const statusOptions: { value: AgentStatus; label: string }[] = [
-  { value: 'active', label: 'アクティブ' },
-  { value: 'inactive', label: '非アクティブ' },
+  { value: 'active', label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
 ]
 
 export function AgentDetailPage() {
@@ -77,7 +77,7 @@ export function AgentDetailPage() {
       <div className="min-h-screen bg-gray-100">
         <AppHeader />
         <main className="max-w-3xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <p className="text-gray-500">読み込み中...</p>
+          <p className="text-gray-500">Loading...</p>
         </main>
       </div>
     )
@@ -88,12 +88,12 @@ export function AgentDetailPage() {
       <div className="min-h-screen bg-gray-100">
         <AppHeader />
         <main className="max-w-3xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <p className="text-red-500">エラーが発生しました: {error.message}</p>
+          <p className="text-red-500">An error occurred: {error.message}</p>
           <button
             onClick={handleBack}
             className="mt-4 text-blue-600 hover:underline"
           >
-            ← 戻る
+            ← Back
           </button>
         </main>
       </div>
@@ -105,12 +105,12 @@ export function AgentDetailPage() {
       <div className="min-h-screen bg-gray-100">
         <AppHeader />
         <main className="max-w-3xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <p className="text-gray-500">エージェントが見つかりません</p>
+          <p className="text-gray-500">Agent not found</p>
           <button
             onClick={handleBack}
             className="mt-4 text-blue-600 hover:underline"
           >
-            ← 戻る
+            ← Back
           </button>
         </main>
       </div>
@@ -129,16 +129,16 @@ export function AgentDetailPage() {
           onClick={handleBack}
           className="mb-6 text-blue-600 hover:underline flex items-center gap-1"
         >
-          ← プロジェクト一覧に戻る
+          ← Back to Projects
         </button>
 
         <div className="bg-white rounded-lg shadow p-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-6">エージェント詳細</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-6">Agent Detail</h1>
 
           {isLocked && (
             <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
               <p className="text-sm text-yellow-700">
-                このエージェントは現在ロックされているため編集できません
+                This agent is currently locked and cannot be edited
               </p>
             </div>
           )}
@@ -151,7 +151,7 @@ export function AgentDetailPage() {
 
           {saveSuccess && (
             <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
-              <p className="text-sm text-green-700">保存しました</p>
+              <p className="text-sm text-green-700">Saved successfully</p>
             </div>
           )}
 
@@ -160,7 +160,7 @@ export function AgentDetailPage() {
               {/* Name */}
               <div>
                 <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-                  名前
+                  Name
                 </label>
                 <input
                   type="text"
@@ -176,7 +176,7 @@ export function AgentDetailPage() {
               {/* Role */}
               <div>
                 <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">
-                  役割
+                  Role
                 </label>
                 <input
                   type="text"
@@ -191,7 +191,7 @@ export function AgentDetailPage() {
               {/* Status */}
               <div>
                 <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
-                  ステータス
+                  Status
                 </label>
                 <select
                   id="status"
@@ -211,7 +211,7 @@ export function AgentDetailPage() {
               {/* Max Parallel Tasks */}
               <div>
                 <label htmlFor="maxParallelTasks" className="block text-sm font-medium text-gray-700 mb-1">
-                  最大並列タスク数
+                  Max Parallel Tasks
                 </label>
                 <input
                   type="number"
@@ -228,7 +228,7 @@ export function AgentDetailPage() {
               {/* System Prompt */}
               <div>
                 <label htmlFor="systemPrompt" className="block text-sm font-medium text-gray-700 mb-1">
-                  システムプロンプト
+                  System Prompt
                 </label>
                 <textarea
                   id="systemPrompt"
@@ -242,50 +242,50 @@ export function AgentDetailPage() {
 
               {/* Read-only Info */}
               <div className="border-t pt-6 mt-6">
-                <h3 className="text-sm font-medium text-gray-700 mb-4">その他の情報</h3>
+                <h3 className="text-sm font-medium text-gray-700 mb-4">Additional Info</h3>
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <dt className="text-gray-500">タイプ</dt>
+                    <dt className="text-gray-500">Type</dt>
                     <dd className="font-medium">{agent.agentType === 'ai' ? 'AI' : 'Human'}</dd>
                   </div>
                   <div>
-                    <dt className="text-gray-500">階層</dt>
+                    <dt className="text-gray-500">Hierarchy</dt>
                     <dd className="font-medium">
-                      {agent.hierarchyType === 'owner' && 'オーナー'}
-                      {agent.hierarchyType === 'manager' && 'マネージャー'}
-                      {agent.hierarchyType === 'worker' && 'ワーカー'}
+                      {agent.hierarchyType === 'owner' && 'Owner'}
+                      {agent.hierarchyType === 'manager' && 'Manager'}
+                      {agent.hierarchyType === 'worker' && 'Worker'}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-gray-500">ロールタイプ</dt>
+                    <dt className="text-gray-500">Role Type</dt>
                     <dd className="font-medium">
-                      {agent.roleType === 'owner' && 'オーナー'}
-                      {agent.roleType === 'manager' && 'マネージャー'}
-                      {agent.roleType === 'general' && '一般'}
+                      {agent.roleType === 'owner' && 'Owner'}
+                      {agent.roleType === 'manager' && 'Manager'}
+                      {agent.roleType === 'general' && 'General'}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-gray-500">起動方式</dt>
+                    <dt className="text-gray-500">Kick Method</dt>
                     <dd className="font-medium">{agent.kickMethod.toUpperCase()}</dd>
                   </div>
                   {agent.provider && (
                     <div>
-                      <dt className="text-gray-500">プロバイダー</dt>
+                      <dt className="text-gray-500">Provider</dt>
                       <dd className="font-medium">{agent.provider}</dd>
                     </div>
                   )}
                   {agent.modelId && (
                     <div>
-                      <dt className="text-gray-500">モデルID</dt>
+                      <dt className="text-gray-500">Model ID</dt>
                       <dd className="font-medium">{agent.modelId}</dd>
                     </div>
                   )}
                   <div>
-                    <dt className="text-gray-500">作成日時</dt>
+                    <dt className="text-gray-500">Created At</dt>
                     <dd className="font-medium">{new Date(agent.createdAt).toLocaleString()}</dd>
                   </div>
                   <div>
-                    <dt className="text-gray-500">更新日時</dt>
+                    <dt className="text-gray-500">Updated At</dt>
                     <dd className="font-medium">{new Date(agent.updatedAt).toLocaleString()}</dd>
                   </div>
                 </dl>
@@ -299,14 +299,14 @@ export function AgentDetailPage() {
                 onClick={handleBack}
                 className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
               >
-                キャンセル
+                Cancel
               </button>
               <button
                 type="submit"
                 disabled={isFormDisabled}
                 className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {updateAgent.isPending ? '保存中...' : '保存'}
+                {updateAgent.isPending ? 'Saving...' : 'Save'}
               </button>
             </div>
           </form>

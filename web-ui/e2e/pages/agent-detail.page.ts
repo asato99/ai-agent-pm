@@ -16,17 +16,17 @@ export class AgentDetailPage {
 
   constructor(page: Page) {
     this.page = page
-    this.backButton = page.getByRole('button', { name: /戻る/ })
-    this.nameInput = page.getByLabel('名前')
-    this.roleInput = page.getByLabel('役割')
-    this.statusSelect = page.getByLabel('ステータス')
-    this.maxParallelTasksInput = page.getByLabel('最大並列タスク数')
-    this.systemPromptTextarea = page.getByLabel('システムプロンプト')
-    this.saveButton = page.getByRole('button', { name: '保存' })
-    this.cancelButton = page.getByRole('button', { name: 'キャンセル' })
-    this.successMessage = page.getByText('保存しました')
+    this.backButton = page.getByRole('button', { name: /Back/ })
+    this.nameInput = page.getByLabel('Name')
+    this.roleInput = page.getByLabel('Role')
+    this.statusSelect = page.getByLabel('Status')
+    this.maxParallelTasksInput = page.getByLabel('Max Parallel Tasks')
+    this.systemPromptTextarea = page.getByLabel('System Prompt')
+    this.saveButton = page.getByRole('button', { name: 'Save' })
+    this.cancelButton = page.getByRole('button', { name: 'Cancel' })
+    this.successMessage = page.getByText('Saved')
     this.errorMessage = page.locator('.bg-red-50')
-    this.lockedWarning = page.getByText('ロックされているため編集できません')
+    this.lockedWarning = page.getByText('Cannot edit while locked')
   }
 
   async goto(agentId: string) {

@@ -2,23 +2,23 @@ import { test, expect } from '@playwright/test'
 import { LoginPage } from '../pages/login.page'
 import { TaskBoardPage } from '../pages/task-board.page'
 
-test.describe('タスクボード', () => {
+test.describe('Task Board', () => {
   test.beforeEach(async ({ page }) => {
-    // ログイン
+    // Login
     const loginPage = new LoginPage(page)
     await loginPage.goto()
     await loginPage.login('manager-1', 'test-passkey')
     await expect(page).toHaveURL('/projects')
 
-    // プロジェクトページへ遷移
+    // Navigate to project page
     const taskBoard = new TaskBoardPage(page)
     await taskBoard.goto('project-1')
   })
 
-  test('カンバンボードが表示される', async ({ page }) => {
+  test('Kanban board is displayed', async ({ page }) => {
     const taskBoard = new TaskBoardPage(page)
 
-    // 5つのカラムが表示される
+    // 5 columns are displayed
     await expect(taskBoard.getColumn('backlog')).toBeVisible()
     await expect(taskBoard.getColumn('todo')).toBeVisible()
     await expect(taskBoard.getColumn('in_progress')).toBeVisible()
@@ -26,18 +26,18 @@ test.describe('タスクボード', () => {
     await expect(taskBoard.getColumn('blocked')).toBeVisible()
   })
 
-  test('プロジェクト名が表示される', async ({ page }) => {
+  test('Project name is displayed', async ({ page }) => {
     await expect(page.getByText('ECサイト開発')).toBeVisible()
   })
 
-  test('タスクカードが表示される', async ({ page }) => {
+  test('Task cards are displayed', async ({ page }) => {
     const taskBoard = new TaskBoardPage(page)
 
     await expect(taskBoard.getTaskCard('API実装')).toBeVisible()
     await expect(taskBoard.getTaskCard('DB設計')).toBeVisible()
   })
 
-  test('タスクカードにタスク情報が表示される', async ({ page }) => {
+  test('Task card displays task information', async ({ page }) => {
     const taskBoard = new TaskBoardPage(page)
     const apiTask = taskBoard.getTaskCard('API実装')
 
@@ -45,47 +45,47 @@ test.describe('タスクボード', () => {
     await expect(apiTask.getByText('High')).toBeVisible()
   })
 
-  test('タスクをドラッグ＆ドロップでステータス変更できる', async ({ page }) => {
+  test('Can change task status via drag and drop', async ({ page }) => {
     const taskBoard = new TaskBoardPage(page)
 
-    // 最初はin_progressカラムにある
+    // Initially in in_progress column
     await expect(taskBoard.getTaskCardInColumn('in_progress', 'API実装')).toBeVisible()
 
-    // doneカラムにドラッグ
+    // Drag to done column
     await taskBoard.dragTask('task-1', 'done')
 
-    // doneカラムに移動している
+    // Now in done column
     await expect(taskBoard.getTaskCardInColumn('done', 'API実装')).toBeVisible()
   })
 
-  test('タスク作成ボタンをクリックするとモーダルが開く', async ({ page }) => {
+  test('Clicking create task button opens modal', async ({ page }) => {
     const taskBoard = new TaskBoardPage(page)
 
     await taskBoard.openCreateTaskModal()
 
     await expect(page.getByRole('dialog')).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'タスク作成' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Create Task' })).toBeVisible()
   })
 
-  test('タスクを新規作成できる', async ({ page }) => {
+  test('Can create new task', async ({ page }) => {
     const taskBoard = new TaskBoardPage(page)
 
     await taskBoard.openCreateTaskModal()
     await taskBoard.fillTaskForm({
-      title: '新しいタスク',
-      description: 'テスト用タスクの説明',
+      title: 'New Task',
+      description: 'Test task description',
       priority: 'high',
     })
     await taskBoard.submitTaskForm()
 
-    // モーダルが閉じる
+    // Modal closes
     await expect(page.getByRole('dialog')).not.toBeVisible()
 
-    // 新しいタスクがBacklogカラムに表示される
-    await expect(taskBoard.getTaskCardInColumn('backlog', '新しいタスク')).toBeVisible()
+    // New task appears in Backlog column
+    await expect(taskBoard.getTaskCardInColumn('backlog', 'New Task')).toBeVisible()
   })
 
-  test('タスクカードをクリックすると詳細パネルが開く', async ({ page }) => {
+  test('Clicking task card opens detail panel', async ({ page }) => {
     const taskBoard = new TaskBoardPage(page)
 
     await taskBoard.clickTask('API実装')
@@ -94,8 +94,8 @@ test.describe('タスクボード', () => {
     await expect(page.getByText('REST APIエンドポイントの実装')).toBeVisible()
   })
 
-  test('プロジェクト一覧に戻るボタンが機能する', async ({ page }) => {
-    await page.getByRole('link', { name: 'プロジェクト一覧' }).click()
+  test('Back to projects button works', async ({ page }) => {
+    await page.getByRole('link', { name: 'Projects' }).click()
 
     await expect(page).toHaveURL('/projects')
   })

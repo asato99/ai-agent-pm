@@ -1,5 +1,5 @@
-// Phase 2.4: マルチデバイス対応 - ワーキングディレクトリ設定コンポーネント
-// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md
+// Phase 2.4: Multi-device support - Working directory settings component
+// Reference: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md
 
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -22,7 +22,7 @@ export function WorkingDirectorySettings({
   const [workingDirectory, setWorkingDirectory] = useState(currentWorkingDirectory || '')
   const [isEditing, setIsEditing] = useState(false)
 
-  // currentWorkingDirectoryが変更されたら同期
+  // Sync when currentWorkingDirectory changes
   useEffect(() => {
     setWorkingDirectory(currentWorkingDirectory || '')
   }, [currentWorkingDirectory])
@@ -65,7 +65,7 @@ export function WorkingDirectorySettings({
   }
 
   const handleDelete = () => {
-    if (window.confirm('ワーキングディレクトリ設定を削除しますか？')) {
+    if (window.confirm('Delete working directory setting?')) {
       deleteWorkingDirectoryMutation.mutate()
     }
   }
@@ -80,13 +80,13 @@ export function WorkingDirectorySettings({
   return (
     <div className="bg-white rounded-lg shadow p-4 mb-4">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-gray-700">マイ ワーキングディレクトリ</h3>
+        <h3 className="text-sm font-medium text-gray-700">My Working Directory</h3>
         {!isEditing && (
           <button
             onClick={() => setIsEditing(true)}
             className="text-sm text-blue-600 hover:text-blue-800"
           >
-            編集
+            Edit
           </button>
         )}
       </div>
@@ -108,7 +108,7 @@ export function WorkingDirectorySettings({
                 disabled={isPending}
                 className="px-3 py-1.5 text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
               >
-                削除
+                Delete
               </button>
             )}
             <button
@@ -116,14 +116,14 @@ export function WorkingDirectorySettings({
               disabled={isPending}
               className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 disabled:opacity-50"
             >
-              キャンセル
+              Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={isPending || !workingDirectory.trim()}
               className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isPending ? '保存中...' : '保存'}
+              {isPending ? 'Saving...' : 'Save'}
             </button>
           </div>
         </div>
@@ -132,7 +132,7 @@ export function WorkingDirectorySettings({
           {currentWorkingDirectory ? (
             <code className="bg-gray-100 px-2 py-1 rounded">{currentWorkingDirectory}</code>
           ) : (
-            <span className="text-gray-400 italic">未設定（プロジェクトのデフォルトを使用）</span>
+            <span className="text-gray-400 italic">Not set (using project default)</span>
           )}
         </div>
       )}

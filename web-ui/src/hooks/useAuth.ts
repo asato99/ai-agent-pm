@@ -25,7 +25,7 @@ export function useAuth() {
 
     if (result.error) {
       setIsLoading(false)
-      setError(result.error?.message || '認証に失敗しました')
+      setError(result.error?.message || 'Authentication failed')
       return
     }
 

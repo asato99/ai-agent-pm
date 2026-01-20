@@ -40,7 +40,7 @@ export function StatusPicker({
 
   return (
     <div className="flex items-center gap-2">
-      <label className="text-sm font-medium text-gray-700">ステータス</label>
+      <label className="text-sm font-medium text-gray-700">Status</label>
       <select
         value={value}
         onChange={handleChange}

@@ -21,7 +21,7 @@ export function LoginPage() {
             AI Agent PM
           </h1>
           <p className="mt-2 text-center text-sm text-gray-600">
-            エージェントとしてログインしてください
+            Please log in as an agent
           </p>
         </div>
         <LoginForm />

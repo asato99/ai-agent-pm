@@ -92,7 +92,7 @@ export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
 
       {/* Form */}
       <div className="relative bg-white rounded-lg shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">タスク編集</h2>
+        <h2 className="text-xl font-bold text-gray-900 mb-4">Edit Task</h2>
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
@@ -105,7 +105,7 @@ export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
             {/* Title */}
             <div>
               <label htmlFor="edit-title" className="block text-sm font-medium text-gray-700 mb-1">
-                タイトル
+                Title
               </label>
               <input
                 type="text"
@@ -123,7 +123,7 @@ export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
                 htmlFor="edit-description"
                 className="block text-sm font-medium text-gray-700 mb-1"
               >
-                説明
+                Description
               </label>
               <textarea
                 id="edit-description"
@@ -140,7 +140,7 @@ export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
                 htmlFor="edit-priority"
                 className="block text-sm font-medium text-gray-700 mb-1"
               >
-                優先度
+                Priority
               </label>
               <select
                 id="edit-priority"
@@ -161,7 +161,7 @@ export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
                 htmlFor="edit-assignee"
                 className="block text-sm font-medium text-gray-700 mb-1"
               >
-                担当エージェント
+                Assignee
               </label>
               <select
                 id="edit-assignee"
@@ -170,7 +170,7 @@ export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
                 disabled={isLoading || !permissions?.canReassign}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
               >
-                <option value="">未割り当て</option>
+                <option value="">Unassigned</option>
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
                     {agent.name}
@@ -190,14 +190,14 @@ export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
               onClick={onClose}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
             >
-              キャンセル
+              Cancel
             </button>
             <button
               type="submit"
               disabled={updateTaskMutation.isPending}
               className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
             >
-              {updateTaskMutation.isPending ? '保存中...' : '保存'}
+              {updateTaskMutation.isPending ? 'Saving...' : 'Save'}
             </button>
           </div>
         </form>

@@ -6,10 +6,10 @@ interface AgentCardProps {
 }
 
 const statusConfig: Record<AgentStatus, { label: string; className: string }> = {
-  active: { label: 'アクティブ', className: 'bg-green-100 text-green-800' },
-  inactive: { label: '非アクティブ', className: 'bg-gray-100 text-gray-800' },
-  suspended: { label: '停止中', className: 'bg-red-100 text-red-800' },
-  archived: { label: 'アーカイブ', className: 'bg-gray-100 text-gray-500' },
+  active: { label: 'Active', className: 'bg-green-100 text-green-800' },
+  inactive: { label: 'Inactive', className: 'bg-gray-100 text-gray-800' },
+  suspended: { label: 'Suspended', className: 'bg-red-100 text-red-800' },
+  archived: { label: 'Archived', className: 'bg-gray-100 text-gray-500' },
 }
 
 const agentTypeIcon: Record<AgentType, string> = {
@@ -18,9 +18,9 @@ const agentTypeIcon: Record<AgentType, string> = {
 }
 
 const hierarchyTypeLabel: Record<AgentHierarchyType, string> = {
-  owner: 'オーナー',
-  manager: 'マネージャー',
-  worker: 'ワーカー',
+  owner: 'Owner',
+  manager: 'Manager',
+  worker: 'Worker',
 }
 
 export function AgentCard({ agent, onClick }: AgentCardProps) {

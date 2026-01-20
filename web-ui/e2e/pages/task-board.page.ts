@@ -12,8 +12,8 @@ export class TaskBoardPage extends BasePage {
   constructor(page: Page) {
     super(page)
     this.projectTitle = page.getByTestId('project-title')
-    this.createTaskButton = page.getByRole('button', { name: 'タスク作成' })
-    this.backButton = page.getByRole('link', { name: 'プロジェクト一覧' })
+    this.createTaskButton = page.getByRole('button', { name: 'Create Task' })
+    this.backButton = page.getByRole('link', { name: 'Projects' })
     this.filterBar = page.locator('[data-testid="filter-bar"]')
     this.columns = page.locator('[data-testid="kanban-column"]')
     this.taskCards = page.locator('[data-testid="task-card"]')
@@ -89,26 +89,26 @@ export class TaskBoardPage extends BasePage {
     priority?: string
     assignee?: string
   }) {
-    await this.page.getByLabel('タイトル').fill(data.title)
+    await this.page.getByLabel('Title').fill(data.title)
     if (data.description) {
-      await this.page.getByLabel('説明').fill(data.description)
+      await this.page.getByLabel('Description').fill(data.description)
     }
     if (data.status) {
-      await this.page.getByLabel('ステータス').selectOption(data.status)
+      await this.page.getByLabel('Status').selectOption(data.status)
     }
     if (data.priority) {
-      await this.page.getByLabel('優先度').selectOption(data.priority)
+      await this.page.getByLabel('Priority').selectOption(data.priority)
     }
     if (data.assignee) {
-      await this.page.getByLabel('担当エージェント').selectOption(data.assignee)
+      await this.page.getByLabel('Assignee').selectOption(data.assignee)
     }
   }
 
   async submitTaskForm() {
-    await this.page.getByRole('button', { name: '作成', exact: true }).click()
+    await this.page.getByRole('button', { name: 'Create', exact: true }).click()
   }
 
   async closeModal() {
-    await this.page.getByRole('button', { name: '閉じる' }).click()
+    await this.page.getByRole('button', { name: 'Close' }).click()
   }
 }

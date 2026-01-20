@@ -80,7 +80,7 @@ export const handlers = [
     }
 
     return HttpResponse.json(
-      { message: '認証に失敗しました' },
+      { message: 'Authentication failed' },
       { status: 401 }
     )
   }),

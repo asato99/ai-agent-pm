@@ -53,21 +53,21 @@ describe('ProjectListPage', () => {
     })
   })
 
-  it('ページタイトルを表示する', async () => {
+  it('displays the page title', async () => {
     renderWithProviders(<ProjectListPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('参加プロジェクト')).toBeInTheDocument()
+      expect(screen.getByText('My Projects')).toBeInTheDocument()
     })
   })
 
-  it('ローディング中はスピナーを表示する', () => {
+  it('displays spinner while loading', () => {
     renderWithProviders(<ProjectListPage />)
 
-    expect(screen.getByText('プロジェクトを読み込み中...')).toBeInTheDocument()
+    expect(screen.getByText('Loading projects...')).toBeInTheDocument()
   })
 
-  it('プロジェクト一覧を表示する', async () => {
+  it('displays project list', async () => {
     renderWithProviders(<ProjectListPage />)
 
     await waitFor(() => {
@@ -76,7 +76,7 @@ describe('ProjectListPage', () => {
     })
   })
 
-  it('プロジェクトカードをクリックするとタスクボードに遷移する', async () => {
+  it('navigates to task board when project card is clicked', async () => {
     renderWithProviders(<ProjectListPage />)
 
     await waitFor(() => {
@@ -88,7 +88,7 @@ describe('ProjectListPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/projects/project-1')
   })
 
-  it('ヘッダーにエージェント名を表示する', async () => {
+  it('displays agent name in header', async () => {
     renderWithProviders(<ProjectListPage />)
 
     await waitFor(() => {
@@ -96,11 +96,11 @@ describe('ProjectListPage', () => {
     })
   })
 
-  it('ログアウトボタンが表示される', async () => {
+  it('displays logout button', async () => {
     renderWithProviders(<ProjectListPage />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'ログアウト' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument()
     })
   })
 })

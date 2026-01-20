@@ -23,7 +23,7 @@ describe('useProjects', () => {
     localStorage.setItem('sessionToken', 'test-session-token')
   })
 
-  it('プロジェクト一覧を取得できる', async () => {
+  it('can fetch project list', async () => {
     const { result } = renderHook(() => useProjects(), {
       wrapper: createWrapper(),
     })
@@ -39,7 +39,7 @@ describe('useProjects', () => {
     expect(result.current.projects[1].name).toBe('モバイルアプリ')
   })
 
-  it('プロジェクト情報にタスク数が含まれる', async () => {
+  it('includes task counts in project information', async () => {
     const { result } = renderHook(() => useProjects(), {
       wrapper: createWrapper(),
     })
@@ -54,7 +54,7 @@ describe('useProjects', () => {
     expect(ecProject.completedCount).toBe(5)
   })
 
-  it('アクティブなプロジェクトのみをフィルタできる', async () => {
+  it('can filter only active projects', async () => {
     const { result } = renderHook(() => useProjects({ status: 'active' }), {
       wrapper: createWrapper(),
     })
@@ -66,7 +66,7 @@ describe('useProjects', () => {
     expect(result.current.projects.every((p) => p.status === 'active')).toBe(true)
   })
 
-  it('エラー時にエラー状態を返す', async () => {
+  it('returns error state on error', async () => {
     localStorage.removeItem('sessionToken')
 
     const { result } = renderHook(() => useProjects(), {

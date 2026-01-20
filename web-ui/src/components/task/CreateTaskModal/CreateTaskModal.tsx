@@ -30,12 +30,12 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit }: CreateTaskModalPr
     >
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
       <div className="relative bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">タスク作成</h2>
+        <h2 className="text-xl font-bold text-gray-900 mb-4">Create Task</h2>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
               <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
-                タイトル
+                Title
               </label>
               <input
                 type="text"
@@ -48,7 +48,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit }: CreateTaskModalPr
             </div>
             <div>
               <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
-                説明
+                Description
               </label>
               <textarea
                 id="description"
@@ -60,7 +60,7 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit }: CreateTaskModalPr
             </div>
             <div>
               <label htmlFor="priority" className="block text-sm font-medium text-gray-700 mb-1">
-                優先度
+                Priority
               </label>
               <select
                 id="priority"
@@ -81,13 +81,13 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit }: CreateTaskModalPr
               onClick={onClose}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
             >
-              閉じる
+              Close
             </button>
             <button
               type="submit"
               className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700"
             >
-              作成
+              Create
             </button>
           </div>
         </form>

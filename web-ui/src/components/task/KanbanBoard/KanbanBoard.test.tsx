@@ -49,7 +49,7 @@ const mockTasks: Task[] = [
 ]
 
 describe('KanbanBoard', () => {
-  it('5つのカラムが表示される', () => {
+  it('displays 5 columns', () => {
     render(<KanbanBoard tasks={mockTasks} onTaskMove={vi.fn()} onTaskClick={vi.fn()} />)
 
     expect(screen.getByText('Backlog')).toBeInTheDocument()
@@ -59,23 +59,23 @@ describe('KanbanBoard', () => {
     expect(screen.getByText('Blocked')).toBeInTheDocument()
   })
 
-  it('タスクが正しいカラムに表示される', () => {
+  it('displays tasks in correct columns', () => {
     const { container } = render(<KanbanBoard tasks={mockTasks} onTaskMove={vi.fn()} onTaskClick={vi.fn()} />)
 
-    // Backlogカラム内にUI設計タスクがある
+    // UI設計 task is in Backlog column
     const backlogColumn = container.querySelector('[data-column="backlog"]')
     expect(backlogColumn).toContainElement(screen.getByText('UI設計'))
 
-    // In Progressカラム内にAPI実装タスクがある
+    // API実装 task is in In Progress column
     const inProgressColumn = container.querySelector('[data-column="in_progress"]')
     expect(inProgressColumn).toContainElement(screen.getByText('API実装'))
 
-    // Doneカラム内にDB設計タスクがある
+    // DB設計 task is in Done column
     const doneColumn = container.querySelector('[data-column="done"]')
     expect(doneColumn).toContainElement(screen.getByText('DB設計'))
   })
 
-  it('各カラムにタスク数が表示される', () => {
+  it('displays task count for each column', () => {
     const { container } = render(<KanbanBoard tasks={mockTasks} onTaskMove={vi.fn()} onTaskClick={vi.fn()} />)
 
     // Backlog: 1, Todo: 0, In Progress: 1, Done: 1, Blocked: 0
@@ -92,7 +92,7 @@ describe('KanbanBoard', () => {
     expect(doneColumn).toHaveTextContent('(1)')
   })
 
-  it('タスクカードがドラッグ可能である', () => {
+  it('task cards are draggable', () => {
     render(<KanbanBoard tasks={mockTasks} onTaskMove={vi.fn()} onTaskClick={vi.fn()} />)
 
     const taskCards = screen.getAllByTestId('task-card')

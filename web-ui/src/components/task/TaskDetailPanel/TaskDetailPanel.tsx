@@ -90,7 +90,7 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
             type="button"
             onClick={onClose}
             className="ml-4 p-1 text-gray-400 hover:text-gray-600 rounded"
-            aria-label="閉じる"
+            aria-label="Close"
           >
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -131,24 +131,24 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
 
           {/* Description */}
           <div>
-            <h3 className="text-sm font-medium text-gray-700 mb-2">説明</h3>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Description</h3>
             <p className="text-gray-600 whitespace-pre-wrap">
-              {task.description || '説明がありません'}
+              {task.description || 'No description'}
             </p>
           </div>
 
           {/* Task Details */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-1">作成日</h3>
+              <h3 className="text-sm font-medium text-gray-700 mb-1">Created</h3>
               <p className="text-sm text-gray-600">
-                {new Date(task.createdAt).toLocaleDateString('ja-JP')}
+                {new Date(task.createdAt).toLocaleDateString()}
               </p>
             </div>
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-1">更新日</h3>
+              <h3 className="text-sm font-medium text-gray-700 mb-1">Updated</h3>
               <p className="text-sm text-gray-600">
-                {new Date(task.updatedAt).toLocaleDateString('ja-JP')}
+                {new Date(task.updatedAt).toLocaleDateString()}
               </p>
             </div>
           </div>
@@ -156,7 +156,7 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
           {/* Dependencies */}
           {task.dependencies.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-2">依存タスク</h3>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Dependencies</h3>
               <div className="flex flex-wrap gap-2">
                 {task.dependencies.map((depId) => (
                   <span
@@ -173,13 +173,13 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
           {/* Handoffs Section */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-700">ハンドオフ履歴</h3>
+              <h3 className="text-sm font-medium text-gray-700">Handoff History</h3>
               <button
                 type="button"
                 onClick={() => setIsHandoffFormOpen(!isHandoffFormOpen)}
                 className="text-sm text-blue-600 hover:text-blue-700"
               >
-                {isHandoffFormOpen ? 'キャンセル' : '+ 新規ハンドオフ'}
+                {isHandoffFormOpen ? 'Cancel' : '+ New Handoff'}
               </button>
             </div>
 
@@ -189,14 +189,14 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
                 <div className="space-y-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      引き継ぎ先エージェント（任意）
+                      Target Agent (Optional)
                     </label>
                     <select
                       value={handoffToAgentId}
                       onChange={(e) => setHandoffToAgentId(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                     >
-                      <option value="">指定しない（全員に公開）</option>
+                      <option value="">Not specified (visible to all)</option>
                       {agents.map((agent) => (
                         <option key={agent.id} value={agent.id}>
                           {agent.name}
@@ -206,24 +206,24 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      サマリー <span className="text-red-500">*</span>
+                      Summary <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
                       value={handoffSummary}
                       onChange={(e) => setHandoffSummary(e.target.value)}
-                      placeholder="引き継ぎ内容の概要"
+                      placeholder="Summary of handoff"
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      コンテキスト（任意）
+                      Context (Optional)
                     </label>
                     <textarea
                       value={handoffContext}
                       onChange={(e) => setHandoffContext(e.target.value)}
-                      placeholder="作業の背景や注意点など"
+                      placeholder="Background or notes"
                       rows={3}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                     />
@@ -253,7 +253,7 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
                     disabled={!handoffSummary.trim() || createHandoffMutation.isPending}
                     className="w-full px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm"
                   >
-                    {createHandoffMutation.isPending ? '作成中...' : 'ハンドオフを作成'}
+                    {createHandoffMutation.isPending ? 'Creating...' : 'Create Handoff'}
                   </button>
                 </div>
               </div>
@@ -265,7 +265,7 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
                 <div className="h-16 bg-gray-200 rounded" />
               </div>
             ) : handoffs.length === 0 ? (
-              <p className="text-sm text-gray-500">ハンドオフ履歴はありません</p>
+              <p className="text-sm text-gray-500">No handoff history</p>
             ) : (
               <div className="space-y-2">
                 {handoffs.map((handoff) => (
@@ -277,7 +277,7 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs text-gray-500">
-                        {new Date(handoff.createdAt).toLocaleString('ja-JP')}
+                        {new Date(handoff.createdAt).toLocaleString()}
                       </span>
                       <span
                         className={`text-xs px-2 py-0.5 rounded ${
@@ -286,7 +286,7 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
                             : 'bg-green-100 text-green-800'
                         }`}
                       >
-                        {handoff.isPending ? '保留中' : '承認済み'}
+                        {handoff.isPending ? 'Pending' : 'Accepted'}
                       </span>
                     </div>
                     <p className="text-sm font-medium text-gray-900">{handoff.summary}</p>
@@ -311,7 +311,7 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
             onClick={onClose}
             className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
           >
-            閉じる
+            Close
           </button>
           {permissions?.canEdit && (
             <button
@@ -319,7 +319,7 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
               onClick={() => setIsEditFormOpen(true)}
               className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700"
             >
-              編集
+              Edit
             </button>
           )}
         </div>

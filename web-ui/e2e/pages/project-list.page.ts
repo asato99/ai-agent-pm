@@ -15,10 +15,10 @@ export class ProjectListPage {
     this.projectCards = page.locator('[data-testid="project-card"]')
     this.header = page.locator('header')
     this.agentName = page.getByTestId('agent-name')
-    this.logoutButton = page.getByRole('button', { name: 'ログアウト' })
+    this.logoutButton = page.getByRole('button', { name: 'Log out' })
     this.archivedSection = page.getByTestId('archived-projects')
     this.agentCards = page.locator('[data-testid="agent-card"]')
-    this.subordinatesSection = page.getByText('部下エージェント').locator('..')
+    this.subordinatesSection = page.getByText('Subordinate Agents').locator('..')
   }
 
   async goto() {

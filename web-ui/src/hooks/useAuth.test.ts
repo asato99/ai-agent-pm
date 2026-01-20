@@ -14,14 +14,14 @@ describe('useAuth', () => {
     })
   })
 
-  it('初期状態は未認証', () => {
+  it('initial state is unauthenticated', () => {
     const { result } = renderHook(() => useAuth())
 
     expect(result.current.isAuthenticated).toBe(false)
     expect(result.current.agent).toBeNull()
   })
 
-  it('ログイン成功時にセッションを保存する', async () => {
+  it('saves session on successful login', async () => {
     const { result } = renderHook(() => useAuth())
 
     await act(async () => {
@@ -36,7 +36,7 @@ describe('useAuth', () => {
     expect(localStorage.getItem('sessionToken')).toBe('test-session-token')
   })
 
-  it('ログイン失敗時にエラーを返す', async () => {
+  it('returns error on login failure', async () => {
     const { result } = renderHook(() => useAuth())
 
     await act(async () => {
@@ -44,15 +44,15 @@ describe('useAuth', () => {
     })
 
     await waitFor(() => {
-      expect(result.current.error).toBe('認証に失敗しました')
+      expect(result.current.error).toBe('Authentication failed')
     })
     expect(result.current.isAuthenticated).toBe(false)
   })
 
-  it('ログアウト時にセッションをクリアする', async () => {
+  it('clears session on logout', async () => {
     const { result } = renderHook(() => useAuth())
 
-    // まずログイン
+    // First login
     await act(async () => {
       await result.current.login('manager-1', 'test-passkey')
     })
@@ -61,7 +61,7 @@ describe('useAuth', () => {
       expect(result.current.isAuthenticated).toBe(true)
     })
 
-    // ログアウト
+    // Logout
     await act(async () => {
       await result.current.logout()
     })
@@ -73,7 +73,7 @@ describe('useAuth', () => {
     expect(localStorage.getItem('sessionToken')).toBeNull()
   })
 
-  it('ログイン中はisLoadingがtrue', async () => {
+  it('isLoading is true while logging in', async () => {
     const { result } = renderHook(() => useAuth())
 
     let loginPromise: Promise<void>

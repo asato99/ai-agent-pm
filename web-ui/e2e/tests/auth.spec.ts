@@ -1,29 +1,29 @@
 import { test, expect } from '@playwright/test'
 import { LoginPage } from '../pages/login.page'
 
-test.describe('認証', () => {
-  test('正しい認証情報でログインできる', async ({ page }) => {
+test.describe('Authentication', () => {
+  test('Can login with valid credentials', async ({ page }) => {
     const loginPage = new LoginPage(page)
     await loginPage.goto()
 
     await loginPage.login('manager-1', 'test-passkey')
 
     await expect(page).toHaveURL('/projects')
-    await expect(page.getByText('参加プロジェクト')).toBeVisible()
+    await expect(page.getByText('My Projects')).toBeVisible()
   })
 
-  test('不正な認証情報でエラーが表示される', async ({ page }) => {
+  test('Shows error with invalid credentials', async ({ page }) => {
     const loginPage = new LoginPage(page)
     await loginPage.goto()
 
     await loginPage.login('invalid-agent', 'wrong-passkey')
 
     await expect(loginPage.errorMessage).toBeVisible()
-    await expect(loginPage.errorMessage).toContainText('認証に失敗しました')
+    await expect(loginPage.errorMessage).toContainText('Authentication failed')
     await expect(page).toHaveURL('/login')
   })
 
-  test('未認証状態でプロジェクト一覧にアクセスするとログイン画面にリダイレクトされる', async ({
+  test('Redirects to login page when accessing project list without authentication', async ({
     page,
   }) => {
     await page.goto('/projects')
@@ -31,19 +31,19 @@ test.describe('認証', () => {
     await expect(page).toHaveURL('/login')
   })
 
-  test('ログアウトするとログイン画面に戻る', async ({ page }) => {
-    // 事前に認証状態を設定
+  test('Logout returns to login page', async ({ page }) => {
+    // Set up authentication state
     const loginPage = new LoginPage(page)
     await loginPage.goto()
     await loginPage.login('manager-1', 'test-passkey')
 
-    // ログアウトボタンをクリック
-    await page.getByRole('button', { name: 'ログアウト' }).click()
+    // Click logout button
+    await page.getByRole('button', { name: 'Log out' }).click()
 
     await expect(page).toHaveURL('/login')
   })
 
-  test('ログイン後にユーザー名が表示される', async ({ page }) => {
+  test('Username is displayed after login', async ({ page }) => {
     const loginPage = new LoginPage(page)
     await loginPage.goto()
 

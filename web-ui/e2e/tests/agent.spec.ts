@@ -3,7 +3,7 @@ import { LoginPage } from '../pages/login.page'
 import { ProjectListPage } from '../pages/project-list.page'
 import { AgentDetailPage } from '../pages/agent-detail.page'
 
-test.describe('部下エージェント一覧', () => {
+test.describe('Subordinate Agent List', () => {
   test.beforeEach(async ({ page }) => {
     const loginPage = new LoginPage(page)
     await loginPage.goto()
@@ -11,13 +11,13 @@ test.describe('部下エージェント一覧', () => {
     await expect(page).toHaveURL('/projects')
   })
 
-  test('部下エージェントセクションが表示される', async ({ page }) => {
+  test('Subordinate agents section is displayed', async ({ page }) => {
     const projectList = new ProjectListPage(page)
 
-    await expect(page.getByText('部下エージェント')).toBeVisible()
+    await expect(page.getByText('Subordinate Agents')).toBeVisible()
   })
 
-  test('部下エージェントカードが表示される', async ({ page }) => {
+  test('Subordinate agent cards are displayed', async ({ page }) => {
     const projectList = new ProjectListPage(page)
 
     // Wait for agent cards to load
@@ -29,7 +29,7 @@ test.describe('部下エージェント一覧', () => {
   })
 })
 
-test.describe('部下エージェント一覧（manager-1）', () => {
+test.describe('Subordinate Agent List (manager-1)', () => {
   test.beforeEach(async ({ page }) => {
     const loginPage = new LoginPage(page)
     await loginPage.goto()
@@ -37,7 +37,7 @@ test.describe('部下エージェント一覧（manager-1）', () => {
     await expect(page).toHaveURL('/projects')
   })
 
-  test('エージェントカードに情報が表示される', async ({ page }) => {
+  test('Agent card displays information', async ({ page }) => {
     const projectList = new ProjectListPage(page)
 
     // Wait for cards to load
@@ -49,7 +49,7 @@ test.describe('部下エージェント一覧（manager-1）', () => {
     await expect(firstCard).toBeVisible()
   })
 
-  test('エージェントカードをクリックすると詳細画面に遷移する', async ({ page }) => {
+  test('Clicking agent card navigates to detail page', async ({ page }) => {
     const projectList = new ProjectListPage(page)
 
     // Wait for cards to load
@@ -63,8 +63,8 @@ test.describe('部下エージェント一覧（manager-1）', () => {
   })
 })
 
-test.describe('全下位エージェント表示', () => {
-  test('オーナーは全ての下位エージェントを表示できる（直下だけでなく孫も）', async ({ page }) => {
+test.describe('All Descendant Agents Display', () => {
+  test('Owner can view all descendant agents (not just direct children but also grandchildren)', async ({ page }) => {
     // owner-1 hierarchy:
     // owner-1 → manager-1 → worker-1, worker-2
     // Expected: 3 agents (manager-1, worker-1, worker-2)
@@ -88,7 +88,7 @@ test.describe('全下位エージェント表示', () => {
     await expect(projectList.getAgentCard('Worker 2')).toBeVisible()
   })
 
-  test('オーナーは孫エージェント（Worker）の詳細画面を表示できる', async ({ page }) => {
+  test('Owner can view grandchild agent (Worker) detail page', async ({ page }) => {
     // owner-1 → manager-1 → worker-1
     // owner-1 should be able to view worker-1 detail (grandchild)
     const loginPage = new LoginPage(page)
@@ -108,12 +108,12 @@ test.describe('全下位エージェント表示', () => {
     await expect(page).toHaveURL(/\/agents\/worker-1/)
 
     // Should show agent detail form (not error)
-    await expect(page.getByText('エージェント詳細')).toBeVisible()
-    await expect(page.getByLabel('名前')).toBeVisible()
+    await expect(page.getByText('Agent Detail')).toBeVisible()
+    await expect(page.getByLabel('Name')).toBeVisible()
   })
 })
 
-test.describe('エージェント詳細', () => {
+test.describe('Agent Detail', () => {
   test.beforeEach(async ({ page }) => {
     const loginPage = new LoginPage(page)
     await loginPage.goto()
@@ -121,7 +121,7 @@ test.describe('エージェント詳細', () => {
     await expect(page).toHaveURL('/projects')
   })
 
-  test('エージェント詳細画面が表示される', async ({ page }) => {
+  test('Agent detail page is displayed', async ({ page }) => {
     const projectList = new ProjectListPage(page)
 
     // Wait for cards and click first agent
@@ -129,13 +129,13 @@ test.describe('エージェント詳細', () => {
     await projectList.agentCards.first().click()
 
     // Should show agent detail form
-    await expect(page.getByText('エージェント詳細')).toBeVisible()
-    await expect(page.getByLabel('名前')).toBeVisible()
-    await expect(page.getByLabel('役割')).toBeVisible()
-    await expect(page.getByLabel('ステータス')).toBeVisible()
+    await expect(page.getByText('Agent Detail')).toBeVisible()
+    await expect(page.getByLabel('Name')).toBeVisible()
+    await expect(page.getByLabel('Role')).toBeVisible()
+    await expect(page.getByLabel('Status')).toBeVisible()
   })
 
-  test('戻るボタンでプロジェクト一覧に戻れる', async ({ page }) => {
+  test('Back button returns to project list', async ({ page }) => {
     const projectList = new ProjectListPage(page)
     const agentDetail = new AgentDetailPage(page)
 
@@ -151,7 +151,7 @@ test.describe('エージェント詳細', () => {
     await expect(page).toHaveURL('/projects')
   })
 
-  test('読み取り専用情報が表示される', async ({ page }) => {
+  test('Read-only information is displayed', async ({ page }) => {
     const projectList = new ProjectListPage(page)
 
     // Navigate to agent detail
@@ -159,13 +159,13 @@ test.describe('エージェント詳細', () => {
     await projectList.agentCards.first().click()
 
     // Should show read-only info section
-    await expect(page.getByText('その他の情報')).toBeVisible()
-    await expect(page.getByText('タイプ', { exact: true })).toBeVisible()
-    await expect(page.getByText('階層')).toBeVisible()
+    await expect(page.getByText('Other Information')).toBeVisible()
+    await expect(page.getByText('Type', { exact: true })).toBeVisible()
+    await expect(page.getByText('Hierarchy')).toBeVisible()
   })
 })
 
-test.describe('エージェント編集', () => {
+test.describe('Agent Edit', () => {
   test.beforeEach(async ({ page }) => {
     const loginPage = new LoginPage(page)
     await loginPage.goto()
@@ -173,7 +173,7 @@ test.describe('エージェント編集', () => {
     await expect(page).toHaveURL('/projects')
   })
 
-  test('エージェント名を編集して保存できる', async ({ page }) => {
+  test('Can edit and save agent name', async ({ page }) => {
     const projectList = new ProjectListPage(page)
     const agentDetail = new AgentDetailPage(page)
 
@@ -197,7 +197,7 @@ test.describe('エージェント編集', () => {
     await agentDetail.save()
   })
 
-  test('キャンセルボタンで変更を破棄してプロジェクト一覧に戻れる', async ({ page }) => {
+  test('Cancel button discards changes and returns to project list', async ({ page }) => {
     const projectList = new ProjectListPage(page)
     const agentDetail = new AgentDetailPage(page)
 

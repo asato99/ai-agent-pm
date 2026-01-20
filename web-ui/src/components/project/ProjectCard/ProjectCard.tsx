@@ -25,8 +25,8 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
 
       <div className="space-y-2">
         <div className="flex justify-between text-sm text-gray-500">
-          <span>タスク: {project.taskCount}</span>
-          <span>あなたの担当: {project.myTaskCount}件</span>
+          <span>Tasks: {project.taskCount}</span>
+          <span>My Tasks: {project.myTaskCount}</span>
         </div>
 
         <div
@@ -43,13 +43,13 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
         </div>
 
         <div className="flex justify-between text-xs text-gray-500">
-          <span>完了: {project.completedCount}/{project.taskCount}</span>
+          <span>Completed: {project.completedCount}/{project.taskCount}</span>
           <span>{progressPercent}%</span>
         </div>
 
         {project.blockedCount > 0 && (
           <div className="text-xs text-orange-600 font-medium mt-2">
-            ⚠️ ブロック中: {project.blockedCount}
+            ⚠️ Blocked: {project.blockedCount}
           </div>
         )}
       </div>

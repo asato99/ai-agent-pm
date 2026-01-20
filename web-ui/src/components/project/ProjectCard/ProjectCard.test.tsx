@@ -5,8 +5,8 @@ import type { ProjectSummary } from '@/types'
 
 const mockProject: ProjectSummary = {
   id: 'project-1',
-  name: 'ECサイト開発',
-  description: 'ECサイトの新規開発プロジェクト',
+  name: 'EC Site Development',
+  description: 'New EC site development project',
   status: 'active',
   createdAt: '2024-01-01T00:00:00Z',
   updatedAt: '2024-01-15T10:00:00Z',
@@ -18,31 +18,31 @@ const mockProject: ProjectSummary = {
 }
 
 describe('ProjectCard', () => {
-  it('プロジェクト名を表示する', () => {
+  it('displays the project name', () => {
     render(<ProjectCard project={mockProject} />)
 
-    expect(screen.getByText('ECサイト開発')).toBeInTheDocument()
+    expect(screen.getByText('EC Site Development')).toBeInTheDocument()
   })
 
-  it('プロジェクト説明を表示する', () => {
+  it('displays the project description', () => {
     render(<ProjectCard project={mockProject} />)
 
-    expect(screen.getByText('ECサイトの新規開発プロジェクト')).toBeInTheDocument()
+    expect(screen.getByText('New EC site development project')).toBeInTheDocument()
   })
 
-  it('タスク数を表示する', () => {
+  it('displays task count', () => {
     render(<ProjectCard project={mockProject} />)
 
-    expect(screen.getByText('タスク: 12')).toBeInTheDocument()
+    expect(screen.getByText('Tasks: 12')).toBeInTheDocument()
   })
 
-  it('担当タスク数を表示する', () => {
+  it('displays my task count', () => {
     render(<ProjectCard project={mockProject} />)
 
-    expect(screen.getByText('あなたの担当: 3件')).toBeInTheDocument()
+    expect(screen.getByText('My Tasks: 3')).toBeInTheDocument()
   })
 
-  it('進捗バーを表示する', () => {
+  it('displays progress bar', () => {
     render(<ProjectCard project={mockProject} />)
 
     const progressBar = screen.getByRole('progressbar')
@@ -51,7 +51,7 @@ describe('ProjectCard', () => {
     expect(progressBar).toHaveAttribute('aria-valuenow', '42')
   })
 
-  it('クリック時にonClickが呼ばれる', () => {
+  it('calls onClick when clicked', () => {
     const handleClick = vi.fn()
     render(<ProjectCard project={mockProject} onClick={handleClick} />)
 
@@ -60,22 +60,22 @@ describe('ProjectCard', () => {
     expect(handleClick).toHaveBeenCalledWith('project-1')
   })
 
-  it('data-testid属性を持つ', () => {
+  it('has data-testid attribute', () => {
     render(<ProjectCard project={mockProject} />)
 
     expect(screen.getByTestId('project-card')).toBeInTheDocument()
   })
 
-  it('blockedタスクがある場合は警告を表示する', () => {
+  it('displays warning when there are blocked tasks', () => {
     render(<ProjectCard project={mockProject} />)
 
-    expect(screen.getByText(/ブロック中: 1/)).toBeInTheDocument()
+    expect(screen.getByText(/Blocked: 1/)).toBeInTheDocument()
   })
 
-  it('blockedタスクがない場合は警告を表示しない', () => {
+  it('does not display warning when there are no blocked tasks', () => {
     const projectWithoutBlocked = { ...mockProject, blockedCount: 0 }
     render(<ProjectCard project={projectWithoutBlocked} />)
 
-    expect(screen.queryByText(/ブロック中/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Blocked/)).not.toBeInTheDocument()
   })
 })

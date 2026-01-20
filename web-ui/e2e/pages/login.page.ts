@@ -11,7 +11,7 @@ export class LoginPage extends BasePage {
     super(page)
     this.agentIdInput = page.getByLabel('Agent ID')
     this.passkeyInput = page.getByLabel('Passkey')
-    this.loginButton = page.getByRole('button', { name: 'ログイン' })
+    this.loginButton = page.getByRole('button', { name: 'Log in' })
     this.errorMessage = page.getByRole('alert')
   }
 

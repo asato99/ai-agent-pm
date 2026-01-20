@@ -3,7 +3,7 @@ import { render, screen } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
 import { LoginForm } from './LoginForm'
 
-// useAuth をモック
+// Mock useAuth
 const mockLogin = vi.fn()
 const mockLogout = vi.fn()
 
@@ -33,31 +33,31 @@ describe('LoginForm', () => {
     })
   })
 
-  it('Agent IDとPasskeyの入力フィールドを表示する', () => {
+  it('displays Agent ID and Passkey input fields', () => {
     render(<LoginForm />)
 
     expect(screen.getByLabelText('Agent ID')).toBeInTheDocument()
     expect(screen.getByLabelText('Passkey')).toBeInTheDocument()
   })
 
-  it('ログインボタンを表示する', () => {
+  it('displays login button', () => {
     render(<LoginForm />)
 
-    expect(screen.getByRole('button', { name: 'ログイン' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeInTheDocument()
   })
 
-  it('フォーム送信時にlogin関数を呼び出す', async () => {
+  it('calls login function on form submit', async () => {
     render(<LoginForm />)
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('Agent ID'), 'manager-1')
     await user.type(screen.getByLabelText('Passkey'), 'test-passkey')
-    await user.click(screen.getByRole('button', { name: 'ログイン' }))
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
 
     expect(mockLogin).toHaveBeenCalledWith('manager-1', 'test-passkey')
   })
 
-  it('ローディング中はボタンを無効化する', () => {
+  it('disables button while loading', () => {
     vi.mocked(useAuth).mockReturnValue({
       isAuthenticated: false,
       agent: null,
@@ -69,21 +69,21 @@ describe('LoginForm', () => {
 
     render(<LoginForm />)
 
-    expect(screen.getByRole('button', { name: 'ログイン中...' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Logging in...' })).toBeDisabled()
   })
 
-  it('エラーがある場合はエラーメッセージを表示する', () => {
+  it('displays error message when error exists', () => {
     vi.mocked(useAuth).mockReturnValue({
       isAuthenticated: false,
       agent: null,
       isLoading: false,
-      error: '認証に失敗しました',
+      error: 'Authentication failed',
       login: mockLogin,
       logout: mockLogout,
     })
 
     render(<LoginForm />)
 
-    expect(screen.getByRole('alert')).toHaveTextContent('認証に失敗しました')
+    expect(screen.getByRole('alert')).toHaveTextContent('Authentication failed')
   })
 })

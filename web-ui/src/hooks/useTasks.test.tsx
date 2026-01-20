@@ -23,7 +23,7 @@ describe('useTasks', () => {
     localStorage.setItem('sessionToken', 'test-session-token')
   })
 
-  it('プロジェクトのタスク一覧を取得できる', async () => {
+  it('can fetch project task list', async () => {
     const { result } = renderHook(() => useTasks('project-1'), {
       wrapper: createWrapper(),
     })
@@ -39,7 +39,7 @@ describe('useTasks', () => {
     expect(result.current.tasks[1].title).toBe('DB設計')
   })
 
-  it('タスク情報にステータスと優先度が含まれる', async () => {
+  it('includes status and priority in task information', async () => {
     const { result } = renderHook(() => useTasks('project-1'), {
       wrapper: createWrapper(),
     })
@@ -53,7 +53,7 @@ describe('useTasks', () => {
     expect(apiTask.priority).toBe('high')
   })
 
-  it('ステータスでグループ化されたタスクを取得できる', async () => {
+  it('can get tasks grouped by status', async () => {
     const { result } = renderHook(() => useTasks('project-1'), {
       wrapper: createWrapper(),
     })

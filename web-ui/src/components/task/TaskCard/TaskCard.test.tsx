@@ -19,31 +19,31 @@ const mockTask: Task = {
 }
 
 describe('TaskCard', () => {
-  it('タスクタイトルを表示する', () => {
+  it('displays task title', () => {
     render(<TaskCard task={mockTask} />)
 
     expect(screen.getByText('API実装')).toBeInTheDocument()
   })
 
-  it('優先度に応じたバッジを表示する', () => {
+  it('displays priority badge', () => {
     render(<TaskCard task={mockTask} />)
 
     expect(screen.getByText('High')).toBeInTheDocument()
   })
 
-  it('data-testid属性を持つ', () => {
+  it('has data-testid attribute', () => {
     render(<TaskCard task={mockTask} />)
 
     expect(screen.getByTestId('task-card')).toBeInTheDocument()
   })
 
-  it('data-task-id属性を持つ', () => {
+  it('has data-task-id attribute', () => {
     render(<TaskCard task={mockTask} />)
 
     expect(screen.getByTestId('task-card')).toHaveAttribute('data-task-id', 'task-1')
   })
 
-  it('クリック時にonClickが呼ばれる', () => {
+  it('calls onClick when clicked', () => {
     const handleClick = vi.fn()
     render(<TaskCard task={mockTask} onClick={handleClick} />)
 
@@ -52,14 +52,14 @@ describe('TaskCard', () => {
     expect(handleClick).toHaveBeenCalledWith('task-1')
   })
 
-  it('Low優先度のスタイルが適用される', () => {
+  it('applies Low priority style', () => {
     const lowPriorityTask = { ...mockTask, priority: 'low' as const }
     render(<TaskCard task={lowPriorityTask} />)
 
     expect(screen.getByText('Low')).toBeInTheDocument()
   })
 
-  it('urgent優先度のスタイルが適用される', () => {
+  it('applies Urgent priority style', () => {
     const urgentTask = { ...mockTask, priority: 'urgent' as const }
     render(<TaskCard task={urgentTask} />)
 

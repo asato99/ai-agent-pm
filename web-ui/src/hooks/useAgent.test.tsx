@@ -26,7 +26,7 @@ describe('useAgent', () => {
     localStorage.setItem('sessionToken', 'test-session-token')
   })
 
-  it('エージェント詳細を取得できる', async () => {
+  it('can fetch agent details', async () => {
     const { result } = renderHook(() => useAgent('worker-1'), {
       wrapper: createWrapper(),
     })
@@ -42,7 +42,7 @@ describe('useAgent', () => {
     expect(result.current.agent?.name).toBe('Worker 1')
   })
 
-  it('詳細フィールドが含まれる', async () => {
+  it('includes detail fields', async () => {
     const { result } = renderHook(() => useAgent('worker-1'), {
       wrapper: createWrapper(),
     })
@@ -64,7 +64,7 @@ describe('useAgent', () => {
     expect(agent.updatedAt).toBeDefined()
   })
 
-  it('agentIdがnullの場合はクエリを実行しない', async () => {
+  it('does not execute query when agentId is null', async () => {
     const { result } = renderHook(() => useAgent(null), {
       wrapper: createWrapper(),
     })
@@ -74,7 +74,7 @@ describe('useAgent', () => {
     expect(result.current.agent).toBeUndefined()
   })
 
-  it('存在しないエージェントの場合はエラーを返す', async () => {
+  it('returns error for non-existent agent', async () => {
     const { result } = renderHook(() => useAgent('unknown-agent'), {
       wrapper: createWrapper(),
     })
@@ -86,7 +86,7 @@ describe('useAgent', () => {
     expect(result.current.error).toBeTruthy()
   })
 
-  it('認証エラー時にエラー状態を返す', async () => {
+  it('returns error state on authentication error', async () => {
     localStorage.removeItem('sessionToken')
 
     const { result } = renderHook(() => useAgent('worker-1'), {
@@ -107,7 +107,7 @@ describe('useUpdateAgent', () => {
     localStorage.setItem('sessionToken', 'test-session-token')
   })
 
-  it('エージェントを更新できる', async () => {
+  it('can update agent', async () => {
     const { result } = renderHook(() => useUpdateAgent(), {
       wrapper: createWrapper(),
     })
@@ -126,7 +126,7 @@ describe('useUpdateAgent', () => {
     expect(result.current.data?.name).toBe('Updated Worker')
   })
 
-  it('複数フィールドを同時に更新できる', async () => {
+  it('can update multiple fields at once', async () => {
     const { result } = renderHook(() => useUpdateAgent(), {
       wrapper: createWrapper(),
     })
@@ -151,7 +151,7 @@ describe('useUpdateAgent', () => {
     expect(result.current.data?.maxParallelTasks).toBe(5)
   })
 
-  it('ロックされたエージェントの更新はエラーになる', async () => {
+  it('returns error when updating locked agent', async () => {
     const { result } = renderHook(() => useUpdateAgent(), {
       wrapper: createWrapper(),
     })

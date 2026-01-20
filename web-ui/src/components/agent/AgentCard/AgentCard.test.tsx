@@ -14,79 +14,79 @@ const mockAgent: Agent = {
 }
 
 describe('AgentCard', () => {
-  it('エージェント名を表示する', () => {
+  it('displays the agent name', () => {
     render(<AgentCard agent={mockAgent} />)
 
     expect(screen.getByText('Worker 1')).toBeInTheDocument()
   })
 
-  it('役割を表示する', () => {
+  it('displays the role', () => {
     render(<AgentCard agent={mockAgent} />)
 
     expect(screen.getByText('Backend Developer')).toBeInTheDocument()
   })
 
-  it('AIエージェントのアイコンを表示する', () => {
+  it('displays AI agent icon', () => {
     render(<AgentCard agent={mockAgent} />)
 
     expect(screen.getByRole('img', { name: 'AI' })).toBeInTheDocument()
   })
 
-  it('Humanエージェントのアイコンを表示する', () => {
+  it('displays Human agent icon', () => {
     const humanAgent: Agent = { ...mockAgent, agentType: 'human' }
     render(<AgentCard agent={humanAgent} />)
 
     expect(screen.getByRole('img', { name: 'Human' })).toBeInTheDocument()
   })
 
-  it('アクティブステータスを表示する', () => {
+  it('displays Active status', () => {
     render(<AgentCard agent={mockAgent} />)
 
-    expect(screen.getByText('アクティブ')).toBeInTheDocument()
+    expect(screen.getByText('Active')).toBeInTheDocument()
   })
 
-  it('非アクティブステータスを表示する', () => {
+  it('displays Inactive status', () => {
     const inactiveAgent: Agent = { ...mockAgent, status: 'inactive' }
     render(<AgentCard agent={inactiveAgent} />)
 
-    expect(screen.getByText('非アクティブ')).toBeInTheDocument()
+    expect(screen.getByText('Inactive')).toBeInTheDocument()
   })
 
-  it('停止中ステータスを表示する', () => {
+  it('displays Suspended status', () => {
     const suspendedAgent: Agent = { ...mockAgent, status: 'suspended' }
     render(<AgentCard agent={suspendedAgent} />)
 
-    expect(screen.getByText('停止中')).toBeInTheDocument()
+    expect(screen.getByText('Suspended')).toBeInTheDocument()
   })
 
-  it('アーカイブステータスを表示する', () => {
+  it('displays Archived status', () => {
     const archivedAgent: Agent = { ...mockAgent, status: 'archived' }
     render(<AgentCard agent={archivedAgent} />)
 
-    expect(screen.getByText('アーカイブ')).toBeInTheDocument()
+    expect(screen.getByText('Archived')).toBeInTheDocument()
   })
 
-  it('ワーカー階層タイプを表示する', () => {
+  it('displays Worker hierarchy type', () => {
     render(<AgentCard agent={mockAgent} />)
 
-    expect(screen.getByText('ワーカー')).toBeInTheDocument()
+    expect(screen.getByText('Worker')).toBeInTheDocument()
   })
 
-  it('マネージャー階層タイプを表示する', () => {
+  it('displays Manager hierarchy type', () => {
     const managerAgent: Agent = { ...mockAgent, hierarchyType: 'manager' }
     render(<AgentCard agent={managerAgent} />)
 
-    expect(screen.getByText('マネージャー')).toBeInTheDocument()
+    expect(screen.getByText('Manager')).toBeInTheDocument()
   })
 
-  it('オーナー階層タイプを表示する', () => {
+  it('displays Owner hierarchy type', () => {
     const ownerAgent: Agent = { ...mockAgent, hierarchyType: 'owner' }
     render(<AgentCard agent={ownerAgent} />)
 
-    expect(screen.getByText('オーナー')).toBeInTheDocument()
+    expect(screen.getByText('Owner')).toBeInTheDocument()
   })
 
-  it('クリック時にonClickが呼ばれる', () => {
+  it('calls onClick when clicked', () => {
     const handleClick = vi.fn()
     render(<AgentCard agent={mockAgent} onClick={handleClick} />)
 
@@ -95,13 +95,13 @@ describe('AgentCard', () => {
     expect(handleClick).toHaveBeenCalledWith('worker-1')
   })
 
-  it('data-testid属性を持つ', () => {
+  it('has data-testid attribute', () => {
     render(<AgentCard agent={mockAgent} />)
 
     expect(screen.getByTestId('agent-card')).toBeInTheDocument()
   })
 
-  it('onClickが未指定でもエラーにならない', () => {
+  it('does not throw error when onClick is not provided', () => {
     render(<AgentCard agent={mockAgent} />)
 
     // Should not throw

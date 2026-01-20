@@ -93,7 +93,7 @@ export function TaskBoardPage() {
               className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
             >
               <span>←</span>
-              <span>プロジェクト一覧</span>
+              <span>Projects</span>
             </Link>
             <h2 data-testid="project-title" className="text-2xl font-bold text-gray-900">
               {project?.name}
@@ -103,11 +103,11 @@ export function TaskBoardPage() {
             onClick={() => setIsCreateModalOpen(true)}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
-            タスク作成
+            Create Task
           </button>
         </div>
 
-        {/* Phase 2.4: マルチデバイス対応 - ワーキングディレクトリ設定 */}
+        {/* Phase 2.4: Multi-device support - Working directory settings */}
         {projectId && (
           <WorkingDirectorySettings
             projectId={projectId}

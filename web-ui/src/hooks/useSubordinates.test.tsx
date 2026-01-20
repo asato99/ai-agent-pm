@@ -23,7 +23,7 @@ describe('useSubordinates', () => {
     localStorage.setItem('sessionToken', 'test-session-token')
   })
 
-  it('部下エージェント一覧を取得できる', async () => {
+  it('can fetch subordinate agents list', async () => {
     const { result } = renderHook(() => useSubordinates(), {
       wrapper: createWrapper(),
     })
@@ -39,7 +39,7 @@ describe('useSubordinates', () => {
     expect(result.current.subordinates[1].name).toBe('Worker 2')
   })
 
-  it('エージェント情報に必要なフィールドが含まれる', async () => {
+  it('includes required fields in agent information', async () => {
     const { result } = renderHook(() => useSubordinates(), {
       wrapper: createWrapper(),
     })
@@ -57,7 +57,7 @@ describe('useSubordinates', () => {
     expect(agent.parentAgentId).toBe('manager-1')
   })
 
-  it('異なるステータスのエージェントを含む', async () => {
+  it('includes agents with different statuses', async () => {
     const { result } = renderHook(() => useSubordinates(), {
       wrapper: createWrapper(),
     })
@@ -71,7 +71,7 @@ describe('useSubordinates', () => {
     expect(statuses).toContain('inactive')
   })
 
-  it('エラー時にエラー状態を返す', async () => {
+  it('returns error state on error', async () => {
     localStorage.removeItem('sessionToken')
 
     const { result } = renderHook(() => useSubordinates(), {
