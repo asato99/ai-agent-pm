@@ -81,20 +81,39 @@ public enum AppConfig {
             return defaultPort
         }
 
-        /// ポートをUserDefaultsに保存
+        /// ポートをUserDefaultsに保存し、web-ui用の設定ファイルも更新
         public static func setPort(_ port: Int) {
             guard isValidPort(port) else { return }
             UserDefaults.standard.set(port, forKey: portUserDefaultsKey)
+            writePortConfigFile(port)
         }
 
         /// ポートをデフォルトにリセット
         public static func resetPort() {
             UserDefaults.standard.removeObject(forKey: portUserDefaultsKey)
+            writePortConfigFile(defaultPort)
         }
 
         /// 有効なポート番号か確認
         public static func isValidPort(_ port: Int) -> Bool {
             return port >= 1024 && port <= 65535
+        }
+
+        /// web-ui開発用のポート設定ファイルを書き出す
+        /// ファイル場所: ~/Library/Application Support/AIAgentPM/webserver-port
+        private static func writePortConfigFile(_ port: Int) {
+            let appSupportDir = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first?.appendingPathComponent("AIAgentPM")
+
+            guard let dir = appSupportDir else { return }
+
+            // ディレクトリがなければ作成
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+            let portFile = dir.appendingPathComponent("webserver-port")
+            try? String(port).write(to: portFile, atomically: true, encoding: .utf8)
         }
     }
 }

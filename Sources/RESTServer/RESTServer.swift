@@ -82,6 +82,20 @@ public final class RESTServer {
         registerProtectedRoutes(router: apiRouter)
         debugLog("Protected routes registered")
 
+        // API catch-all for unmatched routes (must be registered LAST on apiRouter)
+        // This ensures API routes return proper JSON 404 instead of falling through to static file handler
+        apiRouter.get("**") { _, context in
+            let pathComponents = context.parameters.getCatchAll()
+            let path = pathComponents.joined(separator: "/")
+            debugLog("API catch-all: /api/\(path) not found")
+            return Response(
+                status: .notFound,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: .init(string: "{\"message\":\"Not Found\",\"path\":\"/api/\(path)\"}"))
+            )
+        }
+        debugLog("API catch-all registered")
+
         // Static file serving for web-ui (if enabled)
         if let webUIPath = webUIPath {
             debugLog("Static files will be enabled from: \(webUIPath)")
@@ -102,11 +116,18 @@ public final class RESTServer {
             }
             debugLog("Assets route registered")
 
-            // Catch-all for files and SPA (must be after specific routes)
+            // Catch-all for static files and SPA (must be after specific routes)
+            // Note: API routes are handled by apiRouter, so we don't need to exclude /api here
             router.get("/**") { request, context in
                 let pathComponents = context.parameters.getCatchAll()
                 let path = pathComponents.joined(separator: "/")
-                debugLog("Catch-all handler for: \(path)")
+                debugLog("Static catch-all handler for: \(path)")
+
+                // Skip if this looks like an API path (should not happen due to apiRouter priority)
+                if path.hasPrefix("api/") || path == "api" {
+                    debugLog("Warning: API path reached static catch-all: /\(path)")
+                    return self.serveFile(at: "\(webUIPath)/index.html")
+                }
 
                 // Check if file exists
                 let filePath = "\(webUIPath)/\(path)"
@@ -123,7 +144,7 @@ public final class RESTServer {
                 debugLog("SPA fallback: index.html")
                 return self.serveFile(at: "\(webUIPath)/index.html")
             }
-            debugLog("Catch-all route registered")
+            debugLog("Static catch-all route registered")
         } else {
             debugLog("No webUIPath provided, static files disabled")
         }
@@ -266,18 +287,24 @@ public final class RESTServer {
 
         // Direct task access
         let taskRouter = protectedRouter.group("tasks")
+        debugLog("Task router created with group 'tasks'")
         taskRouter.get(":taskId") { [self] request, context in
-            try await getTask(request: request, context: context)
+            debugLog("GET /api/tasks/:taskId called")
+            return try await getTask(request: request, context: context)
         }
         taskRouter.patch(":taskId") { [self] request, context in
-            try await updateTask(request: request, context: context)
+            debugLog("PATCH /api/tasks/:taskId called")
+            return try await updateTask(request: request, context: context)
         }
         taskRouter.delete(":taskId") { [self] request, context in
-            try await deleteTask(request: request, context: context)
+            debugLog("DELETE /api/tasks/:taskId called")
+            return try await deleteTask(request: request, context: context)
         }
         taskRouter.get(":taskId/permissions") { [self] request, context in
-            try await getTaskPermissions(request: request, context: context)
+            debugLog("GET /api/tasks/:taskId/permissions called")
+            return try await getTaskPermissions(request: request, context: context)
         }
+        debugLog("Task routes registered: GET/:taskId, PATCH/:taskId, DELETE/:taskId, GET/:taskId/permissions")
 
         // Agents
         let agentRouter = protectedRouter.group("agents")
@@ -287,20 +314,27 @@ public final class RESTServer {
 
         // Handoffs
         let handoffRouter = protectedRouter.group("handoffs")
+        debugLog("Handoff router created with group 'handoffs'")
         handoffRouter.get { [self] request, context in
-            try await listHandoffs(request: request, context: context)
+            debugLog("GET /api/handoffs called")
+            return try await listHandoffs(request: request, context: context)
         }
         handoffRouter.post { [self] request, context in
-            try await createHandoff(request: request, context: context)
+            debugLog("POST /api/handoffs called")
+            return try await createHandoff(request: request, context: context)
         }
         handoffRouter.post(":handoffId/accept") { [self] request, context in
-            try await acceptHandoff(request: request, context: context)
+            debugLog("POST /api/handoffs/:handoffId/accept called")
+            return try await acceptHandoff(request: request, context: context)
         }
+        debugLog("Handoff routes registered")
 
         // Handoffs for a specific task
         taskRouter.get(":taskId/handoffs") { [self] request, context in
-            try await listTaskHandoffs(request: request, context: context)
+            debugLog("GET /api/tasks/:taskId/handoffs called")
+            return try await listTaskHandoffs(request: request, context: context)
         }
+        debugLog("Task handoffs route registered: GET/:taskId/handoffs")
     }
 
     // MARK: - Auth Handlers

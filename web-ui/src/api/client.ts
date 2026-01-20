@@ -1,6 +1,24 @@
 import type { ApiResult } from '@/types'
 
-const API_BASE = '/api'
+// API base URL
+// - Production (served from same origin): '/api'
+// - Development (vite dev server): use VITE_API_PORT env var with CORS
+function getApiBase(): string {
+  // Only use direct access in development mode
+  // import.meta.env.DEV is true when running `npm run dev`, false in production build
+  if (import.meta.env.DEV) {
+    const viteApiPort = import.meta.env.VITE_API_PORT as string | undefined
+    if (viteApiPort) {
+      // Development mode: direct access to REST server (with CORS)
+      return `http://localhost:${viteApiPort}/api`
+    }
+  }
+
+  // Production mode: same origin (relative path)
+  return '/api'
+}
+
+const API_BASE = getApiBase()
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string>

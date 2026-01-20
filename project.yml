@@ -234,6 +234,31 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
 
+  # 単体テスト - RESTServer
+  # Note: RESTServerはtoolタイプなので@testable importできない
+  # そのため、ソースファイルを直接テストターゲットに含める
+  RESTServerTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/RESTServerTests
+        type: group
+      - path: Sources/RESTServer
+        type: group
+        excludes:
+          - "main.swift"
+    dependencies:
+      - target: Infrastructure
+      - target: UseCase
+      - target: Domain
+      - package: Hummingbird
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiagentpm.restservertests
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+
   # UIテスト
   AIAgentPMUITests:
     type: bundle.ui-testing
@@ -263,6 +288,7 @@ schemes:
         UseCaseTests: [test]
         InfrastructureTests: [test]
         MCPServerTests: [test]
+        RESTServerTests: [test]
         AIAgentPMUITests: [test]
     run:
       config: Debug
@@ -275,4 +301,5 @@ schemes:
         - UseCaseTests
         - InfrastructureTests
         - MCPServerTests
+        - RESTServerTests
         - AIAgentPMUITests
