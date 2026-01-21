@@ -15,7 +15,7 @@ from typing import Optional, TextIO
 
 from aiagent_runner.coordinator_config import CoordinatorConfig
 from aiagent_runner.mcp_client import MCPClient, MCPError
-from aiagent_runner.platform import get_data_directory
+from aiagent_runner.platform import get_data_directory, is_windows
 
 logger = logging.getLogger(__name__)
 
@@ -620,11 +620,14 @@ class Coordinator:
         log_f = open(log_file, "w")
 
         # Spawn process
+        # On Windows, shell=True is required to find commands in PATH
+        # This is safe since cmd is constructed from configuration, not user input
         process = subprocess.Popen(
             cmd,
             cwd=working_dir,
             stdout=log_f,
             stderr=subprocess.STDOUT,
+            shell=is_windows(),
             env={
                 **os.environ,
                 "AGENT_ID": agent_id,
