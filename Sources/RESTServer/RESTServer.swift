@@ -875,12 +875,13 @@ final class RESTServer {
         }
         let projectId = ProjectID(value: projectIdStr)
 
-        // Get agents assigned to this project
+        // Get agents assigned to this project (active only, same as assignable-agents)
         let projectAgents = try projectAgentAssignmentRepository.findAgentsByProject(projectId)
+        let activeAgents = projectAgents.filter { $0.status == .active }
 
-        // Count active sessions for each agent
+        // Count active sessions for each active agent
         var sessionCounts: [String: Int] = [:]
-        for agent in projectAgents {
+        for agent in activeAgents {
             let count = try sessionRepository.countActiveSessions(agentId: agent.id)
             sessionCounts[agent.id.value] = count
         }
