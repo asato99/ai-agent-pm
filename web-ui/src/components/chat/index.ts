@@ -1,5 +1,5 @@
 // web-ui/src/components/chat/index.ts
-// チャットコンポーネントのエクスポート
+// Chat component exports
 
 export { ChatPanel } from './ChatPanel'
 export { ChatMessage } from './ChatMessage'

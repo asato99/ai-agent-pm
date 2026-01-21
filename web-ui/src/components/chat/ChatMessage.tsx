@@ -1,6 +1,6 @@
 // web-ui/src/components/chat/ChatMessage.tsx
-// 個別チャットメッセージの表示コンポーネント
-// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
+// Individual chat message display component
+// Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
 
 import type { ChatMessage as ChatMessageType } from '@/types'
 
@@ -12,10 +12,10 @@ export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.sender === 'user'
   const isSystem = message.sender === 'system'
 
-  // フォーマット済みの時刻を取得
+  // Get formatted time
   const formatTime = (dateString: string) => {
     const date = new Date(dateString)
-    return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   }
 
   return (
@@ -36,7 +36,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
         {/* Sender label for agent/system messages */}
         {!isUser && (
           <div className="text-xs font-semibold mb-1 opacity-70">
-            {isSystem ? 'システム' : 'エージェント'}
+            {isSystem ? 'System' : 'Agent'}
           </div>
         )}
 

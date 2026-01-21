@@ -71,3 +71,32 @@ export default defineConfig([
   },
 ])
 ```
+
+## Development Guidelines
+
+### Language Requirements
+
+**All user-facing text and code comments must be in English.**
+
+This includes:
+- UI text (buttons, labels, messages, placeholders)
+- Error messages
+- Comments in source code
+- Test descriptions
+- Documentation
+
+**Examples:**
+
+```tsx
+// ✅ Correct
+<button aria-label="Send">Send</button>
+placeholder="Type a message..."
+// Get formatted time
+
+// ❌ Incorrect
+<button aria-label="送信">送信</button>
+placeholder="メッセージを入力..."
+// フォーマット済みの時刻を取得
+```
+
+This ensures consistency across the codebase and makes the application accessible to a wider audience.

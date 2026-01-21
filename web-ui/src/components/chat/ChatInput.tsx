@@ -1,6 +1,6 @@
 // web-ui/src/components/chat/ChatInput.tsx
-// メッセージ入力コンポーネント
-// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
+// Message input component
+// Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
 
 import { useState, useCallback, type FormEvent, type KeyboardEvent } from 'react'
 
@@ -14,7 +14,7 @@ interface ChatInputProps {
 export function ChatInput({
   onSend,
   disabled = false,
-  placeholder = 'メッセージを入力...',
+  placeholder = 'Type a message...',
   maxLength = 4000,
 }: ChatInputProps) {
   const [content, setContent] = useState('')
@@ -64,14 +64,14 @@ export function ChatInput({
           disabled={isDisabled}
           maxLength={maxLength}
           rows={2}
-          aria-label="チャットメッセージ入力"
+          aria-label="Chat message input"
         />
         <button
           type="submit"
           data-testid="chat-send-button"
           className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
           disabled={isDisabled || !content.trim()}
-          aria-label="送信"
+          aria-label="Send"
         >
           {isSubmitting ? (
             <span className="flex items-center gap-1">
@@ -91,15 +91,15 @@ export function ChatInput({
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 />
               </svg>
-              送信中
+              Sending
             </span>
           ) : (
-            '送信'
+            'Send'
           )}
         </button>
       </div>
       <div className="mt-1 text-xs text-gray-400 text-right">
-        {content.length}/{maxLength} 文字 (Ctrl+Enterで送信)
+        {content.length}/{maxLength} characters (Ctrl+Enter to send)
       </div>
     </form>
   )
