@@ -1534,9 +1534,16 @@ public final class MCPServer {
             let handoffs = try handoffRepository.findByTask(task.id)
             let latestHandoff = handoffs.last
 
-            // プロジェクトから作業ディレクトリを取得
+            // Phase 2.3: working_directoryの解決
+            // 優先順位: AgentWorkingDirectory > Project.workingDirectory
             let project = try projectRepository.findById(task.projectId)
-            let workingDirectory = project?.workingDirectory
+            var workingDirectory = project?.workingDirectory
+            if let agentWorkingDir = try agentWorkingDirectoryRepository.findByAgentAndProject(
+                agentId: session.agentId,
+                projectId: task.projectId
+            ) {
+                workingDirectory = agentWorkingDir.workingDirectory
+            }
 
             var taskDict: [String: Any] = [
                 "task_id": task.id.value,

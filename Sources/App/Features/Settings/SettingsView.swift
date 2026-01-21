@@ -952,6 +952,33 @@ private struct CoordinatorConfigExporter {
     let agentCredentialRepository: AgentCredentialRepositoryProtocol
     let appSettingsRepository: AppSettingsRepository
 
+    /// ローカルIPアドレスを取得
+    private var localIPAddress: String {
+        var address = "localhost"
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else {
+            return address
+        }
+        defer { freeifaddrs(ifaddr) }
+
+        for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let flags = Int32(ptr.pointee.ifa_flags)
+            let addr = ptr.pointee.ifa_addr.pointee
+
+            guard (flags & (IFF_UP|IFF_RUNNING|IFF_LOOPBACK)) == (IFF_UP|IFF_RUNNING),
+                  addr.sa_family == UInt8(AF_INET) else { continue }
+
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
+                          &hostname, socklen_t(hostname.count),
+                          nil, 0, NI_NUMERICHOST) == 0 {
+                address = String(cString: hostname)
+                break
+            }
+        }
+        return address
+    }
+
     /// 設定ファイルの内容を生成
     /// - Parameters:
     ///   - rootAgentId: 起点となるhumanエージェントのID（nilの場合は全エージェント）
@@ -976,8 +1003,18 @@ private struct CoordinatorConfigExporter {
             agentCredentials.append((agent.id, credential?.rawPasskey))
         }
 
-        // MCPソケットパス
-        let socketPath = "~/Library/Application Support/AIAgentPM/mcp.sock"
+        // MCPソケットパス/URL
+        // rootAgentIdが指定されている場合（humanエージェント起点のマルチデバイス運用）はHTTP URLを使用
+        // そうでない場合はUnixソケットを使用
+        let mcpConnectionPath: String
+        if rootAgentId != nil {
+            // マルチデバイス運用: HTTP経由でRESTサーバーに接続
+            let port = AppConfig.WebServer.port
+            mcpConnectionPath = "http://\(localIPAddress):\(port)/mcp"
+        } else {
+            // ローカル運用: Unixソケット経由でMCPデーモンに接続
+            mcpConnectionPath = "~/Library/Application Support/AIAgentPM/mcp.sock"
+        }
 
         // YAML生成
         var yaml = """
@@ -1014,10 +1051,12 @@ private struct CoordinatorConfigExporter {
             """
         }
 
-        // MCP Socket Path
+        // MCP Socket Path / URL
         yaml += """
-        # MCP server socket path
-        mcp_socket_path: \(socketPath)
+        # MCP server connection path
+        # - Unix socket: ~/Library/Application Support/AIAgentPM/mcp.sock (local)
+        # - HTTP URL: http://<hostname>:<port>/mcp (remote/multi-device)
+        mcp_socket_path: \(mcpConnectionPath)
 
         # AI providers configuration
         ai_providers:

@@ -53,9 +53,20 @@ fi
 
 # mcp-server-pm daemonを終了（Claude Codeで使用中のものは除外）
 # 注意: .build/debug/mcp-server-pm はClaude Code MCPで使用中なので終了しない
-if pgrep -f "DerivedData.*mcp-server-pm daemon" > /dev/null 2>&1; then
-    pkill -f "DerivedData.*mcp-server-pm daemon" 2>/dev/null || true
-    echo "   Stopped: mcp-server-pm daemon (DerivedData)"
+# より確実に終了させるため、.build/debug以外のすべてのmcp-server-pm daemonを対象にする
+MCP_PIDS=$(pgrep -f "mcp-server-pm daemon" 2>/dev/null || true)
+if [ -n "$MCP_PIDS" ]; then
+    for pid in $MCP_PIDS; do
+        # プロセスのコマンドラインを取得
+        CMD=$(ps -p "$pid" -o args= 2>/dev/null || true)
+        # .build/debug/mcp-server-pm は除外（Claude Code MCP用）
+        if [[ "$CMD" != *".build/debug/mcp-server-pm"* ]]; then
+            # SIGKILLで確実に終了させる
+            kill -9 "$pid" 2>/dev/null || true
+            echo "   Stopped: mcp-server-pm daemon (PID: $pid)"
+        fi
+    done
+    sleep 1
 fi
 
 echo "   Done"

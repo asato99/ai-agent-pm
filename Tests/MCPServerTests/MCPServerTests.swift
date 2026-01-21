@@ -1475,6 +1475,250 @@ final class ExecutionLogRepositoryFindLatestTests: XCTestCase {
     }
 }
 
+// MARK: - Working Directory Resolution Tests
+
+/// ワーキングディレクトリ解決のテスト
+/// Bug: getMyTask が AgentWorkingDirectory を参照せず、Project.workingDirectory のみを使用している
+/// 期待: AgentWorkingDirectory > Project.workingDirectory の優先順位で解決されるべき
+final class WorkingDirectoryResolutionTests: XCTestCase {
+
+    var db: DatabaseQueue!
+    var mcpServer: MCPServer!
+    var taskRepository: TaskRepository!
+    var agentRepository: AgentRepository!
+    var projectRepository: ProjectRepository!
+    var agentCredentialRepository: AgentCredentialRepository!
+    var agentSessionRepository: AgentSessionRepository!
+    var projectAgentAssignmentRepository: ProjectAgentAssignmentRepository!
+    var workingDirectoryRepository: AgentWorkingDirectoryRepository!
+    var executionLogRepository: ExecutionLogRepository!
+
+    // テストデータ
+    let testAgentId = AgentID(value: "agt_working_dir_test")
+    let testProjectId = ProjectID(value: "prj_working_dir_test")
+    let testTaskId = TaskID(value: "tsk_working_dir_test")
+
+    // ワーキングディレクトリのテスト値
+    let projectWorkingDirectory = "/project/default/path"
+    let agentWorkingDirectory = "/agent/specific/path"  // この値が返されるべき
+
+    override func setUpWithError() throws {
+        // テスト用インメモリDBを作成
+        let tempDir = FileManager.default.temporaryDirectory
+        let dbPath = tempDir.appendingPathComponent("test_wd_\(UUID().uuidString).db").path
+        db = try DatabaseSetup.createDatabase(at: dbPath)
+
+        // リポジトリを初期化
+        taskRepository = TaskRepository(database: db)
+        agentRepository = AgentRepository(database: db)
+        projectRepository = ProjectRepository(database: db)
+        agentCredentialRepository = AgentCredentialRepository(database: db)
+        agentSessionRepository = AgentSessionRepository(database: db)
+        projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: db)
+        workingDirectoryRepository = AgentWorkingDirectoryRepository(database: db)
+        executionLogRepository = ExecutionLogRepository(database: db)
+
+        // MCPServerを初期化
+        mcpServer = MCPServer(database: db)
+
+        // テストデータを作成
+        try setupTestData()
+    }
+
+    override func tearDownWithError() throws {
+        db = nil
+        mcpServer = nil
+    }
+
+    private func setupTestData() throws {
+        // プロジェクトを作成（workingDirectoryを設定）
+        var project = Project(
+            id: testProjectId,
+            name: "Working Dir Test Project",
+            description: "Test project for working directory resolution"
+        )
+        project.workingDirectory = projectWorkingDirectory
+        try projectRepository.save(project)
+
+        // エージェントを作成（Worker）
+        let agent = Agent(
+            id: testAgentId,
+            name: "Test Worker",
+            role: "Worker agent for working directory testing",
+            hierarchyType: .worker,
+            systemPrompt: "You are a test worker"
+        )
+        try agentRepository.save(agent)
+
+        // プロジェクトにエージェントを割り当て
+        _ = try projectAgentAssignmentRepository.assign(
+            projectId: testProjectId,
+            agentId: testAgentId
+        )
+
+        // エージェント認証情報を作成
+        let credential = AgentCredential(
+            agentId: testAgentId,
+            rawPasskey: "test_wd_passkey_12345"
+        )
+        try agentCredentialRepository.save(credential)
+
+        // タスクを作成（in_progress状態）
+        let task = Task(
+            id: testTaskId,
+            projectId: testProjectId,
+            title: "Working Directory Test Task",
+            description: "Task for testing working directory resolution",
+            status: .inProgress,
+            priority: .medium,
+            assigneeId: testAgentId
+        )
+        try taskRepository.save(task)
+
+        // ★重要★ AgentWorkingDirectoryを設定（これが優先されるべき）
+        let agentWD = AgentWorkingDirectory.create(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            workingDirectory: agentWorkingDirectory
+        )
+        try workingDirectoryRepository.save(agentWD)
+    }
+
+    /// RED: getMyTask が AgentWorkingDirectory を返すことを検証
+    /// 現在のバグ: Project.workingDirectory を返している
+    /// 期待: AgentWorkingDirectory の値が返されるべき
+    func testGetMyTaskReturnsAgentWorkingDirectory() throws {
+        // Arrange: セッションを作成
+        let session = AgentSession(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            purpose: .task
+        )
+        try agentSessionRepository.save(session)
+
+        // 実行ログを作成（get_my_task で自動作成される）
+        let executionLog = ExecutionLog(
+            taskId: testTaskId,
+            agentId: testAgentId
+        )
+        try executionLogRepository.save(executionLog)
+
+        // Act: get_my_task ツールを呼び出し
+        let arguments: [String: Any] = [
+            "session_token": session.token
+        ]
+        let caller = CallerType.worker(agentId: testAgentId, session: session)
+
+        let result = try mcpServer.executeTool(
+            name: "get_my_task",
+            arguments: arguments,
+            caller: caller
+        )
+
+        // Assert: 結果を検証
+        guard let resultDict = result as? [String: Any] else {
+            XCTFail("Result should be a dictionary")
+            return
+        }
+
+        XCTAssertTrue(resultDict["has_task"] as? Bool ?? false, "Should have a task")
+
+        guard let taskDict = resultDict["task"] as? [String: Any] else {
+            XCTFail("Task should be present in result")
+            return
+        }
+
+        // ★ これがREDになる検証ポイント ★
+        // 現在のバグ: Project.workingDirectory ("/project/default/path") が返される
+        // 期待: AgentWorkingDirectory ("/agent/specific/path") が返されるべき
+        let returnedWorkingDir = taskDict["working_directory"] as? String
+        XCTAssertEqual(
+            returnedWorkingDir,
+            agentWorkingDirectory,
+            "get_my_task should return AgentWorkingDirectory ('\(agentWorkingDirectory)'), not Project.workingDirectory ('\(projectWorkingDirectory)')"
+        )
+    }
+
+    /// RED: AgentWorkingDirectory が未設定の場合、Project.workingDirectory にフォールバックすることを検証
+    func testGetMyTaskFallsBackToProjectWorkingDirectoryWhenAgentWDNotSet() throws {
+        // Arrange: AgentWorkingDirectoryを削除
+        try workingDirectoryRepository.deleteByAgentAndProject(agentId: testAgentId, projectId: testProjectId)
+
+        // セッションを作成
+        let session = AgentSession(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            purpose: .task
+        )
+        try agentSessionRepository.save(session)
+
+        // 実行ログを作成
+        let executionLog = ExecutionLog(
+            taskId: testTaskId,
+            agentId: testAgentId
+        )
+        try executionLogRepository.save(executionLog)
+
+        // Act: get_my_task ツールを呼び出し
+        let arguments: [String: Any] = [
+            "session_token": session.token
+        ]
+        let caller = CallerType.worker(agentId: testAgentId, session: session)
+
+        let result = try mcpServer.executeTool(
+            name: "get_my_task",
+            arguments: arguments,
+            caller: caller
+        )
+
+        // Assert: フォールバックでProject.workingDirectoryが返される
+        guard let resultDict = result as? [String: Any],
+              let taskDict = resultDict["task"] as? [String: Any] else {
+            XCTFail("Task should be present in result")
+            return
+        }
+
+        let returnedWorkingDir = taskDict["working_directory"] as? String
+        XCTAssertEqual(
+            returnedWorkingDir,
+            projectWorkingDirectory,
+            "Should fall back to Project.workingDirectory when AgentWorkingDirectory is not set"
+        )
+    }
+
+    /// list_active_projects_with_agents が agentId パラメータで AgentWorkingDirectory を返すことを検証
+    /// （これは正しく実装されているはず - 参考のため）
+    func testListActiveProjectsWithAgentsReturnsAgentWorkingDirectory() throws {
+        // Act: list_active_projects_with_agents を agentId 付きで呼び出し
+        let arguments: [String: Any] = [
+            "agent_id": testAgentId.value
+        ]
+
+        let result = try mcpServer.executeTool(
+            name: "list_active_projects_with_agents",
+            arguments: arguments,
+            caller: .coordinator
+        )
+
+        // Assert: AgentWorkingDirectoryが返される
+        guard let resultDict = result as? [String: Any],
+              let projects = resultDict["projects"] as? [[String: Any]] else {
+            XCTFail("Projects should be present in result")
+            return
+        }
+
+        let targetProject = projects.first { ($0["project_id"] as? String) == testProjectId.value }
+        XCTAssertNotNil(targetProject, "Test project should be in list")
+
+        let returnedWorkingDir = targetProject?["working_directory"] as? String
+        XCTAssertEqual(
+            returnedWorkingDir,
+            agentWorkingDirectory,
+            "list_active_projects_with_agents should return AgentWorkingDirectory when agentId is provided"
+        )
+    }
+}
+
 // MARK: - Worker Blocked State Management Tests
 
 /// ワーカーブロック時のマネージャー即時起動機能のテスト
