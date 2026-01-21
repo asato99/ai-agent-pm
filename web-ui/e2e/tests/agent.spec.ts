@@ -158,8 +158,8 @@ test.describe('Agent Detail', () => {
     await expect(projectList.agentCards.first()).toBeVisible({ timeout: 10000 })
     await projectList.agentCards.first().click()
 
-    // Should show read-only info section
-    await expect(page.getByText('Other Information')).toBeVisible()
+    // Should show read-only info section (displayed as "Additional Info")
+    await expect(page.getByText('Additional Info')).toBeVisible()
     await expect(page.getByText('Type', { exact: true })).toBeVisible()
     await expect(page.getByText('Hierarchy')).toBeVisible()
   })

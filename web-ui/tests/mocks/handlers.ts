@@ -38,7 +38,7 @@ const initialTasks: Task[] = [
     description: 'データベーススキーマの設計',
     status: 'done',
     priority: 'medium',
-    assigneeId: 'worker-2',
+    assigneeId: null,
     creatorId: 'manager-1',
     dependencies: [],
     contexts: [],
@@ -73,7 +73,23 @@ export const handlers = [
           agentType: 'ai',
           status: 'active',
           hierarchyType: 'manager',
-          parentId: null,  // Top-level manager has no parent
+          parentId: 'owner-1',
+        },
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      })
+    }
+
+    if (body.agentId === 'owner-1' && body.passkey === 'test-passkey') {
+      return HttpResponse.json({
+        sessionToken: 'test-session-token-owner',
+        agent: {
+          id: 'owner-1',
+          name: 'Owner',
+          role: 'Project Owner',
+          agentType: 'human',
+          status: 'active',
+          hierarchyType: 'owner',
+          parentId: null,
         },
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       })
@@ -99,7 +115,18 @@ export const handlers = [
         agentType: 'ai',
         status: 'active',
         hierarchyType: 'manager',
-        parentId: null,  // Top-level manager has no parent
+        parentId: 'owner-1',
+      })
+    }
+    if (authHeader === 'Bearer test-session-token-owner') {
+      return HttpResponse.json({
+        id: 'owner-1',
+        name: 'Owner',
+        role: 'Project Owner',
+        agentType: 'human',
+        status: 'active',
+        hierarchyType: 'owner',
+        parentId: null,
       })
     }
     return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
@@ -274,16 +301,35 @@ export const handlers = [
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
     }
-    const body = (await request.json()) as { status?: string }
+    const body = (await request.json()) as {
+      status?: string
+      title?: string
+      description?: string
+      priority?: string
+      assigneeId?: string | null
+    }
     const { taskId } = params
     const task = tasks.find(t => t.id === taskId)
     if (!task) {
       return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
     }
-    if (body.status) {
+    // Update all provided fields
+    if (body.status !== undefined) {
       task.status = body.status
-      task.updatedAt = new Date().toISOString()
     }
+    if (body.title !== undefined) {
+      task.title = body.title
+    }
+    if (body.description !== undefined) {
+      task.description = body.description
+    }
+    if (body.priority !== undefined) {
+      task.priority = body.priority
+    }
+    if (body.assigneeId !== undefined) {
+      task.assigneeId = body.assigneeId
+    }
+    task.updatedAt = new Date().toISOString()
     return HttpResponse.json(task)
   }),
 
@@ -418,6 +464,41 @@ export const handlers = [
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
     }
+
+    // Owner sees all descendants (manager + workers)
+    if (authHeader === 'Bearer test-session-token-owner') {
+      return HttpResponse.json([
+        {
+          id: 'manager-1',
+          name: 'Manager A',
+          role: 'Backend Manager',
+          agentType: 'ai',
+          status: 'active',
+          hierarchyType: 'manager',
+          parentAgentId: 'owner-1',
+        },
+        {
+          id: 'worker-1',
+          name: 'Worker 1',
+          role: 'Backend Developer',
+          agentType: 'ai',
+          status: 'active',
+          hierarchyType: 'worker',
+          parentAgentId: 'manager-1',
+        },
+        {
+          id: 'worker-2',
+          name: 'Worker 2',
+          role: 'Frontend Developer',
+          agentType: 'ai',
+          status: 'inactive',
+          hierarchyType: 'worker',
+          parentAgentId: 'manager-1',
+        },
+      ])
+    }
+
+    // Manager sees only direct subordinates (workers)
     return HttpResponse.json([
       {
         id: 'worker-1',

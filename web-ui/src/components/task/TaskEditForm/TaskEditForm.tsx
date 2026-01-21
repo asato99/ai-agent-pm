@@ -86,12 +86,16 @@ export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center"
+      onClick={onClose}
     >
       {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/50 pointer-events-none" aria-hidden="true" />
 
       {/* Form */}
-      <div className="relative bg-white rounded-lg shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div
+        className="relative bg-white rounded-lg shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <h2 className="text-xl font-bold text-gray-900 mb-4">Edit Task</h2>
 
         {error && (
