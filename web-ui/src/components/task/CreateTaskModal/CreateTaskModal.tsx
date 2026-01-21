@@ -1,25 +1,35 @@
 import { useState } from 'react'
+import { useAssignableAgents } from '@/hooks'
 import type { TaskPriority } from '@/types'
 
 interface CreateTaskModalProps {
+  projectId: string
   isOpen: boolean
   onClose: () => void
-  onSubmit: (data: { title: string; description: string; priority: TaskPriority }) => void
+  onSubmit: (data: { title: string; description: string; priority: TaskPriority; assigneeId?: string }) => void
 }
 
-export function CreateTaskModal({ isOpen, onClose, onSubmit }: CreateTaskModalProps) {
+export function CreateTaskModal({ projectId, isOpen, onClose, onSubmit }: CreateTaskModalProps) {
+  const { agents, isLoading: agentsLoading } = useAssignableAgents(projectId)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('medium')
+  const [assigneeId, setAssigneeId] = useState('')
 
   if (!isOpen) return null
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit({ title, description, priority })
+    onSubmit({
+      title,
+      description,
+      priority,
+      assigneeId: assigneeId || undefined,
+    })
     setTitle('')
     setDescription('')
     setPriority('medium')
+    setAssigneeId('')
   }
 
   return (
@@ -72,6 +82,25 @@ export function CreateTaskModal({ isOpen, onClose, onSubmit }: CreateTaskModalPr
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
                 <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="assignee" className="block text-sm font-medium text-gray-700 mb-1">
+                Assignee
+              </label>
+              <select
+                id="assignee"
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+                disabled={agentsLoading}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              >
+                <option value="">Unassigned</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

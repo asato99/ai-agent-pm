@@ -2,16 +2,23 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { Agent } from '@/types'
 
-export function useAssignableAgents() {
+/**
+ * Fetches agents that can be assigned to tasks in a specific project.
+ * According to requirements (PROJECTS.md), task assignees must be agents assigned to the project.
+ *
+ * @param projectId - The project ID to get assignable agents for
+ */
+export function useAssignableAgents(projectId: string) {
   const query = useQuery({
-    queryKey: ['assignable-agents'],
+    queryKey: ['assignable-agents', projectId],
     queryFn: async () => {
-      const result = await api.get<Agent[]>('/agents/assignable')
+      const result = await api.get<Agent[]>(`/projects/${projectId}/assignable-agents`)
       if (result.error) {
         throw new Error(result.error.message)
       }
       return result.data!
     },
+    enabled: !!projectId,
   })
 
   return {

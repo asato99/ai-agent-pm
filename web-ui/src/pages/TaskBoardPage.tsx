@@ -26,7 +26,7 @@ export function TaskBoardPage() {
   )
 
   const createTaskMutation = useMutation({
-    mutationFn: async (data: { title: string; description: string; priority: TaskPriority }) => {
+    mutationFn: async (data: { title: string; description: string; priority: TaskPriority; assigneeId?: string }) => {
       const result = await api.post<Task>(`/projects/${projectId}/tasks`, data)
       if (result.error) {
         throw new Error(result.error.message)
@@ -61,7 +61,7 @@ export function TaskBoardPage() {
     setIsDetailPanelOpen(true)
   }
 
-  const handleCreateTask = (data: { title: string; description: string; priority: TaskPriority }) => {
+  const handleCreateTask = (data: { title: string; description: string; priority: TaskPriority; assigneeId?: string }) => {
     createTaskMutation.mutate(data)
   }
 
@@ -126,6 +126,7 @@ export function TaskBoardPage() {
       </main>
 
       <CreateTaskModal
+        projectId={projectId || ''}
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSubmit={handleCreateTask}

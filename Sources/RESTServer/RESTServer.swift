@@ -339,6 +339,12 @@ final class RESTServer {
             try await createTask(request: request, context: context)
         }
 
+        // Assignable agents for project (agents assigned to the project)
+        // According to requirements (PROJECTS.md): Task assignees must be agents assigned to the project
+        projectRouter.get(":projectId/assignable-agents") { [self] request, context in
+            try await listProjectAssignableAgents(request: request, context: context)
+        }
+
         // Direct task access
         let taskRouter = protectedRouter.group("tasks")
         debugLog("Task router created with group 'tasks'")
@@ -827,9 +833,29 @@ final class RESTServer {
 
     // MARK: - Agent Handlers
 
+    /// GET /api/agents/assignable (deprecated - use /projects/:projectId/assignable-agents)
     private func listAssignableAgents(request: Request, context: AuthenticatedContext) async throws -> Response {
+        // Legacy endpoint: returns all active agents
+        // Note: This endpoint doesn't filter by project. Use /projects/:projectId/assignable-agents instead.
         let agents = try agentRepository.findAll()
         let assignable = agents.filter { $0.status == .active }
+        let dtos = assignable.map { AgentDTO(from: $0) }
+        return jsonResponse(dtos)
+    }
+
+    /// GET /api/projects/:projectId/assignable-agents - プロジェクトに割り当て可能なエージェント一覧
+    /// According to requirements (PROJECTS.md): Task assignees must be agents assigned to the project
+    private func listProjectAssignableAgents(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let projectIdStr = context.parameters.get("projectId") else {
+            return errorResponse(status: .badRequest, message: "Project ID is required")
+        }
+        let projectId = ProjectID(value: projectIdStr)
+
+        // Get agents assigned to this project
+        let projectAgents = try projectAgentAssignmentRepository.findAgentsByProject(projectId)
+
+        // Filter to active agents only
+        let assignable = projectAgents.filter { $0.status == .active }
         let dtos = assignable.map { AgentDTO(from: $0) }
         return jsonResponse(dtos)
     }

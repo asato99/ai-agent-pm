@@ -304,7 +304,56 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
-  // Assignable agents
+  // Assignable agents (project-specific)
+  // According to requirements (PROJECTS.md): Task assignees must be agents assigned to the project
+  http.get('/api/projects/:projectId/assignable-agents', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId } = params
+
+    // Mock: project-1 has worker-1 and worker-2 assigned
+    // project-2 has only worker-2 assigned
+    if (projectId === 'project-1') {
+      return HttpResponse.json([
+        {
+          id: 'worker-1',
+          name: 'Worker 1',
+          role: 'Backend Developer',
+          agentType: 'ai',
+          status: 'active',
+          hierarchyType: 'worker',
+          parentId: 'manager-1',
+        },
+        {
+          id: 'worker-2',
+          name: 'Worker 2',
+          role: 'Frontend Developer',
+          agentType: 'ai',
+          status: 'active',
+          hierarchyType: 'worker',
+          parentId: 'manager-1',
+        },
+      ])
+    }
+    if (projectId === 'project-2') {
+      return HttpResponse.json([
+        {
+          id: 'worker-2',
+          name: 'Worker 2',
+          role: 'Frontend Developer',
+          agentType: 'ai',
+          status: 'active',
+          hierarchyType: 'worker',
+          parentId: 'manager-1',
+        },
+      ])
+    }
+    return HttpResponse.json([])
+  }),
+
+  // Legacy endpoint (kept for backward compatibility, will be deprecated)
   http.get('/api/agents/assignable', () => {
     return HttpResponse.json([
       {

@@ -13,7 +13,7 @@ interface TaskEditFormProps {
 export function TaskEditForm({ task, isOpen, onClose }: TaskEditFormProps) {
   const queryClient = useQueryClient()
   const { permissions, isLoading: permissionsLoading } = useTaskPermissions(task.id)
-  const { agents, isLoading: agentsLoading } = useAssignableAgents()
+  const { agents, isLoading: agentsLoading } = useAssignableAgents(task.projectId)
 
   const [title, setTitle] = useState(task.title)
   const [description, setDescription] = useState(task.description)
