@@ -591,7 +591,7 @@ final class RESTServer {
     }
 
     private func createTask(request: Request, context: AuthenticatedContext) async throws -> Response {
-        guard context.agentId != nil else {
+        guard let agentId = context.agentId else {
             return errorResponse(status: .unauthorized, message: "Not authenticated")
         }
 
@@ -612,13 +612,14 @@ final class RESTServer {
         }
 
         let task = Domain.Task(
-            id: TaskID(value: UUID().uuidString),
+            id: TaskID.generate(),
             projectId: projectId,
             title: createRequest.title,
             description: createRequest.description ?? "",
             status: .backlog,
             priority: createRequest.priority.flatMap { TaskPriority(rawValue: $0) } ?? .medium,
             assigneeId: createRequest.assigneeId.map { AgentID(value: $0) },
+            createdByAgentId: agentId,
             dependencies: createRequest.dependencies?.map { TaskID(value: $0) } ?? []
         )
 
