@@ -4,6 +4,7 @@
 
 import { useRef, useEffect } from 'react'
 import { useChat } from '@/hooks/useChat'
+import { useAuthStore } from '@/stores/authStore'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import type { Agent } from '@/types'
@@ -15,6 +16,8 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
+  const { agent: currentAgent } = useAuthStore()
+  const currentAgentId = currentAgent?.id ?? ''
   const { messages, isLoading, sendMessage, isSending, hasMore, loadMore } = useChat(
     projectId,
     agent.id
@@ -120,7 +123,7 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
               </div>
             )}
             {messages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} />
+              <ChatMessage key={msg.id} message={msg} currentAgentId={currentAgentId} />
             ))}
             <div ref={messagesEndRef} />
           </>

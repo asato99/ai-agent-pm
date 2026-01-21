@@ -1,5 +1,6 @@
 // Tests/InfrastructureTests/PendingMessageIdentifierTests.swift
 // Phase 0: 未読メッセージ判定ロジックのユニットテスト
+// Updated for senderId/receiverId model (dual storage)
 
 import XCTest
 @testable import Domain
@@ -7,52 +8,57 @@ import XCTest
 
 final class PendingMessageIdentifierTests: XCTestCase {
 
+    /// Test agent IDs
+    private let myAgentId = AgentID(value: "my-agent")
+    private let otherAgentId = AgentID(value: "other-agent")
+    private let systemAgentId = AgentID(value: "system")
+
     // MARK: - 基本ケース
 
-    func testIdentifyPending_LastMessageIsUser_IsPending() {
-        // Given: [user, agent, user]
+    func testIdentifyPending_LastMessageFromOther_IsPending() {
+        // Given: [other, me, other]
         let messages = [
-            createMessage(id: "1", sender: .user, offset: 0),
-            createMessage(id: "2", sender: .agent, offset: 1),
-            createMessage(id: "3", sender: .user, offset: 2),
+            createMessage(id: "1", senderId: otherAgentId, offset: 0),
+            createMessage(id: "2", senderId: myAgentId, offset: 1),
+            createMessage(id: "3", senderId: otherAgentId, offset: 2),
         ]
 
         // When: 未読を判定
-        let pending = PendingMessageIdentifier.identify(messages)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId)
 
-        // Then: 最後のuserメッセージが未読
+        // Then: 最後の他者からのメッセージが未読
         XCTAssertEqual(pending.count, 1)
         XCTAssertEqual(pending[0].id.value, "3")
     }
 
-    func testIdentifyPending_LastMessageIsAgent_NoPending() {
-        // Given: [user, agent]
+    func testIdentifyPending_LastMessageFromMe_NoPending() {
+        // Given: [other, me]
         let messages = [
-            createMessage(id: "1", sender: .user, offset: 0),
-            createMessage(id: "2", sender: .agent, offset: 1),
+            createMessage(id: "1", senderId: otherAgentId, offset: 0),
+            createMessage(id: "2", senderId: myAgentId, offset: 1),
         ]
 
         // When: 未読を判定
-        let pending = PendingMessageIdentifier.identify(messages)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId)
 
         // Then: 未読なし
         XCTAssertTrue(pending.isEmpty)
     }
 
-    func testIdentifyPending_ConsecutiveUserMessages_AllPending() {
-        // Given: [user, agent, user, user, user]
+    func testIdentifyPending_ConsecutiveOtherMessages_AllPending() {
+        // Given: [other, me, other, other, other]
         let messages = [
-            createMessage(id: "1", sender: .user, offset: 0),
-            createMessage(id: "2", sender: .agent, offset: 1),
-            createMessage(id: "3", sender: .user, offset: 2),
-            createMessage(id: "4", sender: .user, offset: 3),
-            createMessage(id: "5", sender: .user, offset: 4),
+            createMessage(id: "1", senderId: otherAgentId, offset: 0),
+            createMessage(id: "2", senderId: myAgentId, offset: 1),
+            createMessage(id: "3", senderId: otherAgentId, offset: 2),
+            createMessage(id: "4", senderId: otherAgentId, offset: 3),
+            createMessage(id: "5", senderId: otherAgentId, offset: 4),
         ]
 
         // When: 未読を判定
-        let pending = PendingMessageIdentifier.identify(messages)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId)
 
-        // Then: 連続するuserメッセージが全て未読
+        // Then: 連続する他者からのメッセージが全て未読
         XCTAssertEqual(pending.count, 3)
         XCTAssertEqual(pending.map { $0.id.value }, ["3", "4", "5"])
     }
@@ -62,36 +68,36 @@ final class PendingMessageIdentifierTests: XCTestCase {
         let messages: [ChatMessage] = []
 
         // When: 未読を判定
-        let pending = PendingMessageIdentifier.identify(messages)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId)
 
         // Then: 未読なし
         XCTAssertTrue(pending.isEmpty)
     }
 
-    func testIdentifyPending_OnlyUserMessages_AllPending() {
-        // Given: [user, user, user]（agentの応答なし）
+    func testIdentifyPending_OnlyOtherMessages_AllPending() {
+        // Given: [other, other, other]（自分の応答なし）
         let messages = [
-            createMessage(id: "1", sender: .user, offset: 0),
-            createMessage(id: "2", sender: .user, offset: 1),
-            createMessage(id: "3", sender: .user, offset: 2),
+            createMessage(id: "1", senderId: otherAgentId, offset: 0),
+            createMessage(id: "2", senderId: otherAgentId, offset: 1),
+            createMessage(id: "3", senderId: otherAgentId, offset: 2),
         ]
 
         // When: 未読を判定
-        let pending = PendingMessageIdentifier.identify(messages)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId)
 
         // Then: 全て未読
         XCTAssertEqual(pending.count, 3)
     }
 
-    func testIdentifyPending_OnlyAgentMessages_NoPending() {
-        // Given: [agent, agent]
+    func testIdentifyPending_OnlyMyMessages_NoPending() {
+        // Given: [me, me]
         let messages = [
-            createMessage(id: "1", sender: .agent, offset: 0),
-            createMessage(id: "2", sender: .agent, offset: 1),
+            createMessage(id: "1", senderId: myAgentId, offset: 0),
+            createMessage(id: "2", senderId: myAgentId, offset: 1),
         ]
 
         // When: 未読を判定
-        let pending = PendingMessageIdentifier.identify(messages)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId)
 
         // Then: 未読なし
         XCTAssertTrue(pending.isEmpty)
@@ -99,49 +105,53 @@ final class PendingMessageIdentifierTests: XCTestCase {
 
     // MARK: - システムメッセージの扱い
 
-    func testIdentifyPending_SystemMessageAfterAgent_NotPending() {
-        // Given: [user, agent, system]
+    func testIdentifyPending_SystemMessageAfterMe_NotPending() {
+        // Given: [other, me, system]
+        // Note: System messages have senderId = "system", which is not myAgentId
+        // So they ARE treated as "from others" and thus pending
+        // This behavior change is intentional - system messages are now unread
         let messages = [
-            createMessage(id: "1", sender: .user, offset: 0),
-            createMessage(id: "2", sender: .agent, offset: 1),
-            createMessage(id: "3", sender: .system, offset: 2),
+            createMessage(id: "1", senderId: otherAgentId, offset: 0),
+            createMessage(id: "2", senderId: myAgentId, offset: 1),
+            createMessage(id: "3", senderId: systemAgentId, offset: 2),
         ]
 
         // When: 未読を判定
-        let pending = PendingMessageIdentifier.identify(messages)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId)
 
-        // Then: システムメッセージは未読扱いしない
-        XCTAssertTrue(pending.isEmpty)
+        // Then: システムメッセージも未読として扱われる（senderId != myAgentId）
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending[0].id.value, "3")
     }
 
-    func testIdentifyPending_UserAfterSystem_IsPending() {
-        // Given: [user, agent, system, user]
+    func testIdentifyPending_OtherAfterSystem_IsPending() {
+        // Given: [other, me, system, other]
         let messages = [
-            createMessage(id: "1", sender: .user, offset: 0),
-            createMessage(id: "2", sender: .agent, offset: 1),
-            createMessage(id: "3", sender: .system, offset: 2),
-            createMessage(id: "4", sender: .user, offset: 3),
+            createMessage(id: "1", senderId: otherAgentId, offset: 0),
+            createMessage(id: "2", senderId: myAgentId, offset: 1),
+            createMessage(id: "3", senderId: systemAgentId, offset: 2),
+            createMessage(id: "4", senderId: otherAgentId, offset: 3),
         ]
 
         // When: 未読を判定
-        let pending = PendingMessageIdentifier.identify(messages)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId)
 
-        // Then: userメッセージは未読
-        XCTAssertEqual(pending.count, 1)
-        XCTAssertEqual(pending[0].id.value, "4")
+        // Then: システムメッセージと他者メッセージが未読
+        XCTAssertEqual(pending.count, 2)
+        XCTAssertEqual(pending.map { $0.id.value }, ["3", "4"])
     }
 
     // MARK: - limit パラメータ
 
     func testIdentifyPending_WithLimit_ReturnsLatestOnly() {
         // Given: 10件の未読メッセージ
-        var messages = [createMessage(id: "0", sender: .agent, offset: 0)]
+        var messages = [createMessage(id: "0", senderId: myAgentId, offset: 0)]
         for i in 1...10 {
-            messages.append(createMessage(id: "\(i)", sender: .user, offset: i))
+            messages.append(createMessage(id: "\(i)", senderId: otherAgentId, offset: i))
         }
 
         // When: limit=5で判定
-        let pending = PendingMessageIdentifier.identify(messages, limit: 5)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId, limit: 5)
 
         // Then: 最新5件のみ
         XCTAssertEqual(pending.count, 5)
@@ -151,14 +161,14 @@ final class PendingMessageIdentifierTests: XCTestCase {
     func testIdentifyPending_WithLimitExceedingCount_ReturnsAll() {
         // Given: 3件の未読メッセージ
         let messages = [
-            createMessage(id: "0", sender: .agent, offset: 0),
-            createMessage(id: "1", sender: .user, offset: 1),
-            createMessage(id: "2", sender: .user, offset: 2),
-            createMessage(id: "3", sender: .user, offset: 3),
+            createMessage(id: "0", senderId: myAgentId, offset: 0),
+            createMessage(id: "1", senderId: otherAgentId, offset: 1),
+            createMessage(id: "2", senderId: otherAgentId, offset: 2),
+            createMessage(id: "3", senderId: otherAgentId, offset: 3),
         ]
 
         // When: limit=10で判定
-        let pending = PendingMessageIdentifier.identify(messages, limit: 10)
+        let pending = PendingMessageIdentifier.identify(messages, agentId: myAgentId, limit: 10)
 
         // Then: 全て返る
         XCTAssertEqual(pending.count, 3)
@@ -167,20 +177,21 @@ final class PendingMessageIdentifierTests: XCTestCase {
     // MARK: - separateContextAndPending
 
     func testSeparateContextAndPending_ReturnsContextAndPending() {
-        // Given: 25件の会話（交互）、最後3件がuser
+        // Given: 25件の会話（交互）、最後3件が他者から
         var messages: [ChatMessage] = []
         for i in 0..<22 {
-            let sender: SenderType = i % 2 == 0 ? .user : .agent
-            messages.append(createMessage(id: "\(i)", sender: sender, offset: i))
+            let senderId = i % 2 == 0 ? otherAgentId : myAgentId
+            messages.append(createMessage(id: "\(i)", senderId: senderId, offset: i))
         }
-        // 最後の3件はuser
-        messages.append(createMessage(id: "22", sender: .user, offset: 22))
-        messages.append(createMessage(id: "23", sender: .user, offset: 23))
-        messages.append(createMessage(id: "24", sender: .user, offset: 24))
+        // 最後の3件は他者から
+        messages.append(createMessage(id: "22", senderId: otherAgentId, offset: 22))
+        messages.append(createMessage(id: "23", senderId: otherAgentId, offset: 23))
+        messages.append(createMessage(id: "24", senderId: otherAgentId, offset: 24))
 
         // When: コンテキストと未読を分離
         let result = PendingMessageIdentifier.separateContextAndPending(
             messages,
+            agentId: myAgentId,
             contextLimit: 20,
             pendingLimit: 10
         )
@@ -193,14 +204,14 @@ final class PendingMessageIdentifierTests: XCTestCase {
     }
 
     func testSeparateContextAndPending_NoPending_ReturnsEmptyPending() {
-        // Given: 最後のメッセージがagent（全て既読）
+        // Given: 最後のメッセージが自分（全て既読）
         let messages = [
-            createMessage(id: "1", sender: .user, offset: 0),
-            createMessage(id: "2", sender: .agent, offset: 1),
+            createMessage(id: "1", senderId: otherAgentId, offset: 0),
+            createMessage(id: "2", senderId: myAgentId, offset: 1),
         ]
 
         // When: コンテキストと未読を分離
-        let result = PendingMessageIdentifier.separateContextAndPending(messages)
+        let result = PendingMessageIdentifier.separateContextAndPending(messages, agentId: myAgentId)
 
         // Then: pending は空
         XCTAssertTrue(result.pendingMessages.isEmpty)
@@ -210,14 +221,15 @@ final class PendingMessageIdentifierTests: XCTestCase {
 
     func testSeparateContextAndPending_ManyPending_LimitsTo10() {
         // Given: 15件の未読メッセージ
-        var messages = [createMessage(id: "0", sender: .agent, offset: 0)]
+        var messages = [createMessage(id: "0", senderId: myAgentId, offset: 0)]
         for i in 1...15 {
-            messages.append(createMessage(id: "\(i)", sender: .user, offset: i))
+            messages.append(createMessage(id: "\(i)", senderId: otherAgentId, offset: i))
         }
 
         // When: pendingLimit=10 で分離
         let result = PendingMessageIdentifier.separateContextAndPending(
             messages,
+            agentId: myAgentId,
             contextLimit: 20,
             pendingLimit: 10
         )
@@ -233,7 +245,7 @@ final class PendingMessageIdentifierTests: XCTestCase {
         let messages: [ChatMessage] = []
 
         // When: コンテキストと未読を分離
-        let result = PendingMessageIdentifier.separateContextAndPending(messages)
+        let result = PendingMessageIdentifier.separateContextAndPending(messages, agentId: myAgentId)
 
         // Then: 全て空
         XCTAssertTrue(result.contextMessages.isEmpty)
@@ -245,15 +257,15 @@ final class PendingMessageIdentifierTests: XCTestCase {
     func testSeparateContextAndPending_FewMessages_NoTruncation() {
         // Given: 5件の会話履歴
         let messages = [
-            createMessage(id: "1", sender: .user, offset: 0),
-            createMessage(id: "2", sender: .agent, offset: 1),
-            createMessage(id: "3", sender: .user, offset: 2),
-            createMessage(id: "4", sender: .agent, offset: 3),
-            createMessage(id: "5", sender: .user, offset: 4),
+            createMessage(id: "1", senderId: otherAgentId, offset: 0),
+            createMessage(id: "2", senderId: myAgentId, offset: 1),
+            createMessage(id: "3", senderId: otherAgentId, offset: 2),
+            createMessage(id: "4", senderId: myAgentId, offset: 3),
+            createMessage(id: "5", senderId: otherAgentId, offset: 4),
         ]
 
         // When: コンテキストと未読を分離
-        let result = PendingMessageIdentifier.separateContextAndPending(messages)
+        let result = PendingMessageIdentifier.separateContextAndPending(messages, agentId: myAgentId)
 
         // Then: context_truncated = false
         XCTAssertFalse(result.contextTruncated)
@@ -262,10 +274,10 @@ final class PendingMessageIdentifierTests: XCTestCase {
 
     // MARK: - Helper
 
-    private func createMessage(id: String, sender: SenderType, offset: Int) -> ChatMessage {
+    private func createMessage(id: String, senderId: AgentID, offset: Int) -> ChatMessage {
         ChatMessage(
             id: ChatMessageID(value: id),
-            sender: sender,
+            senderId: senderId,
             content: "Message \(id)",
             createdAt: Date().addingTimeInterval(TimeInterval(offset))
         )

@@ -26,6 +26,14 @@ vi.mock('@/hooks/useChat', () => ({
   })),
 }))
 
+// Mock the authStore
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: vi.fn(() => ({
+    agent: { id: 'current-user-agent', name: 'Current User', role: 'Owner' },
+    isAuthenticated: true,
+  })),
+}))
+
 // Import the mocked module
 import { useChat } from '@/hooks/useChat'
 const mockUseChat = vi.mocked(useChat)
@@ -83,8 +91,8 @@ describe('ChatPanel', () => {
     it('displays messages', () => {
       mockUseChat.mockReturnValue({
         messages: [
-          { id: 'msg-1', sender: 'user', content: 'Hello', createdAt: '2026-01-21T10:00:00Z' },
-          { id: 'msg-2', sender: 'agent', content: 'Hi there!', createdAt: '2026-01-21T10:00:05Z' },
+          { id: 'msg-1', senderId: 'current-user-agent', receiverId: 'agent-1', content: 'Hello', createdAt: '2026-01-21T10:00:00Z' },
+          { id: 'msg-2', senderId: 'agent-1', content: 'Hi there!', createdAt: '2026-01-21T10:00:05Z' },
         ],
         isLoading: false,
         error: null,
@@ -130,7 +138,8 @@ describe('ChatPanel', () => {
       const user = userEvent.setup()
       mockSendMessage.mockResolvedValue({
         id: 'msg-new',
-        sender: 'user',
+        senderId: 'current-user-agent',
+        receiverId: 'agent-1',
         content: 'Test message',
         createdAt: new Date().toISOString(),
       })

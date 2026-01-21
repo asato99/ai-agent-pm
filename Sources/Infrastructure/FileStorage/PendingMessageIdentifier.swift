@@ -7,10 +7,11 @@ import Domain
 
 /// 未読（pending）メッセージを特定するユーティリティ
 ///
-/// 未読の定義:
-/// - 最後のagent応答より後に送信されたuserメッセージ
-/// - agentの応答がない場合は、全てのuserメッセージが未読
-/// - systemメッセージは未読対象外
+/// 未読の定義（senderId/receiverIdモデル）:
+/// - 最後の自分の応答より後に送信された他者からのメッセージ
+/// - 自分の応答がない場合は、全ての他者からのメッセージが未読
+/// - senderId == agentId のメッセージは自分が送信したもの
+/// - senderId != agentId のメッセージは他者から受信したもの
 public enum PendingMessageIdentifier {
 
     /// MCP用のデフォルトコンテキスト件数
@@ -23,23 +24,24 @@ public enum PendingMessageIdentifier {
     ///
     /// - Parameters:
     ///   - messages: 全メッセージ（時系列順）
+    ///   - agentId: 自分のエージェントID（未読判定の基準）
     ///   - limit: 返す未読メッセージの最大件数（nilの場合は全件）
-    /// - Returns: 未読のuserメッセージ（時系列順）
-    public static func identify(_ messages: [ChatMessage], limit: Int? = nil) -> [ChatMessage] {
+    /// - Returns: 未読の受信メッセージ（時系列順）
+    public static func identify(_ messages: [ChatMessage], agentId: AgentID, limit: Int? = nil) -> [ChatMessage] {
         guard !messages.isEmpty else { return [] }
 
-        // 最後のagent応答のインデックスを探す
-        let lastAgentIndex = messages.lastIndex { $0.sender == .agent }
+        // 最後の自分の応答のインデックスを探す
+        let lastMyMessageIndex = messages.lastIndex { $0.senderId == agentId }
 
         let pendingMessages: [ChatMessage]
 
-        if let lastAgentIndex = lastAgentIndex {
-            // agent応答より後のuserメッセージを取得
-            pendingMessages = messages.suffix(from: lastAgentIndex + 1)
-                .filter { $0.sender == .user }
+        if let lastMyMessageIndex = lastMyMessageIndex {
+            // 自分の応答より後の他者からのメッセージを取得
+            pendingMessages = messages.suffix(from: lastMyMessageIndex + 1)
+                .filter { $0.senderId != agentId }
         } else {
-            // agent応答がない場合、全てのuserメッセージが未読
-            pendingMessages = messages.filter { $0.sender == .user }
+            // 自分の応答がない場合、全ての他者からのメッセージが未読
+            pendingMessages = messages.filter { $0.senderId != agentId }
         }
 
         // limit が指定されている場合は最新のものに制限
@@ -56,11 +58,13 @@ public enum PendingMessageIdentifier {
     ///
     /// - Parameters:
     ///   - messages: 全メッセージ（時系列順）
+    ///   - agentId: 自分のエージェントID（未読判定の基準）
     ///   - contextLimit: コンテキストとして返す最大件数
     ///   - pendingLimit: 未読として返す最大件数
     /// - Returns: コンテキストと未読メッセージ、および統計情報
     public static func separateContextAndPending(
         _ messages: [ChatMessage],
+        agentId: AgentID,
         contextLimit: Int = defaultContextLimit,
         pendingLimit: Int = defaultPendingLimit
     ) -> ContextAndPendingResult {
@@ -74,7 +78,7 @@ public enum PendingMessageIdentifier {
         }
 
         // 未読メッセージを特定（limit付き）
-        let allPending = identify(messages)
+        let allPending = identify(messages, agentId: agentId)
         let limitedPending = Array(allPending.suffix(pendingLimit))
 
         // コンテキスト = 未読を除いた直近のメッセージ

@@ -1,66 +1,69 @@
 // Sources/Domain/Entities/ChatMessage.swift
-// 参照: docs/design/CHAT_FEATURE.md - ChatMessageエンティティ
+// Reference: docs/design/CHAT_FEATURE.md - Section 2.4
 
 import Foundation
 
-/// チャットメッセージを表すエンティティ
-/// エージェントとユーザー間のメッセージ履歴を管理
-/// ファイルベース（JSONL形式）で永続化
+/// Chat message entity with dual storage model
+/// Each agent stores messages in their own storage file
+/// - Sender's storage: includes receiverId
+/// - Receiver's storage: receiverId is nil
 public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
     public let id: ChatMessageID
-    public let sender: SenderType
+    /// Sender's agent ID
+    public let senderId: AgentID
+    /// Receiver's agent ID (only in sender's storage)
+    public let receiverId: AgentID?
     public let content: String
     public let createdAt: Date
 
-    /// 関連タスクID（オプション）
+    /// Related task ID (optional)
     public let relatedTaskId: TaskID?
-    /// 関連ハンドオフID（オプション）
+    /// Related handoff ID (optional)
     public let relatedHandoffId: HandoffID?
 
     public init(
         id: ChatMessageID,
-        sender: SenderType,
+        senderId: AgentID,
+        receiverId: AgentID? = nil,
         content: String,
         createdAt: Date = Date(),
         relatedTaskId: TaskID? = nil,
         relatedHandoffId: HandoffID? = nil
     ) {
         self.id = id
-        self.sender = sender
+        self.senderId = senderId
+        self.receiverId = receiverId
         self.content = content
         self.createdAt = createdAt
         self.relatedTaskId = relatedTaskId
         self.relatedHandoffId = relatedHandoffId
     }
 
-    /// ユーザーからのメッセージかどうか
-    public var isFromUser: Bool {
-        sender == .user
+    /// Check if this message was sent by the given agent
+    /// - Parameter agentId: Agent ID to check
+    /// - Returns: true if senderId matches
+    public func isSentBy(_ agentId: AgentID) -> Bool {
+        senderId == agentId
     }
 
-    /// エージェントからのメッセージかどうか
-    public var isFromAgent: Bool {
-        sender == .agent
+    /// Check if this message was received by the given agent
+    /// (i.e., the message is from someone else)
+    /// - Parameter agentId: Agent ID to check
+    /// - Returns: true if senderId does NOT match
+    public func isReceivedBy(_ agentId: AgentID) -> Bool {
+        senderId != agentId
     }
-}
 
-// MARK: - SenderType
-
-/// メッセージ送信者の種類
-public enum SenderType: String, Codable, Sendable {
-    /// 人間ユーザー（PMアプリ操作者）
-    case user
-    /// AIエージェント
-    case agent
-    /// システム（エラーメッセージ等）
-    case system
-
-    /// 表示用ラベル
-    public var displayName: String {
-        switch self {
-        case .user: return "User"
-        case .agent: return "Agent"
-        case .system: return "System"
-        }
+    /// Create a copy without receiverId (for receiver's storage)
+    public func withoutReceiverId() -> ChatMessage {
+        ChatMessage(
+            id: id,
+            senderId: senderId,
+            receiverId: nil,
+            content: content,
+            createdAt: createdAt,
+            relatedTaskId: relatedTaskId,
+            relatedHandoffId: relatedHandoffId
+        )
     }
 }

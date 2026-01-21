@@ -1,12 +1,12 @@
 // Sources/Infrastructure/FileStorage/ChatFileRepository.swift
-// 参照: docs/design/CHAT_FEATURE.md - ChatFileRepository
+// Reference: docs/design/CHAT_FEATURE.md - Section 2.3
 
 import Foundation
 import Domain
 
 // MARK: - ChatFileRepositoryError
 
-/// ChatFileRepository のエラー
+/// ChatFileRepository errors
 public enum ChatFileRepositoryError: Error, LocalizedError {
     case workingDirectoryNotSet
     case encodingFailed(ChatMessage, Error)
@@ -32,13 +32,17 @@ public enum ChatFileRepositoryError: Error, LocalizedError {
 
 // MARK: - ChatFileRepository
 
-/// ファイルベースのチャットリポジトリ
-/// JSONL形式でメッセージを保存（1行1メッセージ、追記型）
+/// File-based chat repository
+/// JSONL format for message storage (one message per line, append-only)
 ///
-/// ファイル形式:
+/// Storage format (sender's storage):
 /// ```jsonl
-/// {"id":"msg_01","sender":"user","content":"Hello","createdAt":"2026-01-11T10:00:00Z"}
-/// {"id":"msg_02","sender":"agent","content":"Hi!","createdAt":"2026-01-11T10:00:05Z"}
+/// {"id":"msg_01","senderId":"owner-1","receiverId":"worker-1","content":"Hello","createdAt":"..."}
+/// ```
+///
+/// Storage format (receiver's storage):
+/// ```jsonl
+/// {"id":"msg_01","senderId":"owner-1","content":"Hello","createdAt":"..."}
 /// ```
 public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendable {
     private let directoryManager: ProjectDirectoryManager
@@ -54,7 +58,7 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
         self.directoryManager = directoryManager
         self.projectRepository = projectRepository
 
-        // ISO8601 日時フォーマット
+        // ISO8601 date format
         self.encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
 
@@ -95,21 +99,55 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
         return Array(allMessages.suffix(limit))
     }
 
-    public func findUnreadUserMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage] {
+    /// Find unread messages (messages from others after my last message)
+    /// Uses senderId to identify who sent each message
+    public func findUnreadMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage] {
         let allMessages = try findMessages(projectId: projectId, agentId: agentId)
 
-        // エージェントからの最後のメッセージのインデックスを探す
-        guard let lastAgentMessageIndex = allMessages.lastIndex(where: { $0.sender == .agent }) else {
-            // エージェントからのメッセージがない場合、全てのユーザーメッセージが未読
-            return allMessages.filter { $0.sender == .user }
+        // Find the index of my last sent message
+        guard let lastSentIndex = allMessages.lastIndex(where: { $0.senderId == agentId }) else {
+            // No messages from me, all messages from others are unread
+            return allMessages.filter { $0.senderId != agentId }
         }
 
-        // 最後のエージェントメッセージ以降のユーザーメッセージを取得
-        let messagesAfterLastAgent = allMessages[(lastAgentMessageIndex + 1)...]
-        return messagesAfterLastAgent.filter { $0.sender == .user }
+        // Get messages after my last sent message that are from others
+        let messagesAfterLastSent = allMessages[(lastSentIndex + 1)...]
+        return messagesAfterLastSent.filter { $0.senderId != agentId }
     }
 
-    // MARK: - ページネーション対応（REST API用）
+    // MARK: - Dual Write (双方向保存)
+
+    /// Save message to both sender's and receiver's storage
+    /// - Sender's storage: includes receiverId
+    /// - Receiver's storage: receiverId is nil
+    public func saveMessageDualWrite(
+        _ message: ChatMessage,
+        projectId: ProjectID,
+        senderAgentId: AgentID,
+        receiverAgentId: AgentID
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let workingDir = try getWorkingDirectory(projectId: projectId)
+
+        // 1. Save to sender's storage (with receiverId)
+        let senderFileURL = try directoryManager.getChatFilePath(
+            workingDirectory: workingDir,
+            agentId: senderAgentId
+        )
+        try appendMessageToFile(message, at: senderFileURL)
+
+        // 2. Save to receiver's storage (without receiverId)
+        let receiverMessage = message.withoutReceiverId()
+        let receiverFileURL = try directoryManager.getChatFilePath(
+            workingDirectory: workingDir,
+            agentId: receiverAgentId
+        )
+        try appendMessageToFile(receiverMessage, at: receiverFileURL)
+    }
+
+    // MARK: - Pagination (REST API)
 
     public func findMessagesWithCursor(
         projectId: ProjectID,
@@ -122,21 +160,21 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
 
         var filteredMessages = allMessages
 
-        // after カーソル: 指定IDより後のメッセージのみ
+        // after cursor: get messages after the specified ID
         if let afterId = after {
             if let afterIndex = allMessages.firstIndex(where: { $0.id == afterId }) {
                 filteredMessages = Array(allMessages.suffix(from: afterIndex + 1))
             }
         }
 
-        // before カーソル: 指定IDより前のメッセージのみ
+        // before cursor: get messages before the specified ID
         if let beforeId = before {
             if let beforeIndex = filteredMessages.firstIndex(where: { $0.id == beforeId }) {
                 filteredMessages = Array(filteredMessages.prefix(beforeIndex))
             }
         }
 
-        // limit を適用
+        // Apply limit
         let hasMore = filteredMessages.count > limit
         let limitedMessages = Array(filteredMessages.suffix(limit))
 
@@ -154,7 +192,7 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
 
     // MARK: - Private Methods
 
-    /// プロジェクトIDから作業ディレクトリを取得
+    /// Get working directory from project ID
     private func getWorkingDirectory(projectId: ProjectID) throws -> String {
         guard let project = try projectRepository.findById(projectId),
               let workingDir = project.workingDirectory else {
@@ -163,9 +201,9 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
         return workingDir
     }
 
-    /// ファイルからメッセージを読み込み
+    /// Read messages from file
     private func readMessagesFromFile(at url: URL) throws -> [ChatMessage] {
-        // ファイルが存在しない場合は空配列を返す
+        // Return empty array if file doesn't exist
         guard FileManager.default.fileExists(atPath: url.path) else {
             return []
         }
@@ -177,7 +215,7 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
             throw ChatFileRepositoryError.readFailed(url, error)
         }
 
-        // 空ファイルの場合は空配列を返す
+        // Return empty array if file is empty
         guard !content.isEmpty else {
             return []
         }
@@ -195,7 +233,7 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
                 let message = try decoder.decode(ChatMessage.self, from: data)
                 messages.append(message)
             } catch {
-                // パース失敗した行はスキップ（ログは出すが処理は継続）
+                // Skip failed lines (log warning but continue)
                 print("[ChatFileRepository] Warning: Failed to decode line: \(error)")
             }
         }
@@ -203,7 +241,7 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
         return messages
     }
 
-    /// メッセージをファイルに追記
+    /// Append message to file
     private func appendMessageToFile(_ message: ChatMessage, at url: URL) throws {
         let jsonData: Data
         do {
@@ -216,10 +254,10 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
             throw ChatFileRepositoryError.encodingFailed(message, NSError(domain: "ChatFileRepository", code: -1))
         }
 
-        // 改行を追加
+        // Add newline
         jsonString += "\n"
 
-        // ファイルが存在しない場合は新規作成
+        // Create new file if it doesn't exist
         if !FileManager.default.fileExists(atPath: url.path) {
             do {
                 try jsonString.write(to: url, atomically: true, encoding: .utf8)
@@ -229,7 +267,7 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
             return
         }
 
-        // 既存ファイルに追記
+        // Append to existing file
         do {
             let fileHandle = try FileHandle(forWritingTo: url)
             defer { try? fileHandle.close() }

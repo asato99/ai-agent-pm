@@ -98,11 +98,60 @@ AgentChatView (VStack)
 
 ### 2.3 ファイル形式: JSONL
 
+### 2.3.1 ストレージモデル: 双方向保存
+
+**設計方針**:
+- 各エージェントは自分のストレージ（chat.jsonl）のみを参照する
+- メッセージ送信時、送信者と受信者両方のストレージに書き込む
+- 送信者のストレージには `receiverId` を含め、誰宛てか明確にする
+- 受信者のストレージには `receiverId` は不要（自分のストレージ = 自分宛て）
+
+**メリット**:
+- 人間↔人間、人間↔AI、AI↔AI すべて同じモデルで対応可能
+- 各エージェントは自分のストレージだけで会話が完結
+- オーナーからのメッセージとマネージャーからのメッセージを区別可能
+
+**書き込みルール**:
+
+| 書き込み先 | senderId | receiverId |
+|------------|----------|------------|
+| 送信者のストレージ | 送信者ID | 受信者ID（必須） |
+| 受信者のストレージ | 送信者ID | なし |
+
+**例: Owner (owner-1) → Worker (worker-1)**
+
+```
+# Owner のストレージ (.ai-pm/agents/owner-1/chat.jsonl)
+{"id":"msg_01","senderId":"owner-1","receiverId":"worker-1","content":"これやっといて","createdAt":"..."}
+
+# Worker のストレージ (.ai-pm/agents/worker-1/chat.jsonl)
+{"id":"msg_01","senderId":"owner-1","content":"これやっといて","createdAt":"..."}
+```
+
+**例: Worker (worker-1) → Owner (owner-1) への返信**
+
+```
+# Worker のストレージ (.ai-pm/agents/worker-1/chat.jsonl)
+{"id":"msg_01","senderId":"owner-1","content":"これやっといて","createdAt":"..."}
+{"id":"msg_02","senderId":"worker-1","receiverId":"owner-1","content":"了解です","createdAt":"..."}
+
+# Owner のストレージ (.ai-pm/agents/owner-1/chat.jsonl)
+{"id":"msg_01","senderId":"owner-1","receiverId":"worker-1","content":"これやっといて","createdAt":"..."}
+{"id":"msg_02","senderId":"worker-1","content":"了解です","createdAt":"..."}
+```
+
+**メッセージの識別（各エージェントの視点）**:
+- `senderId` = 自分のID → 自分が送ったメッセージ
+- `senderId` ≠ 自分のID → 相手から受け取ったメッセージ
+- `receiverId`（自分が送った場合のみ存在）→ 誰に送ったか
+
+### 2.3.2 ファイル形式: JSONL
+
 **chat.jsonl**（1行1メッセージ、追記型）:
 ```jsonl
-{"id":"msg_01HJ...","sender":"user","content":"タスクAの進捗を教えて","createdAt":"2026-01-11T10:00:00Z"}
-{"id":"msg_01HK...","sender":"agent","content":"タスクAは現在実装中です。","createdAt":"2026-01-11T10:00:03Z"}
-{"id":"msg_01HL...","sender":"user","content":"ブロッカーはある？","createdAt":"2026-01-11T10:01:00Z"}
+{"id":"msg_01HJ...","senderId":"owner-1","receiverId":"worker-1","content":"タスクAの進捗を教えて","createdAt":"2026-01-11T10:00:00Z"}
+{"id":"msg_01HK...","senderId":"worker-1","content":"タスクAは現在実装中です。","createdAt":"2026-01-11T10:00:03Z"}
+{"id":"msg_01HL...","senderId":"owner-1","receiverId":"worker-1","content":"ブロッカーはある？","createdAt":"2026-01-11T10:01:00Z"}
 ```
 
 **JSONL採用理由**:
@@ -117,7 +166,8 @@ AgentChatView (VStack)
 // Sources/Domain/Entities/ChatMessage.swift
 public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
     public let id: ChatMessageID
-    public let sender: SenderType
+    public let senderId: AgentID              // 送信者のエージェントID
+    public let receiverId: AgentID?           // 受信者のエージェントID（送信者のストレージのみ）
     public let content: String
     public let createdAt: Date
 
@@ -126,13 +176,10 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
     public let relatedHandoffId: HandoffID?
 }
 
-public enum SenderType: String, Codable, Sendable {
-    case user   // 人間ユーザー（PMアプリ操作者）
-    case agent  // AIエージェント
-}
-
 public typealias ChatMessageID = Tagged<ChatMessage, String>
 ```
+
+**注意**: 以前の `SenderType` enum（`user` | `agent`）は廃止し、具体的な `AgentID` で送信者を識別する。これにより人間エージェント同士、AIエージェント同士の会話も同じモデルで扱える。
 
 ---
 
@@ -537,10 +584,14 @@ private func getPendingMessages(session: AgentSession) throws -> [[String: Any]]
 ```swift
 static let respondChat: [String: Any] = [
     "name": "respond_chat",
-    "description": "ユーザーへのチャット応答を送信します",
+    "description": "チャット応答を送信します",
     "inputSchema": [
         "type": "object",
         "properties": [
+            "receiver_id": [
+                "type": "string",
+                "description": "応答先のエージェントID"
+            ],
             "content": [
                 "type": "string",
                 "description": "応答メッセージ本文"
@@ -550,14 +601,14 @@ static let respondChat: [String: Any] = [
                 "description": "関連タスクID（オプション）"
             ]
         ],
-        "required": ["content"]
+        "required": ["receiver_id", "content"]
     ]
 ]
 ```
 
 **実装**:
 ```swift
-private func respondChat(session: AgentSession, content: String, relatedTaskId: String?) throws -> [String: Any] {
+private func respondChat(session: AgentSession, content: String, relatedTaskId: String?, receiverId: String) throws -> [String: Any] {
     guard let project = try projectRepository.findById(session.projectId),
           let workingDir = project.workingDirectory else {
         throw MCPError.projectNotFound(session.projectId.value)
@@ -566,13 +617,16 @@ private func respondChat(session: AgentSession, content: String, relatedTaskId: 
     let chatRepo = ChatFileRepository(baseDirectory: URL(fileURLWithPath: workingDir))
     let message = ChatMessage(
         id: ChatMessageID(UUID().uuidString),
-        sender: .agent,
+        senderId: session.agentId,              // 送信者 = 現在のエージェント
+        receiverId: AgentID(receiverId),        // 受信者 = 引数で指定
         content: content,
         createdAt: Date(),
         relatedTaskId: relatedTaskId.map { TaskID($0) }
     )
 
-    try chatRepo.saveMessage(message, agentId: session.agentId)
+    // 双方向保存: 送信者と受信者の両方のストレージに書き込み
+    try chatRepo.saveMessageToSender(message, agentId: session.agentId)
+    try chatRepo.saveMessageToReceiver(message, agentId: AgentID(receiverId))
 
     return ["success": true, "message_id": message.id.value]
 }
@@ -605,9 +659,17 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
 ### 9.10 ファイル形式
 
 **chat.jsonl**（JSONL形式、追記型）:
+
+送信者のストレージ（例: owner-1）:
 ```jsonl
-{"id":"msg_01","sender":"user","content":"タスクAの進捗は？","createdAt":"2026-01-11T10:00:00Z"}
-{"id":"msg_02","sender":"agent","content":"現在50%です","createdAt":"2026-01-11T10:00:05Z"}
+{"id":"msg_01","senderId":"owner-1","receiverId":"worker-1","content":"タスクAの進捗は？","createdAt":"2026-01-11T10:00:00Z"}
+{"id":"msg_02","senderId":"worker-1","content":"現在50%です","createdAt":"2026-01-11T10:00:05Z"}
+```
+
+受信者のストレージ（例: worker-1）:
+```jsonl
+{"id":"msg_01","senderId":"owner-1","content":"タスクAの進捗は？","createdAt":"2026-01-11T10:00:00Z"}
+{"id":"msg_02","senderId":"worker-1","receiverId":"owner-1","content":"現在50%です","createdAt":"2026-01-11T10:00:05Z"}
 ```
 
 - 未読管理はファイル読み込み時に判定（DBで管理しない）
@@ -713,14 +775,15 @@ Response:
   "messages": [
     {
       "id": "msg_01HJ...",
-      "sender": "user",
+      "senderId": "owner-1",
+      "receiverId": "worker-1",
       "content": "タスクAの進捗は？",
       "createdAt": "2026-01-11T10:00:00Z",
       "relatedTaskId": null
     },
     {
       "id": "msg_01HK...",
-      "sender": "agent",
+      "senderId": "worker-1",
       "content": "現在50%完了しています。",
       "createdAt": "2026-01-11T10:00:05Z",
       "relatedTaskId": "task_123"
@@ -728,6 +791,9 @@ Response:
   ],
   "hasMore": false
 }
+
+注意: `receiverId` は自分が送信したメッセージにのみ存在する。
+相手から受信したメッセージには `receiverId` がない（自分のストレージにある = 自分宛て）。
 ```
 
 #### B. メッセージ送信
@@ -746,7 +812,8 @@ Request Body:
 Response:
 {
   "id": "msg_01HL...",
-  "sender": "user",  // または "agent"（MCPからの場合）
+  "senderId": "owner-1",        // 送信者のエージェントID
+  "receiverId": "worker-1",     // 受信者のエージェントID（送信者側レスポンス）
   "content": "タスクAの進捗を教えて",
   "createdAt": "2026-01-11T10:01:00Z",
   "relatedTaskId": "task_123"
@@ -795,28 +862,31 @@ Error Response (400 Bad Request):
 
 ```json
 {
+  "my_agent_id": "worker-1",
   "context_messages": [
     {
       "id": "msg_01",
-      "sender": "user",
+      "senderId": "owner-1",
       "content": "タスクAの進捗は？",
       "createdAt": "2026-01-11T10:00:00Z"
     },
     {
       "id": "msg_02",
-      "sender": "agent",
+      "senderId": "worker-1",
+      "receiverId": "owner-1",
       "content": "50%完了しています",
       "createdAt": "2026-01-11T10:00:05Z"
     },
     {
       "id": "msg_03",
-      "sender": "user",
+      "senderId": "owner-1",
       "content": "ブロッカーはある？",
       "createdAt": "2026-01-11T10:01:00Z"
     },
     {
       "id": "msg_04",
-      "sender": "agent",
+      "senderId": "worker-1",
+      "receiverId": "owner-1",
       "content": "依存タスクBが未完了です",
       "createdAt": "2026-01-11T10:01:05Z"
     }
@@ -824,7 +894,7 @@ Error Response (400 Bad Request):
   "pending_messages": [
     {
       "id": "msg_05",
-      "sender": "user",
+      "senderId": "owner-1",
       "content": "じゃあそれを解決して",
       "createdAt": "2026-01-11T10:02:00Z"
     }
@@ -836,10 +906,15 @@ Error Response (400 Bad Request):
 
 | フィールド | 説明 |
 |-----------|------|
+| `my_agent_id` | 自分のエージェントID。`senderId` と比較して送受信を判別する。 |
 | `context_messages` | 直近の会話履歴（最大20件）。文脈理解用。 |
 | `pending_messages` | 未読メッセージ（最大10件）。応答が必要なもの。 |
 | `total_history_count` | 全履歴件数（参考情報） |
 | `context_truncated` | コンテキストが省略されているか |
+
+**送受信の判別方法**:
+- `senderId == my_agent_id` → 自分が送ったメッセージ
+- `senderId != my_agent_id` → 相手から受け取ったメッセージ（応答先は `senderId`）
 
 ### 11.7 Web UI実装
 

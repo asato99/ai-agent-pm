@@ -1451,13 +1451,16 @@ public final class MCPServer {
         if pendingPurposeExpired {
             let ttlMinutes = Int(configuredTTL) / 60
             // チャットにシステムエラーメッセージを書き込む
+            // System messages use a special "system" senderId, no dual write needed
             let errorMessage = ChatMessage(
                 id: ChatMessageID(value: "sys_\(UUID().uuidString)"),
-                sender: .system,
+                senderId: AgentID(value: "system"),
+                receiverId: nil,  // System messages don't have a specific receiver
                 content: "エージェントの起動がタイムアウトしました（\(ttlMinutes)分経過）。再度メッセージを送信してください。",
                 createdAt: Date()
             )
             do {
+                // System messages are saved only to the agent's storage (no dual write)
                 try chatRepository.saveMessage(errorMessage, projectId: projId, agentId: id)
                 Self.log("[MCP] getAgentAction: Wrote timeout error message to chat")
             } catch {
@@ -1998,7 +2001,7 @@ public final class MCPServer {
         // 1.6. Chat機能: purpose=chat の場合はチャット応答フローへ
         if session.purpose == .chat {
             // 未読メッセージがあるか確認してからアクションを決定
-            let pendingMessages = try chatRepository.findUnreadUserMessages(
+            let pendingMessages = try chatRepository.findUnreadMessages(
                 projectId: session.projectId,
                 agentId: session.agentId
             )
@@ -3894,13 +3897,16 @@ public final class MCPServer {
         let projId = ProjectID(value: projectId)
 
         // エラーメッセージをチャットに保存
+        // System error messages use a special "system" senderId, no dual write needed
         let message = ChatMessage(
             id: ChatMessageID(value: "err_\(UUID().uuidString)"),
-            sender: .system,
+            senderId: AgentID(value: "system"),
+            receiverId: nil,  // System messages don't have a specific receiver
             content: "⚠️ エージェントエラー:\n\(errorMessage)",
             createdAt: Date()
         )
 
+        // System messages are saved only to the agent's storage (no dual write)
         try chatRepository.saveMessage(message, projectId: projId, agentId: agId)
         Self.log("[MCP] Error message saved to chat: \(message.id.value)")
 
@@ -3938,6 +3944,7 @@ public final class MCPServer {
         // PendingMessageIdentifier を使用してコンテキストと未読を分離
         let result = PendingMessageIdentifier.separateContextAndPending(
             allMessages,
+            agentId: session.agentId,
             contextLimit: PendingMessageIdentifier.defaultContextLimit,  // 20
             pendingLimit: PendingMessageIdentifier.defaultPendingLimit   // 10
         )
@@ -3949,22 +3956,30 @@ public final class MCPServer {
 
         // コンテキストメッセージを辞書に変換
         let contextDicts = result.contextMessages.map { message -> [String: Any] in
-            [
+            var dict: [String: Any] = [
                 "id": message.id.value,
-                "sender": message.sender.rawValue,
+                "sender_id": message.senderId.value,
                 "content": message.content,
                 "created_at": formatter.string(from: message.createdAt)
             ]
+            if let receiverId = message.receiverId {
+                dict["receiver_id"] = receiverId.value
+            }
+            return dict
         }
 
         // 未読メッセージを辞書に変換
         let pendingDicts = result.pendingMessages.map { message -> [String: Any] in
-            [
+            var dict: [String: Any] = [
                 "id": message.id.value,
-                "sender": message.sender.rawValue,
+                "sender_id": message.senderId.value,
                 "content": message.content,
                 "created_at": formatter.string(from: message.createdAt)
             ]
+            if let receiverId = message.receiverId {
+                dict["receiver_id"] = receiverId.value
+            }
+            return dict
         }
 
         // 指示文を生成
@@ -3991,25 +4006,48 @@ public final class MCPServer {
 
     /// respond_chat - チャット応答を保存
     /// エージェントがユーザーメッセージに対する応答を保存する
+    /// Dual write: saves to both agent's and receiver's storage
     private func respondChat(session: AgentSession, content: String) throws -> [String: Any] {
         Self.log("[MCP] respondChat called: agentId='\(session.agentId.value)', content length=\(content.count)")
+
+        // Find unread messages to determine who to respond to
+        let unreadMessages = try chatRepository.findUnreadMessages(
+            projectId: session.projectId,
+            agentId: session.agentId
+        )
+
+        // Get the receiver (the sender of the most recent unread message)
+        // If no unread messages, use a fallback (save only to agent's own storage)
+        let receiverId: AgentID? = unreadMessages.last?.senderId
 
         // エージェント応答メッセージを作成
         let message = ChatMessage(
             id: ChatMessageID.generate(),
-            sender: .agent,
+            senderId: session.agentId,
+            receiverId: receiverId,
             content: content,
             createdAt: Date()
         )
 
-        // メッセージを保存
-        try chatRepository.saveMessage(message, projectId: session.projectId, agentId: session.agentId)
-
-        Self.log("[MCP] Chat response saved: \(message.id.value)")
+        // メッセージを保存 (dual write if receiver is known)
+        if let receiverAgentId = receiverId {
+            try chatRepository.saveMessageDualWrite(
+                message,
+                projectId: session.projectId,
+                senderAgentId: session.agentId,
+                receiverAgentId: receiverAgentId
+            )
+            Self.log("[MCP] Chat response saved with dual write: \(message.id.value) → \(receiverAgentId.value)")
+        } else {
+            // No receiver known, save only to agent's own storage
+            try chatRepository.saveMessage(message, projectId: session.projectId, agentId: session.agentId)
+            Self.log("[MCP] Chat response saved (no receiver): \(message.id.value)")
+        }
 
         return [
             "success": true,
             "message_id": message.id.value,
+            "receiver_id": receiverId?.value as Any,
             "instruction": "応答を保存しました。get_next_action を呼び出して次の指示を確認してください。"
         ]
     }
