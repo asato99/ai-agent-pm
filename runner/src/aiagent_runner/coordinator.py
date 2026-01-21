@@ -15,6 +15,7 @@ from typing import Optional, TextIO
 
 from aiagent_runner.coordinator_config import CoordinatorConfig
 from aiagent_runner.mcp_client import MCPClient, MCPError
+from aiagent_runner.platform import get_data_directory
 
 logger = logging.getLogger(__name__)
 
@@ -110,12 +111,8 @@ class Coordinator:
             # プロジェクトのワーキングディレクトリ基準
             log_dir = Path(working_dir) / ".aiagent" / "logs" / agent_id
         else:
-            # フォールバック: アプリ管轄ディレクトリ
-            log_dir = (
-                Path.home()
-                / "Library" / "Application Support" / "AIAgentPM"
-                / "agent_logs" / agent_id
-            )
+            # フォールバック: プラットフォーム固有のデータディレクトリ
+            log_dir = get_data_directory() / "agent_logs" / agent_id
 
         log_dir.mkdir(parents=True, exist_ok=True)
         return log_dir
@@ -505,8 +502,17 @@ class Coordinator:
             if not connection_path.startswith("http"):
                 connection_path = os.path.expanduser(connection_path)
         else:
-            connection_path = os.path.expanduser(
-                "~/Library/Application Support/AIAgentPM/mcp.sock"
+            # Use platform-specific default socket path
+            from aiagent_runner.platform import get_default_socket_path
+            connection_path = get_default_socket_path()
+
+        # Validate connection_path (empty on Windows without explicit config)
+        if not connection_path:
+            raise ValueError(
+                "MCP connection path is required. "
+                "On Windows, Unix sockets are not supported. "
+                "Please set 'mcp_socket_path' to an HTTP URL (e.g., http://hostname:8081/mcp) "
+                "in your coordinator.yaml configuration."
             )
 
         # Determine transport type based on connection path

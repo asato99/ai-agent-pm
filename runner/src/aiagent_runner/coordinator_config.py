@@ -9,6 +9,8 @@ from typing import Optional
 
 import yaml
 
+from aiagent_runner.platform import get_default_socket_path, get_log_directory
+
 
 @dataclass
 class AIProviderConfig:
@@ -45,8 +47,8 @@ class CoordinatorConfig:
     max_concurrent: int = 3
 
     # MCP connection (Unix socket or HTTP URL - used by both Coordinator and Agent Instances)
-    # Unix socket: ~/Library/Application Support/AIAgentPM/mcp.sock
-    # HTTP URL: http://hostname:port/mcp
+    # Unix socket: platform-specific (see aiagent_runner.platform)
+    # HTTP URL: http://hostname:port/mcp (required for Windows)
     mcp_socket_path: Optional[str] = None
 
     # Phase 5: Coordinator token for Coordinator-only API authorization
@@ -80,10 +82,9 @@ class CoordinatorConfig:
             raise ValueError("max_concurrent must be positive")
 
         # Set default MCP socket path if not specified
+        # Uses platform-specific default (empty on Windows - requires HTTP)
         if self.mcp_socket_path is None:
-            self.mcp_socket_path = os.path.expanduser(
-                "~/Library/Application Support/AIAgentPM/mcp.sock"
-            )
+            self.mcp_socket_path = get_default_socket_path()
 
         # Phase 5: Set coordinator token from environment if not specified
         if self.coordinator_token is None:
@@ -106,9 +107,10 @@ class CoordinatorConfig:
         max_concurrent: 3
 
         # MCP connection: Unix socket (local) or HTTP URL (remote)
-        # Local: ~/Library/Application Support/AIAgentPM/mcp.sock
-        # Remote: http://192.168.1.100:8080/mcp
-        mcp_socket_path: ~/Library/Application Support/AIAgentPM/mcp.sock
+        # Local (macOS): ~/Library/Application Support/AIAgentPM/mcp.sock
+        # Local (Linux): ~/.local/share/aiagent-runner/mcp.sock
+        # Windows/Remote: http://192.168.1.100:8080/mcp (HTTP required)
+        mcp_socket_path: http://192.168.1.100:8080/mcp
 
         # Phase 5: Coordinator token for Coordinator-only API calls
         # Can also be set via MCP_COORDINATOR_TOKEN environment variable

@@ -19,6 +19,8 @@ try:
 except ImportError:
     HAS_AIOHTTP = False
 
+from aiagent_runner.platform import get_default_socket_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,9 +124,9 @@ class MCPClient:
 
         Args:
             socket_path: Path to MCP Unix socket, or HTTP URL for remote connections.
-                        Unix socket: ~/Library/Application Support/AIAgentPM/mcp.sock
-                        HTTP URL: http://hostname:port/mcp
-                        Defaults to standard Unix socket location.
+                        Unix socket: platform-specific (see aiagent_runner.platform)
+                        HTTP URL: http://hostname:port/mcp (required for Windows)
+                        Defaults to platform-specific location.
             coordinator_token: Token for Coordinator-only API calls (Phase 5).
                               If not provided, reads from MCP_COORDINATOR_TOKEN env var.
         """
@@ -150,10 +152,8 @@ class MCPClient:
         self._coordinator_token = coordinator_token or os.environ.get("MCP_COORDINATOR_TOKEN")
 
     def _default_socket_path(self) -> str:
-        """Get default MCP socket path."""
-        return os.path.expanduser(
-            "~/Library/Application Support/AIAgentPM/mcp.sock"
-        )
+        """Get default MCP socket path (platform-specific)."""
+        return get_default_socket_path()
 
     async def _call_tool(self, tool_name: str, args: dict) -> dict:
         """Call an MCP tool via Unix socket or HTTP.
