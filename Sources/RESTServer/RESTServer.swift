@@ -8,11 +8,24 @@ import Infrastructure
 import UseCase
 import Domain
 // MCPServer types are compiled directly in this target (not imported as module)
+// (os.log import removed - using file-based logging instead)
 
-// Debug logging helper
+// Debug logging helper - uses file-based logging for reliable debugging
+// Reference: docs/guide/LOGGING.md - ファイルベースログの推奨
 private func debugLog(_ message: String) {
-    let line = "[RESTServer] \(message)\n"
-    FileHandle.standardError.write(line.data(using: .utf8)!)
+    let logFile = "/tmp/restserver_debug.log"
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let logMessage = "[\(timestamp)] \(message)\n"
+
+    if let handle = FileHandle(forWritingAtPath: logFile) {
+        handle.seekToEndOfFile()
+        if let data = logMessage.data(using: .utf8) {
+            handle.write(data)
+        }
+        handle.closeFile()
+    } else {
+        FileManager.default.createFile(atPath: logFile, contents: logMessage.data(using: .utf8), attributes: nil)
+    }
 }
 
 /// REST API Server for web-ui
@@ -32,6 +45,8 @@ final class RESTServer {
     private let appSettingsRepository: AppSettingsRepository
     /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.2
     private let workingDirectoryRepository: AgentWorkingDirectoryRepository
+    /// 参照: docs/requirements/PROJECTS.md - エージェント割り当て
+    private let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository
 
     // MCP Server for HTTP transport
     // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
@@ -60,6 +75,7 @@ final class RESTServer {
         self.eventRepository = EventRepository(database: database)
         self.appSettingsRepository = AppSettingsRepository(database: database)
         self.workingDirectoryRepository = AgentWorkingDirectoryRepository(database: database)
+        self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
     }
 
     func run() async throws {
@@ -412,7 +428,13 @@ final class RESTServer {
             return errorResponse(status: .unauthorized, message: "Not authenticated")
         }
 
-        let projects = try projectRepository.findAll()
+        // Return only projects that the logged-in agent is assigned to
+        // Reference: docs/requirements/PROJECTS.md - Agent Assignment
+        let projects = try projectAgentAssignmentRepository.findProjectsByAgent(agentId)
+        debugLog("listProjects: agentId=\(agentId.value), assigned projects count=\(projects.count)")
+        for p in projects {
+            debugLog("  - assigned project: \(p.id.value) (\(p.name))")
+        }
         var summaries: [ProjectSummaryDTO] = []
 
         for project in projects {
@@ -421,6 +443,7 @@ final class RESTServer {
             summaries.append(ProjectSummaryDTO(from: project, taskCounts: counts.counts, myTaskCount: counts.myTasks))
         }
 
+        debugLog("listProjects: returning \(summaries.count) projects")
         return jsonResponse(summaries)
     }
 

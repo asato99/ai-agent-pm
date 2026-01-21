@@ -646,6 +646,39 @@ final class HTTPIntegrationTests: XCTestCase {
         XCTAssertTrue(json is [Any], "Response should be an array")
     }
 
+    /// Verify that GET /api/projects returns only projects the logged-in agent is assigned to
+    /// Reference: docs/requirements/PROJECTS.md - Agent Assignment
+    func testListProjectsReturnsOnlyAssignedProjects() async throws {
+        // Create a second project that the test agent is NOT assigned to
+        let unassignedProjectId = ProjectID(value: "prj_unassigned")
+        let unassignedProject = Project(
+            id: unassignedProjectId,
+            name: "Unassigned Project",
+            description: "Project that test agent is not assigned to"
+        )
+        try projectRepository.save(unassignedProject)
+
+        // Login and get projects
+        let token = try await login()
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects",
+            token: token
+        )
+
+        XCTAssertEqual(response.statusCode, 200, "GET /api/projects should return 200")
+
+        // Parse response
+        let json = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+        // Should only return the assigned project, not the unassigned one
+        XCTAssertEqual(json.count, 1, "Should return only 1 project (the one agent is assigned to)")
+
+        let projectIds = json.compactMap { $0["id"] as? String }
+        XCTAssertTrue(projectIds.contains(testProjectId.value), "Should contain the assigned project")
+        XCTAssertFalse(projectIds.contains(unassignedProjectId.value), "Should NOT contain the unassigned project")
+    }
+
     // MARK: - API 404 Tests
 
     func testUnknownAPIEndpointReturns404() async throws {

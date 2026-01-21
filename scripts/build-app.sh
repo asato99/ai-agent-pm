@@ -1,11 +1,77 @@
 #!/bin/bash
 # scripts/build-app.sh
 # Web UIビルド + macOSアプリビルドを一括実行
+#
+# オプション:
+#   --clean    DerivedDataをクリーンしてからビルド
+#   --launch   ビルド後にアプリを起動
+#   --help     ヘルプを表示
 
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# オプション解析
+CLEAN_BUILD=false
+LAUNCH_AFTER=false
+
+for arg in "$@"; do
+    case $arg in
+        --clean)
+            CLEAN_BUILD=true
+            ;;
+        --launch)
+            LAUNCH_AFTER=true
+            ;;
+        --help)
+            echo "Usage: $0 [--clean] [--launch]"
+            echo "  --clean   Clean DerivedData before build"
+            echo "  --launch  Launch app after build"
+            exit 0
+            ;;
+    esac
+done
+
 echo "📁 Project: $PROJECT_DIR"
+
+# 0. 古いプロセスを終了（最新のビルドを確実に反映するため）
+echo ""
+echo "🛑 Stopping existing processes..."
+
+# AIAgentPM.appを終了
+if pgrep -f "AIAgentPM.app" > /dev/null 2>&1; then
+    pkill -f "AIAgentPM.app" 2>/dev/null || true
+    echo "   Stopped: AIAgentPM.app"
+    sleep 1
+fi
+
+# rest-server-pmを終了
+if pgrep -f "rest-server-pm" > /dev/null 2>&1; then
+    pkill -f "rest-server-pm" 2>/dev/null || true
+    echo "   Stopped: rest-server-pm"
+fi
+
+# mcp-server-pm daemonを終了（Claude Codeで使用中のものは除外）
+# 注意: .build/debug/mcp-server-pm はClaude Code MCPで使用中なので終了しない
+if pgrep -f "DerivedData.*mcp-server-pm daemon" > /dev/null 2>&1; then
+    pkill -f "DerivedData.*mcp-server-pm daemon" 2>/dev/null || true
+    echo "   Stopped: mcp-server-pm daemon (DerivedData)"
+fi
+
+echo "   Done"
+
+# クリーンビルドオプション
+if [ "$CLEAN_BUILD" = true ]; then
+    echo ""
+    echo "🧹 Cleaning DerivedData..."
+    DERIVED_DATA_PATH=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name "AIAgentPM-*" -type d 2>/dev/null | head -1)
+    if [ -n "$DERIVED_DATA_PATH" ]; then
+        rm -rf "$DERIVED_DATA_PATH"
+        echo "   Removed: $DERIVED_DATA_PATH"
+    else
+        echo "   No DerivedData found"
+    fi
+fi
 
 # 1. Web UIビルド
 echo ""
@@ -49,6 +115,16 @@ fi
 
 echo ""
 echo "✅ Build complete!"
+
+APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Debug/AIAgentPM.app" -type d 2>/dev/null | head -1)
 echo ""
 echo "📍 App location:"
-echo "   $(find ~/Library/Developer/Xcode/DerivedData -name 'AIAgentPM.app' -type d 2>/dev/null | head -1)"
+echo "   $APP_PATH"
+
+# --launch オプションでアプリを起動
+if [ "$LAUNCH_AFTER" = true ] && [ -n "$APP_PATH" ]; then
+    echo ""
+    echo "🚀 Launching app..."
+    open "$APP_PATH"
+    echo "   App started"
+fi
