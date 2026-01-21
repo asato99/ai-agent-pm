@@ -50,6 +50,8 @@ final class RESTServer {
     /// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
     private let chatRepository: ChatFileRepository
     private let directoryManager: ProjectDirectoryManager
+    /// 参照: docs/design/CHAT_FEATURE.md - MCP連携設計
+    private let pendingAgentPurposeRepository: PendingAgentPurposeRepository
 
     // MCP Server for HTTP transport
     // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
@@ -85,6 +87,8 @@ final class RESTServer {
             directoryManager: directoryManager,
             projectRepository: projectRepository
         )
+        // 参照: docs/design/CHAT_FEATURE.md - MCP連携設計
+        self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
     }
 
     func run() async throws {
@@ -1291,6 +1295,19 @@ final class RESTServer {
 
         do {
             try chatRepository.saveMessage(message, projectId: projectId, agentId: targetAgentId)
+
+            // Record pending purpose to trigger agent spawn
+            // 参照: docs/design/CHAT_FEATURE.md - 9.3 エージェント起動フロー
+            let pendingPurpose = PendingAgentPurpose(
+                agentId: targetAgentId,
+                projectId: projectId,
+                purpose: .chat,
+                createdAt: Date(),
+                startedAt: nil
+            )
+            try pendingAgentPurposeRepository.save(pendingPurpose)
+            debugLog("Recorded pending purpose for chat: agent=\(targetAgentId.value), project=\(projectId.value)")
+
             return jsonResponse(ChatMessageDTO(from: message), status: .created)
         } catch {
             debugLog("Failed to save chat message: \(error)")
