@@ -21,6 +21,12 @@ public final class DatabaseSetup {
             )
         }
 
+        // 既存DBがある場合、外部キー無効状態でクリーンアップを先に実行
+        // （マイグレーション前に外部キー違反を解消）
+        if FileManager.default.fileExists(atPath: path) {
+            try cleanupOrphanedRecords(at: path)
+        }
+
         // WALモードを有効化した設定を作成
         var configuration = Configuration()
 
@@ -43,6 +49,72 @@ public final class DatabaseSetup {
         try migrate(dbQueue)
 
         return dbQueue
+    }
+
+    /// 外部キー無効状態で孤立レコードをクリーンアップ
+    /// マイグレーション前に外部キー違反を解消する
+    private static func cleanupOrphanedRecords(at path: String) throws {
+        var cleanupConfig = Configuration()
+        cleanupConfig.busyMode = .timeout(5.0)
+        cleanupConfig.prepareDatabase { db in
+            // 外部キーを無効化した状態でクリーンアップ
+            try db.execute(sql: "PRAGMA foreign_keys = OFF")
+        }
+
+        let cleanupQueue = try DatabaseQueue(path: path, configuration: cleanupConfig)
+        try cleanupQueue.write { db in
+            let hasTasks = try tableExists(db, name: "tasks")
+            let hasAgents = try tableExists(db, name: "agents")
+            let hasProjects = try tableExists(db, name: "projects")
+
+            // execution_logs の孤立レコードを削除
+            if try tableExists(db, name: "execution_logs") && hasTasks {
+                try db.execute(sql: """
+                    DELETE FROM execution_logs
+                    WHERE task_id NOT IN (SELECT id FROM tasks)
+                """)
+            }
+
+            // contexts の孤立レコードを削除
+            if try tableExists(db, name: "contexts") && hasTasks {
+                try db.execute(sql: """
+                    DELETE FROM contexts
+                    WHERE task_id NOT IN (SELECT id FROM tasks)
+                """)
+            }
+
+            // agent_sessions の孤立レコードを削除
+            if try tableExists(db, name: "agent_sessions") && hasAgents {
+                try db.execute(sql: """
+                    DELETE FROM agent_sessions
+                    WHERE agent_id NOT IN (SELECT id FROM agents)
+                """)
+            }
+
+            // handoffs の孤立レコードを削除
+            if try tableExists(db, name: "handoffs") && hasTasks {
+                try db.execute(sql: """
+                    DELETE FROM handoffs
+                    WHERE task_id NOT IN (SELECT id FROM tasks)
+                """)
+            }
+
+            // tasks の孤立レコードを削除（存在しないプロジェクト参照）
+            if hasTasks && hasProjects {
+                try db.execute(sql: """
+                    DELETE FROM tasks
+                    WHERE project_id NOT IN (SELECT id FROM projects)
+                """)
+            }
+        }
+    }
+
+    /// テーブルが存在するかチェック
+    private static func tableExists(_ db: Database, name: String) throws -> Bool {
+        try Bool.fetchOne(db, sql: """
+            SELECT COUNT(*) > 0 FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+        """, arguments: [name]) ?? false
     }
 
     /// マイグレーションを実行
@@ -748,6 +820,29 @@ public final class DatabaseSetup {
             )
             try db.create(indexOn: "agent_working_directories", columns: ["agent_id"])
             try db.create(indexOn: "agent_working_directories", columns: ["project_id"])
+        }
+
+        // v34: セッションアイドルタイムアウト管理
+        // 参照: Web UIセッション管理 - アイドルタイムアウト
+        // 最終アクティビティ日時を記録し、一定時間操作がなければセッション無効化
+        migrator.registerMigration("v34_session_last_activity") { db in
+            try db.alter(table: "agent_sessions") { t in
+                t.add(column: "last_activity_at", .datetime)
+            }
+            // 既存セッションは created_at で初期化
+            try db.execute(sql: """
+                UPDATE agent_sessions SET last_activity_at = created_at
+                WHERE last_activity_at IS NULL
+            """)
+        }
+
+        // v35: 孤立した execution_logs のクリーンアップ
+        // 外部キー制約違反を防ぐため、存在しないタスクを参照するレコードを削除
+        migrator.registerMigration("v35_cleanup_orphaned_execution_logs") { db in
+            try db.execute(sql: """
+                DELETE FROM execution_logs
+                WHERE task_id NOT IN (SELECT id FROM tasks)
+            """)
         }
 
         try migrator.migrate(dbQueue)

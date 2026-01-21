@@ -1,4 +1,5 @@
 import type { ApiResult } from '@/types'
+import { useAuthStore } from '@/stores/authStore'
 
 // API base URL
 // - Production (served from same origin): '/api'
@@ -56,6 +57,17 @@ async function request<T>(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
+
+      // 401 Unauthorized - セッション無効または期限切れの場合は自動ログアウト
+      if (response.status === 401) {
+        // Zustand store の logout を直接呼び出し
+        useAuthStore.getState().logout()
+        // ログインページへリダイレクト（現在のページが既にログインページでない場合）
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
+      }
+
       return {
         error: {
           message: errorData.message || `HTTP ${response.status}`,

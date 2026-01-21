@@ -24,6 +24,8 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var purpose: String?
     var expiresAt: Date
     var createdAt: Date
+    /// アイドルタイムアウト管理用: 最終アクティビティ日時
+    var lastActivityAt: Date?
     // Model verification fields
     var reportedProvider: String?
     var reportedModel: String?
@@ -38,6 +40,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case purpose
         case expiresAt = "expires_at"
         case createdAt = "created_at"
+        case lastActivityAt = "last_activity_at"
         case reportedProvider = "reported_provider"
         case reportedModel = "reported_model"
         case modelVerified = "model_verified"
@@ -53,6 +56,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             purpose: AgentPurpose(rawValue: purpose ?? "task") ?? .task,
             expiresAt: expiresAt,
             createdAt: createdAt,
+            lastActivityAt: lastActivityAt,
             reportedProvider: reportedProvider,
             reportedModel: reportedModel,
             modelVerified: modelVerified,
@@ -69,6 +73,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             purpose: session.purpose.rawValue,
             expiresAt: session.expiresAt,
             createdAt: session.createdAt,
+            lastActivityAt: session.lastActivityAt,
             reportedProvider: session.reportedProvider,
             reportedModel: session.reportedModel,
             modelVerified: session.modelVerified,
@@ -196,6 +201,16 @@ public final class AgentSessionRepository: AgentSessionRepositoryProtocol, Senda
                 .order(Column("created_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }
+        }
+    }
+
+    /// 最終アクティビティ日時を更新（アイドルタイムアウト管理用）
+    public func updateLastActivity(token: String, at date: Date = Date()) throws {
+        try db.write { db in
+            try db.execute(
+                sql: "UPDATE agent_sessions SET last_activity_at = ? WHERE token = ?",
+                arguments: [date, token]
+            )
         }
     }
 }

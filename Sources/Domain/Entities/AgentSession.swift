@@ -25,6 +25,10 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     /// セッションの起動理由（task=タスク実行, chat=チャット応答）
     public var purpose: AgentPurpose
 
+    // MARK: - Activity Tracking
+    /// 最終アクティビティ日時（アイドルタイムアウト判定用）
+    public var lastActivityAt: Date
+
     // MARK: - Model Verification Fields
     /// Agent Instanceが申告したプロバイダー
     public var reportedProvider: String?
@@ -64,6 +68,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.purpose = purpose
         self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(Self.defaultExpirationInterval)
         self.createdAt = createdAt
+        self.lastActivityAt = createdAt  // 作成時が最初のアクティビティ
         self.reportedProvider = nil
         self.reportedModel = nil
         self.modelVerified = nil
@@ -79,6 +84,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         purpose: AgentPurpose = .task,
         expiresAt: Date,
         createdAt: Date,
+        lastActivityAt: Date? = nil,
         reportedProvider: String? = nil,
         reportedModel: String? = nil,
         modelVerified: Bool? = nil,
@@ -91,6 +97,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.purpose = purpose
         self.expiresAt = expiresAt
         self.createdAt = createdAt
+        self.lastActivityAt = lastActivityAt ?? createdAt  // 既存データはcreatedAtで初期化
         self.reportedProvider = reportedProvider
         self.reportedModel = reportedModel
         self.modelVerified = modelVerified

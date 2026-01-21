@@ -23,6 +23,9 @@ public struct AuthenticatedContext: RequestContext {
 public struct AuthMiddleware: MiddlewareProtocol {
     public typealias Context = AuthenticatedContext
 
+    /// アイドルタイムアウト時間（30分）
+    private static let idleTimeoutInterval: TimeInterval = 30 * 60
+
     private let sessionRepository: AgentSessionRepository
 
     public init(sessionRepository: AgentSessionRepository) {
@@ -52,6 +55,15 @@ public struct AuthMiddleware: MiddlewareProtocol {
             if session.expiresAt < Date() {
                 return unauthorizedResponse(message: "Session expired")
             }
+
+            // Check idle timeout (30 minutes of inactivity)
+            let idleThreshold = session.lastActivityAt.addingTimeInterval(Self.idleTimeoutInterval)
+            if idleThreshold < Date() {
+                return unauthorizedResponse(message: "Session idle timeout")
+            }
+
+            // Update last activity timestamp
+            try sessionRepository.updateLastActivity(token: token)
 
             // Set authenticated context
             var mutableContext = context
