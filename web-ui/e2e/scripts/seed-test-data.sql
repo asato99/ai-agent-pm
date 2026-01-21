@@ -1,5 +1,9 @@
 -- E2E Test Data Seed Script
 -- This script inserts test data required for E2E tests
+--
+-- IMPORTANT: This script should ONLY be run against the test database!
+-- Use setup-test-data.sh which ensures the correct database is used.
+-- NEVER run this directly against the production database.
 
 -- Clear existing test data (if any)
 DELETE FROM tasks WHERE id LIKE 'task-%' OR id LIKE 'task-2%';
