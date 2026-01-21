@@ -1,13 +1,14 @@
 import { useDraggable } from '@dnd-kit/core'
-import type { Task } from '@/types'
+import type { Task, Agent } from '@/types'
 import { TaskCard } from '../TaskCard'
 
 interface DraggableTaskCardProps {
   task: Task
+  agents?: Agent[]
   onClick: (taskId: string) => void
 }
 
-export function DraggableTaskCard({ task, onClick }: DraggableTaskCardProps) {
+export function DraggableTaskCard({ task, agents, onClick }: DraggableTaskCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   })
@@ -27,7 +28,7 @@ export function DraggableTaskCard({ task, onClick }: DraggableTaskCardProps) {
       {...listeners}
       {...attributes}
     >
-      <TaskCard task={task} onClick={onClick} />
+      <TaskCard task={task} agents={agents} onClick={onClick} />
     </div>
   )
 }

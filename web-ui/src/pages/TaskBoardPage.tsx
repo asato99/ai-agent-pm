@@ -131,6 +131,7 @@ export function TaskBoardPage() {
 
         <KanbanBoard
           tasks={tasks}
+          agents={agents}
           onTaskMove={handleTaskMove}
           onTaskClick={handleTaskClick}
         />

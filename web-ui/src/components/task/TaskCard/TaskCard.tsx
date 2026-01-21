@@ -1,7 +1,8 @@
-import type { Task, TaskPriority } from '@/types'
+import type { Task, TaskPriority, Agent } from '@/types'
 
 interface TaskCardProps {
   task: Task
+  agents?: Agent[]
   onClick?: (taskId: string) => void
 }
 
@@ -19,10 +20,15 @@ const priorityStyles: Record<TaskPriority, string> = {
   urgent: 'bg-red-100 text-red-700',
 }
 
-export function TaskCard({ task, onClick }: TaskCardProps) {
+export function TaskCard({ task, agents, onClick }: TaskCardProps) {
   const handleClick = () => {
     onClick?.(task.id)
   }
+
+  // Find assignee name from agents list
+  const assigneeName = task.assigneeId
+    ? agents?.find((a) => a.id === task.assigneeId)?.name ?? null
+    : null
 
   return (
     <div
@@ -32,11 +38,18 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
       onClick={handleClick}
     >
       <h4 className="text-sm font-medium text-gray-900 mb-2">{task.title}</h4>
-      <span
-        className={`inline-block px-2 py-1 text-xs font-medium rounded ${priorityStyles[task.priority]}`}
-      >
-        {priorityLabels[task.priority]}
-      </span>
+      <div className="flex items-center justify-between">
+        <span
+          className={`inline-block px-2 py-1 text-xs font-medium rounded ${priorityStyles[task.priority]}`}
+        >
+          {priorityLabels[task.priority]}
+        </span>
+        {assigneeName && (
+          <span className="text-xs text-gray-500 truncate max-w-[100px]" title={assigneeName}>
+            {assigneeName}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

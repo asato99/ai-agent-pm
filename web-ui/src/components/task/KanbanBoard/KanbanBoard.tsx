@@ -8,13 +8,14 @@ import {
 } from '@dnd-kit/core'
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
 import { useState } from 'react'
-import type { Task, TaskStatus } from '@/types'
+import type { Task, TaskStatus, Agent } from '@/types'
 import { TaskCard } from '../TaskCard'
 import { DraggableTaskCard } from './DraggableTaskCard'
 import { DroppableColumn } from './DroppableColumn'
 
 interface KanbanBoardProps {
   tasks: Task[]
+  agents?: Agent[]
   onTaskMove: (taskId: string, newStatus: TaskStatus) => void
   onTaskClick: (taskId: string) => void
 }
@@ -32,7 +33,7 @@ const columns: ColumnConfig[] = [
   { status: 'done', label: 'Done' },
 ]
 
-export function KanbanBoard({ tasks, onTaskMove, onTaskClick }: KanbanBoardProps) {
+export function KanbanBoard({ tasks, agents, onTaskMove, onTaskClick }: KanbanBoardProps) {
   const [activeTask, setActiveTask] = useState<Task | null>(null)
 
   const sensors = useSensors(
@@ -104,6 +105,7 @@ export function KanbanBoard({ tasks, onTaskMove, onTaskClick }: KanbanBoardProps
               <DraggableTaskCard
                 key={task.id}
                 task={task}
+                agents={agents}
                 onClick={onTaskClick}
               />
             ))}
@@ -111,7 +113,7 @@ export function KanbanBoard({ tasks, onTaskMove, onTaskClick }: KanbanBoardProps
         ))}
       </div>
       <DragOverlay>
-        {activeTask ? <TaskCard task={activeTask} /> : null}
+        {activeTask ? <TaskCard task={activeTask} agents={agents} /> : null}
       </DragOverlay>
     </DndContext>
   )
