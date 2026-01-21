@@ -26,7 +26,7 @@ for arg in "$@"; do
         --help)
             echo "Usage: $0 [--clean] [--launch]"
             echo "  --clean   Clean DerivedData before build"
-            echo "  --launch  Launch app after build"
+            echo "  --launch  Launch app after build (※Xcodeでデバッグ中は使用不可)"
             exit 0
             ;;
     esac
@@ -116,7 +116,8 @@ fi
 echo ""
 echo "✅ Build complete!"
 
-APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Debug/AIAgentPM.app" -type d 2>/dev/null | head -1)
+# Find the app (exclude Index.noindex path which may have incomplete builds)
+APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/Debug/AIAgentPM.app" -not -path "*/Index.noindex/*" -type d 2>/dev/null | head -1)
 echo ""
 echo "📍 App location:"
 echo "   $APP_PATH"

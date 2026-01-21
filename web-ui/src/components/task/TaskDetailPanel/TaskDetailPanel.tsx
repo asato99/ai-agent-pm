@@ -153,6 +153,16 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
             </div>
           </div>
 
+          {/* Assignee */}
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-1">Assignee</h3>
+            <p className="text-sm text-gray-600">
+              {task.assigneeId
+                ? agents.find((a) => a.id === task.assigneeId)?.name ?? task.assigneeId
+                : 'Unassigned'}
+            </p>
+          </div>
+
           {/* Dependencies */}
           {task.dependencies.length > 0 && (
             <div>

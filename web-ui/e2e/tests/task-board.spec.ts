@@ -99,4 +99,107 @@ test.describe('Task Board', () => {
 
     await expect(page).toHaveURL('/projects')
   })
+
+  test.describe('Task Assignee', () => {
+    test('Task detail panel displays assignee', async ({ page }) => {
+      const taskBoard = new TaskBoardPage(page)
+
+      // Open task detail
+      await taskBoard.clickTask('API実装')
+
+      // Verify assignee section is displayed
+      await expect(page.getByRole('dialog')).toBeVisible()
+      await expect(page.getByText('Assignee')).toBeVisible()
+    })
+
+    test('Task detail panel displays Unassigned when no assignee', async ({ page }) => {
+      const taskBoard = new TaskBoardPage(page)
+
+      // Open unassigned task detail (DB設計 has no assignee)
+      await taskBoard.clickTask('DB設計')
+
+      // Verify Unassigned is displayed
+      await expect(page.getByRole('dialog')).toBeVisible()
+      await expect(page.getByText('Assignee')).toBeVisible()
+      await expect(page.getByText('Unassigned')).toBeVisible()
+    })
+
+    test('Can change task assignee via edit form', async ({ page }) => {
+      const taskBoard = new TaskBoardPage(page)
+
+      // Open task detail
+      await taskBoard.clickTask('API実装')
+      await expect(page.getByRole('dialog')).toBeVisible()
+
+      // Click Edit button
+      await page.getByRole('button', { name: 'Edit' }).click()
+
+      // Edit form should be visible
+      await expect(page.getByRole('heading', { name: 'Edit Task' })).toBeVisible()
+
+      // Change assignee in dropdown
+      const assigneeSelect = page.getByLabel('Assignee')
+      await expect(assigneeSelect).toBeVisible()
+
+      // Select a different worker
+      await assigneeSelect.selectOption({ label: 'Worker 2' })
+
+      // Save changes
+      await page.getByRole('button', { name: 'Save' }).click()
+
+      // Wait for form to close and verify change
+      await expect(page.getByRole('heading', { name: 'Edit Task' })).not.toBeVisible()
+    })
+
+    test('Can set task assignee to Unassigned', async ({ page }) => {
+      const taskBoard = new TaskBoardPage(page)
+
+      // Open task detail
+      await taskBoard.clickTask('API実装')
+
+      // Click Edit button
+      await page.getByRole('button', { name: 'Edit' }).click()
+      await expect(page.getByRole('heading', { name: 'Edit Task' })).toBeVisible()
+
+      // Set to Unassigned
+      const assigneeSelect = page.getByLabel('Assignee')
+      await assigneeSelect.selectOption({ label: 'Unassigned' })
+
+      // Save changes
+      await page.getByRole('button', { name: 'Save' }).click()
+
+      // Wait for form to close
+      await expect(page.getByRole('heading', { name: 'Edit Task' })).not.toBeVisible()
+    })
+
+    // TEST: Reactivity - Detail panel should update after edit (RED expected)
+    test('Task detail panel updates reactively after editing', async ({ page }) => {
+      const taskBoard = new TaskBoardPage(page)
+
+      // Open task detail
+      await taskBoard.clickTask('API実装')
+      await expect(page.getByRole('dialog')).toBeVisible()
+
+      // Verify initial title
+      await expect(page.getByRole('heading', { name: 'API実装' })).toBeVisible()
+
+      // Click Edit button
+      await page.getByRole('button', { name: 'Edit' }).click()
+      await expect(page.getByRole('heading', { name: 'Edit Task' })).toBeVisible()
+
+      // Change the title
+      const titleInput = page.getByLabel('Title')
+      await titleInput.clear()
+      await titleInput.fill('API実装 Updated')
+
+      // Save changes
+      await page.getByRole('button', { name: 'Save' }).click()
+
+      // Wait for edit form to close
+      await expect(page.getByRole('heading', { name: 'Edit Task' })).not.toBeVisible()
+
+      // Detail panel should show updated title WITHOUT reopening (reactivity test)
+      await expect(page.getByRole('heading', { name: 'API実装 Updated' })).toBeVisible()
+    })
+  })
 })

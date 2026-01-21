@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppHeader } from '@/components/layout'
@@ -16,8 +16,14 @@ export function TaskBoardPage() {
   const { tasks, isLoading: tasksLoading } = useTasks(projectId || '')
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false)
+
+  // Derive selectedTask from tasks to ensure reactivity when task data changes
+  const selectedTask = useMemo(
+    () => (selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) ?? null : null),
+    [selectedTaskId, tasks]
+  )
 
   const createTaskMutation = useMutation({
     mutationFn: async (data: { title: string; description: string; priority: TaskPriority }) => {
@@ -51,11 +57,8 @@ export function TaskBoardPage() {
   }
 
   const handleTaskClick = (taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId)
-    if (task) {
-      setSelectedTask(task)
-      setIsDetailPanelOpen(true)
-    }
+    setSelectedTaskId(taskId)
+    setIsDetailPanelOpen(true)
   }
 
   const handleCreateTask = (data: { title: string; description: string; priority: TaskPriority }) => {
@@ -133,7 +136,7 @@ export function TaskBoardPage() {
         isOpen={isDetailPanelOpen}
         onClose={() => {
           setIsDetailPanelOpen(false)
-          setSelectedTask(null)
+          setSelectedTaskId(null)
         }}
       />
     </div>
