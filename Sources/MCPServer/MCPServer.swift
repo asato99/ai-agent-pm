@@ -372,7 +372,8 @@ public final class MCPServer {
 
         case "list_active_projects_with_agents":
             // Phase 2.3: オプションのagent_idパラメータをサポート
-            let agentId = arguments["agent_id"] as? String
+            // Multi-device: root_agent_id も agent_id として受け付ける
+            let agentId = arguments["agent_id"] as? String ?? arguments["root_agent_id"] as? String
             return try listActiveProjectsWithAgents(agentId: agentId)
 
         case "get_agent_action":
@@ -1534,16 +1535,8 @@ public final class MCPServer {
             let handoffs = try handoffRepository.findByTask(task.id)
             let latestHandoff = handoffs.last
 
-            // Phase 2.3: working_directoryの解決
-            // 優先順位: AgentWorkingDirectory > Project.workingDirectory
-            let project = try projectRepository.findById(task.projectId)
-            var workingDirectory = project?.workingDirectory
-            if let agentWorkingDir = try agentWorkingDirectoryRepository.findByAgentAndProject(
-                agentId: session.agentId,
-                projectId: task.projectId
-            ) {
-                workingDirectory = agentWorkingDir.workingDirectory
-            }
+            // Note: working_directoryはコーディネーターが管理するため、
+            // get_my_taskでは返さない（エージェントの混乱を防ぐ）
 
             var taskDict: [String: Any] = [
                 "task_id": task.id.value,
@@ -1557,10 +1550,6 @@ public final class MCPServer {
                 必ず get_next_action を呼び出して、システムからの指示に従ってください。
                 タスクはサブタスクに分解してから実行する必要があります。
                 """
-
-            if let workDir = workingDirectory {
-                taskDict["working_directory"] = workDir
-            }
 
             if let ctx = latestContext {
                 taskDict["context"] = contextToDict(ctx)
@@ -3092,25 +3081,14 @@ public final class MCPServer {
 
     /// Phase 3-2: get_pending_tasks - 作業中タスク取得
     /// 外部Runnerが作業継続のため現在進行中のタスクを取得
+    /// Note: working_directoryはコーディネーターが管理するため返さない
     private func getPendingTasks(agentId: String) throws -> [String: Any] {
         let useCase = GetPendingTasksUseCase(taskRepository: taskRepository)
         let tasks = try useCase.execute(agentId: AgentID(value: agentId))
 
-        // タスクごとにプロジェクトのworking_directoryを取得して含める
-        let tasksWithWorkingDir = try tasks.map { task -> [String: Any] in
-            var dict = taskToDict(task)
-            // プロジェクトのworking_directoryを取得
-            if let project = try projectRepository.findById(task.projectId) {
-                if let workingDir = project.workingDirectory {
-                    dict["working_directory"] = workingDir
-                }
-            }
-            return dict
-        }
-
         return [
             "success": true,
-            "tasks": tasksWithWorkingDir
+            "tasks": tasks.map { taskToDict($0) }
         ]
     }
 
@@ -4016,7 +3994,8 @@ public final class MCPServer {
     }
 
     private func projectToDict(_ project: Project) -> [String: Any] {
-        var dict: [String: Any] = [
+        // Note: working_directoryはコーディネーターが管理するため返さない
+        return [
             "id": project.id.value,
             "name": project.name,
             "description": project.description,
@@ -4024,12 +4003,6 @@ public final class MCPServer {
             "created_at": ISO8601DateFormatter().string(from: project.createdAt),
             "updated_at": ISO8601DateFormatter().string(from: project.updatedAt)
         ]
-
-        if let workingDirectory = project.workingDirectory {
-            dict["working_directory"] = workingDirectory
-        }
-
-        return dict
     }
 
     private func taskToDict(_ task: Task) -> [String: Any] {

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,7 @@ class AgentInstanceInfo:
     log_file_handle: Optional["TextIO"] = None  # Keep file handle open during process lifetime
     task_id: Optional[str] = None              # Phase 4: ログファイルパス登録用
     log_file_path: Optional[str] = None        # Phase 4: ログファイルパス
+    mcp_config_file: Optional[str] = None      # Temp file for MCP config (Claude CLI)
 
 
 class Coordinator:
@@ -353,6 +355,14 @@ class Coordinator:
             except Exception:
                 pass
 
+        # Clean up MCP config temp file
+        if info.mcp_config_file:
+            try:
+                os.unlink(info.mcp_config_file)
+                logger.debug(f"Removed temp MCP config: {info.mcp_config_file}")
+            except Exception:
+                pass
+
         # Remove from instances
         del self._instances[key]
         logger.info(f"Instance {key.agent_id}/{key.project_id} stopped and removed")
@@ -375,6 +385,13 @@ class Coordinator:
                 if info.log_file_handle:
                     try:
                         info.log_file_handle.close()
+                    except Exception:
+                        pass
+                # Clean up MCP config temp file
+                if info.mcp_config_file:
+                    try:
+                        os.unlink(info.mcp_config_file)
+                        logger.debug(f"Removed temp MCP config: {info.mcp_config_file}")
                     except Exception:
                         pass
                 finished.append((key, info, retcode))
@@ -478,39 +495,77 @@ class Coordinator:
         log_dir = self._get_log_directory(working_dir, agent_id)
         log_file = log_dir / f"{timestamp}.log"
 
-        # Build MCP config for Agent Instance (Unix Socket transport)
-        # Agent Instance connects to the SAME MCP daemon that the app started
+        # Build MCP config for Agent Instance
+        # Agent Instance connects to the SAME MCP server that the app started
         # This ensures all components share the same database and state
-        socket_path = self.config.mcp_socket_path
-        if socket_path:
-            # Always expand tilde in socket path
-            socket_path = os.path.expanduser(socket_path)
+        # Supports both Unix Socket and HTTP transport
+        connection_path = self.config.mcp_socket_path
+        if connection_path:
+            # Always expand tilde in socket path (for Unix socket)
+            if not connection_path.startswith("http"):
+                connection_path = os.path.expanduser(connection_path)
         else:
-            socket_path = os.path.expanduser(
+            connection_path = os.path.expanduser(
                 "~/Library/Application Support/AIAgentPM/mcp.sock"
             )
 
-        mcp_config_dict = {
-            "mcpServers": {
-                "agent-pm": {
-                    "command": "nc",
-                    "args": ["-U", socket_path]
+        # Determine transport type based on connection path
+        if connection_path.startswith("http://") or connection_path.startswith("https://"):
+            # HTTP transport (SSE) - for remote/multi-device operation
+            # Claude Code requires "type": "http" field for HTTP MCP servers
+            # Also need "headers" with Authorization token for authentication
+            mcp_server_config: dict = {
+                "type": "http",
+                "url": connection_path
+            }
+            # Add Authorization header if coordinator_token is configured
+            if self.config.coordinator_token:
+                mcp_server_config["headers"] = {
+                    "Authorization": f"Bearer {self.config.coordinator_token}"
+                }
+            mcp_config_dict = {
+                "mcpServers": {
+                    "agent-pm": mcp_server_config
                 }
             }
-        }
+            transport_type = "HTTP"
+        else:
+            # Unix Socket transport - for local operation
+            mcp_config_dict = {
+                "mcpServers": {
+                    "agent-pm": {
+                        "command": "nc",
+                        "args": ["-U", connection_path]
+                    }
+                }
+            }
+            transport_type = "Unix Socket"
 
-        mcp_config = json.dumps(mcp_config_dict)
+        mcp_config_json = json.dumps(mcp_config_dict)
 
         # Debug: Log the MCP config
-        logger.debug(f"MCP config: {mcp_config}")
-        logger.info(f"Agent Instance will connect via Unix Socket: {socket_path}")
+        logger.debug(f"MCP config: {mcp_config_json}")
+        logger.info(f"Agent Instance will connect via {transport_type}: {connection_path}")
 
         # Handle provider-specific MCP configuration
         # Gemini CLI uses file-based config (.gemini/settings.json)
-        # Claude CLI uses inline JSON via --mcp-config flag
+        # Claude CLI requires a file path for --mcp-config flag
+        mcp_config_file_path: Optional[str] = None
         if provider == "gemini":
-            self._prepare_gemini_mcp_config(working_dir, socket_path)
+            self._prepare_gemini_mcp_config(working_dir, connection_path)
             logger.debug("Prepared Gemini MCP config file")
+        else:
+            # Write MCP config to a temp file for Claude CLI
+            # Note: delete=False so the file persists during process lifetime
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.json',
+                prefix='mcp_config_',
+                delete=False
+            ) as f:
+                f.write(mcp_config_json)
+                mcp_config_file_path = f.name
+            logger.debug(f"Wrote MCP config to temp file: {mcp_config_file_path}")
 
         # Build command
         cmd = [
@@ -520,8 +575,8 @@ class Coordinator:
 
         # Add MCP config (only for non-Gemini providers)
         # Gemini reads from .gemini/settings.json automatically
-        if provider != "gemini":
-            cmd.extend(["--mcp-config", mcp_config])
+        if provider != "gemini" and mcp_config_file_path:
+            cmd.extend(["--mcp-config", mcp_config_file_path])
 
         # Add model flag if specified
         # Note: Gemini uses -m, Claude uses --model
@@ -583,12 +638,13 @@ class Coordinator:
             started_at=datetime.now(),
             log_file_handle=log_f,
             task_id=task_id,
-            log_file_path=str(log_file)
+            log_file_path=str(log_file),
+            mcp_config_file=mcp_config_file_path
         )
 
         logger.info(f"Spawned instance {agent_id}/{project_id} (PID: {process.pid})")
 
-    def _prepare_gemini_mcp_config(self, working_dir: str, socket_path: str) -> None:
+    def _prepare_gemini_mcp_config(self, working_dir: str, connection_path: str) -> None:
         """Prepare MCP config file for Gemini CLI.
 
         Gemini CLI reads MCP configuration from .gemini/settings.json in the
@@ -596,20 +652,39 @@ class Coordinator:
 
         Args:
             working_dir: Working directory where .gemini/settings.json will be created
-            socket_path: Unix socket path for MCP connection
+            connection_path: Unix socket path or HTTP URL for MCP connection
         """
         gemini_dir = Path(working_dir) / ".gemini"
         gemini_dir.mkdir(parents=True, exist_ok=True)
 
-        config = {
-            "mcpServers": {
-                "agent-pm": {
-                    "command": "nc",
-                    "args": ["-U", socket_path],
-                    "trust": True  # Auto-approve tool calls
+        # Determine transport type based on connection path
+        if connection_path.startswith("http://") or connection_path.startswith("https://"):
+            # HTTP transport (SSE) - for remote/multi-device operation
+            mcp_server_config: dict = {
+                "url": connection_path,
+                "trust": True  # Auto-approve tool calls
+            }
+            # Add Authorization header if coordinator_token is configured
+            if self.config.coordinator_token:
+                mcp_server_config["headers"] = {
+                    "Authorization": f"Bearer {self.config.coordinator_token}"
+                }
+            config = {
+                "mcpServers": {
+                    "agent-pm": mcp_server_config
                 }
             }
-        }
+        else:
+            # Unix Socket transport - for local operation
+            config = {
+                "mcpServers": {
+                    "agent-pm": {
+                        "command": "nc",
+                        "args": ["-U", connection_path],
+                        "trust": True  # Auto-approve tool calls
+                    }
+                }
+            }
 
         config_file = gemini_dir / "settings.json"
         with open(config_file, "w") as f:

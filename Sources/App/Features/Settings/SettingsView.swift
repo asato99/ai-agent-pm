@@ -1066,6 +1066,7 @@ private struct CoordinatorConfigExporter {
               - "--dangerously-skip-permissions"
               - "--max-turns"
               - "50"
+              - "--verbose"
 
           gemini:
             cli_command: gemini
