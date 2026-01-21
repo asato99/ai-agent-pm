@@ -304,6 +304,32 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // Agent sessions (active session counts per agent)
+  http.get('/api/projects/:projectId/agent-sessions', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId } = params
+
+    if (projectId === 'project-1') {
+      return HttpResponse.json({
+        agentSessionCounts: {
+          'worker-1': 1,
+          'worker-2': 0,
+        },
+      })
+    }
+    if (projectId === 'project-2') {
+      return HttpResponse.json({
+        agentSessionCounts: {
+          'worker-2': 0,
+        },
+      })
+    }
+    return HttpResponse.json({ agentSessionCounts: {} })
+  }),
+
   // Assignable agents (project-specific)
   // According to requirements (PROJECTS.md): Task assignees must be agents assigned to the project
   http.get('/api/projects/:projectId/assignable-agents', ({ params, request }) => {
@@ -501,6 +527,75 @@ export const handlers = [
         updatedAt: new Date().toISOString(),
       })
     }
+    return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
+
+  // Chat messages - GET
+  http.get('/api/projects/:projectId/agents/:agentId/chat/messages', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId, agentId } = params
+
+    // Valid project (project-1) and agents (worker-1, worker-2, agent-1 for unit tests)
+    if (projectId === 'project-1') {
+      // worker-1 and agent-1 have message history (agent-1 for backward compatibility with unit tests)
+      if (agentId === 'worker-1' || agentId === 'agent-1') {
+        return HttpResponse.json({
+          messages: [
+            {
+              id: 'msg-1',
+              sender: 'user',
+              content: 'こんにちは',
+              createdAt: '2024-01-15T10:00:00Z',
+            },
+            {
+              id: 'msg-2',
+              sender: 'agent',
+              content: 'こんにちは！何かお手伝いできますか？',
+              createdAt: '2024-01-15T10:01:00Z',
+            },
+          ],
+          hasMore: false,
+          totalCount: 2,
+        })
+      }
+      // worker-2 has no messages
+      if (agentId === 'worker-2') {
+        return HttpResponse.json({
+          messages: [],
+          hasMore: false,
+          totalCount: 0,
+        })
+      }
+    }
+
+    // Invalid project or agent
+    return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
+
+  // Chat messages - POST
+  http.post('/api/projects/:projectId/agents/:agentId/chat/messages', async ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId, agentId } = params
+    const body = (await request.json()) as { content: string; relatedTaskId?: string }
+
+    // Valid project and agents (agent-1 for backward compatibility with unit tests)
+    if (projectId === 'project-1' && (agentId === 'worker-1' || agentId === 'worker-2' || agentId === 'agent-1')) {
+      return HttpResponse.json({
+        id: `msg-${Date.now()}`,
+        sender: 'user',
+        content: body.content,
+        createdAt: new Date().toISOString(),
+        relatedTaskId: body.relatedTaskId,
+      })
+    }
+
+    // Invalid project or agent
     return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
   }),
 ]

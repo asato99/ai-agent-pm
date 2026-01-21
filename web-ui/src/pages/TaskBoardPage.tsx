@@ -5,11 +5,12 @@ import { AppHeader } from '@/components/layout'
 import { KanbanBoard, CreateTaskModal, TaskDetailPanel } from '@/components/task'
 import { WorkingDirectorySettings } from '@/components/project'
 import { AssignedAgentsRow } from '@/components/agent/AssignedAgentsRow'
+import { ChatPanel } from '@/components/chat'
 import { useProject } from '@/hooks/useProject'
 import { useTasks } from '@/hooks/useTasks'
 import { useAssignableAgents, useAgentSessions } from '@/hooks'
 import { api } from '@/api/client'
-import type { Task, TaskStatus, TaskPriority } from '@/types'
+import type { Task, TaskStatus, TaskPriority, Agent } from '@/types'
 
 export function TaskBoardPage() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -22,6 +23,8 @@ export function TaskBoardPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false)
+  const [selectedChatAgent, setSelectedChatAgent] = useState<Agent | null>(null)
+  const [isChatPanelOpen, setIsChatPanelOpen] = useState(false)
 
   // Derive selectedTask from tasks to ensure reactivity when task data changes
   const selectedTask = useMemo(
@@ -67,6 +70,19 @@ export function TaskBoardPage() {
 
   const handleCreateTask = (data: { title: string; description: string; priority: TaskPriority; assigneeId?: string }) => {
     createTaskMutation.mutate(data)
+  }
+
+  const handleAgentClick = (agentId: string) => {
+    const agent = agents.find((a) => a.id === agentId)
+    if (agent) {
+      setSelectedChatAgent(agent)
+      setIsChatPanelOpen(true)
+    }
+  }
+
+  const handleCloseChatPanel = () => {
+    setIsChatPanelOpen(false)
+    setSelectedChatAgent(null)
   }
 
   const isLoading = projectLoading || tasksLoading || agentsLoading
@@ -119,6 +135,7 @@ export function TaskBoardPage() {
           agents={agents}
           sessionCounts={sessionCounts}
           isLoading={agentsLoading}
+          onAgentClick={handleAgentClick}
         />
 
         {/* Phase 2.4: Multi-device support - Working directory settings */}
@@ -152,6 +169,17 @@ export function TaskBoardPage() {
           setSelectedTaskId(null)
         }}
       />
+
+      {/* Chat Panel - opens when clicking on an agent avatar */}
+      {isChatPanelOpen && selectedChatAgent && projectId && (
+        <div className="fixed right-0 top-0 h-full w-96 shadow-xl z-50">
+          <ChatPanel
+            projectId={projectId}
+            agent={selectedChatAgent}
+            onClose={handleCloseChatPanel}
+          />
+        </div>
+      )}
     </div>
   )
 }

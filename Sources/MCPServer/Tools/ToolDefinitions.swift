@@ -856,9 +856,18 @@ enum ToolDefinitions {
 
     /// get_pending_messages - 未読チャットメッセージを取得
     /// Agent Instance用: purpose=chatのセッションでのみ使用
+    /// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 3
     static let getPendingMessages: [String: Any] = [
         "name": "get_pending_messages",
-        "description": "未読のユーザーチャットメッセージを取得します。チャット目的で起動されたエージェントが最初に呼び出し、ユーザーからのメッセージを取得します。",
+        "description": """
+        未読のユーザーチャットメッセージを取得します。チャット目的で起動されたエージェントが最初に呼び出し、ユーザーからのメッセージを取得します。
+
+        返り値:
+        - context_messages: 文脈理解用の直近メッセージ（最大20件、user/agent両方含む）
+        - pending_messages: 応答対象の未読メッセージ（最大10件）
+        - total_history_count: 全履歴の件数
+        - context_truncated: コンテキストが切り詰められたかどうか
+        """,
         "inputSchema": [
             "type": "object",
             "properties": [

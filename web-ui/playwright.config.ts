@@ -17,6 +17,10 @@ export default defineConfig({
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
+    // Set empty port to use MSW instead of real backend
+    env: {
+      AIAGENTPM_WEBSERVER_PORT: '',
+    },
   },
   projects: [
     {

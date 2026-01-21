@@ -35,6 +35,7 @@ function AgentAvatar({
     <button
       type="button"
       onClick={onClick}
+      data-testid={`agent-avatar-${agent.id}`}
       className="relative group focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 rounded-full"
       title={`${agent.name} - ${agent.role}${sessionCount > 0 ? ` (${sessionCount} active session${sessionCount > 1 ? 's' : ''})` : ''}`}
     >

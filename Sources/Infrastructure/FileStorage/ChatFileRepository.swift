@@ -109,6 +109,49 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
         return messagesAfterLastAgent.filter { $0.sender == .user }
     }
 
+    // MARK: - ページネーション対応（REST API用）
+
+    public func findMessagesWithCursor(
+        projectId: ProjectID,
+        agentId: AgentID,
+        limit: Int,
+        after: ChatMessageID?,
+        before: ChatMessageID?
+    ) throws -> ChatMessagePage {
+        let allMessages = try findMessages(projectId: projectId, agentId: agentId)
+
+        var filteredMessages = allMessages
+
+        // after カーソル: 指定IDより後のメッセージのみ
+        if let afterId = after {
+            if let afterIndex = allMessages.firstIndex(where: { $0.id == afterId }) {
+                filteredMessages = Array(allMessages.suffix(from: afterIndex + 1))
+            }
+        }
+
+        // before カーソル: 指定IDより前のメッセージのみ
+        if let beforeId = before {
+            if let beforeIndex = filteredMessages.firstIndex(where: { $0.id == beforeId }) {
+                filteredMessages = Array(filteredMessages.prefix(beforeIndex))
+            }
+        }
+
+        // limit を適用
+        let hasMore = filteredMessages.count > limit
+        let limitedMessages = Array(filteredMessages.suffix(limit))
+
+        return ChatMessagePage(
+            messages: limitedMessages,
+            hasMore: hasMore,
+            totalCount: allMessages.count
+        )
+    }
+
+    public func countMessages(projectId: ProjectID, agentId: AgentID) throws -> Int {
+        let allMessages = try findMessages(projectId: projectId, agentId: agentId)
+        return allMessages.count
+    }
+
     // MARK: - Private Methods
 
     /// プロジェクトIDから作業ディレクトリを取得

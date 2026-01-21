@@ -2239,3 +2239,69 @@ final class WorkerBlockedStateManagementTests: XCTestCase {
         )
     }
 }
+
+// MARK: - Chat Tools Tests
+// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 3
+
+/// Phase 3: get_pending_messages ツールのテスト
+final class ChatToolsTests: XCTestCase {
+
+    // MARK: - Tool Definition Tests
+
+    /// get_pending_messages ツールが定義されていることを確認
+    func testGetPendingMessagesToolDefinition() {
+        let tool = ToolDefinitions.getPendingMessages
+
+        XCTAssertEqual(tool["name"] as? String, "get_pending_messages")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("session_token"), "get_pending_messages should require session_token")
+        }
+    }
+
+    /// get_pending_messages ツールが全ツール一覧に含まれることを確認
+    func testGetPendingMessagesToolInAllTools() {
+        let tools = ToolDefinitions.all()
+        let toolNames = tools.compactMap { $0["name"] as? String }
+
+        XCTAssertTrue(toolNames.contains("get_pending_messages"), "get_pending_messages should be in all tools")
+    }
+
+    /// get_pending_messages ツールの説明に新しいレスポンス構造が記載されていることを確認
+    func testGetPendingMessagesDescriptionIncludesResponseStructure() {
+        let tool = ToolDefinitions.getPendingMessages
+        let description = tool["description"] as? String ?? ""
+
+        // 新しいレスポンス構造のキーが説明に含まれることを確認
+        XCTAssertTrue(description.contains("context_messages"), "Description should mention context_messages")
+        XCTAssertTrue(description.contains("pending_messages"), "Description should mention pending_messages")
+        XCTAssertTrue(description.contains("total_history_count"), "Description should mention total_history_count")
+        XCTAssertTrue(description.contains("context_truncated"), "Description should mention context_truncated")
+    }
+
+    /// respond_chat ツールが定義されていることを確認
+    func testRespondChatToolDefinition() {
+        let tool = ToolDefinitions.respondChat
+
+        XCTAssertEqual(tool["name"] as? String, "respond_chat")
+        XCTAssertNotNil(tool["description"])
+
+        if let schema = tool["inputSchema"] as? [String: Any] {
+            XCTAssertEqual(schema["type"] as? String, "object")
+            let required = schema["required"] as? [String] ?? []
+            XCTAssertTrue(required.contains("session_token"), "respond_chat should require session_token")
+            XCTAssertTrue(required.contains("content"), "respond_chat should require content")
+        }
+    }
+
+    /// respond_chat ツールが全ツール一覧に含まれることを確認
+    func testRespondChatToolInAllTools() {
+        let tools = ToolDefinitions.all()
+        let toolNames = tools.compactMap { $0["name"] as? String }
+
+        XCTAssertTrue(toolNames.contains("respond_chat"), "respond_chat should be in all tools")
+    }
+}

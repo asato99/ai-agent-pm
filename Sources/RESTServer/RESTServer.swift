@@ -47,6 +47,9 @@ final class RESTServer {
     private let workingDirectoryRepository: AgentWorkingDirectoryRepository
     /// 参照: docs/requirements/PROJECTS.md - エージェント割り当て
     private let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository
+    /// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
+    private let chatRepository: ChatFileRepository
+    private let directoryManager: ProjectDirectoryManager
 
     // MCP Server for HTTP transport
     // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
@@ -76,6 +79,12 @@ final class RESTServer {
         self.appSettingsRepository = AppSettingsRepository(database: database)
         self.workingDirectoryRepository = AgentWorkingDirectoryRepository(database: database)
         self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
+        // 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
+        self.directoryManager = ProjectDirectoryManager()
+        self.chatRepository = ChatFileRepository(
+            directoryManager: directoryManager,
+            projectRepository: projectRepository
+        )
     }
 
     func run() async throws {
@@ -411,6 +420,19 @@ final class RESTServer {
             return try await listTaskHandoffs(request: request, context: context)
         }
         debugLog("Task handoffs route registered: GET/:taskId/handoffs")
+
+        // Chat messages
+        // 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
+        let chatRouter = projectRouter.group(":projectId/agents/:agentId/chat")
+        chatRouter.get("messages") { [self] request, context in
+            debugLog("GET /api/projects/:projectId/agents/:agentId/chat/messages called")
+            return try await getChatMessages(request: request, context: context)
+        }
+        chatRouter.post("messages") { [self] request, context in
+            debugLog("POST /api/projects/:projectId/agents/:agentId/chat/messages called")
+            return try await sendChatMessage(request: request, context: context)
+        }
+        debugLog("Chat routes registered: GET/messages, POST/messages")
     }
 
     // MARK: - Auth Handlers
@@ -1140,6 +1162,160 @@ final class RESTServer {
         let handoffs = try handoffRepository.findByTask(taskId)
         let dtos = handoffs.map { HandoffDTO(from: $0) }
         return jsonResponse(dtos)
+    }
+
+    // MARK: - Chat Handlers
+    // 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
+
+    /// GET /projects/:projectId/agents/:agentId/chat/messages
+    /// Query params: limit (default 50, max 200), after, before (cursor-based pagination)
+    private func getChatMessages(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        // Extract path parameters
+        guard let projectIdStr = context.parameters.get("projectId"),
+              let agentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Missing project or agent ID")
+        }
+
+        let projectId = ProjectID(value: projectIdStr)
+        let targetAgentId = AgentID(value: agentIdStr)
+
+        // Verify agent can access this chat (self or subordinate)
+        guard try canAccessAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId) else {
+            return errorResponse(status: .forbidden, message: "Cannot access this agent's chat")
+        }
+
+        // Parse query parameters
+        let limitStr = request.uri.queryParameters.get("limit")
+        let afterStr = request.uri.queryParameters.get("after")
+        let beforeStr = request.uri.queryParameters.get("before")
+
+        // Parse and validate limit parameter
+        let limitInt = limitStr.flatMap { Int($0) }
+        let limitResult = ChatMessageValidator.validateLimit(limitInt)
+        let limit = limitResult.effectiveValue
+
+        // Get messages with pagination
+        let afterId = afterStr.map { ChatMessageID(value: $0) }
+        let beforeId = beforeStr.map { ChatMessageID(value: $0) }
+
+        do {
+            let page = try chatRepository.findMessagesWithCursor(
+                projectId: projectId,
+                agentId: targetAgentId,
+                limit: limit,
+                after: afterId,
+                before: beforeId
+            )
+
+            let response = ChatMessagesResponse(
+                messages: page.messages.map { ChatMessageDTO(from: $0) },
+                hasMore: page.hasMore,
+                totalCount: page.totalCount
+            )
+
+            return jsonResponse(response)
+        } catch {
+            debugLog("Failed to get chat messages: \(error)")
+            return errorResponse(status: .internalServerError, message: "Failed to retrieve messages")
+        }
+    }
+
+    /// POST /projects/:projectId/agents/:agentId/chat/messages
+    /// Request body: { content: string, relatedTaskId?: string }
+    private func sendChatMessage(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        // Extract path parameters
+        guard let projectIdStr = context.parameters.get("projectId"),
+              let agentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Missing project or agent ID")
+        }
+
+        let projectId = ProjectID(value: projectIdStr)
+        let targetAgentId = AgentID(value: agentIdStr)
+
+        // Verify agent can access this chat (self or subordinate)
+        guard try canAccessAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId) else {
+            return errorResponse(status: .forbidden, message: "Cannot send message to this agent's chat")
+        }
+
+        // Parse request body
+        let body: SendMessageRequest
+        do {
+            body = try await request.decode(as: SendMessageRequest.self, context: context)
+        } catch {
+            return errorResponse(status: .badRequest, message: "Invalid request body")
+        }
+
+        // Validate content
+        let contentResult = ChatMessageValidator.validate(content: body.content)
+        switch contentResult {
+        case .valid:
+            break  // Continue to save message
+        case .invalid(let validationError):
+            let details: ChatValidationErrorDetails?
+            let errorCode: String
+            let errorMessage: String
+            switch validationError {
+            case .emptyContent:
+                errorCode = "EMPTY_CONTENT"
+                errorMessage = "Message content cannot be empty"
+                details = nil
+            case .contentTooLong(let maxLength, let actualLength):
+                errorCode = "CONTENT_TOO_LONG"
+                errorMessage = "Message content exceeds maximum length of \(maxLength) characters"
+                details = ChatValidationErrorDetails(maxLength: maxLength, actualLength: actualLength)
+            }
+            let errorResponse = ChatValidationError(
+                error: errorMessage,
+                code: errorCode,
+                details: details
+            )
+            return jsonResponse(errorResponse, status: .badRequest)
+        }
+
+        // Create and save message
+        let message = ChatMessage(
+            id: ChatMessageID(value: UUID().uuidString),
+            sender: .user,
+            content: body.content,
+            createdAt: Date(),
+            relatedTaskId: body.relatedTaskId.map { TaskID(value: $0) }
+        )
+
+        do {
+            try chatRepository.saveMessage(message, projectId: projectId, agentId: targetAgentId)
+            return jsonResponse(ChatMessageDTO(from: message), status: .created)
+        } catch {
+            debugLog("Failed to save chat message: \(error)")
+            return errorResponse(status: .internalServerError, message: "Failed to save message")
+        }
+    }
+
+    /// Helper: JSON response with custom status
+    private func jsonResponse<T: Encodable>(_ value: T, status: HTTPResponse.Status) -> Response {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(value)
+            return Response(
+                status: status,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: ByteBuffer(data: data))
+            )
+        } catch {
+            return Response(
+                status: .internalServerError,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: ByteBuffer(string: "{\"error\":\"Encoding error\"}"))
+            )
+        }
     }
 
     // MARK: - Helpers

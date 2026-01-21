@@ -7,9 +7,10 @@ import { join } from 'path'
 
 // Read port from macOS app's config file (synced with Settings)
 // Priority: env var > app config file > default (8080)
+// Note: Empty string env var means "use MSW" (for E2E tests)
 function getApiPort(): string {
-  // 1. Environment variable
-  if (process.env.AIAGENTPM_WEBSERVER_PORT) {
+  // 1. Environment variable (empty string means use MSW)
+  if (process.env.AIAGENTPM_WEBSERVER_PORT !== undefined) {
     return process.env.AIAGENTPM_WEBSERVER_PORT
   }
 

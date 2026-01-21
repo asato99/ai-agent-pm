@@ -84,6 +84,10 @@ vi.mock('@/hooks', () => ({
     ],
     isLoading: false,
   }),
+  useAgentSessions: () => ({
+    sessionCounts: {},
+    isLoading: false,
+  }),
 }))
 
 // Mock mutation for updating task

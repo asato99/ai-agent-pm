@@ -3917,32 +3917,75 @@ public final class MCPServer {
 
     /// get_pending_messages - 未読チャットメッセージを取得
     /// チャット目的で起動されたエージェントが呼び出す
+    /// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 3
+    ///
+    /// 返り値:
+    /// - context_messages: 文脈理解用の直近メッセージ（最大20件）
+    /// - pending_messages: 応答対象の未読メッセージ（最大10件）
+    /// - total_history_count: 全履歴の件数
+    /// - context_truncated: コンテキストが切り詰められたかどうか
     private func getPendingMessages(session: AgentSession) throws -> [String: Any] {
         Self.log("[MCP] getPendingMessages called: agentId='\(session.agentId.value)', projectId='\(session.projectId.value)'")
 
-        // 未読メッセージを取得
-        let messages = try chatRepository.findUnreadUserMessages(
+        // 全メッセージを取得
+        let allMessages = try chatRepository.findMessages(
             projectId: session.projectId,
             agentId: session.agentId
         )
 
-        Self.log("[MCP] Found \(messages.count) unread message(s)")
+        Self.log("[MCP] Found \(allMessages.count) total message(s)")
 
-        let messagesDicts = messages.map { message -> [String: Any] in
+        // PendingMessageIdentifier を使用してコンテキストと未読を分離
+        let result = PendingMessageIdentifier.separateContextAndPending(
+            allMessages,
+            contextLimit: PendingMessageIdentifier.defaultContextLimit,  // 20
+            pendingLimit: PendingMessageIdentifier.defaultPendingLimit   // 10
+        )
+
+        Self.log("[MCP] Context: \(result.contextMessages.count), Pending: \(result.pendingMessages.count), Truncated: \(result.contextTruncated)")
+
+        // ISO8601フォーマッタを共有
+        let formatter = ISO8601DateFormatter()
+
+        // コンテキストメッセージを辞書に変換
+        let contextDicts = result.contextMessages.map { message -> [String: Any] in
             [
                 "id": message.id.value,
+                "sender": message.sender.rawValue,
                 "content": message.content,
-                "created_at": ISO8601DateFormatter().string(from: message.createdAt)
+                "created_at": formatter.string(from: message.createdAt)
             ]
+        }
+
+        // 未読メッセージを辞書に変換
+        let pendingDicts = result.pendingMessages.map { message -> [String: Any] in
+            [
+                "id": message.id.value,
+                "sender": message.sender.rawValue,
+                "content": message.content,
+                "created_at": formatter.string(from: message.createdAt)
+            ]
+        }
+
+        // 指示文を生成
+        let instruction: String
+        if result.pendingMessages.isEmpty {
+            instruction = "未読メッセージはありません。get_next_action を呼び出して次のアクションを確認してください。"
+        } else {
+            instruction = """
+            上記の pending_messages に応答してください。
+            context_messages は会話の文脈理解用です（応答対象ではありません）。
+            respond_chat ツールを使用して応答を保存してください。
+            """
         }
 
         return [
             "success": true,
-            "messages": messagesDicts,
-            "count": messages.count,
-            "instruction": messages.isEmpty
-                ? "未読メッセージはありません。logout を呼び出してセッションを終了してください。"
-                : "上記のメッセージに応答してください。respond_chat ツールを使用して応答を保存してください。"
+            "context_messages": contextDicts,
+            "pending_messages": pendingDicts,
+            "total_history_count": result.totalHistoryCount,
+            "context_truncated": result.contextTruncated,
+            "instruction": instruction
         ]
     }
 

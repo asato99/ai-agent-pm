@@ -416,11 +416,17 @@ final class HTTPIntegrationTests: XCTestCase {
     }
 
     private func setupTestData() throws {
-        // Create test project
+        // Create temporary working directory for chat feature tests
+        let tempDir = FileManager.default.temporaryDirectory
+        let testWorkingDir = tempDir.appendingPathComponent("http_test_workdir_\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: testWorkingDir, withIntermediateDirectories: true)
+
+        // Create test project with working directory
         let project = Project(
             id: testProjectId,
             name: "HTTP Test Project",
-            description: "Project for HTTP testing"
+            description: "Project for HTTP testing",
+            workingDirectory: testWorkingDir
         )
         try projectRepository.save(project)
 
@@ -695,5 +701,133 @@ final class HTTPIntegrationTests: XCTestCase {
         // Should return JSON error, not HTML
         let contentType = response.value(forHTTPHeaderField: "Content-Type")
         XCTAssertTrue(contentType?.contains("application/json") ?? false, "404 response should be JSON")
+    }
+
+    // MARK: - Chat API Tests
+    // 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
+
+    func testGetChatMessagesEndpoint() async throws {
+        let token = try await login()
+
+        // GET /api/projects/:projectId/agents/:agentId/chat/messages
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agents/\(testAgentId.value)/chat/messages",
+            token: token
+        )
+
+        XCTAssertEqual(response.statusCode, 200, "GET chat messages should return 200")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertNotNil(json["messages"], "Response should contain messages array")
+        XCTAssertNotNil(json["hasMore"], "Response should contain hasMore field")
+
+        let messages = json["messages"] as? [Any]
+        XCTAssertNotNil(messages, "messages should be an array")
+    }
+
+    func testGetChatMessagesWithLimitParameter() async throws {
+        let token = try await login()
+
+        // GET with limit parameter
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agents/\(testAgentId.value)/chat/messages?limit=10",
+            token: token
+        )
+
+        XCTAssertEqual(response.statusCode, 200, "GET chat messages with limit should return 200")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertNotNil(json["messages"], "Response should contain messages array")
+    }
+
+    func testGetChatMessagesWithInvalidLimit() async throws {
+        let token = try await login()
+
+        // Invalid limit (exceeds max of 200, but should be clamped not error)
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agents/\(testAgentId.value)/chat/messages?limit=500",
+            token: token
+        )
+
+        // Should succeed with clamped limit
+        XCTAssertEqual(response.statusCode, 200, "GET chat messages with limit > 200 should be clamped and return 200")
+    }
+
+    func testPostChatMessageEndpoint() async throws {
+        let token = try await login()
+
+        // POST /api/projects/:projectId/agents/:agentId/chat/messages
+        let messageBody = try JSONEncoder().encode([
+            "content": "Hello from HTTP test"
+        ])
+
+        let (data, response) = try await makeRequest(
+            method: "POST",
+            path: "/api/projects/\(testProjectId.value)/agents/\(testAgentId.value)/chat/messages",
+            body: messageBody,
+            token: token
+        )
+
+        XCTAssertEqual(response.statusCode, 201, "POST chat message should return 201")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertNotNil(json["id"], "Response should contain message id")
+        XCTAssertEqual(json["sender"] as? String, "user", "Sender should be 'user'")
+        XCTAssertEqual(json["content"] as? String, "Hello from HTTP test", "Content should match")
+    }
+
+    func testPostChatMessageWithEmptyContent() async throws {
+        let token = try await login()
+
+        let messageBody = try JSONEncoder().encode([
+            "content": ""
+        ])
+
+        let (data, response) = try await makeRequest(
+            method: "POST",
+            path: "/api/projects/\(testProjectId.value)/agents/\(testAgentId.value)/chat/messages",
+            body: messageBody,
+            token: token
+        )
+
+        XCTAssertEqual(response.statusCode, 400, "POST chat message with empty content should return 400")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertEqual(json["code"] as? String, "EMPTY_CONTENT", "Error code should be EMPTY_CONTENT")
+    }
+
+    func testPostChatMessageWithTooLongContent() async throws {
+        let token = try await login()
+
+        // Create content longer than 4000 characters
+        let longContent = String(repeating: "a", count: 4001)
+        let messageBody = try JSONEncoder().encode([
+            "content": longContent
+        ])
+
+        let (data, response) = try await makeRequest(
+            method: "POST",
+            path: "/api/projects/\(testProjectId.value)/agents/\(testAgentId.value)/chat/messages",
+            body: messageBody,
+            token: token
+        )
+
+        XCTAssertEqual(response.statusCode, 400, "POST chat message with content > 4000 chars should return 400")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertEqual(json["code"] as? String, "CONTENT_TOO_LONG", "Error code should be CONTENT_TOO_LONG")
+        XCTAssertNotNil(json["details"], "Response should contain details")
+    }
+
+    func testChatEndpointWithoutAuth() async throws {
+        let (_, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agents/\(testAgentId.value)/chat/messages"
+        )
+
+        XCTAssertEqual(response.statusCode, 401, "Chat endpoint without auth should return 401")
     }
 }

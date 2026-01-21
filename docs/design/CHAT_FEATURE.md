@@ -636,9 +636,283 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
 
 ---
 
-## 11. 将来拡張（スコープ外）
+## 11. マルチデバイス・Web UI対応
+
+### 11.1 アーキテクチャ原則
+
+**重要**: チャットファイルは**PMアプリが起動している端末のみ**に保存される。
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      PM App Device (Mac)                                 │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ プロジェクトのワーキングディレクトリ                              │   │
+│  │ {project.workingDirectory}/                                      │   │
+│  │ └── .ai-pm/                                                      │   │
+│  │     └── agents/{agent-id}/chat.jsonl  ← チャットファイル         │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ REST Server (localhost:8080)                                     │   │
+│  │ - GET  /projects/{id}/agents/{agentId}/chat/messages            │   │
+│  │ - POST /projects/{id}/agents/{agentId}/chat/messages            │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │                              │
+                    │ REST API                     │ REST API
+                    ▼                              ▼
+        ┌─────────────────────┐        ┌─────────────────────┐
+        │   Remote Agent      │        │     Web UI          │
+        │   (別の端末)         │        │   (ブラウザ)         │
+        │                     │        │                     │
+        │   MCP Tools:        │        │   fetch():          │
+        │   - get_pending_... │        │   - GET messages    │
+        │   - respond_chat    │        │   - POST message    │
+        │                     │        │                     │
+        │   ⚠️ ローカルには     │        │   ⚠️ ローカルには     │
+        │     保存しない       │        │     保存しない       │
+        └─────────────────────┘        └─────────────────────┘
+```
+
+### 11.2 設計方針
+
+| 観点 | 方針 | 理由 |
+|------|------|------|
+| チャット保存場所 | PMアプリ端末のみ | 一元管理、整合性維持 |
+| リモートエージェント | REST API経由 | ローカル保存不要 |
+| Web UI | REST API経由 | ブラウザから直接ファイルアクセス不可 |
+| ファイル形式 | JSONL（維持） | 追記高速、行単位処理 |
+
+### 11.3 データサイズ制限
+
+| 用途 | 項目 | 制限値 | 備考 |
+|------|------|--------|------|
+| **REST API (Web UI)** | デフォルト取得件数 | 50件 | 初回読み込み |
+| | 最大取得件数 | 200件 | `limit` パラメータ上限 |
+| | ポーリング時 | 新着のみ | `after` パラメータ使用 |
+| **MCP** | コンテキスト | 直近20件 | 文脈理解用 |
+| | 未読メッセージ | 最大10件 | 応答対象 |
+| | 合計 | 最大30件 | コンテキストウィンドウ考慮 |
+| **共通** | メッセージ本文 | 最大4,000文字 | 送信時バリデーション |
+
+### 11.4 REST API エンドポイント
+
+#### A. メッセージ一覧取得
+
+```
+GET /projects/{projectId}/agents/{agentId}/chat/messages
+Authorization: Bearer {session_token}  # Web UI用（オプション）
+
+Query Parameters:
+- limit: 取得件数（デフォルト: 50、最大: 200）
+- before: このID以前のメッセージを取得（ページネーション用）
+- after: このID以降のメッセージを取得（ポーリング用）
+
+Response:
+{
+  "messages": [
+    {
+      "id": "msg_01HJ...",
+      "sender": "user",
+      "content": "タスクAの進捗は？",
+      "createdAt": "2026-01-11T10:00:00Z",
+      "relatedTaskId": null
+    },
+    {
+      "id": "msg_01HK...",
+      "sender": "agent",
+      "content": "現在50%完了しています。",
+      "createdAt": "2026-01-11T10:00:05Z",
+      "relatedTaskId": "task_123"
+    }
+  ],
+  "hasMore": false
+}
+```
+
+#### B. メッセージ送信
+
+```
+POST /projects/{projectId}/agents/{agentId}/chat/messages
+Authorization: Bearer {session_token}
+Content-Type: application/json
+
+Request Body:
+{
+  "content": "タスクAの進捗を教えて",  // 最大4,000文字
+  "relatedTaskId": "task_123"  // オプション
+}
+
+Response:
+{
+  "id": "msg_01HL...",
+  "sender": "user",  // または "agent"（MCPからの場合）
+  "content": "タスクAの進捗を教えて",
+  "createdAt": "2026-01-11T10:01:00Z",
+  "relatedTaskId": "task_123"
+}
+
+Error Response (400 Bad Request):
+{
+  "error": "content_too_long",
+  "message": "メッセージは4,000文字以内で入力してください"
+}
+```
+
+### 11.5 MCP連携（リモートエージェント向け）
+
+リモート端末で動作するエージェントは、MCPツールを通じてREST APIにアクセスします。
+
+```
+【リモートエージェントのフロー】
+
+1. エージェント: authenticate(agent_id, passkey, project_id)
+   ↓
+2. MCP Server: セッション作成、purpose="chat" を設定
+   ↓
+3. エージェント: get_pending_messages(session_token)
+   ↓
+4. MCP Server:
+   - 内部で REST API を呼び出し（自己参照）
+   - または ChatFileRepository を直接使用（同一プロセス内の場合）
+   ↓
+5. エージェント: メッセージ内容を確認、応答を生成
+   ↓
+6. エージェント: respond_chat(session_token, content)
+   ↓
+7. MCP Server:
+   - チャットファイルに応答を追記
+   - Web UI / ネイティブアプリがポーリングで検知
+```
+
+**注意**: MCPツール（`get_pending_messages`, `respond_chat`）は内部的にファイル操作を行いますが、
+これはMCPサーバーがPMアプリと同じ端末で動作しているため可能です。
+リモートエージェントのプロセス自体がファイルにアクセスするわけではありません。
+
+#### `get_pending_messages` レスポンス形式
+
+エージェントが会話の文脈を理解できるよう、未読メッセージだけでなくコンテキストも含めて返します。
+
+```json
+{
+  "context_messages": [
+    {
+      "id": "msg_01",
+      "sender": "user",
+      "content": "タスクAの進捗は？",
+      "createdAt": "2026-01-11T10:00:00Z"
+    },
+    {
+      "id": "msg_02",
+      "sender": "agent",
+      "content": "50%完了しています",
+      "createdAt": "2026-01-11T10:00:05Z"
+    },
+    {
+      "id": "msg_03",
+      "sender": "user",
+      "content": "ブロッカーはある？",
+      "createdAt": "2026-01-11T10:01:00Z"
+    },
+    {
+      "id": "msg_04",
+      "sender": "agent",
+      "content": "依存タスクBが未完了です",
+      "createdAt": "2026-01-11T10:01:05Z"
+    }
+  ],
+  "pending_messages": [
+    {
+      "id": "msg_05",
+      "sender": "user",
+      "content": "じゃあそれを解決して",
+      "createdAt": "2026-01-11T10:02:00Z"
+    }
+  ],
+  "total_history_count": 42,
+  "context_truncated": true
+}
+```
+
+| フィールド | 説明 |
+|-----------|------|
+| `context_messages` | 直近の会話履歴（最大20件）。文脈理解用。 |
+| `pending_messages` | 未読メッセージ（最大10件）。応答が必要なもの。 |
+| `total_history_count` | 全履歴件数（参考情報） |
+| `context_truncated` | コンテキストが省略されているか |
+
+### 11.7 Web UI実装
+
+```typescript
+// web-ui/src/hooks/useChat.ts
+export function useChat(projectId: string, agentId: string) {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+
+  // メッセージ取得
+  const fetchMessages = async (afterId?: string) => {
+    const params = afterId ? `?after=${afterId}` : ''
+    const res = await api.get<{ messages: ChatMessage[] }>(
+      `/projects/${projectId}/agents/${agentId}/chat/messages${params}`
+    )
+    if (res.data) {
+      setMessages(prev => afterId
+        ? [...prev, ...res.data.messages]
+        : res.data.messages
+      )
+    }
+  }
+
+  // メッセージ送信
+  const sendMessage = async (content: string, relatedTaskId?: string) => {
+    const res = await api.post<ChatMessage>(
+      `/projects/${projectId}/agents/${agentId}/chat/messages`,
+      { content, relatedTaskId }
+    )
+    if (res.data) {
+      setMessages(prev => [...prev, res.data])
+    }
+    return res
+  }
+
+  // ポーリング（新着メッセージ確認）
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const lastId = messages[messages.length - 1]?.id
+      if (lastId) fetchMessages(lastId)
+    }, 3000) // 3秒間隔
+    return () => clearInterval(interval)
+  }, [messages])
+
+  return { messages, sendMessage, fetchMessages }
+}
+```
+
+### 11.8 実装ファイル一覧（Web UI対応）
+
+#### 新規作成
+
+| ファイル | 説明 |
+|----------|------|
+| `Sources/RESTServer/Routes/ChatRoutes.swift` | REST APIルート定義 |
+| `web-ui/src/hooks/useChat.ts` | チャット用カスタムフック |
+| `web-ui/src/components/chat/ChatPanel.tsx` | チャットパネルコンポーネント |
+| `web-ui/src/components/chat/ChatMessage.tsx` | メッセージ表示コンポーネント |
+| `web-ui/src/components/chat/ChatInput.tsx` | メッセージ入力コンポーネント |
+
+#### 修正
+
+| ファイル | 変更内容 |
+|----------|----------|
+| `Sources/RESTServer/RESTServer.swift` | チャットルート登録 |
+| `web-ui/src/api/client.ts` | チャットAPI関数追加 |
+| `web-ui/src/pages/TaskBoardPage.tsx` | チャットパネル統合 |
+
+---
+
+## 12. 将来拡張（スコープ外）
 
 - ファイル監視によるリアルタイム更新（FSEvents）
+- WebSocket対応（ポーリングからの移行）
 - 実行中エージェントへの通知（ツール返却値に通知フィールド追加）
 - エージェント間対話
 - メッセージ検索・編集・削除
@@ -647,13 +921,15 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
 
 ---
 
-## 12. 決定事項
+## 13. 決定事項
 
 | 項目 | 決定 | 理由 |
 |------|------|------|
 | UI配置 | ヘッダーにアバター列 | コンパクト、既存レイアウト影響小 |
 | チャット表示 | 第3カラム | 3カラム構成維持、タスク詳細と自然な切り替え |
 | メッセージ保存 | ファイルベース（.ai-pm/） | エージェントアクセス容易 |
+| **保存場所** | **PMアプリ端末のみ** | **一元管理、整合性維持、リモート端末に分散させない** |
+| **リモートアクセス** | **REST API経由** | **Web UI・リモートエージェント共通** |
 | 制御情報 | DB（pending_agent_purposes） | MCP側で起動理由を管理 |
 | 未読管理 | ファイルから判定 | 専用テーブル不要 |
 | ファイル形式 | JSONL | 追記高速、行単位処理 |

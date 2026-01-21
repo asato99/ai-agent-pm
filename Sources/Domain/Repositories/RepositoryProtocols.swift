@@ -236,6 +236,47 @@ public protocol ChatRepositoryProtocol: Sendable {
     /// 未読メッセージを取得（エージェントからの最後のメッセージ以降のユーザーメッセージ）
     /// MCP連携用: エージェントが応答すべきメッセージを取得
     func findUnreadUserMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage]
+
+    // MARK: - ページネーション対応（REST API用）
+
+    /// カーソルベースでメッセージを取得
+    /// - Parameters:
+    ///   - projectId: プロジェクトID
+    ///   - agentId: エージェントID
+    ///   - limit: 取得件数上限
+    ///   - after: このメッセージIDより後のメッセージを取得
+    ///   - before: このメッセージIDより前のメッセージを取得
+    /// - Returns: ページネーション結果
+    func findMessagesWithCursor(
+        projectId: ProjectID,
+        agentId: AgentID,
+        limit: Int,
+        after: ChatMessageID?,
+        before: ChatMessageID?
+    ) throws -> ChatMessagePage
+
+    /// 総メッセージ数を取得
+    func countMessages(projectId: ProjectID, agentId: AgentID) throws -> Int
+}
+
+// MARK: - ChatMessagePage
+
+/// ページネーション結果
+public struct ChatMessagePage: Equatable, Sendable {
+    /// 取得したメッセージ（時系列順）
+    public let messages: [ChatMessage]
+
+    /// さらに前のメッセージがあるか
+    public let hasMore: Bool
+
+    /// 総メッセージ数（オプション）
+    public let totalCount: Int?
+
+    public init(messages: [ChatMessage], hasMore: Bool, totalCount: Int? = nil) {
+        self.messages = messages
+        self.hasMore = hasMore
+        self.totalCount = totalCount
+    }
 }
 
 // MARK: - AppSettingsRepositoryProtocol
