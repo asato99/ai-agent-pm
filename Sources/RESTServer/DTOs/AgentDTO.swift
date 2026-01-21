@@ -76,3 +76,9 @@ public struct UpdateAgentRequest: Decodable {
     let systemPrompt: String?
     let status: String?
 }
+
+/// Response for agent session counts
+/// 参照: docs/design/CHAT_FEATURE.md - セッション状態表示
+public struct AgentSessionCountsDTO: Encodable {
+    let agentSessionCounts: [String: Int]
+}

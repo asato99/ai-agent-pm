@@ -345,6 +345,12 @@ final class RESTServer {
             try await listProjectAssignableAgents(request: request, context: context)
         }
 
+        // Agent session counts for project (active sessions per assigned agent)
+        // 参照: docs/design/CHAT_FEATURE.md - セッション状態表示
+        projectRouter.get(":projectId/agent-sessions") { [self] request, context in
+            try await listProjectAgentSessions(request: request, context: context)
+        }
+
         // Direct task access
         let taskRouter = protectedRouter.group("tasks")
         debugLog("Task router created with group 'tasks'")
@@ -859,6 +865,28 @@ final class RESTServer {
         let assignable = projectAgents.filter { $0.status == .active }
         let dtos = assignable.map { AgentDTO(from: $0) }
         return jsonResponse(dtos)
+    }
+
+    /// GET /api/projects/:projectId/agent-sessions - プロジェクトのエージェントセッション数を取得
+    /// 参照: docs/design/CHAT_FEATURE.md - セッション状態表示
+    private func listProjectAgentSessions(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let projectIdStr = context.parameters.get("projectId") else {
+            return errorResponse(status: .badRequest, message: "Project ID is required")
+        }
+        let projectId = ProjectID(value: projectIdStr)
+
+        // Get agents assigned to this project
+        let projectAgents = try projectAgentAssignmentRepository.findAgentsByProject(projectId)
+
+        // Count active sessions for each agent
+        var sessionCounts: [String: Int] = [:]
+        for agent in projectAgents {
+            let count = try sessionRepository.countActiveSessions(agentId: agent.id)
+            sessionCounts[agent.id.value] = count
+        }
+
+        let dto = AgentSessionCountsDTO(agentSessionCounts: sessionCounts)
+        return jsonResponse(dto)
     }
 
     /// GET /api/agents/subordinates - 全下位エージェント一覧（再帰的に取得）

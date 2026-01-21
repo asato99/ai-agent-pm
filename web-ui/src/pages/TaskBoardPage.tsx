@@ -4,8 +4,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppHeader } from '@/components/layout'
 import { KanbanBoard, CreateTaskModal, TaskDetailPanel } from '@/components/task'
 import { WorkingDirectorySettings } from '@/components/project'
+import { AssignedAgentsRow } from '@/components/agent/AssignedAgentsRow'
 import { useProject } from '@/hooks/useProject'
 import { useTasks } from '@/hooks/useTasks'
+import { useAssignableAgents, useAgentSessions } from '@/hooks'
 import { api } from '@/api/client'
 import type { Task, TaskStatus, TaskPriority } from '@/types'
 
@@ -14,6 +16,8 @@ export function TaskBoardPage() {
   const queryClient = useQueryClient()
   const { project, isLoading: projectLoading } = useProject(projectId || '')
   const { tasks, isLoading: tasksLoading } = useTasks(projectId || '')
+  const { agents, isLoading: agentsLoading } = useAssignableAgents(projectId || '')
+  const { sessionCounts } = useAgentSessions(projectId || '')
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -65,7 +69,7 @@ export function TaskBoardPage() {
     createTaskMutation.mutate(data)
   }
 
-  const isLoading = projectLoading || tasksLoading
+  const isLoading = projectLoading || tasksLoading || agentsLoading
 
   if (isLoading) {
     return (
@@ -109,6 +113,13 @@ export function TaskBoardPage() {
             Create Task
           </button>
         </div>
+
+        {/* Agent session status display - similar to native app */}
+        <AssignedAgentsRow
+          agents={agents}
+          sessionCounts={sessionCounts}
+          isLoading={agentsLoading}
+        />
 
         {/* Phase 2.4: Multi-device support - Working directory settings */}
         {projectId && (

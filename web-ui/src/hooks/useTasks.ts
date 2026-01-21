@@ -3,7 +3,9 @@ import { useMemo } from 'react'
 import { api } from '@/api/client'
 import type { Task, TaskStatus } from '@/types'
 
-export function useTasks(projectId: string) {
+export function useTasks(projectId: string, options?: { polling?: boolean }) {
+  const { polling = true } = options ?? {}
+
   const query = useQuery({
     queryKey: ['tasks', projectId],
     queryFn: async () => {
@@ -14,6 +16,9 @@ export function useTasks(projectId: string) {
       return result.data!
     },
     enabled: !!projectId,
+    // Poll every 3 seconds (same as native app) when polling is enabled
+    refetchInterval: polling ? 3000 : false,
+    refetchOnWindowFocus: false,
   })
 
   const tasksByStatus = useMemo(() => {

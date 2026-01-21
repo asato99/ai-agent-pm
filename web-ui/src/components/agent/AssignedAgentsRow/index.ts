@@ -1,0 +1,1 @@
+export { AssignedAgentsRow } from './AssignedAgentsRow'
