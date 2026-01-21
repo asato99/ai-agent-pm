@@ -2,7 +2,7 @@
 // チャット機能用カスタムフック
 // 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 5
 
-import { useCallback } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chatApi } from '@/api/chatApi'
 import type { ChatMessage, GetChatMessagesOptions } from '@/types'
@@ -29,6 +29,8 @@ interface UseChatResult {
   sendMessage: (content: string, relatedTaskId?: string) => Promise<ChatMessage>
   /** 送信中フラグ */
   isSending: boolean
+  /** エージェント応答待ちフラグ */
+  isWaitingForResponse: boolean
   /** 手動リフレッシュ */
   refetch: () => void
   /** 古いメッセージを追加で読み込む */
@@ -51,6 +53,10 @@ export function useChat(
   const queryClient = useQueryClient()
   const queryKey = ['chat', projectId, agentId]
 
+  // エージェント応答待ち状態の追跡
+  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false)
+  const lastMessageCountRef = useRef(0)
+
   // メッセージ取得クエリ
   const queryOptions: GetChatMessagesOptions = {}
   if (limit !== undefined) {
@@ -72,6 +78,20 @@ export function useChat(
     refetchInterval: polling ? pollingInterval : false,
     refetchOnWindowFocus: false,
   })
+
+  // エージェント応答を検出して待機状態を解除
+  useEffect(() => {
+    const messages = data?.messages ?? []
+    if (isWaitingForResponse && messages.length > lastMessageCountRef.current) {
+      // 新しいメッセージが追加された
+      const lastMessage = messages[messages.length - 1]
+      if (lastMessage && lastMessage.sender === 'agent') {
+        // エージェントからの応答を受信
+        setIsWaitingForResponse(false)
+      }
+    }
+    lastMessageCountRef.current = messages.length
+  }, [data?.messages, isWaitingForResponse])
 
   // メッセージ送信ミューテーション
   const sendMutation = useMutation({
@@ -98,6 +118,8 @@ export function useChat(
           messages: [...oldData.messages, newMessage],
         }
       })
+      // エージェント応答待ち状態を開始
+      setIsWaitingForResponse(true)
     },
   })
 
@@ -135,6 +157,7 @@ export function useChat(
     hasMore: data?.hasMore ?? false,
     sendMessage,
     isSending: sendMutation.isPending,
+    isWaitingForResponse,
     refetch,
     loadMore,
   }
