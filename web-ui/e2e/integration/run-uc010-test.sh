@@ -134,7 +134,7 @@ mcp_socket_path: $MCP_SOCKET_PATH
 ai_providers:
   claude:
     cli_command: claude
-    cli_args: ["--dangerously-skip-permissions", "--max-turns", "30"]
+    cli_args: ["--dangerously-skip-permissions", "--max-turns", "100"]
 agents:
   integ-worker:
     passkey: test-passkey
