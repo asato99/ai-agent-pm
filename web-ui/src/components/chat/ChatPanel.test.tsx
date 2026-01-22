@@ -34,6 +34,18 @@ vi.mock('@/stores/authStore', () => ({
   })),
 }))
 
+// Mock useAssignableAgents
+vi.mock('@/hooks/useAssignableAgents', () => ({
+  useAssignableAgents: vi.fn(() => ({
+    agents: [
+      { id: 'agent-1', name: 'Test Agent', role: 'Backend Developer', agentType: 'ai', status: 'active', hierarchyType: 'worker' },
+      { id: 'agent-2', name: 'Another Agent', role: 'Frontend Developer', agentType: 'ai', status: 'active', hierarchyType: 'worker' },
+    ],
+    isLoading: false,
+    error: null,
+  })),
+}))
+
 // Import the mocked module
 import { useChat } from '@/hooks/useChat'
 const mockUseChat = vi.mocked(useChat)

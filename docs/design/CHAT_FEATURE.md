@@ -962,7 +962,112 @@ export function useChat(projectId: string, agentId: string) {
 }
 ```
 
-### 11.8 実装ファイル一覧（Web UI対応）
+### 11.8 Web UI メッセージ表示仕様
+
+#### A. メッセージの配置と色分け
+
+チャットパネルでメッセージを表示する際、送信者に応じて配置と背景色を変える。
+
+**配置ルール**:
+
+| 位置 | 送信者 | 背景色 | 説明 |
+|------|--------|--------|------|
+| **右側** | 自分（currentAgent） | 青系（bg-blue-500） | 自分が送信したメッセージ |
+| **右側** | 第三者 | 緑系（bg-green-500） | 自分でも相手でもないエージェント |
+| **左側** | 相手（対象エージェント） | グレー系（bg-gray-100） | チャット相手からのメッセージ |
+| **左側** | システム | 黄色系（bg-yellow-100） | システム通知・エラーメッセージ |
+
+**判定ロジック**:
+```typescript
+function getMessageStyle(message: ChatMessage, currentAgentId: string, targetAgentId: string) {
+  const { senderId } = message
+
+  if (senderId === currentAgentId) {
+    // 自分が送信 → 右側・青
+    return { position: 'right', bgColor: 'bg-blue-500', textColor: 'text-white' }
+  }
+
+  if (senderId === targetAgentId) {
+    // 相手（チャット対象）が送信 → 左側・グレー
+    return { position: 'left', bgColor: 'bg-gray-100', textColor: 'text-gray-900' }
+  }
+
+  if (senderId === 'system') {
+    // システムメッセージ → 左側・黄色
+    return { position: 'left', bgColor: 'bg-yellow-100', textColor: 'text-yellow-800' }
+  }
+
+  // 第三者 → 右側・緑
+  return { position: 'right', bgColor: 'bg-green-500', textColor: 'text-white' }
+}
+```
+
+**視覚的な意味**:
+- **右側** = 「こちら側」の発言（自分 + 第三者からの介入）
+- **左側** = 「あちら側」の発言（相手 + システム）
+- **色** = 発言者の種類を細かく区別
+
+#### B. 送信者名の表示
+
+メッセージにはIDではなく**エージェント名**を表示する。
+
+**実装方法**:
+1. `ChatMessage` にはIDのみ含まれる（`senderId`）
+2. 表示時に `agentId` → `agentName` のマッピングを行う
+3. キャッシュ済みのエージェント情報を使用
+
+```typescript
+// ChatMessage表示コンポーネント
+interface ChatMessageProps {
+  message: ChatMessage
+  currentAgentId: string
+  targetAgentId: string
+  agentMap: Map<string, Agent>  // ID → Agent情報のマップ
+}
+
+function ChatMessage({ message, currentAgentId, targetAgentId, agentMap }: ChatMessageProps) {
+  const sender = agentMap.get(message.senderId)
+  const senderName = sender?.name ?? message.senderId  // フォールバック: ID表示
+  // ...
+}
+```
+
+#### C. 自分のチャット欄を開いた場合
+
+自分（currentAgent）のチャット欄を開いた場合、通常のチャットとは異なる動作が必要。
+
+**問題**:
+- `targetAgentId === currentAgentId` の場合、誰宛にメッセージを送るか不明
+
+**解決策**:
+- メッセージ入力時に `@エージェント名` で宛先を指定
+- 宛先指定がない場合は送信ボタンを無効化
+
+**UI仕様**:
+```
+┌─────────────────────────────────────────────┐
+│ 自分のチャット                    [×]        │
+├─────────────────────────────────────────────┤
+│                                             │
+│  [過去のメッセージ履歴]                      │
+│                                             │
+├─────────────────────────────────────────────┤
+│ 宛先: [@エージェント選択 ▼]                  │
+│ ┌─────────────────────────────────────────┐ │
+│ │ メッセージを入力...                      │ │
+│ └─────────────────────────────────────────┘ │
+│                              [送信]         │
+└─────────────────────────────────────────────┘
+```
+
+**入力コンポーネントの変更**:
+- `isSelfChat`: `targetAgentId === currentAgentId` の場合 `true`
+- `isSelfChat` が `true` の場合:
+  - 宛先選択ドロップダウンを表示
+  - 宛先未選択時は送信ボタンを無効化
+  - 選択された宛先を `receiverId` としてメッセージ送信
+
+### 11.9 実装ファイル一覧（Web UI対応）
 
 #### 新規作成
 

@@ -2,9 +2,10 @@
 // Chat panel component
 // Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
 
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 import { useChat } from '@/hooks/useChat'
 import { useAuthStore } from '@/stores/authStore'
+import { useAssignableAgents } from '@/hooks/useAssignableAgents'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import type { Agent } from '@/types'
@@ -22,8 +23,25 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
     projectId,
     agent.id
   )
+  const { agents: projectAgents } = useAssignableAgents(projectId)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+
+  // Build agent map for name resolution
+  const agentMap = useMemo(() => {
+    const map: Record<string, Agent> = {}
+    // Add project agents
+    for (const a of projectAgents) {
+      map[a.id] = a
+    }
+    // Add current agent (in case not in project agents)
+    if (currentAgent) {
+      map[currentAgent.id] = currentAgent
+    }
+    // Add target agent (in case not in project agents)
+    map[agent.id] = agent
+    return map
+  }, [projectAgents, currentAgent, agent])
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -123,14 +141,20 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
               </div>
             )}
             {messages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} currentAgentId={currentAgentId} />
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                currentAgentId={currentAgentId}
+                targetAgentId={agent.id}
+                agentMap={agentMap}
+              />
             ))}
             {/* Waiting for response indicator */}
             {isWaitingForResponse && (
               <div className="flex mb-4 justify-start" data-testid="chat-waiting-indicator">
                 <div className="bg-gray-100 rounded-lg px-4 py-2 max-w-[70%]">
                   <div className="text-xs font-semibold mb-1 text-gray-500">
-                    エージェント
+                    {agent.name}
                   </div>
                   <div className="flex items-center text-gray-600">
                     <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
