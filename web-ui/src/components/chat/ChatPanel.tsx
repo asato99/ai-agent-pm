@@ -1,9 +1,10 @@
 // web-ui/src/components/chat/ChatPanel.tsx
-// チャットパネルコンポーネント
-// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
+// Chat panel component
+// Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
 
 import { useRef, useEffect } from 'react'
 import { useChat } from '@/hooks/useChat'
+import { useAuthStore } from '@/stores/authStore'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import type { Agent } from '@/types'
@@ -15,6 +16,8 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
+  const { agent: currentAgent } = useAuthStore()
+  const currentAgentId = currentAgent?.id ?? ''
   const { messages, isLoading, sendMessage, isSending, isWaitingForResponse, hasMore, loadMore } = useChat(
     projectId,
     agent.id
@@ -57,7 +60,7 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
         <button
           onClick={onClose}
           className="p-1 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          aria-label="閉じる"
+          aria-label="Close"
         >
           <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -92,7 +95,7 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               />
             </svg>
-            読み込み中...
+            Loading...
           </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-400">
@@ -104,8 +107,8 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
                 d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
               />
             </svg>
-            <p>メッセージはまだありません</p>
-            <p className="text-sm">最初のメッセージを送信してください</p>
+            <p>No messages yet</p>
+            <p className="text-sm">Send the first message</p>
           </div>
         ) : (
           <>
@@ -115,12 +118,12 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
                   onClick={() => loadMore()}
                   className="text-sm text-blue-500 hover:text-blue-700"
                 >
-                  過去のメッセージを読み込む
+                  Load more messages
                 </button>
               </div>
             )}
             {messages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} />
+              <ChatMessage key={msg.id} message={msg} currentAgentId={currentAgentId} />
             ))}
             {/* Waiting for response indicator */}
             {isWaitingForResponse && (

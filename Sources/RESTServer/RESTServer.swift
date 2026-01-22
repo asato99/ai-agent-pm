@@ -1284,17 +1284,24 @@ final class RESTServer {
             return jsonResponse(errorResponse, status: .badRequest)
         }
 
-        // Create and save message
+        // Create message with sender (current user) and receiver (target agent)
         let message = ChatMessage(
             id: ChatMessageID(value: UUID().uuidString),
-            sender: .user,
+            senderId: currentAgentId,
+            receiverId: targetAgentId,
             content: body.content,
             createdAt: Date(),
             relatedTaskId: body.relatedTaskId.map { TaskID(value: $0) }
         )
 
         do {
-            try chatRepository.saveMessage(message, projectId: projectId, agentId: targetAgentId)
+            // Dual write: save to both sender's and receiver's storage
+            try chatRepository.saveMessageDualWrite(
+                message,
+                projectId: projectId,
+                senderAgentId: currentAgentId,
+                receiverAgentId: targetAgentId
+            )
 
             // Record pending purpose to trigger agent spawn
             // 参照: docs/design/CHAT_FEATURE.md - 9.3 エージェント起動フロー

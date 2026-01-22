@@ -1191,15 +1191,19 @@ final class DomainTests: XCTestCase {
     }
 
     func testChatMessageCreation() {
-        // 要件: ChatMessage { id, sender, content, createdAt, relatedTaskId?, relatedHandoffId? }
+        // 要件: ChatMessage { id, senderId, receiverId?, content, createdAt, relatedTaskId?, relatedHandoffId? }
+        let ownerAgentId = AgentID(value: "owner")
+        let targetAgentId = AgentID(value: "target-agent")
         let message = ChatMessage(
             id: ChatMessageID.generate(),
-            sender: .user,
+            senderId: ownerAgentId,
+            receiverId: targetAgentId,
             content: "タスクAの進捗を教えてください",
             createdAt: Date()
         )
 
-        XCTAssertEqual(message.sender, .user)
+        XCTAssertEqual(message.senderId, ownerAgentId)
+        XCTAssertEqual(message.receiverId, targetAgentId)
         XCTAssertEqual(message.content, "タスクAの進捗を教えてください")
         XCTAssertNil(message.relatedTaskId, "New message should not have related task by default")
         XCTAssertNil(message.relatedHandoffId, "New message should not have related handoff by default")
@@ -1207,38 +1211,54 @@ final class DomainTests: XCTestCase {
 
     func testChatMessageWithRelatedTask() {
         let taskId = TaskID.generate()
+        let agentId = AgentID(value: "test-agent")
+        let ownerAgentId = AgentID(value: "owner")
         let message = ChatMessage(
             id: ChatMessageID.generate(),
-            sender: .agent,
+            senderId: agentId,
+            receiverId: ownerAgentId,
             content: "タスクは50%完了しています",
             createdAt: Date(),
             relatedTaskId: taskId
         )
 
-        XCTAssertEqual(message.sender, .agent)
+        XCTAssertEqual(message.senderId, agentId)
         XCTAssertEqual(message.relatedTaskId, taskId)
     }
 
-    func testSenderTypeValues() {
-        // 要件: user (人間) / agent (AIエージェント)
-        XCTAssertEqual(SenderType.user.rawValue, "user")
-        XCTAssertEqual(SenderType.agent.rawValue, "agent")
+    func testChatMessageIsSentBy() {
+        // 要件: senderId/receiverId model での送信者判定
+        let ownerAgentId = AgentID(value: "owner")
+        let agentId = AgentID(value: "agent")
+        let message = ChatMessage(
+            id: ChatMessageID.generate(),
+            senderId: ownerAgentId,
+            content: "Hello",
+            createdAt: Date()
+        )
+
+        XCTAssertTrue(message.isSentBy(ownerAgentId))
+        XCTAssertFalse(message.isSentBy(agentId))
     }
 
     func testChatMessageEquality() {
         let id = ChatMessageID.generate()
         let now = Date()
+        let ownerAgentId = AgentID(value: "owner")
+        let targetAgentId = AgentID(value: "target")
 
         let message1 = ChatMessage(
             id: id,
-            sender: .user,
+            senderId: ownerAgentId,
+            receiverId: targetAgentId,
             content: "Hello",
             createdAt: now
         )
 
         let message2 = ChatMessage(
             id: id,
-            sender: .user,
+            senderId: ownerAgentId,
+            receiverId: targetAgentId,
             content: "Hello",
             createdAt: now
         )
@@ -1247,9 +1267,12 @@ final class DomainTests: XCTestCase {
     }
 
     func testChatMessageCodable() throws {
+        let agentId = AgentID(value: "test-agent")
+        let ownerAgentId = AgentID(value: "owner")
         let message = ChatMessage(
             id: ChatMessageID(value: "msg_test123"),
-            sender: .agent,
+            senderId: agentId,
+            receiverId: ownerAgentId,
             content: "テストメッセージ",
             createdAt: Date(timeIntervalSince1970: 1704067200) // 2024-01-01 00:00:00 UTC
         )
@@ -1261,7 +1284,8 @@ final class DomainTests: XCTestCase {
         let decoded = try decoder.decode(ChatMessage.self, from: data)
 
         XCTAssertEqual(decoded.id, message.id)
-        XCTAssertEqual(decoded.sender, message.sender)
+        XCTAssertEqual(decoded.senderId, message.senderId)
+        XCTAssertEqual(decoded.receiverId, message.receiverId)
         XCTAssertEqual(decoded.content, message.content)
         XCTAssertEqual(decoded.createdAt, message.createdAt)
     }

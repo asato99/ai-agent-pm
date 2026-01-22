@@ -8,13 +8,17 @@ import Domain
 struct ChatMessageRow: View {
     let message: ChatMessage
     let agentName: String?
+    /// Current user's agent ID (used to determine if message is "mine")
+    let currentAgentId: AgentID
 
+    /// Message is "mine" if senderId matches currentAgentId
     private var isFromUser: Bool {
-        message.sender == .user
+        message.senderId == currentAgentId
     }
 
+    /// System messages have senderId of "system"
     private var isSystemMessage: Bool {
-        message.sender == .system
+        message.senderId.value == "system"
     }
 
     var body: some View {
@@ -138,25 +142,31 @@ struct ChatMessageRow: View {
 
 #if DEBUG
 #Preview {
+    let currentAgentId = AgentID(value: "owner-1")
+    let otherAgentId = AgentID(value: "worker-1")
+
     VStack(spacing: 16) {
         ChatMessageRow(
             message: ChatMessage(
                 id: ChatMessageID.generate(),
-                sender: .user,
+                senderId: currentAgentId,
+                receiverId: otherAgentId,
                 content: "タスクAの進捗を教えてください。",
                 createdAt: Date()
             ),
-            agentName: nil
+            agentName: nil,
+            currentAgentId: currentAgentId
         )
 
         ChatMessageRow(
             message: ChatMessage(
                 id: ChatMessageID.generate(),
-                sender: .agent,
+                senderId: otherAgentId,
                 content: "タスクAは現在50%完了しています。主要な機能の実装が完了し、テストフェーズに入る準備をしています。",
                 createdAt: Date()
             ),
-            agentName: "Claude"
+            agentName: "Claude",
+            currentAgentId: currentAgentId
         )
     }
     .padding()

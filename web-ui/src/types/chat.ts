@@ -3,16 +3,16 @@
 // 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 4
 
 /**
- * チャットメッセージの送信者
- */
-export type ChatSender = 'user' | 'agent' | 'system'
-
-/**
  * チャットメッセージ
+ * Uses senderId/receiverId for dual storage model
+ * Reference: docs/design/CHAT_FEATURE.md - Section 2.4
  */
 export interface ChatMessage {
   id: string
-  sender: ChatSender
+  /** Sender's agent ID */
+  senderId: string
+  /** Receiver's agent ID (only in sender's storage) */
+  receiverId?: string
   content: string
   createdAt: string // ISO8601形式
   relatedTaskId?: string

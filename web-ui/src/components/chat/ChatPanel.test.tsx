@@ -1,6 +1,6 @@
 // web-ui/src/components/chat/ChatPanel.test.tsx
-// ChatPanelコンポーネントのテスト
-// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
+// ChatPanel component tests
+// Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '../../../tests/test-utils'
@@ -23,6 +23,14 @@ vi.mock('@/hooks/useChat', () => ({
     isSending: false,
     refetch: mockRefetch,
     loadMore: mockLoadMore,
+  })),
+}))
+
+// Mock the authStore
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: vi.fn(() => ({
+    agent: { id: 'current-user-agent', name: 'Current User', role: 'Owner' },
+    isAuthenticated: true,
   })),
 }))
 
@@ -54,37 +62,37 @@ describe('ChatPanel', () => {
     })
   })
 
-  describe('ヘッダー表示', () => {
-    it('エージェント名を表示する', () => {
+  describe('Header display', () => {
+    it('displays agent name', () => {
       render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
 
       expect(screen.getByText('Test Agent')).toBeInTheDocument()
     })
 
-    it('エージェントロールを表示する', () => {
+    it('displays agent role', () => {
       render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
 
       expect(screen.getByText('Backend Developer')).toBeInTheDocument()
     })
 
-    it('閉じるボタンをクリックするとonCloseが呼ばれる', async () => {
+    it('calls onClose when close button is clicked', async () => {
       const user = userEvent.setup()
       const mockOnClose = vi.fn()
       render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={mockOnClose} />)
 
-      const closeButton = screen.getByRole('button', { name: /閉じる/i })
+      const closeButton = screen.getByRole('button', { name: /close/i })
       await user.click(closeButton)
 
       expect(mockOnClose).toHaveBeenCalled()
     })
   })
 
-  describe('メッセージ表示', () => {
-    it('メッセージを表示する', () => {
+  describe('Message display', () => {
+    it('displays messages', () => {
       mockUseChat.mockReturnValue({
         messages: [
-          { id: 'msg-1', sender: 'user', content: 'Hello', createdAt: '2026-01-21T10:00:00Z' },
-          { id: 'msg-2', sender: 'agent', content: 'Hi there!', createdAt: '2026-01-21T10:00:05Z' },
+          { id: 'msg-1', senderId: 'current-user-agent', receiverId: 'agent-1', content: 'Hello', createdAt: '2026-01-21T10:00:00Z' },
+          { id: 'msg-2', senderId: 'agent-1', content: 'Hi there!', createdAt: '2026-01-21T10:00:05Z' },
         ],
         isLoading: false,
         error: null,
@@ -101,7 +109,7 @@ describe('ChatPanel', () => {
       expect(screen.getByText('Hi there!')).toBeInTheDocument()
     })
 
-    it('読み込み中状態を表示する', () => {
+    it('displays loading state', () => {
       mockUseChat.mockReturnValue({
         messages: [],
         isLoading: true,
@@ -118,19 +126,20 @@ describe('ChatPanel', () => {
       expect(screen.getByTestId('chat-loading')).toBeInTheDocument()
     })
 
-    it('メッセージがない場合は空状態を表示する', () => {
+    it('displays empty state when no messages', () => {
       render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
 
-      expect(screen.getByText('メッセージはまだありません')).toBeInTheDocument()
+      expect(screen.getByText('No messages yet')).toBeInTheDocument()
     })
   })
 
-  describe('メッセージ送信', () => {
-    it('フォーム送信でメッセージを送信する', async () => {
+  describe('Message sending', () => {
+    it('sends message on form submit', async () => {
       const user = userEvent.setup()
       mockSendMessage.mockResolvedValue({
         id: 'msg-new',
-        sender: 'user',
+        senderId: 'current-user-agent',
+        receiverId: 'agent-1',
         content: 'Test message',
         createdAt: new Date().toISOString(),
       })
@@ -148,7 +157,7 @@ describe('ChatPanel', () => {
       })
     })
 
-    it('空のメッセージは送信しない', async () => {
+    it('does not send empty message', async () => {
       const user = userEvent.setup()
       render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
 
@@ -158,7 +167,7 @@ describe('ChatPanel', () => {
       expect(mockSendMessage).not.toHaveBeenCalled()
     })
 
-    it('送信中はボタンが無効化される', async () => {
+    it('disables button while sending', async () => {
       mockUseChat.mockReturnValue({
         messages: [],
         isLoading: false,
@@ -177,17 +186,17 @@ describe('ChatPanel', () => {
     })
   })
 
-  describe('アクセシビリティ', () => {
-    it('chat-panel testIdを持つ', () => {
+  describe('Accessibility', () => {
+    it('has chat-panel testId', () => {
       render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
 
       expect(screen.getByTestId('chat-panel')).toBeInTheDocument()
     })
 
-    it('入力欄にラベルがある', () => {
+    it('input has label', () => {
       render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
 
-      expect(screen.getByLabelText('チャットメッセージ入力')).toBeInTheDocument()
+      expect(screen.getByLabelText('Chat message input')).toBeInTheDocument()
     })
   })
 })

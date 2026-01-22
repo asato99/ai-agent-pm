@@ -2022,16 +2022,19 @@ final class InfrastructureTests: XCTestCase {
             projectRepository: projectRepo
         )
 
-        // メッセージを作成
+        // メッセージを作成（senderId/receiverId model）
+        let ownerAgentId = AgentID(value: "owner")
         let message1 = ChatMessage(
             id: ChatMessageID.generate(),
-            sender: .user,
+            senderId: ownerAgentId,
+            receiverId: agent.id,
             content: "こんにちは",
             createdAt: Date()
         )
         let message2 = ChatMessage(
             id: ChatMessageID.generate(),
-            sender: .agent,
+            senderId: agent.id,
+            receiverId: ownerAgentId,
             content: "こんにちは！何かお手伝いできることはありますか？",
             createdAt: Date()
         )
@@ -2045,10 +2048,10 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertEqual(messages.count, 2)
         XCTAssertEqual(messages[0].id, message1.id)
         XCTAssertEqual(messages[0].content, "こんにちは")
-        XCTAssertEqual(messages[0].sender, .user)
+        XCTAssertEqual(messages[0].senderId, ownerAgentId)
         XCTAssertEqual(messages[1].id, message2.id)
         XCTAssertEqual(messages[1].content, "こんにちは！何かお手伝いできることはありますか？")
-        XCTAssertEqual(messages[1].sender, .agent)
+        XCTAssertEqual(messages[1].senderId, agent.id)
     }
 
     func testChatFileRepositoryFindMessagesReturnsEmptyWhenNoFile() throws {
@@ -2106,11 +2109,15 @@ final class InfrastructureTests: XCTestCase {
             projectRepository: projectRepo
         )
 
-        // 5件のメッセージを作成
+        // 5件のメッセージを作成（senderId/receiverId model）
+        let ownerAgentId = AgentID(value: "owner")
         for i in 1...5 {
+            let senderId = i % 2 == 0 ? agent.id : ownerAgentId
+            let receiverId = i % 2 == 0 ? ownerAgentId : agent.id
             let message = ChatMessage(
                 id: ChatMessageID.generate(),
-                sender: i % 2 == 0 ? .agent : .user,
+                senderId: senderId,
+                receiverId: receiverId,
                 content: "Message \(i)",
                 createdAt: Date()
             )
@@ -2151,11 +2158,12 @@ final class InfrastructureTests: XCTestCase {
             projectRepository: projectRepo
         )
 
-        // メッセージを作成（user → agent → user → user）
-        let msg1 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg1", createdAt: Date())
-        let msg2 = ChatMessage(id: ChatMessageID.generate(), sender: .agent, content: "msg2", createdAt: Date())
-        let msg3 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg3", createdAt: Date())
-        let msg4 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg4", createdAt: Date())
+        // メッセージを作成（owner → agent → owner → owner）senderId/receiverId model
+        let ownerAgentId = AgentID(value: "owner")
+        let msg1 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg1", createdAt: Date())
+        let msg2 = ChatMessage(id: ChatMessageID.generate(), senderId: agent.id, receiverId: ownerAgentId, content: "msg2", createdAt: Date())
+        let msg3 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg3", createdAt: Date())
+        let msg4 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg4", createdAt: Date())
 
         try chatRepo.saveMessage(msg1, projectId: project.id, agentId: agent.id)
         try chatRepo.saveMessage(msg2, projectId: project.id, agentId: agent.id)
@@ -2163,7 +2171,7 @@ final class InfrastructureTests: XCTestCase {
         try chatRepo.saveMessage(msg4, projectId: project.id, agentId: agent.id)
 
         // When: 未読ユーザーメッセージを取得
-        let unreadMessages = try chatRepo.findUnreadUserMessages(projectId: project.id, agentId: agent.id)
+        let unreadMessages = try chatRepo.findUnreadMessages(projectId: project.id, agentId: agent.id)
 
         // Then: エージェント応答後のユーザーメッセージが返される
         XCTAssertEqual(unreadMessages.count, 2)
@@ -2195,15 +2203,16 @@ final class InfrastructureTests: XCTestCase {
             projectRepository: projectRepo
         )
 
-        // ユーザーメッセージのみ
-        let msg1 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg1", createdAt: Date())
-        let msg2 = ChatMessage(id: ChatMessageID.generate(), sender: .user, content: "msg2", createdAt: Date())
+        // オーナーメッセージのみ（senderId/receiverId model）
+        let ownerAgentId = AgentID(value: "owner")
+        let msg1 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg1", createdAt: Date())
+        let msg2 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg2", createdAt: Date())
 
         try chatRepo.saveMessage(msg1, projectId: project.id, agentId: agent.id)
         try chatRepo.saveMessage(msg2, projectId: project.id, agentId: agent.id)
 
         // When: 未読ユーザーメッセージを取得
-        let unreadMessages = try chatRepo.findUnreadUserMessages(projectId: project.id, agentId: agent.id)
+        let unreadMessages = try chatRepo.findUnreadMessages(projectId: project.id, agentId: agent.id)
 
         // Then: 全てのユーザーメッセージが返される
         XCTAssertEqual(unreadMessages.count, 2)

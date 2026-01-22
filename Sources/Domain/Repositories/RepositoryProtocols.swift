@@ -227,15 +227,31 @@ public protocol ChatRepositoryProtocol: Sendable {
     /// メッセージ一覧を取得（時系列順）
     func findMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage]
 
-    /// メッセージを保存（追記）
+    /// メッセージを保存（追記）- 単一ストレージ
     func saveMessage(_ message: ChatMessage, projectId: ProjectID, agentId: AgentID) throws
 
     /// 最新N件のメッセージを取得
     func getLastMessages(projectId: ProjectID, agentId: AgentID, limit: Int) throws -> [ChatMessage]
 
-    /// 未読メッセージを取得（エージェントからの最後のメッセージ以降のユーザーメッセージ）
+    /// 未読メッセージを取得（senderId != agentId のメッセージで、自分の最後のメッセージ以降のもの）
     /// MCP連携用: エージェントが応答すべきメッセージを取得
-    func findUnreadUserMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage]
+    func findUnreadMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage]
+
+    // MARK: - 双方向保存（Dual Write）
+
+    /// メッセージを送信者と受信者の両方のストレージに保存
+    /// - Parameters:
+    ///   - message: 保存するメッセージ（receiverId を含む）
+    ///   - projectId: プロジェクトID
+    ///   - senderAgentId: 送信者のエージェントID
+    ///   - receiverAgentId: 受信者のエージェントID
+    /// - Note: 送信者のストレージには receiverId あり、受信者のストレージには receiverId なし
+    func saveMessageDualWrite(
+        _ message: ChatMessage,
+        projectId: ProjectID,
+        senderAgentId: AgentID,
+        receiverAgentId: AgentID
+    ) throws
 
     // MARK: - ページネーション対応（REST API用）
 

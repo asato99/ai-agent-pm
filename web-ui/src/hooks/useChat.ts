@@ -85,13 +85,14 @@ export function useChat(
     if (isWaitingForResponse && messages.length > lastMessageCountRef.current) {
       // 新しいメッセージが追加された
       const lastMessage = messages[messages.length - 1]
-      if (lastMessage && lastMessage.sender === 'agent') {
+      // senderId が対象エージェントIDと一致すれば、エージェントからの応答
+      if (lastMessage && lastMessage.senderId === agentId) {
         // エージェントからの応答を受信
         setIsWaitingForResponse(false)
       }
     }
     lastMessageCountRef.current = messages.length
-  }, [data?.messages, isWaitingForResponse])
+  }, [data?.messages, isWaitingForResponse, agentId])
 
   // メッセージ送信ミューテーション
   const sendMutation = useMutation({

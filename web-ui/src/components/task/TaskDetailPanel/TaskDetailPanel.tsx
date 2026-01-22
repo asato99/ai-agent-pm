@@ -70,12 +70,16 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center"
+      onClick={onClose}
     >
       {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/50 pointer-events-none" aria-hidden="true" />
 
       {/* Panel */}
-      <div className="relative bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+      <div
+        className="relative bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-start justify-between p-6 border-b">
           <div className="flex-1 min-w-0">

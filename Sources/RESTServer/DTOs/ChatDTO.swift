@@ -1,21 +1,24 @@
 // Sources/RESTServer/DTOs/ChatDTO.swift
 // AI Agent PM - REST API Server
-// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
+// Reference: docs/design/CHAT_FEATURE.md - Section 11.4
 
 import Foundation
 import Domain
 
 /// Chat message data transfer object for REST API
+/// Uses senderId/receiverId instead of sender type
 public struct ChatMessageDTO: Codable {
     public let id: String
-    public let sender: String
+    public let senderId: String
+    public let receiverId: String?
     public let content: String
     public let createdAt: String
     public let relatedTaskId: String?
 
     public init(from message: ChatMessage) {
         self.id = message.id.value
-        self.sender = message.sender.rawValue
+        self.senderId = message.senderId.value
+        self.receiverId = message.receiverId?.value
         self.content = message.content
         self.createdAt = ISO8601DateFormatter().string(from: message.createdAt)
         self.relatedTaskId = message.relatedTaskId?.value
@@ -36,6 +39,7 @@ public struct ChatMessagesResponse: Codable {
 }
 
 /// Request body for POST /projects/:projectId/agents/:agentId/chat/messages
+/// Note: The receiverId comes from the URL path (agentId parameter)
 public struct SendMessageRequest: Decodable {
     public let content: String
     public let relatedTaskId: String?

@@ -30,6 +30,9 @@ private func chatDebugLog(_ message: String) {
 
 /// エージェントとのチャット画面
 struct AgentChatView: View {
+    /// Owner agent ID representing the human user in the native app
+    static let ownerAgentId = AgentID(value: "owner")
+
     @EnvironmentObject var container: DependencyContainer
     @Environment(Router.self) var router
 
@@ -145,7 +148,8 @@ struct AgentChatView: View {
                         ForEach(messages) { message in
                             ChatMessageRow(
                                 message: message,
-                                agentName: agent?.name
+                                agentName: agent?.name,
+                                currentAgentId: Self.ownerAgentId
                             )
                             .id(message.id)
                         }
@@ -237,9 +241,10 @@ struct AgentChatView: View {
                 chatDebugLog("loadMessages: count changed \(previousCount) -> \(newMessages.count)")
 
                 // エージェントからの応答を受信したら待機状態を解除
+                // Agent response: senderId is not the owner (it's from the target agent)
                 if isWaitingForResponse,
                    let lastMessage = newMessages.last,
-                   lastMessage.sender == .agent {
+                   lastMessage.senderId != Self.ownerAgentId {
                     isWaitingForResponse = false
                     chatDebugLog("loadMessages: agent response received, waiting state cleared")
                 }
@@ -262,17 +267,21 @@ struct AgentChatView: View {
 
         AsyncTask {
             do {
+                // Create message with owner as sender and target agent as receiver
                 let message = ChatMessage(
                     id: ChatMessageID.generate(),
-                    sender: .user,
+                    senderId: Self.ownerAgentId,
+                    receiverId: agentId,
                     content: content,
                     createdAt: Date()
                 )
 
-                try container.chatRepository.saveMessage(
+                // Dual write: save to both owner's and agent's storage
+                try container.chatRepository.saveMessageDualWrite(
                     message,
                     projectId: projectId,
-                    agentId: agentId
+                    senderAgentId: Self.ownerAgentId,
+                    receiverAgentId: agentId
                 )
 
                 // メッセージを再読み込み

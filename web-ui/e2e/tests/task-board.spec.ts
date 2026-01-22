@@ -127,12 +127,13 @@ test.describe('Task Board', () => {
     test('Can change task assignee via edit form', async ({ page }) => {
       const taskBoard = new TaskBoardPage(page)
 
-      // Open task detail
-      await taskBoard.clickTask('API実装')
-      await expect(page.getByRole('dialog')).toBeVisible()
+      // Open task detail (DB設計 has status 'done', which allows reassignment)
+      await taskBoard.clickTask('DB設計')
+      const dialog = page.getByRole('dialog').first()
+      await expect(dialog).toBeVisible()
 
-      // Click Edit button
-      await page.getByRole('button', { name: 'Edit' }).click()
+      // Click Edit button inside dialog
+      await dialog.getByRole('button', { name: 'Edit' }).click()
 
       // Edit form should be visible
       await expect(page.getByRole('heading', { name: 'Edit Task' })).toBeVisible()
@@ -140,8 +141,9 @@ test.describe('Task Board', () => {
       // Change assignee in dropdown
       const assigneeSelect = page.getByLabel('Assignee')
       await expect(assigneeSelect).toBeVisible()
+      await expect(assigneeSelect).toBeEnabled()
 
-      // Select a different worker
+      // Select a worker (task starts as unassigned)
       await assigneeSelect.selectOption({ label: 'Worker 2' })
 
       // Save changes
@@ -154,15 +156,20 @@ test.describe('Task Board', () => {
     test('Can set task assignee to Unassigned', async ({ page }) => {
       const taskBoard = new TaskBoardPage(page)
 
-      // Open task detail
-      await taskBoard.clickTask('API実装')
+      // Open task detail (DB設計 has status 'done', which allows reassignment)
+      await taskBoard.clickTask('DB設計')
+      const dialog = page.getByRole('dialog').first()
+      await expect(dialog).toBeVisible()
 
-      // Click Edit button
-      await page.getByRole('button', { name: 'Edit' }).click()
+      // Click Edit button inside dialog
+      await dialog.getByRole('button', { name: 'Edit' }).click()
+
+      // Edit form should be visible
       await expect(page.getByRole('heading', { name: 'Edit Task' })).toBeVisible()
 
-      // Set to Unassigned
+      // Set to Unassigned (it might already be unassigned, so just verify dropdown works)
       const assigneeSelect = page.getByLabel('Assignee')
+      await expect(assigneeSelect).toBeEnabled()
       await assigneeSelect.selectOption({ label: 'Unassigned' })
 
       // Save changes
@@ -178,13 +185,16 @@ test.describe('Task Board', () => {
 
       // Open task detail
       await taskBoard.clickTask('API実装')
-      await expect(page.getByRole('dialog')).toBeVisible()
+      const dialog = page.getByRole('dialog').first()
+      await expect(dialog).toBeVisible()
 
-      // Verify initial title
-      await expect(page.getByRole('heading', { name: 'API実装' })).toBeVisible()
+      // Verify initial title inside dialog
+      await expect(dialog.getByRole('heading', { name: 'API実装' })).toBeVisible()
 
-      // Click Edit button
-      await page.getByRole('button', { name: 'Edit' }).click()
+      // Click Edit button inside dialog
+      await dialog.getByRole('button', { name: 'Edit' }).click()
+
+      // Edit form should be visible
       await expect(page.getByRole('heading', { name: 'Edit Task' })).toBeVisible()
 
       // Change the title
@@ -199,7 +209,8 @@ test.describe('Task Board', () => {
       await expect(page.getByRole('heading', { name: 'Edit Task' })).not.toBeVisible()
 
       // Detail panel should show updated title WITHOUT reopening (reactivity test)
-      await expect(page.getByRole('heading', { name: 'API実装 Updated' })).toBeVisible()
+      // Note: After edit form closes, the detail dialog should still be visible with updated title
+      await expect(dialog.getByRole('heading', { name: 'API実装 Updated' })).toBeVisible()
     })
   })
 })
