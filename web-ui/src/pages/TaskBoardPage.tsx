@@ -8,17 +8,20 @@ import { AssignedAgentsRow } from '@/components/agent/AssignedAgentsRow'
 import { ChatPanel } from '@/components/chat'
 import { useProject } from '@/hooks/useProject'
 import { useTasks } from '@/hooks/useTasks'
-import { useAssignableAgents, useAgentSessions } from '@/hooks'
+import { useAssignableAgents, useAgentSessions, useAuth, useSubordinates } from '@/hooks'
 import { api } from '@/api/client'
 import type { Task, TaskStatus, TaskPriority, Agent } from '@/types'
 
 export function TaskBoardPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
+  const { agent: currentAgent } = useAuth()
   const { project, isLoading: projectLoading } = useProject(projectId || '')
   const { tasks, isLoading: tasksLoading } = useTasks(projectId || '')
   const { agents, isLoading: agentsLoading } = useAssignableAgents(projectId || '')
   const { sessionCounts } = useAgentSessions(projectId || '')
+  const { subordinates } = useSubordinates()
+  const subordinateIds = subordinates.map((s) => s.id)
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -134,6 +137,8 @@ export function TaskBoardPage() {
         <AssignedAgentsRow
           agents={agents}
           sessionCounts={sessionCounts}
+          currentAgentId={currentAgent?.id}
+          subordinateIds={subordinateIds}
           isLoading={agentsLoading}
           onAgentClick={handleAgentClick}
         />
