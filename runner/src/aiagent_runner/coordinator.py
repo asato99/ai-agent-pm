@@ -599,14 +599,21 @@ class Coordinator:
                 cmd.append("--verbose")
 
         # Add prompt
+        # Credentials are now passed via environment variables (AGENT_ID, PROJECT_ID, AGENT_PASSKEY)
+        # so the prompt itself is simpler and safer to pass as command-line argument
         # Gemini: uses positional argument for one-shot mode (-p is deprecated)
         # Claude: uses -p flag
         if provider == "gemini":
-            cmd.append(prompt)  # Positional argument at the end for one-shot mode
+            cmd.append(prompt)
         else:
             cmd.extend(["-p", prompt])
 
         model_desc = f"{provider}/{model}" if model else provider
+        # Use current directory as fallback if working_dir is empty
+        if not working_dir:
+            working_dir = os.getcwd()
+            logger.debug(f"Using fallback working_dir: {working_dir}")
+
         logger.info(
             f"Spawning {model_desc} instance for {agent_id}/{project_id} "
             f"at {working_dir}"
@@ -707,21 +714,24 @@ class Coordinator:
         The Agent Instance will use this prompt to know how to authenticate
         and what to do. Uses state-driven workflow control via get_next_action.
 
+        Credentials are passed via environment variables for reliability
+        (especially on Windows where multi-line command arguments can fail).
+
         Args:
-            agent_id: Agent ID
-            project_id: Project ID
-            passkey: Agent passkey
+            agent_id: Agent ID (for logging, actual value passed via env)
+            project_id: Project ID (for logging, actual value passed via env)
+            passkey: Agent passkey (for logging, actual value passed via env)
 
         Returns:
             Prompt string for the Agent Instance
         """
-        return f"""You are an AI Agent Instance managed by the AI Agent PM system.
+        return """You are an AI Agent Instance managed by the AI Agent PM system.
 
-## Authentication
-Call `authenticate` with:
-- agent_id: "{agent_id}"
-- passkey: "{passkey}"
-- project_id: "{project_id}"
+## Authentication (CRITICAL: Read from Environment Variables)
+Your credentials are in environment variables. Call `authenticate` with:
+- agent_id: Read from environment variable AGENT_ID
+- passkey: Read from environment variable AGENT_PASSKEY
+- project_id: Read from environment variable PROJECT_ID
 
 Save the session_token from the response.
 
@@ -748,7 +758,7 @@ Before executing any actual work, you MUST decompose the task into sub-tasks:
 - If you receive a system_prompt from authenticate, adopt that role
 - You are working in the project directory
 
-Begin by calling `authenticate`.
+Begin by calling `authenticate` with values from environment variables.
 """
 
 
