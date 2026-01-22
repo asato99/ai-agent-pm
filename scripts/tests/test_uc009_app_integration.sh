@@ -238,15 +238,15 @@ if [ -f "$FULL_CHAT_PATH" ]; then
     echo "chat.jsonl found"
     echo -e "${GREEN}chat.jsonl created${NC}"
 
-    # ユーザーメッセージ確認
-    if grep -q '"sender":"user"' "$FULL_CHAT_PATH"; then
+    # ユーザーメッセージ確認（dual storage形式: senderId.value = "owner"）
+    if grep -q '"senderId":{"value":"owner"}' "$FULL_CHAT_PATH"; then
         echo -e "${GREEN}  User message recorded${NC}"
     else
         echo -e "${RED}  User message NOT found${NC}"
     fi
 
-    # エージェント応答確認
-    if grep -q '"sender":"agent"' "$FULL_CHAT_PATH"; then
+    # エージェント応答確認（dual storage形式: senderId.value = agent ID）
+    if grep -q '"senderId":{"value":"agt_uc009_chat"}' "$FULL_CHAT_PATH"; then
         echo -e "${GREEN}  Agent response recorded${NC}"
     else
         echo -e "${RED}  Agent response NOT found${NC}"
@@ -296,8 +296,9 @@ V3_AGENT_RESPONSE=false
 
 if [ -f "$FULL_CHAT_PATH" ]; then
     V1_CHAT_FILE_EXISTS=true
-    grep -q '"sender":"user"' "$FULL_CHAT_PATH" && V2_USER_MESSAGE=true
-    grep -q '"sender":"agent"' "$FULL_CHAT_PATH" && V3_AGENT_RESPONSE=true
+    # dual storage形式: senderId.value = "owner" (user) or agent ID
+    grep -q '"senderId":{"value":"owner"}' "$FULL_CHAT_PATH" && V2_USER_MESSAGE=true
+    grep -q '"senderId":{"value":"agt_uc009_chat"}' "$FULL_CHAT_PATH" && V3_AGENT_RESPONSE=true
 fi
 
 echo "UC009 Specification (3 assertions):"
