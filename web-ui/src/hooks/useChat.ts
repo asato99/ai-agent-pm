@@ -85,9 +85,10 @@ export function useChat(
     if (isWaitingForResponse && messages.length > lastMessageCountRef.current) {
       // 新しいメッセージが追加された
       const lastMessage = messages[messages.length - 1]
-      // senderId が対象エージェントIDと一致すれば、エージェントからの応答
-      if (lastMessage && lastMessage.senderId === agentId) {
-        // エージェントからの応答を受信
+      // senderId が対象エージェントIDまたは'system'と一致すれば、応答として扱う
+      // system: エラーメッセージやシステム通知
+      if (lastMessage && (lastMessage.senderId === agentId || lastMessage.senderId === 'system')) {
+        // エージェントまたはシステムからの応答を受信
         setIsWaitingForResponse(false)
       }
     }

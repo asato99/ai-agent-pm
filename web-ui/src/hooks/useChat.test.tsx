@@ -217,4 +217,84 @@ describe('useChat', () => {
       expect(result.current.messages).toBeDefined()
     })
   })
+
+  describe('isWaitingForResponse', () => {
+    it('メッセージ送信後にisWaitingForResponseがtrueになる', async () => {
+      const { result } = renderHook(
+        () => useChat('project-1', 'agent-1'),
+        { wrapper: createWrapper() }
+      )
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false)
+      })
+
+      // 送信前はfalse
+      expect(result.current.isWaitingForResponse).toBe(false)
+
+      // メッセージを送信
+      await act(async () => {
+        await result.current.sendMessage('テストメッセージ')
+      })
+
+      // 送信後はtrue（エージェントの応答を待っている）
+      expect(result.current.isWaitingForResponse).toBe(true)
+    })
+
+    it('システムメッセージ受信後もisWaitingForResponseがfalseになるべき（BUG: 現在はtrueのまま）', async () => {
+      // QueryClientを直接操作してシステムメッセージを追加
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: false,
+          },
+        },
+      })
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+
+      const { result } = renderHook(
+        () => useChat('project-1', 'agent-1'),
+        { wrapper }
+      )
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false)
+      })
+
+      // メッセージを送信（isWaitingForResponse = true になる）
+      await act(async () => {
+        await result.current.sendMessage('テストメッセージ')
+      })
+
+      expect(result.current.isWaitingForResponse).toBe(true)
+
+      // システムからのエラーメッセージを受信したことをシミュレート
+      // senderId が 'agent-1' ではないので、現在のロジックでは isWaitingForResponse が解除されない
+      await act(async () => {
+        queryClient.setQueryData(['chat', 'project-1', 'agent-1'], {
+          messages: [
+            ...result.current.messages,
+            {
+              id: 'msg-system-1',
+              senderId: 'system', // システムメッセージ - agent-1 とは異なる
+              content: 'エラー: エージェントに接続できませんでした',
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          hasMore: false,
+        })
+      })
+
+      // 【期待動作】システムメッセージでも応答として扱い、待機状態を解除すべき
+      // 【現在の動作】senderId !== agentId のため、isWaitingForResponse が true のまま
+      await waitFor(() => {
+        expect(result.current.messages).toHaveLength(4) // 2件 + 送信メッセージ + システムメッセージ
+      })
+
+      // このアサーションは現在失敗する（RED）
+      expect(result.current.isWaitingForResponse).toBe(false)
+    })
+  })
 })
