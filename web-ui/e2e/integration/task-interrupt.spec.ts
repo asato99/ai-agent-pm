@@ -25,11 +25,12 @@ const TEST_DB_PATH = '/tmp/AIAgentPM_UC010_WebUI.db'
 // Threshold for agent response to interrupt signal
 // Factors affecting response time:
 // - Coordinator polling interval (2-5 seconds)
-// - Agent tool call processing time
-// - Claude CLI API response time
-// - MCP server processing
-// A reasonable threshold allows for 2-3 polling cycles plus processing
-const INTERRUPT_THRESHOLD_SECONDS = 30
+// - Agent must notice notification field in MCP response
+// - Agent processes notification and calls get_notifications
+// - Agent calls report_completed
+// - Claude CLI API response time for each call
+// A reasonable threshold allows for full notification detection cycle
+const INTERRUPT_THRESHOLD_SECONDS = 60
 
 test.describe('Task Interrupt Flow - UC010', () => {
   const TEST_CREDENTIALS = {

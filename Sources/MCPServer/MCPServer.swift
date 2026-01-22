@@ -294,12 +294,28 @@ public final class MCPServer {
                 ]
             ]
             if let (agentId, projectId) = extractAgentAndProject(from: caller) {
-                let hasNotifications = (try? notificationRepository.hasUnreadNotifications(
+                // 未読通知を取得して種類を確認
+                let unreadNotifications = (try? notificationRepository.findUnreadByAgentAndProject(
                     agentId: agentId,
                     projectId: projectId
-                )) ?? false
-                // 設計書に従い、自然言語メッセージでエージェントに通知
-                if hasNotifications {
+                )) ?? []
+
+                // 中断通知がある場合は、ツールの戻り値を完全に通知メッセージに差し替える
+                // これによりエージェントは通知に対応せざるを得なくなる
+                if let interruptNotification = unreadNotifications.first(where: { $0.type == .interrupt }) {
+                    let interruptMessage = """
+                        通知があります。
+
+                        1. get_notifications() を呼び出して詳細を確認してください
+                        2. 通知の指示に従ってください
+                        """
+                    // 戻り値を完全に差し替え
+                    responseContent = [
+                        "content": [
+                            ["type": "text", "text": interruptMessage]
+                        ]
+                    ]
+                } else if !unreadNotifications.isEmpty {
                     responseContent["notification"] = "【重要】通知があります。get_notifications を呼び出して確認してください。"
                 } else {
                     responseContent["notification"] = "通知はありません"
@@ -2114,36 +2130,6 @@ public final class MCPServer {
                     申告後、get_next_action を再度呼び出してください。
                     """,
                 "state": "needs_model_verification"
-            ]
-        }
-
-        // 1.55. Interrupt通知チェック - 中断シグナルがあれば即座に中断指示を返す
-        // 参照: docs/design/NOTIFICATION_SYSTEM.md - UC010
-        let interruptNotifications = try notificationRepository.findUnreadByAgentAndProject(
-            agentId: agentId,
-            projectId: projectId
-        ).filter { $0.type == .interrupt }
-
-        if let interruptNotification = interruptNotifications.first {
-            Self.log("[MCP] getNextAction: Interrupt notification found, instructing agent to stop")
-            // 注意: 通知を既読にするのは get_notifications が呼ばれた時のみ
-            // ここで既読にすると、エージェントが指示に従わなかった場合に再検出できなくなる
-
-            return [
-                "action": "interrupt",
-                "instruction": """
-                    【重要】中断シグナルを受信しました。
-                    現在の作業を即座に中断してください。
-
-                    次のステップ:
-                    1. get_notifications を呼び出して通知の詳細を取得
-                    2. report_completed を result='blocked' で呼び出してタスクを終了
-
-                    理由: \(interruptNotification.message)
-                    """,
-                "state": "interrupted",
-                "task_id": interruptNotification.taskId?.value ?? "",
-                "notification_id": interruptNotification.id.value
             ]
         }
 
