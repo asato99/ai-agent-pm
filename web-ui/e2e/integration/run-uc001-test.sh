@@ -78,24 +78,50 @@ echo ""
 # Step 2: ビルド確認
 echo -e "${YELLOW}Step 2: Checking server binaries${NC}"
 cd "$PROJECT_ROOT"
-if [ -x ".build/release/mcp-server-pm" ] && [ -x ".build/release/rest-server-pm" ]; then
+
+# Find binaries in DerivedData (Xcode build) or .build/release (SPM build)
+DERIVED_DATA_DIR=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name "AIAgentPM-*" -type d 2>/dev/null | head -1)
+if [ -n "$DERIVED_DATA_DIR" ] && [ -x "$DERIVED_DATA_DIR/Build/Products/Debug/mcp-server-pm" ]; then
+    MCP_SERVER_BIN="$DERIVED_DATA_DIR/Build/Products/Debug/mcp-server-pm"
+    REST_SERVER_BIN="$DERIVED_DATA_DIR/Build/Products/Debug/rest-server-pm"
+elif [ -x ".build/release/mcp-server-pm" ]; then
+    MCP_SERVER_BIN=".build/release/mcp-server-pm"
+    REST_SERVER_BIN=".build/release/rest-server-pm"
+else
+    MCP_SERVER_BIN=""
+    REST_SERVER_BIN=""
+fi
+
+if [ -x "$MCP_SERVER_BIN" ] && [ -x "$REST_SERVER_BIN" ]; then
     echo -e "${GREEN}✓ Server binaries found${NC}"
+    echo "  MCP: $MCP_SERVER_BIN"
+    echo "  REST: $REST_SERVER_BIN"
 else
     echo -e "${YELLOW}Building servers...${NC}"
-    # Try xcodebuild for Xcode project, fallback to swift build
     if [ -f "project.yml" ]; then
-        xcodebuild -scheme AIAgentPM -configuration Release build 2>&1 | tail -5
+        xcodebuild -scheme MCPServer -configuration Debug 2>&1 | tail -5
+        xcodebuild -scheme RESTServer -configuration Debug 2>&1 | tail -5
+        DERIVED_DATA_DIR=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name "AIAgentPM-*" -type d 2>/dev/null | head -1)
+        MCP_SERVER_BIN="$DERIVED_DATA_DIR/Build/Products/Debug/mcp-server-pm"
+        REST_SERVER_BIN="$DERIVED_DATA_DIR/Build/Products/Debug/rest-server-pm"
     else
         swift build -c release --product mcp-server-pm 2>&1 | tail -2
         swift build -c release --product rest-server-pm 2>&1 | tail -2
+        MCP_SERVER_BIN=".build/release/mcp-server-pm"
+        REST_SERVER_BIN=".build/release/rest-server-pm"
     fi
 fi
 echo ""
 
 # Step 3: DB初期化
 echo -e "${YELLOW}Step 3: Initializing database${NC}"
-AIAGENTPM_DB_PATH="$TEST_DB_PATH" "$PROJECT_ROOT/.build/release/mcp-server-pm" setup 2>/dev/null || \
-    timeout 2 bash -c "AIAGENTPM_DB_PATH='$TEST_DB_PATH' '$PROJECT_ROOT/.build/release/mcp-server-pm' serve" 2>/dev/null || true
+# Use daemon command with AIAGENTPM_DB_PATH to auto-initialize the database
+AIAGENTPM_DB_PATH="$TEST_DB_PATH" "$MCP_SERVER_BIN" daemon \
+    --socket-path "$MCP_SOCKET_PATH" --foreground > /tmp/uc001_webui_mcp_init.log 2>&1 &
+INIT_PID=$!
+sleep 3
+kill "$INIT_PID" 2>/dev/null || true
+rm -f "$MCP_SOCKET_PATH"
 
 SQL_FILE="$SCRIPT_DIR/setup/seed-integration-data.sql"
 [ -f "$SQL_FILE" ] && sqlite3 "$TEST_DB_PATH" < "$SQL_FILE"
@@ -105,7 +131,7 @@ echo ""
 # Step 4: サーバー起動
 echo -e "${YELLOW}Step 4: Starting servers${NC}"
 
-AIAGENTPM_DB_PATH="$TEST_DB_PATH" "$PROJECT_ROOT/.build/release/mcp-server-pm" daemon \
+AIAGENTPM_DB_PATH="$TEST_DB_PATH" "$MCP_SERVER_BIN" daemon \
     --socket-path "$MCP_SOCKET_PATH" --foreground > /tmp/uc001_webui_mcp.log 2>&1 &
 MCP_PID=$!
 
@@ -113,7 +139,7 @@ for i in {1..10}; do [ -S "$MCP_SOCKET_PATH" ] && break; sleep 0.5; done
 echo -e "${GREEN}✓ MCP server running${NC}"
 
 AIAGENTPM_DB_PATH="$TEST_DB_PATH" AIAGENTPM_WEBSERVER_PORT="$REST_PORT" \
-    "$PROJECT_ROOT/.build/release/rest-server-pm" > /tmp/uc001_webui_rest.log 2>&1 &
+    "$REST_SERVER_BIN" > /tmp/uc001_webui_rest.log 2>&1 &
 REST_PID=$!
 
 for i in {1..10}; do curl -s "http://localhost:$REST_PORT/health" > /dev/null 2>&1 && break; sleep 0.5; done
@@ -184,7 +210,9 @@ sqlite3 "$TEST_DB_PATH" "SELECT COUNT(*) as count FROM execution_logs;" 2>/dev/n
 echo ""
 
 # 結果判定
-if grep -q "passed" /tmp/uc001_webui_playwright.log && ! grep -q "failed" /tmp/uc001_webui_playwright.log; then
+# Note: "failed" という文字列はステータスメッセージにも含まれるため、
+# 実際のテスト失敗は "X failed" パターン（Xは数字）でチェックする
+if grep -qE "[0-9]+ passed" /tmp/uc001_webui_playwright.log && ! grep -qE "[0-9]+ failed" /tmp/uc001_webui_playwright.log; then
     TEST_PASSED=true
     echo -e "${GREEN}UC001 Web UI Integration Test: PASSED${NC}"
     exit 0

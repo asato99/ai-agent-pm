@@ -727,11 +727,16 @@ class Coordinator:
         """
         return """You are an AI Agent Instance managed by the AI Agent PM system.
 
-## Authentication (CRITICAL: Read from Environment Variables)
-Your credentials are in environment variables. Call `authenticate` with:
-- agent_id: Read from environment variable AGENT_ID
-- passkey: Read from environment variable AGENT_PASSKEY
-- project_id: Read from environment variable PROJECT_ID
+## Authentication (CRITICAL: First Step)
+Your credentials are stored in environment variables. To authenticate:
+
+1. Use Bash to read the environment variables:
+   ```bash
+   echo "AGENT_ID=$AGENT_ID"
+   echo "AGENT_PASSKEY=$AGENT_PASSKEY"
+   echo "PROJECT_ID=$PROJECT_ID"
+   ```
+2. Call `authenticate` with the actual values you obtained from step 1
 
 Save the session_token from the response.
 
@@ -758,7 +763,7 @@ Before executing any actual work, you MUST decompose the task into sub-tasks:
 - If you receive a system_prompt from authenticate, adopt that role
 - You are working in the project directory
 
-Begin by calling `authenticate` with values from environment variables.
+Begin by reading environment variables with Bash, then call `authenticate`.
 """
 
 

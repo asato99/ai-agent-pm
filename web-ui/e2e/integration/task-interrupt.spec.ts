@@ -22,7 +22,14 @@ import { execSync } from 'child_process'
 const TEST_DB_PATH = '/tmp/AIAgentPM_UC010_WebUI.db'
 
 // Threshold: if agent continues working more than this after interrupt, it's RED
-const INTERRUPT_THRESHOLD_SECONDS = 10
+// Threshold for agent response to interrupt signal
+// Factors affecting response time:
+// - Coordinator polling interval (2-5 seconds)
+// - Agent tool call processing time
+// - Claude CLI API response time
+// - MCP server processing
+// A reasonable threshold allows for 2-3 polling cycles plus processing
+const INTERRUPT_THRESHOLD_SECONDS = 30
 
 test.describe('Task Interrupt Flow - UC010', () => {
   const TEST_CREDENTIALS = {

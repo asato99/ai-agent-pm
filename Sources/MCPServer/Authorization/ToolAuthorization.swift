@@ -99,6 +99,7 @@ struct ToolAuthorization {
         "report_model": .authenticated,
         "get_my_profile": .authenticated,
         "get_my_task": .authenticated,
+        "get_notifications": .authenticated,  // 通知取得
         "get_next_action": .authenticated,
         "update_task_status": .authenticated,
         "get_project": .authenticated,

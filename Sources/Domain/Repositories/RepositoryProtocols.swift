@@ -334,3 +334,35 @@ public protocol AgentWorkingDirectoryRepositoryProtocol: Sendable {
     /// エージェント×プロジェクトで削除
     func deleteByAgentAndProject(agentId: AgentID, projectId: ProjectID) throws
 }
+
+// MARK: - NotificationRepositoryProtocol
+
+/// 通知リポジトリのプロトコル
+/// 参照: docs/design/NOTIFICATION_SYSTEM.md
+/// 参照: docs/usecase/UC010_TaskInterruptByStatusChange.md
+public protocol NotificationRepositoryProtocol: Sendable {
+    /// IDで通知を検索
+    func findById(_ id: NotificationID) throws -> AgentNotification?
+
+    /// エージェント×プロジェクトの未読通知を取得（作成日時降順）
+    func findUnreadByAgentAndProject(agentId: AgentID, projectId: ProjectID) throws -> [AgentNotification]
+
+    /// 未読通知が存在するか高速チェック（EXISTS句使用）
+    func hasUnreadNotifications(agentId: AgentID, projectId: ProjectID) throws -> Bool
+
+    /// 通知を保存
+    func save(_ notification: AgentNotification) throws
+
+    /// 通知を既読にマーク
+    func markAsRead(_ id: NotificationID) throws
+
+    /// エージェント×プロジェクトの全通知を既読にマーク
+    func markAllAsRead(agentId: AgentID, projectId: ProjectID) throws
+
+    /// 指定日数より古い通知を削除（クリーンアップ用）
+    /// - Returns: 削除された通知数
+    func deleteOlderThan(days: Int) throws -> Int
+
+    /// 全通知数を取得（テスト用）
+    func countAll() throws -> Int
+}

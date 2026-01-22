@@ -288,3 +288,21 @@ public struct AgentWorkingDirectoryID: Hashable, Codable, Sendable, CustomString
 
     public var description: String { value }
 }
+
+// MARK: - NotificationID
+
+/// 通知の一意識別子
+/// 参照: docs/design/NOTIFICATION_SYSTEM.md
+public struct NotificationID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> NotificationID {
+        NotificationID(value: "ntf_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}

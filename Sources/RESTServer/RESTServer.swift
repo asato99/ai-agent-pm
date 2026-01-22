@@ -52,6 +52,8 @@ final class RESTServer {
     private let directoryManager: ProjectDirectoryManager
     /// 参照: docs/design/CHAT_FEATURE.md - MCP連携設計
     private let pendingAgentPurposeRepository: PendingAgentPurposeRepository
+    /// 参照: docs/design/NOTIFICATION_SYSTEM.md - UC010通知
+    private let notificationRepository: NotificationRepository
 
     // MCP Server for HTTP transport
     // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
@@ -89,6 +91,8 @@ final class RESTServer {
         )
         // 参照: docs/design/CHAT_FEATURE.md - MCP連携設計
         self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
+        // 参照: docs/design/NOTIFICATION_SYSTEM.md - UC010通知
+        self.notificationRepository = NotificationRepository(database: database)
     }
 
     func run() async throws {
@@ -752,6 +756,20 @@ final class RESTServer {
             // Phase 3: blockedに変更時、blockedReasonも一緒に設定
             if newStatus == .blocked {
                 task.blockedReason = updateRequest.blockedReason
+
+                // UC010: blockedに変更時、担当エージェントにinterrupt通知を送信
+                // 参照: docs/design/NOTIFICATION_SYSTEM.md
+                if let assigneeId = task.assigneeId {
+                    let notification = AgentNotification.createInterruptNotification(
+                        targetAgentId: assigneeId,
+                        targetProjectId: task.projectId,
+                        action: "blocked",
+                        taskId: taskId,
+                        instruction: "タスクがblockedに変更されました。現在の作業を中断し、report_completed(result='blocked')を呼び出してください。"
+                    )
+                    try notificationRepository.save(notification)
+                    debugLog("UC010: Created interrupt notification for agent \(assigneeId.value)")
+                }
             } else {
                 task.blockedReason = nil
             }

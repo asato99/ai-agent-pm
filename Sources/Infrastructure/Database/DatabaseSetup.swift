@@ -845,6 +845,33 @@ public final class DatabaseSetup {
             """)
         }
 
+        // v36: 通知システム
+        // 参照: docs/design/NOTIFICATION_SYSTEM.md
+        // 参照: docs/usecase/UC010_TaskInterruptByStatusChange.md
+        migrator.registerMigration("v36_notifications") { db in
+            try db.create(table: "notifications", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("target_agent_id", .text).notNull()
+                t.column("target_project_id", .text).notNull()
+                t.column("type", .text).notNull() // status_change, interrupt, message
+                t.column("action", .text).notNull() // blocked, cancel, pause, user_message, etc.
+                t.column("task_id", .text) // Optional: 関連タスクID
+                t.column("message", .text).notNull() // 人間可読メッセージ
+                t.column("instruction", .text).notNull() // エージェントへの指示
+                t.column("created_at", .datetime).notNull()
+                t.column("is_read", .boolean).notNull().defaults(to: false)
+                t.column("read_at", .datetime)
+            }
+            // (target_agent_id, target_project_id, is_read) で未読通知を高速検索
+            try db.create(
+                index: "idx_notifications_unread",
+                on: "notifications",
+                columns: ["target_agent_id", "target_project_id", "is_read"]
+            )
+            // created_at でソート用
+            try db.create(indexOn: "notifications", columns: ["created_at"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -46,6 +46,10 @@ public final class MCPServer {
     // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ2.3
     private let agentWorkingDirectoryRepository: AgentWorkingDirectoryRepository
 
+    // 通知リポジトリ
+    // 参照: docs/design/NOTIFICATION_SYSTEM.md
+    private let notificationRepository: NotificationRepository
+
     private let debugMode: Bool
 
     /// ステートレス設計: DBパスのみで初期化（stdio用）
@@ -93,6 +97,8 @@ public final class MCPServer {
         self.appSettingsRepository = AppSettingsRepository(database: database)
         // Phase 2.3: ワーキングディレクトリリポジトリ
         self.agentWorkingDirectoryRepository = AgentWorkingDirectoryRepository(database: database)
+        // 通知リポジトリ
+        self.notificationRepository = NotificationRepository(database: database)
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
 
         // 起動時ログ（常に出力）- ファイルとstderrの両方に出力
@@ -279,11 +285,28 @@ public final class MCPServer {
             try ToolAuthorization.authorize(tool: name, caller: caller)
 
             let result = try executeTool(name: name, arguments: arguments, caller: caller)
-            return JSONRPCResponse(id: request.id, result: [
+
+            // 通知ミドルウェア: 認証済みエージェントに未読通知の有無を通知
+            // 参照: docs/design/NOTIFICATION_SYSTEM.md
+            var responseContent: [String: Any] = [
                 "content": [
                     ["type": "text", "text": formatResult(result)]
                 ]
-            ])
+            ]
+            if let (agentId, projectId) = extractAgentAndProject(from: caller) {
+                let hasNotifications = (try? notificationRepository.hasUnreadNotifications(
+                    agentId: agentId,
+                    projectId: projectId
+                )) ?? false
+                // 設計書に従い、自然言語メッセージでエージェントに通知
+                if hasNotifications {
+                    responseContent["notification"] = "【重要】通知があります。get_notifications を呼び出して確認してください。"
+                } else {
+                    responseContent["notification"] = "通知はありません"
+                }
+            }
+
+            return JSONRPCResponse(id: request.id, result: responseContent)
         } catch let error as ToolAuthorizationError {
             // 認可エラーは専用のエラーメッセージで返す
             return JSONRPCResponse(id: request.id, result: [
@@ -342,6 +365,16 @@ public final class MCPServer {
 
         // 3. 未認証（authenticate ツールのみ許可）
         return .unauthenticated
+    }
+
+    /// 認証済みの呼び出し元からエージェントIDとプロジェクトIDを抽出
+    /// 通知ミドルウェア用ヘルパー
+    private func extractAgentAndProject(from caller: CallerType) -> (AgentID, ProjectID)? {
+        guard let agentId = caller.agentId,
+              let session = caller.session else {
+            return nil
+        }
+        return (agentId, session.projectId)
     }
 
     /// Toolを実行
@@ -508,6 +541,19 @@ public final class MCPServer {
                 throw MCPError.sessionTokenRequired
             }
             return try getMyTask(session: session)
+
+        case "get_notifications":
+            // 通知取得ツール: エージェントの未読通知を取得
+            // 参照: docs/design/NOTIFICATION_SYSTEM.md
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            let markAsRead = (arguments["mark_as_read"] as? Bool) ?? true
+            return try getNotifications(
+                agentId: session.agentId,
+                projectId: session.projectId,
+                markAsRead: markAsRead
+            )
 
         case "get_next_action":
             guard let session = caller.session else {
@@ -1630,6 +1676,44 @@ public final class MCPServer {
         }
     }
 
+    /// get_notifications - エージェントの未読通知を取得
+    /// 参照: docs/design/NOTIFICATION_SYSTEM.md
+    private func getNotifications(
+        agentId: AgentID,
+        projectId: ProjectID,
+        markAsRead: Bool
+    ) throws -> [String: Any] {
+        Self.log("[MCP] getNotifications called for agent: '\(agentId.value)', project: '\(projectId.value)', markAsRead: \(markAsRead)")
+
+        let useCase = GetNotificationsUseCase(notificationRepository: notificationRepository)
+        let notifications = try useCase.execute(
+            agentId: agentId,
+            projectId: projectId,
+            markAsRead: markAsRead
+        )
+
+        let notificationDicts: [[String: Any]] = notifications.map { notification in
+            var dict: [String: Any] = [
+                "id": notification.id.value,
+                "type": notification.type.rawValue,
+                "action": notification.action,
+                "message": notification.message,
+                "instruction": notification.instruction,
+                "created_at": ISO8601DateFormatter().string(from: notification.createdAt)
+            ]
+            if let taskId = notification.taskId {
+                dict["task_id"] = taskId.value
+            }
+            return dict
+        }
+
+        return [
+            "success": true,
+            "count": notifications.count,
+            "notifications": notificationDicts
+        ]
+    }
+
     /// report_model - Agent Instanceのモデル情報を申告・検証
     /// Agent Instanceが申告した provider/model_id をエージェント設定と照合し、
     /// 検証結果をセッションに記録する
@@ -1737,6 +1821,41 @@ public final class MCPServer {
         }
         let inProgressTasks = allAssignedTasks.filter { $0.status == .inProgress && $0.projectId == projId }
         Self.log("[MCP] reportCompleted: Found \(inProgressTasks.count) in_progress tasks in project '\(projectId)'")
+
+        // UC010: result='blocked' で呼び出され、タスクが既に blocked なら成功
+        // これは、ユーザーがUIでステータスを変更し、エージェントが通知を受けて完了報告する場合
+        // 参照: docs/design/NOTIFICATION_SYSTEM.md
+        if result == "blocked" {
+            let blockedTasks = allAssignedTasks.filter { $0.status == .blocked && $0.projectId == projId }
+            if let blockedTask = blockedTasks.first {
+                Self.log("[MCP] reportCompleted: Task already blocked (UC010 interrupt flow). Task: \(blockedTask.id.value)")
+
+                // 重要: 早期リターンの前に実行ログを完了させる
+                // これをスキップすると、Coordinatorが実行中のログを検出してタスクが終了しない
+                let runningLogs = try executionLogRepository.findRunning(agentId: id)
+                Self.log("[MCP] reportCompleted (blocked early exit): Completing \(runningLogs.count) running execution logs")
+                for var executionLog in runningLogs {
+                    let duration = Date().timeIntervalSince(executionLog.startedAt)
+                    executionLog.complete(
+                        exitCode: 1,  // blocked = error exit
+                        durationSeconds: duration,
+                        logFilePath: nil,
+                        errorMessage: "Task was blocked by user"
+                    )
+                    try executionLogRepository.save(executionLog)
+                    Self.log("[MCP] ExecutionLog completed (blocked): \(executionLog.id.value)")
+                }
+
+                return [
+                    "success": true,
+                    "task_id": blockedTask.id.value,
+                    "status": "blocked",
+                    "message": "タスクは既に中断されています。作業を終了してください。",
+                    "instruction": "logout を呼び出してセッションを終了してください。"
+                ]
+            }
+        }
+
         guard var task = inProgressTasks.first else {
             Self.log("[MCP] reportCompleted: No in_progress task for agent '\(agentId)' in project '\(projectId)'")
             return [
@@ -1995,6 +2114,36 @@ public final class MCPServer {
                     申告後、get_next_action を再度呼び出してください。
                     """,
                 "state": "needs_model_verification"
+            ]
+        }
+
+        // 1.55. Interrupt通知チェック - 中断シグナルがあれば即座に中断指示を返す
+        // 参照: docs/design/NOTIFICATION_SYSTEM.md - UC010
+        let interruptNotifications = try notificationRepository.findUnreadByAgentAndProject(
+            agentId: agentId,
+            projectId: projectId
+        ).filter { $0.type == .interrupt }
+
+        if let interruptNotification = interruptNotifications.first {
+            Self.log("[MCP] getNextAction: Interrupt notification found, instructing agent to stop")
+            // 注意: 通知を既読にするのは get_notifications が呼ばれた時のみ
+            // ここで既読にすると、エージェントが指示に従わなかった場合に再検出できなくなる
+
+            return [
+                "action": "interrupt",
+                "instruction": """
+                    【重要】中断シグナルを受信しました。
+                    現在の作業を即座に中断してください。
+
+                    次のステップ:
+                    1. get_notifications を呼び出して通知の詳細を取得
+                    2. report_completed を result='blocked' で呼び出してタスクを終了
+
+                    理由: \(interruptNotification.message)
+                    """,
+                "state": "interrupted",
+                "task_id": interruptNotification.taskId?.value ?? "",
+                "notification_id": interruptNotification.id.value
             ]
         }
 

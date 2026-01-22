@@ -48,6 +48,7 @@ enum ToolDefinitions {
             reportModel,
             getMyProfile,
             getMyTask,
+            getNotifications,  // 通知取得
             getNextAction,
             updateTaskStatus,
             getProject,
@@ -183,6 +184,27 @@ enum ToolDefinitions {
                 "session_token": [
                     "type": "string",
                     "description": "authenticateツールで取得したセッショントークン"
+                ]
+            ] as [String: Any],
+            "required": ["session_token"]
+        ]
+    ]
+
+    /// get_notifications - 未読通知を取得
+    /// 参照: docs/design/NOTIFICATION_SYSTEM.md
+    static let getNotifications: [String: Any] = [
+        "name": "get_notifications",
+        "description": "未読通知を取得します。通知にはステータス変更、割り込み指示、メッセージが含まれます。interrupt タイプの通知を受信した場合は、instruction に従って即座に対応してください。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "mark_as_read": [
+                    "type": "boolean",
+                    "description": "取得と同時に既読にするかどうか（デフォルト: true）"
                 ]
             ] as [String: Any],
             "required": ["session_token"]
