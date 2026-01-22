@@ -829,10 +829,21 @@ final class TaskStatusUpdateNotificationTests: XCTestCase {
 
 ## 成功基準
 
-- [ ] 全Phase のユニットテストが GREEN
-- [ ] UC010 統合テストが GREEN
-- [ ] 既存テストに影響なし（リグレッションなし）
-- [ ] パフォーマンス: `hasUnreadNotifications` が 10ms 以下
+- [x] 全Phase のユニットテストが GREEN
+- [x] UC010 統合テストが GREEN
+- [x] 既存テストに影響なし（リグレッションなし）
+- [x] パフォーマンス: `hasUnreadNotifications` が 10ms 以下
+
+---
+
+## 実装完了メモ
+
+### 2026-01-22: UC010 完了
+
+- **実装方式**: interrupt通知のレスポンス差替え方式を採用
+- **理由**: 単にnotificationフィールドを追加するだけではエージェントが検知しない場合がある
+- **統合テスト**: 60秒以内にエージェントが中断を検知することを確認
+- **テスト結果**: PASSED (55.3秒)
 
 ---
 
