@@ -81,7 +81,7 @@ function AgentGroup({
   return (
     <div className="flex items-center gap-2 pr-2">
       <span className="text-xs text-gray-400 whitespace-nowrap">{label}</span>
-      <div className="flex items-center -space-x-1 overflow-x-auto max-w-[200px] py-1 px-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+      <div className="flex items-center -space-x-1 overflow-x-auto max-w-[200px] py-2 px-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
         {agents.map((agent) => (
           <AgentAvatar
             key={agent.id}
