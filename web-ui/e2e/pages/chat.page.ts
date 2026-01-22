@@ -19,9 +19,9 @@ export class ChatPage extends BasePage {
     this.chatPanel = page.getByTestId('chat-panel')
     this.chatInput = page.getByTestId('chat-input')
     this.sendButton = page.getByTestId('chat-send-button')
-    this.closeButton = page.getByRole('button', { name: /閉じる/i })
+    this.closeButton = page.getByRole('button', { name: /Close/i })
     this.loadingIndicator = page.getByTestId('chat-loading')
-    this.emptyState = page.getByText('メッセージはまだありません')
+    this.emptyState = page.getByText('No messages yet')
     this.messages = page.getByTestId('chat-message')
   }
 
