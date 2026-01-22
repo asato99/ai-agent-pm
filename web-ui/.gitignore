@@ -25,4 +25,5 @@ dist-ssr
 
 # Test artifacts
 playwright-report/
+playwright-report-integration/
 test-results/
