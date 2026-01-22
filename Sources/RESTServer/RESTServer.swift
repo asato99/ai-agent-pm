@@ -437,6 +437,14 @@ final class RESTServer {
             return try await sendChatMessage(request: request, context: context)
         }
         debugLog("Chat routes registered: GET/messages, POST/messages")
+
+        // Unread counts (project-level aggregation)
+        // Reference: docs/design/CHAT_FEATURE.md - Unread count feature
+        projectRouter.get(":projectId/unread-counts") { [self] request, context in
+            debugLog("GET /api/projects/:projectId/unread-counts called")
+            return try await getUnreadCounts(request: request, context: context)
+        }
+        debugLog("Unread counts route registered: GET/:projectId/unread-counts")
     }
 
     // MARK: - Auth Handlers
@@ -1009,6 +1017,7 @@ final class RESTServer {
     }
 
     /// Check if current agent can access target agent (self or any descendant)
+    /// Used for agent info viewing and updating - hierarchical downward access only
     private func canAccessAgent(currentAgentId: AgentID, targetAgentId: AgentID) throws -> Bool {
         // Self access is always allowed
         if currentAgentId == targetAgentId {
@@ -1018,6 +1027,56 @@ final class RESTServer {
         // Check if target is a descendant (includes grandchildren, etc.)
         let allDescendants = try agentRepository.findAllDescendants(currentAgentId)
         return allDescendants.contains { $0.id == targetAgentId }
+    }
+
+    /// Check if current agent can chat with target agent
+    /// Chat is allowed if:
+    /// 1. Self access (always allowed)
+    /// 2. Both agents are assigned to the same project
+    /// 3. Target is a descendant (subordinate)
+    /// 4. Target is an ancestor (manager)
+    private func canChatWithAgent(currentAgentId: AgentID, targetAgentId: AgentID, projectId: ProjectID) throws -> Bool {
+        debugLog("canChatWithAgent: current=\(currentAgentId.value), target=\(targetAgentId.value), project=\(projectId.value)")
+
+        // Self access is always allowed
+        if currentAgentId == targetAgentId {
+            debugLog("canChatWithAgent: ALLOWED (self)")
+            return true
+        }
+
+        // Check if both agents are assigned to the same project
+        let currentAssigned = try projectAgentAssignmentRepository.isAgentAssignedToProject(agentId: currentAgentId, projectId: projectId)
+        let targetAssigned = try projectAgentAssignmentRepository.isAgentAssignedToProject(agentId: targetAgentId, projectId: projectId)
+        debugLog("canChatWithAgent: currentAssigned=\(currentAssigned), targetAssigned=\(targetAssigned)")
+
+        if currentAssigned && targetAssigned {
+            debugLog("canChatWithAgent: ALLOWED (same project)")
+            return true
+        }
+
+        // Fallback to hierarchical check: Check if target is a descendant (includes grandchildren, etc.)
+        let allDescendants = try agentRepository.findAllDescendants(currentAgentId)
+        debugLog("canChatWithAgent: descendants count=\(allDescendants.count), ids=\(allDescendants.map { $0.id.value })")
+        if allDescendants.contains(where: { $0.id == targetAgentId }) {
+            debugLog("canChatWithAgent: ALLOWED (descendant)")
+            return true
+        }
+
+        // Fallback to hierarchical check: Check if target is an ancestor (parent, grandparent, etc.)
+        // Walk up the hierarchy from current agent to see if we reach target
+        var currentId: AgentID? = currentAgentId
+        while let id = currentId {
+            guard let agent = try agentRepository.findById(id) else { break }
+            debugLog("canChatWithAgent: checking ancestor - agent=\(agent.id.value), parentId=\(agent.parentAgentId?.value ?? "nil")")
+            if agent.parentAgentId == targetAgentId {
+                debugLog("canChatWithAgent: ALLOWED (ancestor)")
+                return true
+            }
+            currentId = agent.parentAgentId
+        }
+
+        debugLog("canChatWithAgent: DENIED - no relationship found")
+        return false
     }
 
     // MARK: - Handoff Handlers
@@ -1187,8 +1246,8 @@ final class RESTServer {
         let projectId = ProjectID(value: projectIdStr)
         let targetAgentId = AgentID(value: agentIdStr)
 
-        // Verify agent can access this chat (self or subordinate)
-        guard try canAccessAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId) else {
+        // Verify agent can access this chat (same project or hierarchical relationship)
+        guard try canChatWithAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId, projectId: projectId) else {
             return errorResponse(status: .forbidden, message: "Cannot access this agent's chat")
         }
 
@@ -1244,8 +1303,8 @@ final class RESTServer {
         let projectId = ProjectID(value: projectIdStr)
         let targetAgentId = AgentID(value: agentIdStr)
 
-        // Verify agent can access this chat (self or subordinate)
-        guard try canAccessAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId) else {
+        // Verify agent can access this chat (same project or hierarchical relationship)
+        guard try canChatWithAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId, projectId: projectId) else {
             return errorResponse(status: .forbidden, message: "Cannot send message to this agent's chat")
         }
 
@@ -1319,6 +1378,44 @@ final class RESTServer {
         } catch {
             debugLog("Failed to save chat message: \(error)")
             return errorResponse(status: .internalServerError, message: "Failed to save message")
+        }
+    }
+
+    /// GET /projects/:projectId/unread-counts
+    /// Returns unread message counts per agent for the current user in the project
+    /// Reference: docs/design/CHAT_FEATURE.md - Unread count feature
+    private func getUnreadCounts(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let projectIdStr = context.parameters.get("projectId") else {
+            return errorResponse(status: .badRequest, message: "Missing project ID")
+        }
+
+        let projectId = ProjectID(value: projectIdStr)
+
+        // Verify agent is assigned to this project and get all project agents
+        let projectAgents = try projectAgentAssignmentRepository.findAgentsByProject(projectId)
+        guard projectAgents.contains(where: { $0.id == currentAgentId }) else {
+            return errorResponse(status: .forbidden, message: "Not assigned to this project")
+        }
+
+        do {
+            // Get all messages in my chat storage for this project
+            let allMessages = try chatRepository.findMessages(
+                projectId: projectId,
+                agentId: currentAgentId
+            )
+
+            // Calculate unread counts per sender using UnreadCountCalculator
+            let counts = UnreadCountCalculator.calculateBySender(allMessages, agentId: currentAgentId)
+
+            debugLog("getUnreadCounts: projectId=\(projectIdStr), agentId=\(currentAgentId.value), counts=\(counts)")
+            return jsonResponse(UnreadCountsResponse(counts: counts))
+        } catch {
+            debugLog("Failed to get unread counts: \(error)")
+            return errorResponse(status: .internalServerError, message: "Failed to retrieve unread counts")
         }
     }
 

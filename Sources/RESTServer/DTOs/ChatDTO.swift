@@ -57,3 +57,14 @@ public struct ChatValidationErrorDetails: Codable {
     public let maxLength: Int?
     public let actualLength: Int?
 }
+
+/// Response for GET /projects/:projectId/unread-counts
+/// Reference: docs/design/CHAT_FEATURE.md - Unread count feature
+public struct UnreadCountsResponse: Codable {
+    /// Agent ID -> unread message count mapping
+    public let counts: [String: Int]
+
+    public init(counts: [String: Int]) {
+        self.counts = counts
+    }
+}

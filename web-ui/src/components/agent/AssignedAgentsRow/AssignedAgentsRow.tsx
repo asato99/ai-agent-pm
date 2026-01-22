@@ -7,6 +7,8 @@ interface AssignedAgentsRowProps {
   subordinateIds?: string[]
   isLoading?: boolean
   onAgentClick?: (agentId: string) => void
+  /** エージェントID -> 未読メッセージ数のマッピング */
+  unreadCounts?: Record<string, number>
 }
 
 const agentTypeColors: Record<AgentType, string> = {
@@ -19,11 +21,13 @@ function AgentAvatar({
   sessionCount,
   isCurrentUser,
   onClick,
+  unreadCount = 0,
 }: {
   agent: Agent
   sessionCount: number
   isCurrentUser?: boolean
   onClick?: () => void
+  unreadCount?: number
 }) {
   // Get initials from agent name
   const initials = agent.name
@@ -48,16 +52,34 @@ function AgentAvatar({
         {initials}
       </div>
 
-      {/* Active session badge */}
-      {sessionCount > 0 && (
-        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-green-500 text-[10px] font-bold text-white ring-2 ring-white">
-          {sessionCount > 9 ? '9+' : sessionCount}
-        </span>
-      )}
+      {/* Session status indicator (bottom-left) */}
+      <span
+        className={`absolute -bottom-0.5 -left-0.5 h-3 w-3 rounded-full ring-2 ring-white ${
+          sessionCount === 0
+            ? 'bg-gray-400'
+            : sessionCount === 1
+              ? 'bg-green-500'
+              : 'bg-orange-500'
+        }`}
+      />
 
       {/* Pulsing indicator for active sessions */}
       {sessionCount > 0 && (
-        <span className="absolute -top-1 -right-1 h-4 w-4 animate-ping rounded-full bg-green-400 opacity-75" />
+        <span
+          className={`absolute -bottom-0.5 -left-0.5 h-3 w-3 animate-ping rounded-full opacity-75 ${
+            sessionCount === 1 ? 'bg-green-400' : 'bg-orange-400'
+          }`}
+        />
+      )}
+
+      {/* Unread message badge (top-right) */}
+      {unreadCount > 0 && (
+        <span
+          data-testid={`unread-badge-${agent.id}`}
+          className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center ring-2 ring-white"
+        >
+          {unreadCount > 9 ? '9+' : unreadCount}
+        </span>
       )}
     </button>
   )
@@ -69,12 +91,14 @@ function AgentGroup({
   sessionCounts,
   currentAgentId,
   onAgentClick,
+  unreadCounts = {},
 }: {
   label: string
   agents: Agent[]
   sessionCounts: Record<string, number>
   currentAgentId?: string
   onAgentClick?: (agentId: string) => void
+  unreadCounts?: Record<string, number>
 }) {
   if (agents.length === 0) return null
 
@@ -89,6 +113,7 @@ function AgentGroup({
             sessionCount={sessionCounts[agent.id] ?? 0}
             isCurrentUser={agent.id === currentAgentId}
             onClick={() => onAgentClick?.(agent.id)}
+            unreadCount={unreadCounts[agent.id] ?? 0}
           />
         ))}
       </div>
@@ -103,6 +128,7 @@ export function AssignedAgentsRow({
   subordinateIds = [],
   isLoading = false,
   onAgentClick,
+  unreadCounts = {},
 }: AssignedAgentsRowProps) {
   // Count total active sessions
   const totalActiveSessions = Object.values(sessionCounts).reduce((sum, count) => sum + count, 0)
@@ -158,6 +184,7 @@ export function AssignedAgentsRow({
               sessionCounts={sessionCounts}
               currentAgentId={currentAgentId}
               onAgentClick={onAgentClick}
+              unreadCounts={unreadCounts}
             />
 
             {/* Subordinates */}
@@ -168,6 +195,7 @@ export function AssignedAgentsRow({
                 sessionCounts={sessionCounts}
                 currentAgentId={currentAgentId}
                 onAgentClick={onAgentClick}
+                unreadCounts={unreadCounts}
               />
             </div>
 
@@ -179,6 +207,7 @@ export function AssignedAgentsRow({
                 sessionCounts={sessionCounts}
                 currentAgentId={currentAgentId}
                 onAgentClick={onAgentClick}
+                unreadCounts={unreadCounts}
               />
             </div>
           </div>

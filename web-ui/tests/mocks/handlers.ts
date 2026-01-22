@@ -611,6 +611,36 @@ export const handlers = [
     return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
   }),
 
+  // Unread message counts - GET
+  // Reference: docs/design/CHAT_FEATURE.md - Unread count feature
+  http.get('/api/projects/:projectId/unread-counts', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId } = params
+
+    // Mock unread counts for project-1
+    if (projectId === 'project-1') {
+      return HttpResponse.json({
+        counts: {
+          'worker-1': 3,  // 3 unread messages from worker-1
+          'worker-2': 1,  // 1 unread message from worker-2
+        },
+      })
+    }
+
+    // project-2 has no unread
+    if (projectId === 'project-2') {
+      return HttpResponse.json({
+        counts: {},
+      })
+    }
+
+    // Unknown project
+    return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
+
   // Chat messages - GET
   http.get('/api/projects/:projectId/agents/:agentId/chat/messages', ({ params, request }) => {
     const authHeader = request.headers.get('Authorization')

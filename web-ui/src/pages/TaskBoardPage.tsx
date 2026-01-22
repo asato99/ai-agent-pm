@@ -9,6 +9,7 @@ import { ChatPanel } from '@/components/chat'
 import { useProject } from '@/hooks/useProject'
 import { useTasks } from '@/hooks/useTasks'
 import { useAssignableAgents, useAgentSessions, useAuth, useSubordinates } from '@/hooks'
+import { useUnreadCounts } from '@/hooks/useUnreadCounts'
 import { api } from '@/api/client'
 import type { Task, TaskStatus, TaskPriority, Agent } from '@/types'
 
@@ -21,6 +22,7 @@ export function TaskBoardPage() {
   const { agents, isLoading: agentsLoading } = useAssignableAgents(projectId || '')
   const { sessionCounts } = useAgentSessions(projectId || '')
   const { subordinates } = useSubordinates()
+  const { unreadCounts } = useUnreadCounts(projectId || '')
   const subordinateIds = subordinates.map((s) => s.id)
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
@@ -141,6 +143,7 @@ export function TaskBoardPage() {
           subordinateIds={subordinateIds}
           isLoading={agentsLoading}
           onAgentClick={handleAgentClick}
+          unreadCounts={unreadCounts}
         />
 
         {/* Phase 2.4: Multi-device support - Working directory settings */}

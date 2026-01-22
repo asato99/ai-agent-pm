@@ -88,6 +88,25 @@ vi.mock('@/hooks', () => ({
     sessionCounts: {},
     isLoading: false,
   }),
+  useAuth: () => ({
+    agent: { id: 'manager-1', name: 'Manager', role: 'Manager', agentType: 'ai', status: 'active', hierarchyType: 'manager' },
+    isAuthenticated: true,
+  }),
+  useSubordinates: () => ({
+    subordinates: [{ id: 'worker-1' }],
+    isLoading: false,
+  }),
+}))
+
+vi.mock('@/hooks/useUnreadCounts', () => ({
+  useUnreadCounts: () => ({
+    unreadCounts: {},
+    isLoading: false,
+    error: null,
+    getCountFor: () => 0,
+    totalUnread: 0,
+    refetch: vi.fn(),
+  }),
 }))
 
 // Mock mutation for updating task
