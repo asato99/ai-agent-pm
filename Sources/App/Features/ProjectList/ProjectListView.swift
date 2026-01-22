@@ -487,7 +487,6 @@ struct ProjectRow: View {
                 )
                 try await useCase.execute(projectId: project.id)
                 // UI更新は@Published経由で自動的に行われることを期待
-                // 必要であればNotificationCenterで通知
                 NotificationCenter.default.post(name: .testDataSeeded, object: nil)
             } catch {
                 print("Failed to pause project: \(error)")

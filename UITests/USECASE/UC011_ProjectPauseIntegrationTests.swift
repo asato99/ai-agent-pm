@@ -26,21 +26,57 @@ import XCTest
 final class UC011_ProjectPauseIntegrationTests: UC011UITestCase {
 
     let projectName = "UC011 Pause Test"
+    let projectId = "prj_uc011"
     let taskId = "tsk_uc011_main"
     let taskTitle = "UC011テストタスク"
     let agentId = "agt_uc011_dev"
     let workingDir = "/tmp/uc011_test"
 
+    // DB検証用
+    let dbPath = "/tmp/AIAgentPM_UITest.db"
+
     // ファイルマーカー
     let completeFile = "complete.md" // 完了マーカー
+
+    // MARK: - DB Helper Methods
+
+    /// プロジェクトのステータスをDBから取得
+    private func getProjectStatusFromDB() -> String? {
+        let query = "SELECT status FROM projects WHERE id = '\(projectId)';"
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = [dbPath, query]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            print("    ⚠️ sqlite3実行エラー: \(error)")
+            return nil
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !output.isEmpty else {
+            return nil
+        }
+
+        return output
+    }
 
     // MARK: - Integration Tests
 
     /// UC011統合テスト: 実行中エージェントの停止→再開→完了
     ///
     /// このテストは以下を検証:
-    /// 1. タスク開始後、エージェントが実行中になる（step1.md作成）
-    /// 2. 一時停止により、エージェントが停止する（complete.md未作成）
+    /// 1. タスク開始後、エージェントが実行中になる（ファイル作成検出）
+    /// 2. 一時停止により、プロジェクトステータスがpausedに変更される（DB検証）
     /// 3. 再開により、エージェントがタスクを完了する（complete.md作成）
     func testPauseResumeIntegration_RunningAgentStopsAndResumes() throws {
         print("🔍 UC011統合テスト開始: 実行中エージェント停止→再開フロー")
@@ -91,33 +127,21 @@ final class UC011_ProjectPauseIntegrationTests: UC011UITestCase {
         // Phase 3: 一時停止
         // ========================================
         print("📌 Phase 3: プロジェクトを一時停止")
-
-        // 一時停止前のファイル数を記録
-        let filesBeforePause = (try? fileManager.contentsOfDirectory(atPath: workingDir))?.filter { $0.hasSuffix(".md") } ?? []
-        print("  一時停止前のファイル数: \(filesBeforePause.count) (\(filesBeforePause.joined(separator: ", ")))")
-
         try pauseProject(projectName)
         print("✅ Phase 3完了: プロジェクトを一時停止")
 
         // ========================================
-        // Phase 4: 一時停止中の検証
+        // Phase 4: 一時停止中の検証（DBステータス確認）
         // ========================================
-        print("📌 Phase 4: 一時停止中はタスクが進行しないことを確認")
+        print("📌 Phase 4: プロジェクトステータスがpausedであることを確認")
 
-        // 30秒待機して新しいファイルが作成されないことを確認
-        print("  ⏳ 30秒待機中...")
-        Thread.sleep(forTimeInterval: 30)
+        // DBからプロジェクトステータスを取得して検証
+        Thread.sleep(forTimeInterval: 1)  // DB反映待機
+        let pausedStatus = getProjectStatusFromDB()
+        print("  DBのプロジェクトステータス: \(pausedStatus ?? "取得失敗")")
 
-        let filesAfterWait = (try? fileManager.contentsOfDirectory(atPath: workingDir))?.filter { $0.hasSuffix(".md") } ?? []
-        print("  30秒後のファイル数: \(filesAfterWait.count) (\(filesAfterWait.joined(separator: ", ")))")
-
-        // ファイル数が増えていないことを確認（エージェントが停止している証拠）
-        let newFilesCreated = filesAfterWait.filter { !filesBeforePause.contains($0) }
-        if !newFilesCreated.isEmpty {
-            print("  ⚠️ 一時停止中に新しいファイルが作成された: \(newFilesCreated)")
-            // 注: 一時停止直後に作成中だったファイルが完了する場合があるため、警告のみ
-        }
-        print("✅ Phase 4完了: 一時停止中の状態を確認")
+        XCTAssertEqual(pausedStatus, "paused", "❌ Phase 4失敗: プロジェクトステータスがpausedになっていない")
+        print("✅ Phase 4完了: プロジェクトステータスがpausedであることを確認")
 
         // ========================================
         // Phase 5: 再開
