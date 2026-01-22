@@ -709,4 +709,21 @@ export const handlers = [
     // Invalid project or agent
     return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
   }),
+
+  // Chat mark-read - POST
+  http.post('/api/projects/:projectId/agents/:agentId/chat/mark-read', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId, agentId } = params
+
+    // Valid project and agents
+    if (projectId === 'project-1' && (agentId === 'worker-1' || agentId === 'worker-2' || agentId === 'agent-1')) {
+      return HttpResponse.json({ success: true })
+    }
+
+    // Invalid project or agent
+    return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
 ]

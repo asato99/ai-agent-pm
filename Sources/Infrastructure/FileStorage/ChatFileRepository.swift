@@ -282,4 +282,96 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
             throw ChatFileRepositoryError.writeFailed(url, error)
         }
     }
+
+    // MARK: - Last Read Time (既読管理)
+
+    /// Mark messages from a specific sender as read
+    /// - Parameters:
+    ///   - projectId: Project ID
+    ///   - currentAgentId: Current agent (reader)
+    ///   - senderAgentId: Sender whose messages are being marked as read
+    public func markAsRead(
+        projectId: ProjectID,
+        currentAgentId: AgentID,
+        senderAgentId: AgentID
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let workingDir = try getWorkingDirectory(projectId: projectId)
+        let lastReadURL = try getLastReadFilePath(workingDirectory: workingDir, agentId: currentAgentId)
+
+        // Load existing last read times
+        var lastReadTimes = try loadLastReadTimes(from: lastReadURL)
+
+        // Update the last read time for this sender
+        lastReadTimes[senderAgentId.value] = Date()
+
+        // Save back
+        try saveLastReadTimes(lastReadTimes, to: lastReadURL)
+    }
+
+    /// Get last read times for all senders
+    /// - Parameters:
+    ///   - projectId: Project ID
+    ///   - agentId: Current agent
+    /// - Returns: Dictionary of sender ID to last read time
+    public func getLastReadTimes(
+        projectId: ProjectID,
+        agentId: AgentID
+    ) throws -> [String: Date] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let workingDir = try getWorkingDirectory(projectId: projectId)
+        let lastReadURL = try getLastReadFilePath(workingDirectory: workingDir, agentId: agentId)
+
+        return try loadLastReadTimes(from: lastReadURL)
+    }
+
+    /// Get last read file path
+    private func getLastReadFilePath(workingDirectory: String?, agentId: AgentID) throws -> URL {
+        let agentDirURL = try directoryManager.getOrCreateAgentDirectory(
+            workingDirectory: workingDirectory,
+            agentId: agentId
+        )
+        return agentDirURL.appendingPathComponent("last_read.json")
+    }
+
+    /// Load last read times from file
+    private func loadLastReadTimes(from url: URL) throws -> [String: Date] {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return [:]
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw ChatFileRepositoryError.readFailed(url, error)
+        }
+
+        do {
+            return try decoder.decode([String: Date].self, from: data)
+        } catch {
+            // If decoding fails, return empty (corrupted file)
+            return [:]
+        }
+    }
+
+    /// Save last read times to file
+    private func saveLastReadTimes(_ times: [String: Date], to url: URL) throws {
+        let data: Data
+        do {
+            data = try encoder.encode(times)
+        } catch {
+            throw ChatFileRepositoryError.writeFailed(url, error)
+        }
+
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            throw ChatFileRepositoryError.writeFailed(url, error)
+        }
+    }
 }

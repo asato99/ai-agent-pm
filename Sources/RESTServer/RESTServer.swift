@@ -436,7 +436,11 @@ final class RESTServer {
             debugLog("POST /api/projects/:projectId/agents/:agentId/chat/messages called")
             return try await sendChatMessage(request: request, context: context)
         }
-        debugLog("Chat routes registered: GET/messages, POST/messages")
+        chatRouter.post("mark-read") { [self] request, context in
+            debugLog("POST /api/projects/:projectId/agents/:agentId/chat/mark-read called")
+            return try await markChatAsRead(request: request, context: context)
+        }
+        debugLog("Chat routes registered: GET/messages, POST/messages, POST/mark-read")
 
         // Unread counts (project-level aggregation)
         // Reference: docs/design/CHAT_FEATURE.md - Unread count feature
@@ -1408,14 +1412,61 @@ final class RESTServer {
                 agentId: currentAgentId
             )
 
-            // Calculate unread counts per sender using UnreadCountCalculator
-            let counts = UnreadCountCalculator.calculateBySender(allMessages, agentId: currentAgentId)
+            // Get last read times for each sender
+            let lastReadTimes = try chatRepository.getLastReadTimes(
+                projectId: projectId,
+                agentId: currentAgentId
+            )
+
+            // Calculate unread counts per sender using UnreadCountCalculator (with lastReadTimes)
+            let counts = UnreadCountCalculator.calculateBySender(
+                allMessages,
+                agentId: currentAgentId,
+                lastReadTimes: lastReadTimes
+            )
 
             debugLog("getUnreadCounts: projectId=\(projectIdStr), agentId=\(currentAgentId.value), counts=\(counts)")
             return jsonResponse(UnreadCountsResponse(counts: counts))
         } catch {
             debugLog("Failed to get unread counts: \(error)")
             return errorResponse(status: .internalServerError, message: "Failed to retrieve unread counts")
+        }
+    }
+
+    /// POST /projects/:projectId/agents/:agentId/chat/mark-read
+    /// Mark messages from a specific agent as read
+    private func markChatAsRead(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        // Extract path parameters
+        guard let projectIdStr = context.parameters.get("projectId"),
+              let agentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Missing project or agent ID")
+        }
+
+        let projectId = ProjectID(value: projectIdStr)
+        let targetAgentId = AgentID(value: agentIdStr)
+
+        // Verify agent can access this chat
+        guard try canChatWithAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId, projectId: projectId) else {
+            return errorResponse(status: .forbidden, message: "Cannot access this agent's chat")
+        }
+
+        do {
+            // Mark messages from this sender as read
+            try chatRepository.markAsRead(
+                projectId: projectId,
+                currentAgentId: currentAgentId,
+                senderAgentId: targetAgentId
+            )
+
+            debugLog("markChatAsRead: projectId=\(projectIdStr), currentAgent=\(currentAgentId.value), targetAgent=\(agentIdStr)")
+            return jsonResponse(["success": true])
+        } catch {
+            debugLog("Failed to mark chat as read: \(error)")
+            return errorResponse(status: .internalServerError, message: "Failed to mark as read")
         }
     }
 

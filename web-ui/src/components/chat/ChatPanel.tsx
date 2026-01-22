@@ -3,9 +3,11 @@
 // Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
 
 import { useRef, useEffect, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useChat } from '@/hooks/useChat'
 import { useAuthStore } from '@/stores/authStore'
 import { useAssignableAgents } from '@/hooks/useAssignableAgents'
+import { chatApi } from '@/api/chatApi'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import type { Agent } from '@/types'
@@ -19,6 +21,7 @@ interface ChatPanelProps {
 export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
   const { agent: currentAgent } = useAuthStore()
   const currentAgentId = currentAgent?.id ?? ''
+  const queryClient = useQueryClient()
   const { messages, isLoading, sendMessage, isSending, isWaitingForResponse, hasMore, loadMore } = useChat(
     projectId,
     agent.id
@@ -42,6 +45,20 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
     map[agent.id] = agent
     return map
   }, [projectAgents, currentAgent, agent])
+
+  // Mark messages as read when chat panel opens
+  useEffect(() => {
+    const markAsRead = async () => {
+      try {
+        await chatApi.markAsRead(projectId, agent.id)
+        // Invalidate unread counts to update the badge
+        queryClient.invalidateQueries({ queryKey: ['unreadCounts', projectId] })
+      } catch (error) {
+        console.error('Failed to mark chat as read:', error)
+      }
+    }
+    markAsRead()
+  }, [projectId, agent.id, queryClient])
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {

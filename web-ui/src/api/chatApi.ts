@@ -73,4 +73,20 @@ export const chatApi = {
 
     return result.data!
   },
+
+  /**
+   * チャットを既読にする
+   * @param projectId プロジェクトID
+   * @param agentId エージェントID（送信者）
+   */
+  async markAsRead(projectId: string, agentId: string): Promise<void> {
+    const result = await api.post<{ success: boolean }>(
+      `/projects/${projectId}/agents/${agentId}/chat/mark-read`,
+      {}
+    )
+
+    if (result.error) {
+      throw new Error(result.error.message)
+    }
+  },
 }
