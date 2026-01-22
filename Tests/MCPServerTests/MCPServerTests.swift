@@ -2,6 +2,7 @@
 // MCP_DESIGN.md仕様に基づくMCPServer層のテスト
 
 import XCTest
+import GRDB
 // MCPServerのソースはテストターゲットに直接含まれている（toolタイプのため@testable import不可）
 @testable import Domain
 @testable import UseCase
@@ -39,6 +40,9 @@ final class MCPServerTests: XCTestCase {
 
         // Phase 4: Worker報告
         XCTAssertTrue(toolNames.contains("report_completed"), "report_completed should be defined (Phase 4 Worker API)")
+
+        // Help tool (Phase: Tool Authorization Enhancement)
+        XCTAssertTrue(toolNames.contains("help"), "help should be defined for context-aware tool discovery")
     }
 
     /// ステートレス設計で削除されたツールが存在しないことを確認
@@ -521,20 +525,20 @@ final class MCPServerTests: XCTestCase {
     // MARK: - Tool Count Test
 
     /// 定義されているツール数を確認
-    /// Phase 5: 権限ベース認可システム導入により変更
+    /// 参照: Sources/MCPServer/Authorization/ToolAuthorization.swift - 権限定義
     func testToolCount() {
         let tools = ToolDefinitions.all()
 
-        // Phase 5 権限ベース認可システム版ツール: 22個
-        // Unauthenticated: 1 (authenticate)
-        // Coordinator-only: 6 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, invalidate_session)
-        // Manager-only: 4 (list_subordinates, get_subordinate_profile, create_task, assign_task)
+        // 現在のツール一覧: 28個
+        // Unauthenticated: 2 (help, authenticate)
+        // Coordinator-only: 7 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, invalidate_session, report_agent_error)
+        // Manager-only: 5 (list_subordinates, get_subordinate_profile, create_task, create_tasks_batch, assign_task)
         // Worker-only: 1 (report_completed)
-        // Authenticated (Manager + Worker): 10 (report_model, get_my_profile, get_my_task, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete)
+        // Authenticated (Manager + Worker): 11 (report_model, get_my_profile, get_my_task, get_notifications, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete)
+        // Chat-only: 2 (get_pending_messages, respond_chat)
         // 注: list_agents, get_agent_profile, list_projects は削除済み
         // 注: get_my_tasks, get_pending_tasks はget_my_taskに統合済み
-        // 注: save_context, get_task_context, create_handoff, get_pending_handoffs, accept_handoff は将来追加予定
-        XCTAssertEqual(tools.count, 22, "Should have 22 tools defined (Phase 5 authorization system)")
+        XCTAssertEqual(tools.count, 28, "Should have 28 tools defined")
     }
 }
 
@@ -857,6 +861,9 @@ final class ToolAuthorizationTests: XCTestCase {
         XCTAssertEqual(ToolPermission.workerOnly.rawValue, "worker_only")
         XCTAssertEqual(ToolPermission.authenticated.rawValue, "authenticated")
         XCTAssertEqual(ToolPermission.unauthenticated.rawValue, "unauthenticated")
+        // Purpose-based permissions (Phase: Tool Authorization Enhancement)
+        XCTAssertEqual(ToolPermission.chatOnly.rawValue, "chat_only")
+        XCTAssertEqual(ToolPermission.taskOnly.rawValue, "task_only")
     }
 
     // MARK: - Authorization Permission Tests
@@ -880,13 +887,27 @@ final class ToolAuthorizationTests: XCTestCase {
     func testManagerOnlyToolPermissions() {
         XCTAssertEqual(ToolAuthorization.permissions["list_subordinates"], .managerOnly)
         XCTAssertEqual(ToolAuthorization.permissions["get_subordinate_profile"], .managerOnly)
-        XCTAssertEqual(ToolAuthorization.permissions["create_task"], .managerOnly)
         XCTAssertEqual(ToolAuthorization.permissions["assign_task"], .managerOnly)
     }
 
-    /// Worker専用ツールの権限確認
+    /// Worker専用ツールの権限確認（現在は空 - report_completedはauthenticatedに移動）
     func testWorkerOnlyToolPermissions() {
-        XCTAssertEqual(ToolAuthorization.permissions["report_completed"], .workerOnly)
+        // workerOnly権限のツールは現在なし（Phase: Tool Authorization Enhancement で整理）
+        // report_completedはManagerも自分のタスクを完了報告する必要があるためauthenticatedに移動
+        let workerOnlyTools = ToolAuthorization.tools(for: .workerOnly)
+        XCTAssertTrue(workerOnlyTools.isEmpty, "Currently no worker-only tools")
+    }
+
+    /// チャット専用ツールの権限確認（purpose=chatセッションのみ）
+    /// 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
+    func testChatOnlyToolPermissions() {
+        XCTAssertEqual(ToolAuthorization.permissions["get_pending_messages"], .chatOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["respond_chat"], .chatOnly)
+    }
+
+    /// ヘルプツールの権限確認（未認証でも利用可能）
+    func testHelpToolPermission() {
+        XCTAssertEqual(ToolAuthorization.permissions["help"], .unauthenticated)
     }
 
     /// 認証済み共通ツールの権限確認
@@ -924,6 +945,76 @@ final class ToolAuthorizationTests: XCTestCase {
         }
     }
 
+    // MARK: - Purpose-Based Authorization Tests
+    // 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
+
+    /// chatOnlyツールはchatセッションで呼び出し可能
+    func testChatOnlyToolRequiresChatSession() {
+        let chatSession = AgentSession(
+            agentId: AgentID(value: "agent-001"),
+            projectId: ProjectID(value: "proj-001"),
+            purpose: .chat
+        )
+        let workerChatCaller = CallerType.worker(agentId: chatSession.agentId, session: chatSession)
+        let managerChatCaller = CallerType.manager(agentId: chatSession.agentId, session: chatSession)
+
+        // Worker with chat session can access chat tools
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "get_pending_messages", caller: workerChatCaller))
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "respond_chat", caller: workerChatCaller))
+
+        // Manager with chat session can also access chat tools
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "get_pending_messages", caller: managerChatCaller))
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "respond_chat", caller: managerChatCaller))
+    }
+
+    /// chatOnlyツールはtaskセッションでは拒否される
+    func testChatOnlyToolRejectsTaskSession() {
+        let taskSession = AgentSession(
+            agentId: AgentID(value: "agent-001"),
+            projectId: ProjectID(value: "proj-001"),
+            purpose: .task
+        )
+        let workerTaskCaller = CallerType.worker(agentId: taskSession.agentId, session: taskSession)
+
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "get_pending_messages", caller: workerTaskCaller)) { error in
+            guard case ToolAuthorizationError.chatSessionRequired(let tool, let currentPurpose) = error else {
+                XCTFail("Expected chatSessionRequired error, got \(error)")
+                return
+            }
+            XCTAssertEqual(tool, "get_pending_messages")
+            XCTAssertEqual(currentPurpose, .task)
+        }
+
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "respond_chat", caller: workerTaskCaller)) { error in
+            guard case ToolAuthorizationError.chatSessionRequired(let tool, let currentPurpose) = error else {
+                XCTFail("Expected chatSessionRequired error, got \(error)")
+                return
+            }
+            XCTAssertEqual(tool, "respond_chat")
+            XCTAssertEqual(currentPurpose, .task)
+        }
+    }
+
+    /// chatOnlyツールは未認証では拒否される
+    func testChatOnlyToolRejectsUnauthenticated() {
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "get_pending_messages", caller: .unauthenticated)) { error in
+            guard case ToolAuthorizationError.authenticationRequired = error else {
+                XCTFail("Expected authenticationRequired error, got \(error)")
+                return
+            }
+        }
+    }
+
+    /// chatOnlyツールはCoordinatorでも拒否される
+    func testChatOnlyToolRejectsCoordinator() {
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "get_pending_messages", caller: .coordinator)) { error in
+            guard case ToolAuthorizationError.authenticationRequired = error else {
+                XCTFail("Expected authenticationRequired error, got \(error)")
+                return
+            }
+        }
+    }
+
     // MARK: - Tools Helper Tests
 
     /// 特定権限のツール一覧取得
@@ -934,7 +1025,17 @@ final class ToolAuthorizationTests: XCTestCase {
 
         let managerTools = ToolAuthorization.tools(for: .managerOnly)
         XCTAssertTrue(managerTools.contains("list_subordinates"))
-        XCTAssertTrue(managerTools.contains("create_task"))
+        XCTAssertTrue(managerTools.contains("assign_task"))
+
+        // Chat-only tools (Phase: Tool Authorization Enhancement)
+        let chatTools = ToolAuthorization.tools(for: .chatOnly)
+        XCTAssertTrue(chatTools.contains("get_pending_messages"))
+        XCTAssertTrue(chatTools.contains("respond_chat"))
+
+        // Unauthenticated tools
+        let unauthenticatedTools = ToolAuthorization.tools(for: .unauthenticated)
+        XCTAssertTrue(unauthenticatedTools.contains("authenticate"))
+        XCTAssertTrue(unauthenticatedTools.contains("help"))
     }
 
     // MARK: - Error Message Tests
@@ -960,13 +1061,227 @@ final class ToolAuthorizationTests: XCTestCase {
         let notSubordinate = ToolAuthorizationError.notSubordinate(managerId: "mgr-1", targetId: "wkr-1")
         XCTAssertTrue(notSubordinate.errorDescription?.contains("mgr-1") ?? false)
         XCTAssertTrue(notSubordinate.errorDescription?.contains("wkr-1") ?? false)
+
+        // Purpose-based authorization errors (Phase: Tool Authorization Enhancement)
+        let chatRequired = ToolAuthorizationError.chatSessionRequired("test_tool", currentPurpose: .task)
+        XCTAssertTrue(chatRequired.errorDescription?.contains("chat session") ?? false)
+        XCTAssertTrue(chatRequired.errorDescription?.contains("purpose=chat") ?? false)
+        XCTAssertTrue(chatRequired.errorDescription?.contains("task") ?? false)
+
+        let taskRequired = ToolAuthorizationError.taskSessionRequired("test_tool", currentPurpose: .chat)
+        XCTAssertTrue(taskRequired.errorDescription?.contains("task session") ?? false)
+        XCTAssertTrue(taskRequired.errorDescription?.contains("purpose=task") ?? false)
+        XCTAssertTrue(taskRequired.errorDescription?.contains("chat") ?? false)
+    }
+}
+
+// MARK: - Help Tool Tests
+// 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
+
+/// helpツールのテスト
+final class HelpToolTests: XCTestCase {
+
+    var db: DatabaseQueue!
+    var mcpServer: MCPServer!
+
+    override func setUpWithError() throws {
+        // テスト用インメモリDBを作成
+        let tempDir = FileManager.default.temporaryDirectory
+        let dbPath = tempDir.appendingPathComponent("test_help_\(UUID().uuidString).db").path
+        db = try DatabaseSetup.createDatabase(at: dbPath)
+
+        // MCPServer作成
+        mcpServer = MCPServer(database: db)
+    }
+
+    override func tearDownWithError() throws {
+        mcpServer = nil
+        db = nil
+    }
+
+    // MARK: - Help List Tests
+
+    /// 未認証でhelpを呼び出すと、未認証で利用可能なツールのみ返す
+    func testHelpListForUnauthenticated() throws {
+        let result = try mcpServer.executeTool(
+            name: "help",
+            arguments: [:],
+            caller: .unauthenticated
+        ) as! [String: Any]
+
+        // contextの確認
+        let context = result["context"] as! [String: Any]
+        XCTAssertEqual(context["caller_type"] as? String, "unauthenticated")
+
+        // 利用可能なツール
+        let availableTools = result["available_tools"] as! [[String: Any]]
+        let toolNames = availableTools.map { $0["name"] as! String }
+
+        // 未認証では authenticate と help のみ利用可能
+        XCTAssertTrue(toolNames.contains("authenticate"))
+        XCTAssertTrue(toolNames.contains("help"))
+
+        // Coordinator専用ツールは含まれない
+        XCTAssertFalse(toolNames.contains("health_check"))
+        XCTAssertFalse(toolNames.contains("get_agent_action"))
+
+        // 認証済みツールは含まれない
+        XCTAssertFalse(toolNames.contains("get_my_profile"))
+        XCTAssertFalse(toolNames.contains("list_tasks"))
+
+        // unavailable_infoが含まれる
+        let unavailableInfo = result["unavailable_info"] as! [String: String]
+        XCTAssertNotNil(unavailableInfo["authenticated_tools"])
+    }
+
+    /// Workerのtaskセッションでhelpを呼び出すと、chatOnlyツールは含まれない
+    func testHelpListForWorkerTaskSession() throws {
+        let taskSession = AgentSession(
+            agentId: AgentID(value: "agent-001"),
+            projectId: ProjectID(value: "proj-001"),
+            purpose: .task
+        )
+        let workerCaller = CallerType.worker(agentId: taskSession.agentId, session: taskSession)
+
+        let result = try mcpServer.executeTool(
+            name: "help",
+            arguments: [:],
+            caller: workerCaller
+        ) as! [String: Any]
+
+        // contextの確認
+        let context = result["context"] as! [String: Any]
+        XCTAssertEqual(context["caller_type"] as? String, "worker")
+        XCTAssertEqual(context["session_purpose"] as? String, "task")
+
+        // 利用可能なツール
+        let availableTools = result["available_tools"] as! [[String: Any]]
+        let toolNames = availableTools.map { $0["name"] as! String }
+
+        // 認証済みツールは含まれる
+        XCTAssertTrue(toolNames.contains("get_my_profile"))
+        XCTAssertTrue(toolNames.contains("list_tasks"))
+        XCTAssertTrue(toolNames.contains("help"))
+        XCTAssertTrue(toolNames.contains("authenticate"))
+
+        // chatOnlyツールは含まれない
+        XCTAssertFalse(toolNames.contains("get_pending_messages"))
+        XCTAssertFalse(toolNames.contains("respond_chat"))
+
+        // Coordinator専用ツールは含まれない
+        XCTAssertFalse(toolNames.contains("health_check"))
+
+        // unavailable_infoにchat_toolsが含まれる
+        let unavailableInfo = result["unavailable_info"] as! [String: String]
+        XCTAssertNotNil(unavailableInfo["chat_tools"])
+    }
+
+    /// Workerのchatセッションでhelpを呼び出すと、chatOnlyツールも含まれる
+    func testHelpListForWorkerChatSession() throws {
+        let chatSession = AgentSession(
+            agentId: AgentID(value: "agent-001"),
+            projectId: ProjectID(value: "proj-001"),
+            purpose: .chat
+        )
+        let workerCaller = CallerType.worker(agentId: chatSession.agentId, session: chatSession)
+
+        let result = try mcpServer.executeTool(
+            name: "help",
+            arguments: [:],
+            caller: workerCaller
+        ) as! [String: Any]
+
+        // contextの確認
+        let context = result["context"] as! [String: Any]
+        XCTAssertEqual(context["session_purpose"] as? String, "chat")
+
+        // 利用可能なツール
+        let availableTools = result["available_tools"] as! [[String: Any]]
+        let toolNames = availableTools.map { $0["name"] as! String }
+
+        // chatOnlyツールが含まれる
+        XCTAssertTrue(toolNames.contains("get_pending_messages"))
+        XCTAssertTrue(toolNames.contains("respond_chat"))
+    }
+
+    /// Coordinatorでhelpを呼び出すと、Coordinator専用ツールも含まれる
+    func testHelpListForCoordinator() throws {
+        let result = try mcpServer.executeTool(
+            name: "help",
+            arguments: [:],
+            caller: .coordinator
+        ) as! [String: Any]
+
+        // contextの確認
+        let context = result["context"] as! [String: Any]
+        XCTAssertEqual(context["caller_type"] as? String, "coordinator")
+
+        // 利用可能なツール
+        let availableTools = result["available_tools"] as! [[String: Any]]
+        let toolNames = availableTools.map { $0["name"] as! String }
+
+        // Coordinator専用ツールが含まれる
+        XCTAssertTrue(toolNames.contains("health_check"))
+        XCTAssertTrue(toolNames.contains("get_agent_action"))
+        XCTAssertTrue(toolNames.contains("list_managed_agents"))
+    }
+
+    // MARK: - Help Detail Tests
+
+    /// 利用可能なツールの詳細を取得
+    func testHelpDetailForAvailableTool() throws {
+        let result = try mcpServer.executeTool(
+            name: "help",
+            arguments: ["tool_name": "authenticate"],
+            caller: .unauthenticated
+        ) as! [String: Any]
+
+        // 基本情報
+        XCTAssertEqual(result["name"] as? String, "authenticate")
+        XCTAssertTrue(result["available"] as! Bool)
+        XCTAssertNotNil(result["description"])
+
+        // パラメータ情報
+        let parameters = result["parameters"] as! [[String: Any]]
+        let paramNames = parameters.map { $0["name"] as! String }
+        XCTAssertTrue(paramNames.contains("agent_id"))
+        XCTAssertTrue(paramNames.contains("passkey"))
+        XCTAssertTrue(paramNames.contains("project_id"))
+    }
+
+    /// 利用不可なツールの詳細を取得すると、reasonが含まれる
+    func testHelpDetailForUnavailableTool() throws {
+        let result = try mcpServer.executeTool(
+            name: "help",
+            arguments: ["tool_name": "health_check"],
+            caller: .unauthenticated
+        ) as! [String: Any]
+
+        // 基本情報
+        XCTAssertEqual(result["name"] as? String, "health_check")
+        XCTAssertFalse(result["available"] as! Bool)
+
+        // 利用不可の理由
+        let reason = result["reason"] as! String
+        XCTAssertTrue(reason.contains("Coordinator"))
+    }
+
+    /// 存在しないツールの詳細を取得するとエラー
+    func testHelpDetailForUnknownTool() throws {
+        let result = try mcpServer.executeTool(
+            name: "help",
+            arguments: ["tool_name": "unknown_tool"],
+            caller: .unauthenticated
+        ) as! [String: Any]
+
+        // エラーメッセージ
+        let error = result["error"] as! String
+        XCTAssertTrue(error.contains("unknown_tool"))
+        XCTAssertTrue(error.contains("not found"))
     }
 }
 
 // MARK: - MCPServer Integration Tests
-
-import GRDB
-@testable import Infrastructure
 
 /// MCPServer統合テスト - reportCompletedのstatusChangedByAgentId設定バグ修正
 /// 参照: TDD RED-GREEN アプローチ

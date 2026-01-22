@@ -15,6 +15,7 @@ enum ToolDefinitions {
             // ========================================
             // 未認証でも呼び出し可能
             // ========================================
+            help,          // ヘルプ（利用可能ツール一覧）
             authenticate,
 
             // ========================================
@@ -170,7 +171,28 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["agent_id", "passkey", "project_id"]
-        ]
+        ] as [String: Any]
+    ]
+
+    // MARK: - Help（未認証でも利用可能）
+    // 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
+
+    /// helpツール定義
+    /// 利用可能なMCPツールの一覧と詳細を表示
+    /// 呼び出し元の認証状態とセッションのpurposeに応じて表示内容が変わる
+    static let help: [String: Any] = [
+        "name": "help",
+        "description": "利用可能なMCPツールの一覧と詳細を表示します。呼び出し元の認証状態とセッションのpurpose（task/chat）に応じて、実際に利用可能なツールのみが表示されます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "tool_name": [
+                    "type": "string",
+                    "description": "特定のツール名を指定すると、そのツールの詳細（パラメータ、使用例）を表示します。省略すると利用可能なツール一覧を表示します。"
+                ] as [String: Any]
+            ] as [String: Any],
+            "required": [] as [String]
+        ] as [String: Any]
     ]
 
     /// get_my_task - 現在のタスクを取得

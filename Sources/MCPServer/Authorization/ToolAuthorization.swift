@@ -50,6 +50,7 @@ enum CallerType {
 // MARK: - Tool Permission
 
 /// ツールの権限レベル
+/// 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
 enum ToolPermission: String {
     /// Coordinator専用（システム管理）
     case coordinatorOnly = "coordinator_only"
@@ -61,6 +62,10 @@ enum ToolPermission: String {
     case authenticated = "authenticated"
     /// 未認証でも呼び出し可能
     case unauthenticated = "unauthenticated"
+    /// チャットセッション専用（purpose=chat）
+    case chatOnly = "chat_only"
+    /// タスクセッション専用（purpose=task）- 将来用
+    case taskOnly = "task_only"
 }
 
 // MARK: - Tool Authorization
@@ -108,10 +113,14 @@ struct ToolAuthorization {
         "report_execution_start": .authenticated,
         "report_execution_complete": .authenticated,
 
-        // チャット機能（認証済み）- UC009
+        // チャット機能（チャットセッション専用）- UC009
         // 参照: docs/design/CHAT_FEATURE.md
-        "get_pending_messages": .authenticated,
-        "respond_chat": .authenticated,
+        // 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
+        "get_pending_messages": .chatOnly,
+        "respond_chat": .chatOnly,
+
+        // ヘルプ（未認証でも利用可能）
+        "help": .unauthenticated,
     ]
 
     /// ツール呼び出しの認可チェック
@@ -163,6 +172,28 @@ struct ToolAuthorization {
             throw ToolAuthorizationError.authenticationRequired(tool)
         case (.authenticated, .unauthenticated):
             throw ToolAuthorizationError.authenticationRequired(tool)
+
+        // チャットセッション専用（purpose=chat）
+        case (.chatOnly, .manager(_, let session)), (.chatOnly, .worker(_, let session)):
+            guard session.purpose == .chat else {
+                throw ToolAuthorizationError.chatSessionRequired(tool, currentPurpose: session.purpose)
+            }
+            return
+        case (.chatOnly, .coordinator):
+            throw ToolAuthorizationError.authenticationRequired(tool)
+        case (.chatOnly, .unauthenticated):
+            throw ToolAuthorizationError.authenticationRequired(tool)
+
+        // タスクセッション専用（purpose=task）- 将来用
+        case (.taskOnly, .manager(_, let session)), (.taskOnly, .worker(_, let session)):
+            guard session.purpose == .task else {
+                throw ToolAuthorizationError.taskSessionRequired(tool, currentPurpose: session.purpose)
+            }
+            return
+        case (.taskOnly, .coordinator):
+            throw ToolAuthorizationError.authenticationRequired(tool)
+        case (.taskOnly, .unauthenticated):
+            throw ToolAuthorizationError.authenticationRequired(tool)
         }
     }
 
@@ -175,6 +206,7 @@ struct ToolAuthorization {
 // MARK: - Authorization Errors
 
 /// 認可エラー
+/// 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
 enum ToolAuthorizationError: Error, LocalizedError {
     case toolNotRegistered(String)
     case coordinatorRequired(String)
@@ -182,6 +214,10 @@ enum ToolAuthorizationError: Error, LocalizedError {
     case workerRequired(String)
     case authenticationRequired(String)
     case notSubordinate(managerId: String, targetId: String)
+    /// チャットセッションが必要（purpose=chat）
+    case chatSessionRequired(String, currentPurpose: AgentPurpose)
+    /// タスクセッションが必要（purpose=task）
+    case taskSessionRequired(String, currentPurpose: AgentPurpose)
 
     var errorDescription: String? {
         switch self {
@@ -197,6 +233,10 @@ enum ToolAuthorizationError: Error, LocalizedError {
             return "Tool '\(tool)' requires authentication. Call authenticate first."
         case .notSubordinate(let managerId, let targetId):
             return "Agent '\(targetId)' is not a subordinate of '\(managerId)'"
+        case .chatSessionRequired(let tool, let currentPurpose):
+            return "Tool '\(tool)' requires a chat session (purpose=chat). Current session purpose is '\(currentPurpose.rawValue)'."
+        case .taskSessionRequired(let tool, let currentPurpose):
+            return "Tool '\(tool)' requires a task session (purpose=task). Current session purpose is '\(currentPurpose.rawValue)'."
         }
     }
 }
