@@ -27,8 +27,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # テスト設定
 TEST_DB_PATH="/tmp/AIAgentPM_UC010_WebUI.db"
 MCP_SOCKET_PATH="/tmp/aiagentpm_uc010_webui.sock"
-REST_PORT="8085"
-WEB_UI_PORT="5174"
+REST_PORT="8084"
+WEB_UI_PORT="5173"  # Must be 5173 for CORS (allowed origins in REST server)
 
 export MCP_COORDINATOR_TOKEN="test_coordinator_token_uc010_webui"
 

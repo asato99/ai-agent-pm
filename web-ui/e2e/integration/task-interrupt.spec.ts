@@ -159,44 +159,37 @@ test.describe('Task Interrupt Flow - UC010', () => {
       const statusSelect = dialog.getByRole('combobox')
       await expect(statusSelect).toBeVisible()
       await statusSelect.selectOption('in_progress')
-      await page.waitForTimeout(500)
 
-      // Close dialog
-      await page.keyboard.press('Escape')
+      // Wait for status change to propagate
+      await page.waitForTimeout(1000)
 
       // Wait for Coordinator to spawn agent (polling interval is 2 seconds)
       console.log('Waiting for agent to spawn and start executing...')
-      await page.waitForTimeout(10_000) // Wait 10 seconds for agent to start
+
+      // Reload page and wait - this closes any dialog and gets fresh state
+      await page.reload()
+      await page.waitForTimeout(8_000) // Wait 8 seconds total for agent to start
 
       // Re-open task and change to blocked (interrupt signal)
       console.log('Sending interrupt signal (changing to blocked)...')
-      const inProgressColumn = page.locator('[data-column="in_progress"]')
-      const taskInProgress = inProgressColumn.locator('[data-testid="task-card"]', {
-        has: page.getByText(TEST_TASK.title),
-      })
 
-      // Task might still be in in_progress or might have been picked up
-      if ((await taskInProgress.count()) > 0) {
-        await taskInProgress.click()
+      // Find task - it might still be in in_progress or might have moved
+      const taskCardForBlocked = page.locator('[data-testid="task-card"]', {
+        has: page.getByText(TEST_TASK.title),
+      }).first()
+
+      if ((await taskCardForBlocked.count()) > 0) {
+        await taskCardForBlocked.click()
         const dialog2 = page.getByRole('dialog').first()
         await expect(dialog2).toBeVisible()
 
         const statusSelect2 = dialog2.getByRole('combobox')
         await statusSelect2.selectOption('blocked')
-        await page.waitForTimeout(500)
 
-        await page.keyboard.press('Escape')
-      } else {
-        // Task might have moved, find it anywhere
-        const taskAnywhere = page.locator('[data-testid="task-card"]', {
-          has: page.getByText(TEST_TASK.title),
-        })
-        await taskAnywhere.click()
-        const dialog2 = page.getByRole('dialog').first()
-        const statusSelect2 = dialog2.getByRole('combobox')
-        await statusSelect2.selectOption('blocked')
-        await page.waitForTimeout(500)
-        await page.keyboard.press('Escape')
+        // Wait for status change and reload to close dialog
+        await page.waitForTimeout(1000)
+        await page.reload()
+        await page.waitForTimeout(1000)
       }
 
       // Poll UI to verify task ends up in blocked column
@@ -231,7 +224,8 @@ test.describe('Task Interrupt Flow - UC010', () => {
           .locator('[data-column="done"]')
           .locator('[data-testid="task-card"]', { has: page.getByText(TEST_TASK.title) })
           .count()
-        const inProgressCount = await inProgressColumn
+        const inProgressCount = await page
+          .locator('[data-column="in_progress"]')
           .locator('[data-testid="task-card"]', { has: page.getByText(TEST_TASK.title) })
           .count()
 
