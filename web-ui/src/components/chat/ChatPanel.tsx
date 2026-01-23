@@ -2,7 +2,7 @@
 // Chat panel component
 // Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
 
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useChat } from '@/hooks/useChat'
 import { useAuthStore } from '@/stores/authStore'
@@ -75,6 +75,32 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
     startSession()
   }, [projectId, agent.id])
 
+  // Handle close: end chat session before closing panel
+  // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+  const handleClose = useCallback(async () => {
+    try {
+      await chatApi.endSession(projectId, agent.id)
+    } catch (error) {
+      console.error('Failed to end chat session:', error)
+      // Continue with close even if end session fails
+    }
+    onClose()
+  }, [projectId, agent.id, onClose])
+
+  // Register beforeunload handler for browser/tab close
+  // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Use sendBeacon for reliable delivery during page unload
+      chatApi.endSessionBeacon(projectId, agent.id)
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [projectId, agent.id])
+
   // Scroll to bottom when new messages arrive
   useEffect(() => {
     // scrollIntoView may not be available in test environments (JSDOM)
@@ -108,7 +134,7 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
           <span className="text-sm text-gray-500">{agent.role}</span>
         </div>
         <button
-          onClick={onClose}
+          onClick={handleClose}
           className="p-1 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
           aria-label="Close"
         >

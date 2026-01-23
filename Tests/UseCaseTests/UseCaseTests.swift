@@ -424,6 +424,30 @@ final class MockAgentSessionRepository: AgentSessionRepositoryProtocol {
     func findActiveSessions(agentId: AgentID) throws -> [AgentSession] {
         Array(sessions.values.filter { $0.agentId == agentId && !$0.isExpired })
     }
+
+    func countActiveSessionsByPurpose(agentId: AgentID) throws -> [AgentPurpose: Int] {
+        var counts: [AgentPurpose: Int] = [.chat: 0, .task: 0]
+        for session in sessions.values where session.agentId == agentId && !session.isExpired {
+            counts[session.purpose, default: 0] += 1
+        }
+        return counts
+    }
+
+    func updateLastActivity(token: String, at date: Date) throws {
+        if let id = sessions.values.first(where: { $0.token == token })?.id {
+            var session = sessions[id]!
+            session.lastActivityAt = date
+            sessions[id] = session
+        }
+    }
+
+    func updateState(token: String, state: SessionState) throws {
+        if let id = sessions.values.first(where: { $0.token == token })?.id {
+            var session = sessions[id]!
+            session.state = state
+            sessions[id] = session
+        }
+    }
 }
 
 final class MockExecutionLogRepository: ExecutionLogRepositoryProtocol {

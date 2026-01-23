@@ -106,4 +106,43 @@ export const chatApi = {
       throw new Error(result.error.message)
     }
   },
+
+  /**
+   * チャットセッションを終了する
+   * Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+   * @param projectId プロジェクトID
+   * @param agentId エージェントID（対話相手）
+   *
+   * This sets the session state to 'terminating', which causes:
+   * 1. Agent's next getNextAction call returns 'exit' action
+   * 2. Agent calls logout, setting session state to 'ended'
+   */
+  async endSession(projectId: string, agentId: string): Promise<void> {
+    const result = await api.post<{ success: boolean }>(
+      `/projects/${projectId}/agents/${agentId}/chat/end`,
+      {}
+    )
+
+    if (result.error) {
+      throw new Error(result.error.message)
+    }
+  },
+
+  /**
+   * チャットセッションを終了する（sendBeacon版）
+   * Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+   *
+   * ブラウザ/タブを閉じる時に使用。sendBeaconはページアンロード中でも
+   * 確実にリクエストを送信できる。
+   *
+   * @param projectId プロジェクトID
+   * @param agentId エージェントID（対話相手）
+   * @returns boolean - sendBeaconが成功したかどうか
+   */
+  endSessionBeacon(projectId: string, agentId: string): boolean {
+    const url = `/api/projects/${projectId}/agents/${agentId}/chat/end`
+    const data = JSON.stringify({})
+    const blob = new Blob([data], { type: 'application/json' })
+    return navigator.sendBeacon(url, blob)
+  },
 }

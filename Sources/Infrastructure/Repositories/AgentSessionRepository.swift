@@ -2,6 +2,7 @@
 // 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-1 認証基盤
 // 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md - (agent_id, project_id) 単位のセッション管理
 // 参照: docs/design/CHAT_FEATURE.md - セッションの起動理由(purpose)管理
+// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6: セッション終了フロー
 
 import Foundation
 import GRDB
@@ -22,6 +23,8 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var projectId: String
     /// Chat機能: 起動理由（task=タスク実行, chat=チャット応答）
     var purpose: String?
+    /// UC015: セッション状態（active, terminating, ended）
+    var state: String?
     var expiresAt: Date
     var createdAt: Date
     /// アイドルタイムアウト管理用: 最終アクティビティ日時
@@ -38,6 +41,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case agentId = "agent_id"
         case projectId = "project_id"
         case purpose
+        case state
         case expiresAt = "expires_at"
         case createdAt = "created_at"
         case lastActivityAt = "last_activity_at"
@@ -54,6 +58,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             agentId: AgentID(value: agentId),
             projectId: ProjectID(value: projectId),
             purpose: AgentPurpose(rawValue: purpose ?? "task") ?? .task,
+            state: SessionState(rawValue: state ?? "active") ?? .active,
             expiresAt: expiresAt,
             createdAt: createdAt,
             lastActivityAt: lastActivityAt,
@@ -71,6 +76,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             agentId: session.agentId.value,
             projectId: session.projectId.value,
             purpose: session.purpose.rawValue,
+            state: session.state.rawValue,
             expiresAt: session.expiresAt,
             createdAt: session.createdAt,
             lastActivityAt: session.lastActivityAt,
@@ -230,6 +236,17 @@ public final class AgentSessionRepository: AgentSessionRepositoryProtocol, Senda
             try db.execute(
                 sql: "UPDATE agent_sessions SET last_activity_at = ? WHERE token = ?",
                 arguments: [date, token]
+            )
+        }
+    }
+
+    /// セッション状態を更新（UC015: チャットセッション終了）
+    /// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+    public func updateState(token: String, state: SessionState) throws {
+        try db.write { db in
+            try db.execute(
+                sql: "UPDATE agent_sessions SET state = ? WHERE token = ?",
+                arguments: [state.rawValue, token]
             )
         }
     }

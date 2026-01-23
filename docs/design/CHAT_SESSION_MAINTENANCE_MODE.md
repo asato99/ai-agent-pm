@@ -411,27 +411,223 @@ Agent                    MCP Server
 | `chat.soft_timeout_minutes` | 10 | エージェントが自発的にlogoutするまでの時間 |
 | `chat.hard_timeout_minutes` | 15 | Coordinatorが強制終了するまでの時間 |
 
-## 6. 利点と考慮事項
+## 6. セッション終了フロー（UC015）
 
-### 6.1 利点
+### 6.1 セッション状態遷移
+
+セッションは以下の3つの状態を持つ：
+
+```
+┌──────────┐      ユーザーが閉じる      ┌─────────────┐      exit指示を返却      ┌─────────┐
+│  active  │  ─────────────────────▶  │ terminating │  ───────────────────▶  │  ended  │
+└──────────┘                          └─────────────┘                         └─────────┘
+     │                                       │
+     │         タイムアウト（10分）            │
+     └───────────────────────────────────────┘
+                        ↓
+                   ┌─────────┐
+                   │  ended  │
+                   └─────────┘
+```
+
+| 状態 | 説明 |
+|------|------|
+| `active` | セッションが有効、エージェントが待機中 |
+| `terminating` | 終了要求済み、エージェントへのexit指示待ち |
+| `ended` | 終了完了、セッションは無効 |
+
+### 6.2 終了フロー（明示的終了）
+
+ユーザーがチャットパネルを閉じた場合：
+
+```
+User          Web UI        REST Server      MCP Server         Agent
+ │               │               │                │                │
+ │ [×クリック]    │               │                │                │
+ │               │               │                │                │
+ │               ├─POST /chat/end─────────────────▶│                │
+ │               │               │                │                │
+ │               │               │                │ session.state  │
+ │               │               │                │ = terminating  │
+ │               │               │                │                │
+ │               │◀──────────200 OK───────────────┤                │
+ │               │               │                │                │
+ │  [パネル閉じる] │               │                │                │
+ │               │               │                │                │
+ │               │               │                │   (ポーリング)  │
+ │               │               │                │◀─get_next_action─┤
+ │               │               │                │                │
+ │               │               │                │ state ==       │
+ │               │               │                │ terminating?   │
+ │               │               │                │                │
+ │               │               │                ├──{action:exit}─▶│
+ │               │               │                │                │
+ │               │               │                │ session.state  │
+ │               │               │                │ = ended        │
+ │               │               │                │                │
+ │               │               │                │               [終了]
+```
+
+### 6.3 終了フロー（タイムアウト）
+
+10分間メッセージがない場合：
+
+```
+Agent                    MCP Server
+ │                           │
+ │──get_next_action────────▶│
+ │                           │──check: lastActivityAt + 10min < now?
+ │                           │  → Yes (timeout)
+ │                           │
+ │                           │  session.state = terminating
+ │                           │
+ │◀──{action: exit}─────────│
+ │                           │
+ │                           │  session.state = ended
+ │                           │
+ │    [プロセス終了]          │
+```
+
+### 6.4 状態遷移の保証
+
+**なぜ `terminating` 状態が必要か？**
+
+1. **exit指示の到達保証**: セッションを即座に `ended` にすると、エージェントが終了指示を受け取る前にセッションが消える可能性がある
+2. **リソース管理**: `terminating` 状態のセッションは新規起動をブロックしつつ、既存エージェントの終了を待つ
+3. **監査**: どの段階でセッションが終了したかを追跡可能
+
+**状態遷移ルール**:
+
+| 現在の状態 | 許可される遷移 | トリガー |
+|------------|----------------|----------|
+| `active` | `terminating` | ユーザーが閉じる / タイムアウト |
+| `active` | `ended` | 不可（必ずterminatingを経由） |
+| `terminating` | `ended` | exit指示を返却後 |
+| `ended` | - | 最終状態 |
+
+### 6.5 AgentSession の変更
+
+```swift
+public struct AgentSession {
+    public let id: AgentSessionID
+    public let agentId: AgentID
+    public let projectId: ProjectID
+    public let purpose: SessionPurpose
+    public var state: SessionState      // 追加
+    public var lastActivityAt: Date
+    public let expiresAt: Date
+    public let createdAt: Date
+}
+
+public enum SessionState: String, Codable {
+    case active       // 有効
+    case terminating  // 終了要求済み
+    case ended        // 終了完了
+}
+```
+
+### 6.6 getNextAction の変更
+
+```swift
+func getNextAction(agentId: String, projectId: String) -> [String: Any] {
+    let session = try findActiveSession(agentId, projectId)
+
+    // 終了要求をチェック
+    if session.state == .terminating {
+        // exit指示を返し、セッションを ended に更新
+        session.state = .ended
+        try sessionRepository.update(session)
+
+        return [
+            "action": "exit",
+            "reason": "session_closed",
+            "instruction": "チャットセッションが終了しました。"
+        ]
+    }
+
+    // タイムアウトチェック
+    let idleTime = Date().timeIntervalSince(session.lastActivityAt)
+    if idleTime > 10 * 60 {  // 10分
+        session.state = .terminating
+        try sessionRepository.update(session)
+        // 次回のget_next_actionでexitを返す
+    }
+
+    // ... 通常の処理
+}
+```
+
+### 6.7 POST /chat/end エンドポイント
+
+```swift
+// REST API
+router.post("/projects/:projectId/agents/:agentId/chat/end") { request -> Response in
+    let projectId = request.parameters.get("projectId")!
+    let agentId = request.parameters.get("agentId")!
+
+    // アクティブなセッションを検索
+    let sessions = try sessionRepository.findByAgentIdAndProjectId(agentId, projectId)
+    let activeSession = sessions.first { $0.state == .active }
+
+    if let session = activeSession {
+        // terminating に更新（まだ ended にしない）
+        var updated = session
+        updated.state = .terminating
+        try sessionRepository.update(updated)
+    }
+
+    // セッションがなくても 200 OK（べき等性）
+    return Response(status: .ok)
+}
+```
+
+### 6.8 Web UI の変更
+
+```typescript
+// ChatPanel.tsx
+const handleClose = async () => {
+  try {
+    await chatApi.endSession(projectId, agent.id)
+  } catch (error) {
+    // エラーがあってもUIは閉じる
+    console.error('Failed to end chat session:', error)
+  }
+  onClose()
+}
+
+// ブラウザ直接閉じ対応
+useEffect(() => {
+  const handleBeforeUnload = () => {
+    navigator.sendBeacon(
+      `/api/projects/${projectId}/agents/${agent.id}/chat/end`
+    )
+  }
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+}, [projectId, agent.id])
+```
+
+## 7. 利点と考慮事項
+
+### 7.1 利点
 
 1. **レスポンス速度向上**: 起動・認証のオーバーヘッドがなくなる
 2. **コンテキスト維持**: 会話の流れが自然に維持される
 3. **リソース効率**: 短い会話でも長時間プロセスを維持しない（タイムアウト）
 
-### 6.2 考慮事項
+### 7.2 考慮事項
 
 1. **リソース消費**: 待機中もプロセスがメモリを消費
 2. **API課金**: Claude APIの場合、コンテキストが積み重なる
 3. **同時接続数**: 複数ユーザーが同時にチャットする場合の制限
 
-### 6.3 将来の拡張
+### 7.3 将来の拡張
 
 1. **WebSocket対応**: ポーリングの代わりにリアルタイム通知
 2. **コンテキスト圧縮**: 長い会話のサマリー化
 3. **プライオリティキュー**: 重要なメッセージの優先処理
 
-## 7. 実装フェーズ
+## 8. 実装フェーズ
 
 ### Phase 1: Domain層
 - [ ] `ChatMessage` に `visible` フィールド追加（デフォルト: true）

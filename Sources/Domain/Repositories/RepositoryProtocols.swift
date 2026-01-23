@@ -182,6 +182,11 @@ public protocol AgentSessionRepositoryProtocol: Sendable {
     /// アクティブなセッション数をpurpose別にカウント（Chat Session Maintenance Mode用）
     /// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
     func countActiveSessionsByPurpose(agentId: AgentID) throws -> [AgentPurpose: Int]
+    /// 最終アクティビティ日時を更新（アイドルタイムアウト管理用）
+    func updateLastActivity(token: String, at date: Date) throws
+    /// セッション状態を更新（UC015: チャットセッション終了）
+    /// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+    func updateState(token: String, state: SessionState) throws
 }
 
 // MARK: - ExecutionLogRepositoryProtocol

@@ -450,7 +450,13 @@ final class RESTServer {
             debugLog("POST /api/projects/:projectId/agents/:agentId/chat/start called")
             return try await startChatSession(request: request, context: context)
         }
-        debugLog("Chat routes registered: GET/messages, POST/messages, POST/mark-read, POST/start")
+        // Chat session end endpoint (UC015)
+        // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+        chatRouter.post("end") { [self] request, context in
+            debugLog("POST /api/projects/:projectId/agents/:agentId/chat/end called")
+            return try await endChatSession(request: request, context: context)
+        }
+        debugLog("Chat routes registered: GET/messages, POST/messages, POST/mark-read, POST/start, POST/end")
 
         // Unread counts (project-level aggregation)
         // Reference: docs/design/CHAT_FEATURE.md - Unread count feature
@@ -1555,6 +1561,61 @@ final class RESTServer {
         } catch {
             debugLog("Failed to start chat session: \(error)")
             return errorResponse(status: .internalServerError, message: "Failed to start chat session")
+        }
+    }
+
+    // MARK: - UC015: End Chat Session
+    /// POST /api/projects/:projectId/agents/:agentId/chat/end
+    /// Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+    /// Sets the chat session state to 'terminating' so agent receives exit action on next getNextAction call
+    private func endChatSession(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        // Extract path parameters
+        guard let projectIdStr = context.parameters.get("projectId"),
+              let agentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Missing project or agent ID")
+        }
+
+        let projectId = ProjectID(value: projectIdStr)
+        let targetAgentId = AgentID(value: agentIdStr)
+
+        // Verify agent can chat with target
+        guard try canChatWithAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId, projectId: projectId) else {
+            return errorResponse(status: .forbidden, message: "Cannot access this agent's chat")
+        }
+
+        do {
+            // Find active chat sessions for this agent/project
+            let sessions = try sessionRepository.findByAgentIdAndProjectId(
+                targetAgentId,
+                projectId: projectId
+            )
+
+            // Filter to active sessions with chat purpose
+            let activeChatSessions = sessions.filter { !$0.isExpired && $0.purpose == .chat && $0.state == .active }
+
+            if activeChatSessions.isEmpty {
+                debugLog("endChatSession: No active chat session found for agent=\(agentIdStr)")
+                // Return success even if no session exists (idempotent)
+                return jsonResponse(["success": true, "noActiveSession": true])
+            }
+
+            // Update each active session's state to terminating
+            var terminatedCount = 0
+            for session in activeChatSessions {
+                try sessionRepository.updateState(token: session.token, state: .terminating)
+                terminatedCount += 1
+                debugLog("endChatSession: Set session to terminating, token=\(session.token.prefix(8))...")
+            }
+
+            debugLog("endChatSession: Terminated \(terminatedCount) session(s) for agent=\(agentIdStr)")
+            return jsonResponse(["success": true])
+        } catch {
+            debugLog("Failed to end chat session: \(error)")
+            return errorResponse(status: .internalServerError, message: "Failed to end chat session")
         }
     }
 

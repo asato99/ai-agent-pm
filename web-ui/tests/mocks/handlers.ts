@@ -745,4 +745,24 @@ export const handlers = [
     // Invalid project or agent
     return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
   }),
+
+  // Chat session end - POST
+  // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6 (UC015)
+  http.post('/api/projects/:projectId/agents/:agentId/chat/end', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId, agentId } = params
+
+    // Valid project and agents
+    if (projectId === 'project-1' && (agentId === 'worker-1' || agentId === 'worker-2' || agentId === 'agent-1')) {
+      // Simulate ending the session
+      // In real implementation, this sets session state to 'terminating'
+      return HttpResponse.json({ success: true })
+    }
+
+    // If no active session, still return success (idempotent)
+    return HttpResponse.json({ success: true, noActiveSession: true })
+  }),
 ]

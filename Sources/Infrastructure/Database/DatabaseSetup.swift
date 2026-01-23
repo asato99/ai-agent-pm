@@ -872,6 +872,16 @@ public final class DatabaseSetup {
             try db.create(indexOn: "notifications", columns: ["created_at"])
         }
 
+        // v37: セッション状態フィールド追加（UC015: チャットセッション終了）
+        // 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+        // 状態遷移: active → terminating → ended
+        migrator.registerMigration("v37_session_state") { db in
+            try db.alter(table: "agent_sessions") { t in
+                // デフォルト値は "active"（既存データとの互換性）
+                t.add(column: "state", .text).defaults(to: "active")
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -2,8 +2,25 @@
 // 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md - Phase 3-1 認証基盤
 // 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md - (agent_id, project_id) 単位のセッション管理
 // 参照: docs/design/CHAT_FEATURE.md - セッションの起動理由(purpose)管理
+// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6: セッション終了フロー
 
 import Foundation
+
+/// セッション状態（UC015: チャットセッション終了）
+/// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+///
+/// 状態遷移: active → terminating → ended
+/// - active: 通常の動作中
+/// - terminating: UIが閉じられた（エージェントに exit 指示を返す）
+/// - ended: エージェントが終了完了（セッション削除可能）
+public enum SessionState: String, Codable, Sendable {
+    /// 通常の動作中
+    case active
+    /// UIが閉じられた（エージェントに exit 指示を返す）
+    case terminating
+    /// エージェントが終了完了
+    case ended
+}
 
 /// エージェントの認証セッションを表すエンティティ
 /// 認証成功後に発行され、一定時間後に失効する
@@ -29,6 +46,11 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     /// 最終アクティビティ日時（アイドルタイムアウト判定用）
     public var lastActivityAt: Date
 
+    // MARK: - Session State (UC015)
+    /// セッション状態（active → terminating → ended）
+    /// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+    public var state: SessionState
+
     // MARK: - Model Verification Fields
     /// Agent Instanceが申告したプロバイダー
     public var reportedProvider: String?
@@ -53,11 +75,13 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     /// 新しいセッションを生成
     /// Phase 4: projectId は必須
     /// Chat機能: purpose はデフォルトで .task
+    /// UC015: state はデフォルトで .active
     public init(
         id: AgentSessionID = .generate(),
         agentId: AgentID,
         projectId: ProjectID,
         purpose: AgentPurpose = .task,
+        state: SessionState = .active,
         expiresAt: Date? = nil,
         createdAt: Date = Date()
     ) {
@@ -66,6 +90,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.agentId = agentId
         self.projectId = projectId
         self.purpose = purpose
+        self.state = state
         self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(Self.defaultExpirationInterval)
         self.createdAt = createdAt
         self.lastActivityAt = createdAt  // 作成時が最初のアクティビティ
@@ -76,12 +101,14 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     }
 
     /// DBから復元用（トークンを直接設定）
+    /// UC015: state はデフォルトで .active（既存データとの互換性）
     public init(
         id: AgentSessionID,
         token: String,
         agentId: AgentID,
         projectId: ProjectID,
         purpose: AgentPurpose = .task,
+        state: SessionState = .active,
         expiresAt: Date,
         createdAt: Date,
         lastActivityAt: Date? = nil,
@@ -95,6 +122,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.agentId = agentId
         self.projectId = projectId
         self.purpose = purpose
+        self.state = state
         self.expiresAt = expiresAt
         self.createdAt = createdAt
         self.lastActivityAt = lastActivityAt ?? createdAt  // 既存データはcreatedAtで初期化

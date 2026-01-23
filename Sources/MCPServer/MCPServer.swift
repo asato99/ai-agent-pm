@@ -2192,7 +2192,22 @@ public final class MCPServer {
             ]
         }
 
-        // 1.6. Chat機能: purpose=chat の場合はチャット応答フローへ
+        // 1.6. UC015: セッション終了チェック - terminating 状態なら exit を返す
+        // 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
+        if session.state == .terminating {
+            Self.log("[MCP] getNextAction: Session is terminating, returning exit action")
+            return [
+                "action": "exit",
+                "instruction": """
+                    ユーザーがチャットを閉じました。
+                    logout を呼び出してセッションを終了してください。
+                    """,
+                "state": "session_terminating",
+                "reason": "user_closed_chat"
+            ]
+        }
+
+        // 1.7. Chat機能: purpose=chat の場合はチャット応答フローへ
         if session.purpose == .chat {
             // セッションタイムアウトチェック（10分）
             // lastActivityAt からの経過時間を使用（アイドル時間ベース）
