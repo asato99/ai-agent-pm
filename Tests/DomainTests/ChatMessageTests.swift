@@ -181,4 +181,84 @@ final class ChatMessageTests: XCTestCase {
 
         XCTAssertEqual(message.relatedHandoffId?.value, "handoff-456")
     }
+
+    // MARK: - Conversation ID (UC016: AI-to-AI Conversation)
+
+    func testChatMessageWithConversationId() {
+        let convId = ConversationID(value: "conv-001")
+        let message = ChatMessage(
+            id: ChatMessageID(value: "msg-1"),
+            senderId: AgentID(value: "agent-a"),
+            receiverId: AgentID(value: "agent-b"),
+            content: "りんご",
+            conversationId: convId
+        )
+
+        XCTAssertEqual(message.conversationId?.value, "conv-001")
+    }
+
+    func testChatMessageConversationIdIsOptional() {
+        let message = ChatMessage(
+            id: ChatMessageID(value: "msg-1"),
+            senderId: AgentID(value: "agent-a"),
+            receiverId: AgentID(value: "agent-b"),
+            content: "テスト"
+        )
+
+        XCTAssertNil(message.conversationId)
+    }
+
+    func testChatMessageWithoutReceiverIdPreservesConversationId() {
+        let convId = ConversationID(value: "conv-001")
+        let message = ChatMessage(
+            id: ChatMessageID(value: "msg-1"),
+            senderId: AgentID(value: "agent-a"),
+            receiverId: AgentID(value: "agent-b"),
+            content: "テスト",
+            conversationId: convId
+        )
+
+        let withoutReceiver = message.withoutReceiverId()
+
+        XCTAssertNil(withoutReceiver.receiverId)
+        XCTAssertEqual(withoutReceiver.conversationId?.value, "conv-001")
+    }
+
+    func testChatMessageEncodesConversationId() throws {
+        let message = ChatMessage(
+            id: ChatMessageID(value: "msg-1"),
+            senderId: AgentID(value: "agent-a"),
+            receiverId: AgentID(value: "agent-b"),
+            content: "テスト",
+            createdAt: Date(timeIntervalSince1970: 1705827600),
+            conversationId: ConversationID(value: "conv-001")
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(message)
+        let jsonString = String(data: data, encoding: .utf8)!
+
+        XCTAssertTrue(jsonString.contains("\"conversationId\":{\"value\":\"conv-001\"}"))
+    }
+
+    func testChatMessageDecodesConversationId() throws {
+        let json = """
+        {
+            "id": {"value": "msg-1"},
+            "senderId": {"value": "agent-a"},
+            "receiverId": {"value": "agent-b"},
+            "content": "テスト",
+            "createdAt": "2026-01-23T10:00:00Z",
+            "conversationId": {"value": "conv-001"}
+        }
+        """
+        let data = json.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let message = try decoder.decode(ChatMessage.self, from: data)
+
+        XCTAssertEqual(message.conversationId?.value, "conv-001")
+    }
 }

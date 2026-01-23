@@ -30,6 +30,8 @@ AIエージェント同士がチャットセッションを通じて対話でき
 | 対話モデル | ターンベース + 非同期 | 柔軟性を確保しつつ制御可能 |
 | ストレージ | 既存ファイルベース活用 | 実装コスト削減、一貫性維持 |
 | 状態管理 | DBで会話状態を管理 | セッション終了の同期が必要 |
+| メッセージ紐付け | conversationIdをメッセージに付与 | 会話履歴の追跡・参照を可能に |
+| **AI間メッセージ制約** | **アクティブ会話必須** | **ライフサイクル強制、追跡可能性確保** |
 
 ---
 
@@ -186,6 +188,46 @@ public protocol ConversationRepository: Sendable {
 }
 ```
 
+### ChatMessage の拡張
+
+既存の `ChatMessage` に `conversationId` フィールドを追加し、AI間会話のメッセージを会話単位で追跡可能にする。
+
+```swift
+// Sources/Domain/Entities/ChatMessage.swift（既存エンティティの拡張）
+
+public struct ChatMessage: Codable, Sendable {
+    public let id: String
+    public let senderId: AgentID
+    public let recipientId: AgentID
+    public let content: String
+    public let timestamp: Date
+    public let conversationId: ConversationID?  // 追加: AI⇄AI会話時に設定
+
+    // ... 既存のイニシャライザを拡張
+}
+```
+
+**conversationId の設定ルール**:
+
+| フロー | conversationId | 理由 |
+|--------|----------------|------|
+| Human → AI | `nil` | Humanは会話エンティティを使用しない |
+| AI (task) → AI (非同期) | `nil` | 明示的な会話なし |
+| AI ⇄ AI (会話中) | 自動設定 | 会話履歴の追跡に必要 |
+
+**chat.jsonl の形式**:
+
+```json
+{
+    "id": "msg_xxx",
+    "senderId": "worker-a",
+    "recipientId": "worker-b",
+    "content": "しりとりをしましょう。りんご",
+    "timestamp": "2026-01-23T10:00:00Z",
+    "conversationId": "conv_xxx"
+}
+```
+
 ---
 
 ## 状態遷移
@@ -199,7 +241,7 @@ public protocol ConversationRepository: Sendable {
 ┌─────────────┐
 │   pending   │ ── 参加者がauthenticate ──┐
 └──────┬──────┘                          │
-       │ timeout (5分)                    │
+       │ pendingタイムアウト               │
        ▼                                 ▼
 ┌─────────────┐                   ┌─────────────┐
 │   expired   │                   │   active    │◀───────┐
@@ -208,7 +250,7 @@ public protocol ConversationRepository: Sendable {
                           ┌──────────────┼───────────────┘
                           │              │    (messages exchanged)
                           │              │
-           end_conversation              │ timeout (10分)
+           end_conversation              │ activeタイムアウト
                           │              │
                           ▼              ▼
                    ┌─────────────────────────────┐
@@ -229,10 +271,80 @@ public protocol ConversationRepository: Sendable {
 |------------|----------------|----------|
 | (none) | pending | `start_conversation` |
 | pending | active | 参加者が `authenticate` |
-| pending | expired | 5分間参加者が応答しない |
-| active | terminating | `end_conversation` / 10分タイムアウト |
+| pending | expired | pendingタイムアウト（デフォルト5分） |
+| active | terminating | `end_conversation` / activeタイムアウト（デフォルト10分） |
 | terminating | ended | 両者に終了通知が到達 |
 | ended | - | 最終状態 |
+
+### タイムアウト設定
+
+テスト時に長時間待機を避けるため、タイムアウト値は環境変数で設定可能とする。
+
+| 環境変数 | デフォルト | 説明 |
+|----------|------------|------|
+| `CONVERSATION_PENDING_TIMEOUT_SECONDS` | 300 (5分) | pending状態のタイムアウト |
+| `CONVERSATION_ACTIVE_TIMEOUT_SECONDS` | 600 (10分) | active状態のタイムアウト |
+
+**テスト時の例**:
+```bash
+CONVERSATION_PENDING_TIMEOUT_SECONDS=5 \
+CONVERSATION_ACTIVE_TIMEOUT_SECONDS=5 \
+swift test --filter AIConversationTests
+```
+
+---
+
+## send_message 制約: AI間メッセージにはアクティブ会話必須
+
+### 概要
+
+AIエージェント間のメッセージ送信（`send_message`）は、**アクティブな会話が存在する場合のみ許可**される。
+これにより、会話ライフサイクル（`start_conversation` → メッセージ交換 → `end_conversation`）の使用が強制される。
+
+### 制約ルール
+
+| 送信者 | 受信者 | アクティブ会話 | 結果 |
+|--------|--------|----------------|------|
+| Human | AI | 不要 | ✅ 送信可能 |
+| AI | Human | 不要 | ✅ 送信可能 |
+| AI | AI | **必須** | ⚠️ なければエラー |
+| AI | AI | あり | ✅ 送信可能 |
+
+### 実装ロジック
+
+```swift
+// sendMessage内での検証
+let senderAgent = try agentRepository.findById(session.agentId)
+let targetAgent = try agentRepository.findById(AgentID(value: targetAgentId))
+
+// 両方がAIエージェントの場合、アクティブ会話必須
+if senderAgent?.type == .ai && targetAgent?.type == .ai {
+    guard resolvedConversationId != nil else {
+        throw MCPError.conversationRequiredForAIToAI(
+            fromAgentId: session.agentId.value,
+            toAgentId: targetAgentId
+        )
+    }
+}
+```
+
+### エラーレスポンス
+
+```json
+{
+    "error": "conversation_required_for_ai_to_ai",
+    "message": "AIエージェント間のメッセージ送信にはアクティブな会話が必要です。先にstart_conversation(participant_agent_id: \"target-agent\", initial_message: \"...\")を呼び出してください。",
+    "from_agent_id": "worker-a",
+    "to_agent_id": "worker-b"
+}
+```
+
+### 設計根拠
+
+1. **ライフサイクル強制**: システムプロンプトに依存せず、ツールの仕様として会話開始を強制
+2. **追跡可能性**: すべてのAI間通信に `conversationId` が付与され、監査・デバッグが容易
+3. **リソース管理**: 明示的な開始・終了により、未終了の会話を検出・クリーンアップ可能
+4. **Human-AI互換性**: 既存のHuman-AIチャット（Web UI経由）には影響なし
 
 ---
 
@@ -330,7 +442,7 @@ static let endConversation: [String: Any] = [
     "conversation_id": "conv_xxx",
     "from_agent_id": "worker-a",
     "from_agent_name": "Analysis Worker",
-    "purpose": "実装方針についての相談",
+    "purpose": "しりとり",
     "instruction": "worker-aから会話リクエストがあります。get_pending_messagesでメッセージを確認し、respond_chatで応答してください。",
     "state": "conversation_active"
 }
@@ -571,20 +683,76 @@ private func getNextAction(session: AgentSession) throws -> [String: Any] {
 }
 ```
 
+### send_message の拡張（conversationId 自動付与 + AI間制約）
+
+```swift
+// MCPServer.swift - sendMessage内
+private func sendMessage(
+    session: AgentSession,
+    targetAgentId: String,
+    content: String
+) throws -> [String: Any] {
+
+    // 1. 送信者・受信者のエージェントタイプを取得
+    let senderAgent = try agentRepository.findById(session.agentId)
+    let targetAgent = try agentRepository.findById(AgentID(value: targetAgentId))
+
+    // 2. 対象エージェントとのアクティブな会話があるか確認
+    let activeConversations = try conversationRepository.findActiveByAgentId(
+        session.agentId,
+        projectId: session.projectId
+    )
+
+    let conversationId = activeConversations.first { conv in
+        conv.participantAgentId.value == targetAgentId ||
+        conv.initiatorAgentId.value == targetAgentId
+    }?.id
+
+    // 3. AI間メッセージの場合、アクティブ会話必須
+    if senderAgent?.type == .ai && targetAgent?.type == .ai {
+        guard conversationId != nil else {
+            throw MCPError.conversationRequiredForAIToAI(
+                fromAgentId: session.agentId.value,
+                toAgentId: targetAgentId
+            )
+        }
+    }
+
+    // 4. ChatMessage作成（conversationIdを付与）
+    let message = ChatMessage(
+        id: UUID().uuidString,
+        senderId: session.agentId,
+        recipientId: AgentID(targetAgentId),
+        content: content,
+        timestamp: Date(),
+        conversationId: conversationId  // アクティブな会話があれば自動設定
+    )
+
+    // 5. chat.jsonlに書き込み（既存処理）
+    try chatRepository.save(message, projectId: session.projectId)
+
+    return [
+        "success": true,
+        "message_id": message.id,
+        "conversation_id": conversationId?.value as Any
+    ]
+}
+```
+
 ---
 
 ## ユースケース例
 
 ### UC016: AIエージェント間の明示的会話
 
-#### シナリオ: Worker-AがWorker-Bに実装方針を相談
+#### シナリオ: Worker-AとWorker-Bでしりとり（検証用）
 
 ```
-1. Worker-A (タスク実行中)
-   └── start_conversation(target: worker-b, purpose: "認証実装の相談")
+1. Worker-A
+   └── start_conversation(target: worker-b, purpose: "しりとり")
 
 2. System
-   └── Conversation作成 (state: pending)
+   └── Conversation作成 (state: pending, id: conv_xxx)
    └── PendingAgentPurpose作成 (worker-b, chat, conv_id)
 
 3. Coordinator
@@ -595,17 +763,19 @@ private func getNextAction(session: AgentSession) throws -> [String: Any] {
    └── get_next_action → conversation_request from worker-a
 
 5. Worker-A
-   └── send_message(to: worker-b, "JWT と Session、どちらが推奨？")
+   └── send_message(to: worker-b, "しりとりをしましょう。りんご")
+       → ChatMessage保存 (conversationId: conv_xxx)
 
 6. Worker-B
-   └── get_pending_messages → Worker-Aからのメッセージ
-   └── respond_chat(to: worker-a, "このプロジェクトではJWTを使用しています。理由は...")
+   └── get_pending_messages → [{content: "しりとりをしましょう。りんご", conversationId: conv_xxx}]
+   └── respond_chat(to: worker-a, "ごりら")
+       → ChatMessage保存 (conversationId: conv_xxx)
 
-7. Worker-A
-   └── (メッセージ受信)
-   └── send_message(to: worker-b, "了解、JWTで実装します")
+7. [5-6を繰り返し、5往復を完了]
+   └── 全メッセージに同一のconversationId: conv_xxxが付与される
 
 8. Worker-A
+   └── send_message(to: worker-b, "5ターン完了。終了します")
    └── end_conversation
 
 9. Worker-B
@@ -627,6 +797,7 @@ private func getNextAction(session: AgentSession) throws -> [String: Any] {
 | `conversation_not_found` | 指定された会話IDが存在しない | 404 Not Found |
 | `no_active_conversation` | アクティブな会話がない（end時） | 400 Bad Request |
 | `not_conversation_participant` | 会話の参加者ではない | 403 Forbidden |
+| **`conversation_required_for_ai_to_ai`** | **AI間でアクティブ会話なしに送信** | **400 Bad Request** |
 
 ---
 
@@ -645,12 +816,13 @@ private func getNextAction(session: AgentSession) throws -> [String: Any] {
 
 | ファイル | 変更内容 |
 |----------|----------|
+| `Sources/Domain/Entities/ChatMessage.swift` | `conversationId`フィールド追加 |
 | `Sources/Domain/Repositories/RepositoryProtocols.swift` | `ConversationRepository`プロトコル追加 |
 | `Sources/Domain/Entities/PendingAgentPurpose.swift` | `conversationId`フィールド追加 |
 | `Sources/Infrastructure/Database/DatabaseSetup.swift` | マイグレーション v38 追加 |
 | `Sources/MCPServer/Authorization/ToolAuthorization.swift` | 新ツールの権限定義 |
 | `Sources/MCPServer/Tools/ToolDefinitions.swift` | `startConversation`, `endConversation` 追加 |
-| `Sources/MCPServer/MCPServer.swift` | ツール実装、getNextAction拡張 |
+| `Sources/MCPServer/MCPServer.swift` | ツール実装、getNextAction拡張、sendMessage拡張 |
 
 ---
 
@@ -660,6 +832,7 @@ private func getNextAction(session: AgentSession) throws -> [String: Any] {
 - [ ] `Conversation` エンティティ作成
 - [ ] `ConversationRepository` プロトコル定義
 - [ ] `PendingAgentPurpose` に `conversationId` 追加
+- [ ] `ChatMessage` に `conversationId` 追加
 
 ### Phase 2: Infrastructure層
 - [ ] DBマイグレーション v38 作成
@@ -668,6 +841,8 @@ private func getNextAction(session: AgentSession) throws -> [String: Any] {
 ### Phase 3: MCP Tools
 - [ ] `start_conversation` ツール実装
 - [ ] `end_conversation` ツール実装
+- [ ] `send_message` 拡張（conversationId自動付与）
+- [ ] `send_message` 拡張（AI間メッセージにアクティブ会話必須）
 - [ ] ツール定義・権限設定
 
 ### Phase 4: getNextAction拡張
@@ -699,9 +874,11 @@ send_message(
 
 3人以上のエージェントが参加できるグループ会話。
 
-### 会話履歴の永続化
+### 会話履歴の参照機能
 
-会話のコンテキストを次回以降の会話でも参照できるようにする。
+`conversationId` によりメッセージと会話の紐付けは可能になったため、
+特定の会話のメッセージのみを取得するツール（`get_conversation_history`）を追加し、
+過去の会話コンテキストを参照できるようにする。
 
 ---
 

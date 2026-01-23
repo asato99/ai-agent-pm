@@ -529,16 +529,17 @@ final class MCPServerTests: XCTestCase {
     func testToolCount() {
         let tools = ToolDefinitions.all()
 
-        // 現在のツール一覧: 28個
+        // 現在のツール一覧: 32個
         // Unauthenticated: 2 (help, authenticate)
         // Coordinator-only: 7 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, invalidate_session, report_agent_error)
         // Manager-only: 5 (list_subordinates, get_subordinate_profile, create_task, create_tasks_batch, assign_task)
         // Worker-only: 1 (report_completed)
-        // Authenticated (Manager + Worker): 11 (report_model, get_my_profile, get_my_task, get_notifications, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete)
+        // Authenticated (Manager + Worker): 14 (logout, report_model, get_my_profile, get_my_task, get_notifications, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete, send_message, start_conversation, end_conversation)
         // Chat-only: 2 (get_pending_messages, respond_chat)
         // 注: list_agents, get_agent_profile, list_projects は削除済み
         // 注: get_my_tasks, get_pending_tasks はget_my_taskに統合済み
-        XCTAssertEqual(tools.count, 28, "Should have 28 tools defined")
+        // 注: start_conversation, end_conversation はAI-to-AI会話用（UC016）
+        XCTAssertEqual(tools.count, 32, "Should have 32 tools defined")
     }
 }
 
@@ -3125,11 +3126,12 @@ final class SendMessageIntegrationTests: XCTestCase {
         )
         try projectRepository.save(project)
 
-        // Create sender agent
+        // Create sender agent (Human type to test Human-to-AI messaging without conversation)
         let senderAgent = Agent(
             id: senderAgentId,
             name: "Sender Agent",
             role: "Test sender",
+            type: .human,  // Human type: can send messages without conversation
             hierarchyType: .worker,
             systemPrompt: "Test prompt"
         )
@@ -3379,5 +3381,98 @@ final class SendMessageIntegrationTests: XCTestCase {
             let errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             XCTAssertTrue(errorMessage.contains("4000") || errorMessage.lowercased().contains("long") || errorMessage.contains("超過"))
         }
+    }
+
+    // MARK: - AI-to-AI Conversation Constraint Tests
+    // 参照: docs/design/AI_TO_AI_CONVERSATION.md - send_message 制約
+
+    /// 異常系: AI間メッセージで会話なしは拒否
+    /// AIエージェント同士のメッセージ送信には、事前にstart_conversationでの会話開始が必要
+    func testSendMessageRejectsAIToAIWithoutConversation() throws {
+        // Create AI sender agent (different from the Human sender in setup)
+        let aiSenderId = AgentID(value: "agt_ai_sender")
+        let aiSender = Agent(
+            id: aiSenderId,
+            name: "AI Sender",
+            role: "Test AI sender",
+            type: .ai,  // AI type
+            hierarchyType: .worker,
+            systemPrompt: "Test prompt"
+        )
+        try agentRepository.save(aiSender)
+        _ = try projectAgentAssignmentRepository.assign(projectId: testProjectId, agentId: aiSenderId)
+
+        // Create credential and authenticate AI sender
+        let credential = AgentCredential(agentId: aiSenderId, rawPasskey: "ai_sender_passkey")
+        try agentCredentialRepository.save(credential)
+
+        let authResult = try mcpServer.executeTool(
+            name: "authenticate",
+            arguments: [
+                "agent_id": aiSenderId.value,
+                "passkey": "ai_sender_passkey",
+                "project_id": testProjectId.value
+            ],
+            caller: .unauthenticated
+        )
+        guard let dict = authResult as? [String: Any],
+              let aiToken = dict["session_token"] as? String else {
+            XCTFail("AI sender authentication failed")
+            return
+        }
+
+        let aiSession = try agentSessionRepository.findByToken(aiToken)!
+
+        // Attempt to send message from AI to AI (receiver is also AI from setup)
+        // This should fail because there's no active conversation
+        XCTAssertThrowsError(try mcpServer.executeTool(
+            name: "send_message",
+            arguments: [
+                "session_token": aiToken,
+                "target_agent_id": receiverAgentId.value,  // AI receiver
+                "content": "AIからAIへのメッセージ"
+            ],
+            caller: .worker(agentId: aiSenderId, session: aiSession)
+        )) { error in
+            let errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            // エラーメッセージに会話が必要であることが含まれることを確認
+            XCTAssertTrue(
+                errorMessage.contains("start_conversation") ||
+                errorMessage.contains("会話") ||
+                errorMessage.contains("conversation"),
+                "Error message should mention conversation requirement: \(errorMessage)"
+            )
+        }
+    }
+
+    /// 正常系: Human-to-AIメッセージは会話なしでもOK
+    /// Human-AIのやりとりには会話開始は不要
+    func testSendMessageAllowsHumanToAIWithoutConversation() throws {
+        // sender is Human (from setup), receiver is AI
+        guard let token = sessionToken else {
+            XCTFail("Session token should be available")
+            return
+        }
+
+        let session = try agentSessionRepository.findByToken(token)!
+
+        // Human to AI should work without conversation
+        let result = try mcpServer.executeTool(
+            name: "send_message",
+            arguments: [
+                "session_token": token,
+                "target_agent_id": receiverAgentId.value,  // AI receiver
+                "content": "HumanからAIへのメッセージ"
+            ],
+            caller: .worker(agentId: senderAgentId, session: session)  // Human sender
+        )
+
+        guard let dict = result as? [String: Any] else {
+            XCTFail("Result should be a dictionary")
+            return
+        }
+
+        XCTAssertEqual(dict["success"] as? Bool, true)
+        XCTAssertNotNil(dict["message_id"])
     }
 }

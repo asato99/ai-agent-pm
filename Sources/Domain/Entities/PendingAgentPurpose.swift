@@ -51,19 +51,24 @@ public struct PendingAgentPurpose: Identifiable, Equatable, Sendable {
     public let createdAt: Date
     /// Coordinatorがエージェント起動を開始した時刻（nilなら未起動）
     public let startedAt: Date?
+    /// 関連する会話ID（AI-to-AI会話の場合に設定）
+    /// Reference: docs/design/AI_TO_AI_CONVERSATION.md
+    public let conversationId: ConversationID?
 
     public init(
         agentId: AgentID,
         projectId: ProjectID,
         purpose: AgentPurpose,
         createdAt: Date = Date(),
-        startedAt: Date? = nil
+        startedAt: Date? = nil,
+        conversationId: ConversationID? = nil
     ) {
         self.agentId = agentId
         self.projectId = projectId
         self.purpose = purpose
         self.createdAt = createdAt
         self.startedAt = startedAt
+        self.conversationId = conversationId
     }
 
     /// 起動済みとしてマークした新しいインスタンスを返す
@@ -73,7 +78,8 @@ public struct PendingAgentPurpose: Identifiable, Equatable, Sendable {
             projectId: projectId,
             purpose: purpose,
             createdAt: createdAt,
-            startedAt: date
+            startedAt: date,
+            conversationId: conversationId
         )
     }
 

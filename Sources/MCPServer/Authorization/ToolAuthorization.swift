@@ -124,6 +124,11 @@ struct ToolAuthorization {
         // 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
         "send_message": .authenticated,
 
+        // AI-to-AI会話機能（認証済み）- UC016
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+        "start_conversation": .authenticated,
+        "end_conversation": .authenticated,
+
         // ヘルプ（未認証でも利用可能）
         "help": .unauthenticated,
     ]

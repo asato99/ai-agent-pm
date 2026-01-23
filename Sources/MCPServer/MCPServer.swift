@@ -39,6 +39,9 @@ public final class MCPServer {
     private let chatRepository: ChatFileRepository
     private let pendingAgentPurposeRepository: PendingAgentPurposeRepository
 
+    // AI-to-AI会話リポジトリ（UC016）
+    private let conversationRepository: ConversationRepository
+
     // アプリ設定リポジトリ（TTL設定など）
     private let appSettingsRepository: AppSettingsRepository
 
@@ -93,6 +96,8 @@ public final class MCPServer {
             projectRepository: self.projectRepository
         )
         self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
+        // AI-to-AI会話リポジトリ
+        self.conversationRepository = ConversationRepository(database: database)
         // アプリ設定リポジトリ
         self.appSettingsRepository = AppSettingsRepository(database: database)
         // Phase 2.3: ワーキングディレクトリリポジトリ
@@ -686,11 +691,49 @@ public final class MCPServer {
                 throw MCPError.missingArguments(["content"])
             }
             let relatedTaskId = arguments["related_task_id"] as? String
+            let conversationId = arguments["conversation_id"] as? String
             return try sendMessage(
                 session: session,
                 targetAgentId: targetAgentId,
                 content: content,
-                relatedTaskId: relatedTaskId
+                relatedTaskId: relatedTaskId,
+                conversationId: conversationId
+            )
+
+        // ========================================
+        // AI-to-AI会話機能
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+        // ========================================
+        case "start_conversation":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let participantAgentId = arguments["participant_agent_id"] as? String else {
+                throw MCPError.missingArguments(["participant_agent_id"])
+            }
+            guard let initialMessage = arguments["initial_message"] as? String else {
+                throw MCPError.missingArguments(["initial_message"])
+            }
+            let purpose = arguments["purpose"] as? String
+            return try startConversation(
+                session: session,
+                participantAgentId: participantAgentId,
+                purpose: purpose,
+                initialMessage: initialMessage
+            )
+
+        case "end_conversation":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let conversationId = arguments["conversation_id"] as? String else {
+                throw MCPError.missingArguments(["conversation_id"])
+            }
+            let finalMessage = arguments["final_message"] as? String
+            return try endConversation(
+                session: session,
+                conversationId: conversationId,
+                finalMessage: finalMessage
             )
 
         // ========================================
@@ -2227,6 +2270,59 @@ public final class MCPServer {
                 ]
             }
 
+            // 1.7.1. AI-to-AI会話チェック（UC016）
+            // 参照: docs/design/AI_TO_AI_CONVERSATION.md - getNextAction拡張
+            // pending会話の検出（相手からの会話要求）
+            let pendingConversations = try conversationRepository.findPendingForParticipant(
+                session.agentId,
+                projectId: session.projectId
+            )
+            if let pendingConv = pendingConversations.first {
+                // 会話をactiveに遷移
+                try conversationRepository.updateState(pendingConv.id, state: .active)
+                Self.log("[MCP] getNextAction: Accepted conversation request: \(pendingConv.id.value)")
+
+                return [
+                    "action": "conversation_request",
+                    "instruction": """
+                        AI-to-AI会話の要求を受信しました。
+                        相手エージェントからの会話を受け入れ、get_pending_messages でメッセージを取得してください。
+                        会話を終了する場合は end_conversation を呼び出してください。
+                        """,
+                    "state": "conversation_active",
+                    "conversation_id": pendingConv.id.value,
+                    "initiator_agent_id": pendingConv.initiatorAgentId.value,
+                    "purpose": pendingConv.purpose ?? ""
+                ]
+            }
+
+            // terminatingの会話をチェック（相手が終了を要求）
+            let activeConversations = try conversationRepository.findActiveByAgentId(
+                session.agentId,
+                projectId: session.projectId
+            )
+            for conv in activeConversations {
+                // 自分がparticipantで、会話がterminatingの場合
+                if let terminatingConv = try conversationRepository.findById(conv.id),
+                   terminatingConv.state == .terminating {
+                    // 会話をendedに遷移
+                    try conversationRepository.updateState(terminatingConv.id, state: .ended, endedAt: Date())
+                    Self.log("[MCP] getNextAction: Conversation ended by partner: \(terminatingConv.id.value)")
+
+                    return [
+                        "action": "conversation_ended",
+                        "instruction": """
+                            AI-to-AI会話が終了しました。
+                            相手エージェントが会話を終了しました。
+                            未読メッセージがあれば処理し、get_next_action で次のアクションを確認してください。
+                            """,
+                        "state": "conversation_ended",
+                        "conversation_id": terminatingConv.id.value,
+                        "ended_by": terminatingConv.getPartnerId(for: session.agentId)?.value ?? ""
+                    ]
+                }
+            }
+
             // 未読メッセージがあるか確認してからアクションを決定
             let pendingMessages = try chatRepository.findUnreadMessages(
                 projectId: session.projectId,
@@ -2243,6 +2339,8 @@ public final class MCPServer {
                     "instruction": """
                         現在処理待ちのメッセージがありません。
                         2秒後に再度 get_next_action を呼び出して新しいメッセージを確認してください。
+                        他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
+                        その他の可能な操作は help ツールで確認できます。
                         """,
                     "state": "chat_waiting",
                     "wait_seconds": 2,
@@ -2256,6 +2354,8 @@ public final class MCPServer {
                         チャットセッションです。
                         get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
                         メッセージに対する応答は respond_chat で送信してください。
+                        他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
+                        その他の可能な操作は help ツールで確認できます。
                         """,
                     "state": "chat_session"
                 ]
@@ -4311,13 +4411,37 @@ public final class MCPServer {
             Self.log("[MCP] respondChat: Auto-detected receiver from unread messages: \(receiverId?.value ?? "none")")
         }
 
+        // conversationIdの解決
+        // receiverIdがAIエージェントの場合、アクティブな会話があれば自動設定
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+        var resolvedConversationId: ConversationID? = nil
+        if let receiverAgentId = receiverId {
+            // 受信者がAIエージェントか確認
+            if let receiverAgent = try agentRepository.findById(receiverAgentId),
+               receiverAgent.type == .ai {
+                // 送信者と受信者間のアクティブな会話を検索
+                let activeConversations = try conversationRepository.findActiveByAgentId(
+                    session.agentId,
+                    projectId: session.projectId
+                )
+                // 両者が参加している会話を探す
+                if let activeConv = activeConversations.first(where: {
+                    $0.getPartnerId(for: session.agentId)?.value == receiverAgentId.value
+                }) {
+                    resolvedConversationId = activeConv.id
+                    Self.log("[MCP] respondChat: Auto-resolved conversation_id from active: \(activeConv.id.value)")
+                }
+            }
+        }
+
         // エージェント応答メッセージを作成
         let message = ChatMessage(
             id: ChatMessageID.generate(),
             senderId: session.agentId,
             receiverId: receiverId,
             content: content,
-            createdAt: Date()
+            createdAt: Date(),
+            conversationId: resolvedConversationId
         )
 
         // メッセージを保存 (dual write if receiver is known)
@@ -4339,22 +4463,38 @@ public final class MCPServer {
         try agentSessionRepository.updateLastActivity(token: session.token)
         Self.log("[MCP] respondChat: Updated lastActivityAt for session: \(session.token.prefix(8))...")
 
-        return [
+        var result: [String: Any] = [
             "success": true,
             "message_id": message.id.value,
             "receiver_id": receiverId?.value as Any,
             "instruction": "応答を保存しました。get_next_action を呼び出して次の指示を確認してください。"
         ]
+
+        // 会話内メッセージ数をカウントし、5件ごとにリマインド
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+        if let convId = resolvedConversationId {
+            result["conversation_id"] = convId.value
+            let allMessages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
+            let conversationMessageCount = allMessages.filter { $0.conversationId == convId }.count
+            if conversationMessageCount > 0 && conversationMessageCount % 5 == 0 {
+                result["reminder"] = "【確認】会話の目的は達成されましたか？達成された場合は end_conversation で会話を終了してください。"
+                Self.log("[MCP] respondChat: Conversation reminder added at message count: \(conversationMessageCount)")
+            }
+        }
+
+        return result
     }
 
     /// send_message - プロジェクト内の他のエージェントにメッセージを送信
     /// タスクセッション・チャットセッションの両方で使用可能（.authenticated権限）
     /// 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
+    /// 参照: docs/design/AI_TO_AI_CONVERSATION.md - conversationId自動設定
     private func sendMessage(
         session: AgentSession,
         targetAgentId: String,
         content: String,
-        relatedTaskId: String?
+        relatedTaskId: String?,
+        conversationId: String? = nil
     ) throws -> [String: Any] {
         Self.log("[MCP] sendMessage called: from='\(session.agentId.value)' to='\(targetAgentId)' content_length=\(content.count)")
 
@@ -4369,7 +4509,7 @@ public final class MCPServer {
         }
 
         // 3. 送信先エージェントの存在確認
-        guard let _ = try agentRepository.findById(AgentID(value: targetAgentId)) else {
+        guard let targetAgent = try agentRepository.findById(AgentID(value: targetAgentId)) else {
             throw MCPError.agentNotFound(targetAgentId)
         }
 
@@ -4382,17 +4522,65 @@ public final class MCPServer {
             throw MCPError.targetAgentNotInProject(targetAgentId: targetAgentId, projectId: session.projectId.value)
         }
 
-        // 5. メッセージ作成
+        // 5. conversationIdの解決
+        // 明示的に指定されていない場合、アクティブまたはpending会話から自動設定
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md - pending状態でもイニシエーターからのメッセージは許可
+        var resolvedConversationId: ConversationID? = nil
+        if let convIdStr = conversationId {
+            resolvedConversationId = ConversationID(value: convIdStr)
+        } else {
+            // 送信者と受信者間のアクティブな会話を検索
+            let activeConversations = try conversationRepository.findActiveByAgentId(
+                session.agentId,
+                projectId: session.projectId
+            )
+            // 両者が参加している会話を探す
+            if let activeConv = activeConversations.first(where: {
+                $0.getPartnerId(for: session.agentId)?.value == targetAgentId
+            }) {
+                resolvedConversationId = activeConv.id
+                Self.log("[MCP] Auto-resolved conversation_id from active: \(activeConv.id.value)")
+            } else {
+                // active会話がない場合、イニシエーターとしてpending会話を検索
+                let pendingConversations = try conversationRepository.findPendingForInitiator(
+                    session.agentId,
+                    projectId: session.projectId
+                )
+                if let pendingConv = pendingConversations.first(where: {
+                    $0.participantAgentId.value == targetAgentId
+                }) {
+                    resolvedConversationId = pendingConv.id
+                    Self.log("[MCP] Auto-resolved conversation_id from pending (initiator): \(pendingConv.id.value)")
+                }
+            }
+        }
+
+        // 6. AI間メッセージ制約チェック
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md - send_message 制約
+        // 両者がAIエージェントの場合、アクティブな会話が必須
+        let senderAgent = try agentRepository.findById(session.agentId)
+        if senderAgent?.type == .ai && targetAgent.type == .ai {
+            guard resolvedConversationId != nil else {
+                Self.log("[MCP] AI-to-AI message rejected: no active conversation between \(session.agentId.value) and \(targetAgentId)")
+                throw MCPError.conversationRequiredForAIToAI(
+                    fromAgentId: session.agentId.value,
+                    toAgentId: targetAgentId
+                )
+            }
+        }
+
+        // 7. メッセージ作成
         let message = ChatMessage(
             id: ChatMessageID.generate(),
             senderId: session.agentId,
             receiverId: AgentID(value: targetAgentId),
             content: content,
             createdAt: Date(),
-            relatedTaskId: relatedTaskId.map { TaskID(value: $0) }
+            relatedTaskId: relatedTaskId.map { TaskID(value: $0) },
+            conversationId: resolvedConversationId
         )
 
-        // 6. 双方向保存
+        // 8. 双方向保存
         try chatRepository.saveMessageDualWrite(
             message,
             projectId: session.projectId,
@@ -4400,24 +4588,217 @@ public final class MCPServer {
             receiverAgentId: AgentID(value: targetAgentId)
         )
 
-        // 7. ターゲットエージェントのPendingAgentPurposeを作成
+        // 9. ターゲットエージェントのPendingAgentPurposeを作成
         // これにより、get_agent_actionがターゲットエージェントに対してstart(reason=has_pending_messages)を返す
+        // 会話IDがある場合は紐付け
         let pendingPurpose = PendingAgentPurpose(
             agentId: AgentID(value: targetAgentId),
             projectId: session.projectId,
             purpose: .chat,
             createdAt: Date(),
-            startedAt: nil
+            startedAt: nil,
+            conversationId: resolvedConversationId
         )
         try pendingAgentPurposeRepository.save(pendingPurpose)
-        Self.log("[MCP] Created pending purpose for target agent: agent=\(targetAgentId), project=\(session.projectId.value), purpose=chat")
+        Self.log("[MCP] Created pending purpose for target agent: agent=\(targetAgentId), project=\(session.projectId.value), purpose=chat, conversation=\(resolvedConversationId?.value ?? "none")")
 
         Self.log("[MCP] Message sent successfully: \(message.id.value) from \(session.agentId.value) to \(targetAgentId)")
 
-        return [
+        var result: [String: Any] = [
             "success": true,
             "message_id": message.id.value,
             "target_agent_id": targetAgentId
+        ]
+        if let convId = resolvedConversationId {
+            result["conversation_id"] = convId.value
+
+            // 会話内メッセージ数をカウントし、5件ごとにリマインド
+            // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+            let allMessages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
+            let conversationMessageCount = allMessages.filter { $0.conversationId == convId }.count
+            if conversationMessageCount > 0 && conversationMessageCount % 5 == 0 {
+                result["reminder"] = "【確認】会話の目的は達成されましたか？達成された場合は end_conversation で会話を終了してください。"
+                Self.log("[MCP] Conversation reminder added at message count: \(conversationMessageCount)")
+            }
+        }
+        return result
+    }
+
+    // MARK: - AI-to-AI Conversation Tools
+    // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+
+    /// start_conversation - 他のAIエージェントとの会話を開始
+    private func startConversation(
+        session: AgentSession,
+        participantAgentId: String,
+        purpose: String?,
+        initialMessage: String
+    ) throws -> [String: Any] {
+        Self.log("[MCP] startConversation called: initiator='\(session.agentId.value)' participant='\(participantAgentId)'")
+
+        // 1. コンテンツ長チェック
+        guard initialMessage.count <= 4000 else {
+            throw MCPError.contentTooLong(maxLength: 4000, actual: initialMessage.count)
+        }
+
+        // 2. 自分自身との会話は禁止
+        guard participantAgentId != session.agentId.value else {
+            throw MCPError.cannotMessageSelf
+        }
+
+        // 3. 参加者エージェントの存在確認
+        guard let _ = try agentRepository.findById(AgentID(value: participantAgentId)) else {
+            throw MCPError.agentNotFound(participantAgentId)
+        }
+
+        // 4. 同一プロジェクト内のエージェントか確認
+        let isParticipantInProject = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+            agentId: AgentID(value: participantAgentId),
+            projectId: session.projectId
+        )
+        guard isParticipantInProject else {
+            throw MCPError.targetAgentNotInProject(targetAgentId: participantAgentId, projectId: session.projectId.value)
+        }
+
+        // 5. 既存のアクティブ/保留中会話がないか確認（重複防止）
+        let hasExisting = try conversationRepository.hasActiveOrPendingConversation(
+            initiatorAgentId: session.agentId,
+            participantAgentId: AgentID(value: participantAgentId),
+            projectId: session.projectId
+        )
+        if hasExisting {
+            throw MCPError.conversationAlreadyExists(
+                initiator: session.agentId.value,
+                participant: participantAgentId
+            )
+        }
+
+        // 6. 会話エンティティ作成
+        let conversation = Conversation(
+            id: ConversationID.generate(),
+            projectId: session.projectId,
+            initiatorAgentId: session.agentId,
+            participantAgentId: AgentID(value: participantAgentId),
+            state: .pending,
+            purpose: purpose,
+            createdAt: Date()
+        )
+        try conversationRepository.save(conversation)
+        Self.log("[MCP] Created conversation: \(conversation.id.value) state=pending")
+
+        // 7. 初期メッセージを送信（会話IDを紐付け）
+        let message = ChatMessage(
+            id: ChatMessageID.generate(),
+            senderId: session.agentId,
+            receiverId: AgentID(value: participantAgentId),
+            content: initialMessage,
+            createdAt: Date(),
+            conversationId: conversation.id
+        )
+        try chatRepository.saveMessageDualWrite(
+            message,
+            projectId: session.projectId,
+            senderAgentId: session.agentId,
+            receiverAgentId: AgentID(value: participantAgentId)
+        )
+
+        // 8. 参加者エージェントのPendingAgentPurposeを作成（会話ID付き）
+        let pendingPurpose = PendingAgentPurpose(
+            agentId: AgentID(value: participantAgentId),
+            projectId: session.projectId,
+            purpose: .chat,
+            createdAt: Date(),
+            startedAt: nil,
+            conversationId: conversation.id
+        )
+        try pendingAgentPurposeRepository.save(pendingPurpose)
+        Self.log("[MCP] Created pending purpose for participant: agent=\(participantAgentId), conversation=\(conversation.id.value)")
+
+        return [
+            "success": true,
+            "conversation_id": conversation.id.value,
+            "state": conversation.state.rawValue,
+            "participant_agent_id": participantAgentId,
+            "message_id": message.id.value,
+            "instruction": "会話を開始しました。相手エージェントが認証後、会話がアクティブになります。send_messageでメッセージを送信し、get_next_actionで相手の応答を待機してください。"
+        ]
+    }
+
+    /// end_conversation - AI-to-AI会話を終了
+    private func endConversation(
+        session: AgentSession,
+        conversationId: String,
+        finalMessage: String?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] endConversation called: conversation='\(conversationId)' by='\(session.agentId.value)'")
+
+        // 1. 会話の存在確認
+        let convId = ConversationID(value: conversationId)
+        guard let conversation = try conversationRepository.findById(convId) else {
+            throw MCPError.conversationNotFound(conversationId)
+        }
+
+        // 2. 参加者確認
+        guard conversation.isParticipant(session.agentId) else {
+            throw MCPError.notConversationParticipant(
+                conversationId: conversationId,
+                agentId: session.agentId.value
+            )
+        }
+
+        // 3. 会話状態の確認
+        guard conversation.state == .active || conversation.state == .pending else {
+            throw MCPError.conversationNotActive(
+                conversationId: conversationId,
+                currentState: conversation.state.rawValue
+            )
+        }
+
+        // 4. 最終メッセージがあれば送信
+        if let finalMsg = finalMessage, !finalMsg.isEmpty {
+            guard finalMsg.count <= 4000 else {
+                throw MCPError.contentTooLong(maxLength: 4000, actual: finalMsg.count)
+            }
+
+            let partnerId = conversation.getPartnerId(for: session.agentId)!
+            let message = ChatMessage(
+                id: ChatMessageID.generate(),
+                senderId: session.agentId,
+                receiverId: partnerId,
+                content: finalMsg,
+                createdAt: Date(),
+                conversationId: convId
+            )
+            try chatRepository.saveMessageDualWrite(
+                message,
+                projectId: session.projectId,
+                senderAgentId: session.agentId,
+                receiverAgentId: partnerId
+            )
+            Self.log("[MCP] Sent final message: \(message.id.value)")
+        }
+
+        // 5. 会話状態を terminating に更新
+        try conversationRepository.updateState(convId, state: .terminating)
+        Self.log("[MCP] Conversation state updated to terminating: \(conversationId)")
+
+        // 6. 相手エージェントに終了通知用のPendingAgentPurposeを作成
+        let partnerId = conversation.getPartnerId(for: session.agentId)!
+        let pendingPurpose = PendingAgentPurpose(
+            agentId: partnerId,
+            projectId: session.projectId,
+            purpose: .chat,
+            createdAt: Date(),
+            startedAt: nil,
+            conversationId: convId
+        )
+        try pendingAgentPurposeRepository.save(pendingPurpose)
+
+        return [
+            "success": true,
+            "conversation_id": conversationId,
+            "state": ConversationState.terminating.rawValue,
+            "instruction": "会話終了を要求しました。相手エージェントが終了を確認後、会話は完全に終了します。"
         ]
     }
 
@@ -4856,6 +5237,13 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
     case targetAgentNotInProject(targetAgentId: String, projectId: String)  // 送信先がプロジェクト外
     case contentTooLong(maxLength: Int, actual: Int)  // コンテンツ長超過
 
+    // AI-to-AI会話用エラー（UC016）
+    case conversationNotFound(String)  // 会話が見つからない
+    case conversationAlreadyExists(initiator: String, participant: String)  // 既にアクティブな会話が存在
+    case notConversationParticipant(conversationId: String, agentId: String)  // 会話の参加者ではない
+    case conversationNotActive(conversationId: String, currentState: String)  // 会話がアクティブではない
+    case conversationRequiredForAIToAI(fromAgentId: String, toAgentId: String)  // AI間メッセージにはアクティブ会話必須
+
     var description: String {
         switch self {
         case .agentNotFound(let id):
@@ -4916,6 +5304,16 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
             return "Target agent '\(targetAgentId)' is not assigned to project '\(projectId)'"
         case .contentTooLong(let maxLength, let actual):
             return "Content too long: \(actual) characters (max \(maxLength))"
+        case .conversationNotFound(let id):
+            return "Conversation not found: \(id)"
+        case .conversationAlreadyExists(let initiator, let participant):
+            return "An active or pending conversation already exists between '\(initiator)' and '\(participant)'"
+        case .notConversationParticipant(let conversationId, let agentId):
+            return "Agent '\(agentId)' is not a participant of conversation '\(conversationId)'"
+        case .conversationNotActive(let conversationId, let currentState):
+            return "Conversation '\(conversationId)' is not active (current state: \(currentState))"
+        case .conversationRequiredForAIToAI(let fromAgentId, let toAgentId):
+            return "AIエージェント間のメッセージ送信にはアクティブな会話が必要です。先にstart_conversation(participant_agent_id: \"\(toAgentId)\", initial_message: \"...\")を呼び出してください。(from: \(fromAgentId), to: \(toAgentId))"
         }
     }
 

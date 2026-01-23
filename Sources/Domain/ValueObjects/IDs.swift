@@ -306,3 +306,21 @@ public struct NotificationID: Hashable, Codable, Sendable, CustomStringConvertib
 
     public var description: String { value }
 }
+
+// MARK: - ConversationID
+
+/// AI-to-AI会話の一意識別子
+/// 参照: docs/design/AI_TO_AI_CONVERSATION.md
+public struct ConversationID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> ConversationID {
+        ConversationID(value: "cnv_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}

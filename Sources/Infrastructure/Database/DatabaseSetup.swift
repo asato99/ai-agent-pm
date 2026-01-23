@@ -882,6 +882,39 @@ public final class DatabaseSetup {
             }
         }
 
+        // v38: AI-to-AI会話管理テーブル（UC016）
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+        // エージェント間の明示的な会話ライフサイクルを管理
+        migrator.registerMigration("v38_conversations") { db in
+            // conversations テーブル
+            try db.create(table: "conversations", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("project_id", .text).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("initiator_agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("participant_agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("state", .text).notNull().defaults(to: "pending")
+                t.column("purpose", .text)
+                t.column("created_at", .datetime).notNull()
+                t.column("ended_at", .datetime)
+            }
+            // プロジェクト内の会話一覧取得用
+            try db.create(indexOn: "conversations", columns: ["project_id"])
+            // 特定エージェントの会話検索用
+            try db.create(indexOn: "conversations", columns: ["initiator_agent_id"])
+            try db.create(indexOn: "conversations", columns: ["participant_agent_id"])
+            // アクティブ会話の検索用
+            try db.create(indexOn: "conversations", columns: ["state"])
+
+            // pending_agent_purposes に conversation_id を追加
+            // AI-to-AI会話開始時に会話IDを紐付け
+            try db.alter(table: "pending_agent_purposes") { t in
+                t.add(column: "conversation_id", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -20,6 +20,9 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
     public let relatedTaskId: TaskID?
     /// Related handoff ID (optional)
     public let relatedHandoffId: HandoffID?
+    /// Related conversation ID (optional, for AI-to-AI conversations)
+    /// Reference: docs/design/AI_TO_AI_CONVERSATION.md
+    public let conversationId: ConversationID?
 
     public init(
         id: ChatMessageID,
@@ -28,7 +31,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
         content: String,
         createdAt: Date = Date(),
         relatedTaskId: TaskID? = nil,
-        relatedHandoffId: HandoffID? = nil
+        relatedHandoffId: HandoffID? = nil,
+        conversationId: ConversationID? = nil
     ) {
         self.id = id
         self.senderId = senderId
@@ -37,6 +41,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
         self.createdAt = createdAt
         self.relatedTaskId = relatedTaskId
         self.relatedHandoffId = relatedHandoffId
+        self.conversationId = conversationId
     }
 
     /// Check if this message was sent by the given agent
@@ -63,7 +68,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
             content: content,
             createdAt: createdAt,
             relatedTaskId: relatedTaskId,
-            relatedHandoffId: relatedHandoffId
+            relatedHandoffId: relatedHandoffId,
+            conversationId: conversationId
         )
     }
 }

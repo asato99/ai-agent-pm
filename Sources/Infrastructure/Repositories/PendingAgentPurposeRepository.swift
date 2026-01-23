@@ -16,6 +16,7 @@ struct PendingAgentPurposeRecord: Codable, FetchableRecord, PersistableRecord {
     var purpose: String
     var createdAt: Date
     var startedAt: Date?
+    var conversationId: String?
 
     enum CodingKeys: String, CodingKey {
         case agentId = "agent_id"
@@ -23,6 +24,7 @@ struct PendingAgentPurposeRecord: Codable, FetchableRecord, PersistableRecord {
         case purpose
         case createdAt = "created_at"
         case startedAt = "started_at"
+        case conversationId = "conversation_id"
     }
 
     func toDomain() -> PendingAgentPurpose {
@@ -31,7 +33,8 @@ struct PendingAgentPurposeRecord: Codable, FetchableRecord, PersistableRecord {
             projectId: ProjectID(value: projectId),
             purpose: AgentPurpose(rawValue: purpose) ?? .task,
             createdAt: createdAt,
-            startedAt: startedAt
+            startedAt: startedAt,
+            conversationId: conversationId.map { ConversationID(value: $0) }
         )
     }
 
@@ -41,7 +44,8 @@ struct PendingAgentPurposeRecord: Codable, FetchableRecord, PersistableRecord {
             projectId: entity.projectId.value,
             purpose: entity.purpose.rawValue,
             createdAt: entity.createdAt,
-            startedAt: entity.startedAt
+            startedAt: entity.startedAt,
+            conversationId: entity.conversationId?.value
         )
     }
 }

@@ -343,6 +343,54 @@ public protocol AgentWorkingDirectoryRepositoryProtocol: Sendable {
     func deleteByAgentAndProject(agentId: AgentID, projectId: ProjectID) throws
 }
 
+// MARK: - ConversationRepositoryProtocol
+
+/// 会話リポジトリのプロトコル
+/// 参照: docs/design/AI_TO_AI_CONVERSATION.md
+/// AIエージェント間の会話を管理
+public protocol ConversationRepositoryProtocol: Sendable {
+    /// 会話を保存
+    func save(_ conversation: Conversation) throws
+
+    /// IDで会話を検索
+    func findById(_ id: ConversationID) throws -> Conversation?
+
+    /// エージェントが参加しているアクティブな会話を検索（active, terminating状態）
+    /// - Parameters:
+    ///   - agentId: エージェントID（initiator または participant として）
+    ///   - projectId: プロジェクトID
+    func findActiveByAgentId(_ agentId: AgentID, projectId: ProjectID) throws -> [Conversation]
+
+    /// 参加者として pending な会話を検索
+    /// - Parameters:
+    ///   - agentId: 参加者のエージェントID
+    ///   - projectId: プロジェクトID
+    func findPendingForParticipant(_ agentId: AgentID, projectId: ProjectID) throws -> [Conversation]
+
+    /// イニシエーターとして pending な会話を検索
+    /// 参照: docs/design/AI_TO_AI_CONVERSATION.md - pending状態でもイニシエーターからのメッセージは許可
+    /// - Parameters:
+    ///   - agentId: イニシエーターのエージェントID
+    ///   - projectId: プロジェクトID
+    func findPendingForInitiator(_ agentId: AgentID, projectId: ProjectID) throws -> [Conversation]
+
+    /// 会話の状態を更新
+    func updateState(_ id: ConversationID, state: ConversationState) throws
+
+    /// 会話の状態と終了日時を更新
+    func updateState(_ id: ConversationID, state: ConversationState, endedAt: Date?) throws
+
+    /// 最終アクティビティ日時を更新（タイムアウト管理用）
+    func updateLastActivity(_ id: ConversationID, at date: Date) throws
+
+    /// 指定したエージェントペア間でアクティブまたはペンディングな会話があるか確認
+    func hasActiveOrPendingConversation(
+        initiatorAgentId: AgentID,
+        participantAgentId: AgentID,
+        projectId: ProjectID
+    ) throws -> Bool
+}
+
 // MARK: - NotificationRepositoryProtocol
 
 /// 通知リポジトリのプロトコル

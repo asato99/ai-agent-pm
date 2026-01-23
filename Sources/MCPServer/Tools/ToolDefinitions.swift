@@ -69,6 +69,13 @@ enum ToolDefinitions {
             sendMessage,  // タスク・チャット両方で使用可能
 
             // ========================================
+            // AI-to-AI会話機能（認証済み）
+            // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+            // ========================================
+            startConversation,  // 会話開始
+            endConversation,    // 会話終了
+
+            // ========================================
             // 削除済み（権限なし - 呼び出し不可）
             // ========================================
             // - list_agents: → list_subordinates を使用
@@ -975,6 +982,7 @@ enum ToolDefinitions {
 
     /// send_message - プロジェクト内の他のエージェントにメッセージを送信
     /// 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
+    /// 参照: docs/design/AI_TO_AI_CONVERSATION.md - AI間メッセージ制約
     /// タスクセッション・チャットセッションの両方で使用可能（.authenticated権限）
     static let sendMessage: [String: Any] = [
         "name": "send_message",
@@ -982,6 +990,10 @@ enum ToolDefinitions {
             プロジェクト内の他のエージェントにメッセージを送信します（非同期）。
             受信者は get_pending_messages またはチャット画面で確認できます。
             タスクセッション・チャットセッションの両方で使用可能です。
+
+            【重要】AIエージェント間のメッセージ送信には、アクティブな会話が必要です。
+            先にstart_conversationで会話を開始してください。
+            Human-AI間のメッセージにはこの制約はありません。
             """,
         "inputSchema": [
             "type": "object",
@@ -1001,9 +1013,78 @@ enum ToolDefinitions {
                 "related_task_id": [
                     "type": "string",
                     "description": "関連タスクID（任意）"
+                ],
+                "conversation_id": [
+                    "type": "string",
+                    "description": "会話ID（AI-to-AI会話の場合に指定、省略時はアクティブ会話から自動設定）"
                 ]
             ] as [String: Any],
             "required": ["session_token", "target_agent_id", "content"]
+        ]
+    ]
+
+    // MARK: - AI-to-AI Conversation Tools
+    // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+
+    /// start_conversation - 他のエージェントとの会話を開始
+    /// 参照: docs/design/AI_TO_AI_CONVERSATION.md - start_conversation ツール
+    static let startConversation: [String: Any] = [
+        "name": "start_conversation",
+        "description": """
+            他のAIエージェントとの明示的な会話を開始します。
+            相手エージェントが認証後、get_next_actionで会話要求を受信し、activeになります。
+            会話終了時はend_conversationを呼び出してください。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "participant_agent_id": [
+                    "type": "string",
+                    "description": "会話相手のエージェントID（同一プロジェクト内のエージェントのみ）"
+                ],
+                "purpose": [
+                    "type": "string",
+                    "description": "会話の目的（任意、相手への説明用）"
+                ],
+                "initial_message": [
+                    "type": "string",
+                    "description": "最初のメッセージ内容（最大4,000文字）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "participant_agent_id", "initial_message"]
+        ]
+    ]
+
+    /// end_conversation - 会話を終了
+    /// 参照: docs/design/AI_TO_AI_CONVERSATION.md - end_conversation ツール
+    static let endConversation: [String: Any] = [
+        "name": "end_conversation",
+        "description": """
+            AI-to-AI会話を終了します。
+            会話はterminatingに遷移し、相手エージェントがget_next_actionで終了通知を受信後、endedになります。
+            会話の両参加者のどちらからでも終了可能です。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "conversation_id": [
+                    "type": "string",
+                    "description": "終了する会話のID"
+                ],
+                "final_message": [
+                    "type": "string",
+                    "description": "終了時の最終メッセージ（任意、最大4,000文字）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "conversation_id"]
         ]
     ]
 }
