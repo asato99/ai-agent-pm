@@ -17,6 +17,7 @@ struct ConversationRecord: Codable, FetchableRecord, PersistableRecord {
     var participantAgentId: String
     var state: String
     var purpose: String?
+    var maxTurns: Int
     var createdAt: Date
     var endedAt: Date?
 
@@ -27,6 +28,7 @@ struct ConversationRecord: Codable, FetchableRecord, PersistableRecord {
         case participantAgentId = "participant_agent_id"
         case state
         case purpose
+        case maxTurns = "max_turns"
         case createdAt = "created_at"
         case endedAt = "ended_at"
     }
@@ -39,6 +41,7 @@ struct ConversationRecord: Codable, FetchableRecord, PersistableRecord {
             participantAgentId: AgentID(value: participantAgentId),
             state: ConversationState(rawValue: state) ?? .pending,
             purpose: purpose,
+            maxTurns: maxTurns,
             createdAt: createdAt,
             endedAt: endedAt
         )
@@ -52,6 +55,7 @@ struct ConversationRecord: Codable, FetchableRecord, PersistableRecord {
             participantAgentId: entity.participantAgentId.value,
             state: entity.state.rawValue,
             purpose: entity.purpose,
+            maxTurns: entity.maxTurns,
             createdAt: entity.createdAt,
             endedAt: entity.endedAt
         )

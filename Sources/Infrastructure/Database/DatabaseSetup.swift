@@ -915,6 +915,17 @@ public final class DatabaseSetup {
             }
         }
 
+        // v39: conversations に max_turns を追加
+        // AI-to-AI会話のターン数制限機能
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+        migrator.registerMigration("v39_conversations_max_turns") { db in
+            try db.alter(table: "conversations") { t in
+                // max_turns: 最大ターン数（1メッセージ = 1ターン）
+                // デフォルト20（10往復）、システム上限40（20往復）
+                t.add(column: "max_turns", .integer).notNull().defaults(to: 20)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

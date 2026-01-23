@@ -39,10 +39,18 @@ public struct Conversation: Identifiable, Codable, Sendable, Equatable {
     public var state: ConversationState
     /// 会話の目的（オプション）
     public let purpose: String?
+    /// 最大ターン数（1メッセージ = 1ターン）
+    /// システム上限: 20、デフォルト: 10
+    public let maxTurns: Int
     /// 会話開始日時
     public let createdAt: Date
     /// 会話終了日時
     public var endedAt: Date?
+
+    /// システム上限ターン数（1メッセージ = 1ターン、20往復 = 40ターン）
+    public static let systemMaxTurns: Int = 40
+    /// デフォルトターン数（10往復 = 20ターン）
+    public static let defaultMaxTurns: Int = 20
 
     public init(
         id: ConversationID = .generate(),
@@ -51,6 +59,7 @@ public struct Conversation: Identifiable, Codable, Sendable, Equatable {
         participantAgentId: AgentID,
         state: ConversationState = .pending,
         purpose: String? = nil,
+        maxTurns: Int = Conversation.defaultMaxTurns,
         createdAt: Date = Date(),
         endedAt: Date? = nil
     ) {
@@ -60,6 +69,7 @@ public struct Conversation: Identifiable, Codable, Sendable, Equatable {
         self.participantAgentId = participantAgentId
         self.state = state
         self.purpose = purpose
+        self.maxTurns = min(maxTurns, Conversation.systemMaxTurns)
         self.createdAt = createdAt
         self.endedAt = endedAt
     }

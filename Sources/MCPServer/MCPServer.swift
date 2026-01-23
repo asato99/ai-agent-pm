@@ -714,12 +714,16 @@ public final class MCPServer {
             guard let initialMessage = arguments["initial_message"] as? String else {
                 throw MCPError.missingArguments(["initial_message"])
             }
+            guard let maxTurns = arguments["max_turns"] as? Int else {
+                throw MCPError.missingArguments(["max_turns"])
+            }
             let purpose = arguments["purpose"] as? String
             return try startConversation(
                 session: session,
                 participantAgentId: participantAgentId,
                 purpose: purpose,
-                initialMessage: initialMessage
+                initialMessage: initialMessage,
+                maxTurns: maxTurns
             )
 
         case "end_conversation":
@@ -4503,15 +4507,29 @@ public final class MCPServer {
             "instruction": "応答を保存しました。get_next_action を呼び出して次の指示を確認してください。"
         ]
 
-        // 会話内メッセージ数をカウントし、5件ごとにリマインド
+        // 会話内メッセージ数をカウント
         // 参照: docs/design/AI_TO_AI_CONVERSATION.md
         if let convId = resolvedConversationId {
             result["conversation_id"] = convId.value
             let allMessages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
             let conversationMessageCount = allMessages.filter { $0.conversationId == convId }.count
-            if conversationMessageCount > 0 && conversationMessageCount % 5 == 0 {
-                result["reminder"] = "【確認】会話の目的は達成されましたか？達成された場合は end_conversation で会話を終了してください。"
-                Self.log("[MCP] respondChat: Conversation reminder added at message count: \(conversationMessageCount)")
+
+            // 会話を取得してmax_turnsをチェック
+            if let conversation = try conversationRepository.findById(convId) {
+                result["current_turns"] = conversationMessageCount
+                result["max_turns"] = conversation.maxTurns
+
+                // ターン数上限に達した場合、会話を自動終了
+                if conversationMessageCount >= conversation.maxTurns {
+                    try conversationRepository.updateState(convId, state: .ended, endedAt: Date())
+                    result["conversation_ended"] = true
+                    result["warning"] = "【会話終了】最大ターン数（\(conversation.maxTurns)）に達したため会話を自動終了しました。必要であれば新しい会話を開始してください。"
+                    Self.log("[MCP] respondChat: Conversation auto-ended due to max_turns limit: \(conversationMessageCount)/\(conversation.maxTurns)")
+                } else if conversationMessageCount > 0 && conversationMessageCount % 5 == 0 {
+                    // 5件ごとにリマインド
+                    result["reminder"] = "【確認】会話の目的は達成されましたか？達成された場合は end_conversation で会話を終了してください。（\(conversationMessageCount)/\(conversation.maxTurns)ターン）"
+                    Self.log("[MCP] respondChat: Conversation reminder added at message count: \(conversationMessageCount)/\(conversation.maxTurns)")
+                }
             }
         }
 
@@ -4645,13 +4663,27 @@ public final class MCPServer {
         if let convId = resolvedConversationId {
             result["conversation_id"] = convId.value
 
-            // 会話内メッセージ数をカウントし、5件ごとにリマインド
+            // 会話内メッセージ数をカウント
             // 参照: docs/design/AI_TO_AI_CONVERSATION.md
             let allMessages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
             let conversationMessageCount = allMessages.filter { $0.conversationId == convId }.count
-            if conversationMessageCount > 0 && conversationMessageCount % 5 == 0 {
-                result["reminder"] = "【確認】会話の目的は達成されましたか？達成された場合は end_conversation で会話を終了してください。"
-                Self.log("[MCP] Conversation reminder added at message count: \(conversationMessageCount)")
+
+            // 会話を取得してmax_turnsをチェック
+            if let conversation = try conversationRepository.findById(convId) {
+                result["current_turns"] = conversationMessageCount
+                result["max_turns"] = conversation.maxTurns
+
+                // ターン数上限に達した場合、会話を自動終了
+                if conversationMessageCount >= conversation.maxTurns {
+                    try conversationRepository.updateState(convId, state: .ended, endedAt: Date())
+                    result["conversation_ended"] = true
+                    result["warning"] = "【会話終了】最大ターン数（\(conversation.maxTurns)）に達したため会話を自動終了しました。必要であれば新しい会話を開始してください。"
+                    Self.log("[MCP] sendMessage: Conversation auto-ended due to max_turns limit: \(conversationMessageCount)/\(conversation.maxTurns)")
+                } else if conversationMessageCount > 0 && conversationMessageCount % 5 == 0 {
+                    // 5件ごとにリマインド
+                    result["reminder"] = "【確認】会話の目的は達成されましたか？達成された場合は end_conversation で会話を終了してください。（\(conversationMessageCount)/\(conversation.maxTurns)ターン）"
+                    Self.log("[MCP] sendMessage: Conversation reminder added at message count: \(conversationMessageCount)/\(conversation.maxTurns)")
+                }
             }
         }
         return result
@@ -4665,9 +4697,10 @@ public final class MCPServer {
         session: AgentSession,
         participantAgentId: String,
         purpose: String?,
-        initialMessage: String
+        initialMessage: String,
+        maxTurns: Int
     ) throws -> [String: Any] {
-        Self.log("[MCP] startConversation called: initiator='\(session.agentId.value)' participant='\(participantAgentId)'")
+        Self.log("[MCP] startConversation called: initiator='\(session.agentId.value)' participant='\(participantAgentId)' maxTurns=\(maxTurns)")
 
         // 1. コンテンツ長チェック
         guard initialMessage.count <= 4000 else {
@@ -4707,6 +4740,8 @@ public final class MCPServer {
         }
 
         // 6. 会話エンティティ作成
+        // maxTurnsはシステム上限（40）以下に制限
+        let validatedMaxTurns = min(max(maxTurns, 2), Conversation.systemMaxTurns)
         let conversation = Conversation(
             id: ConversationID.generate(),
             projectId: session.projectId,
@@ -4714,10 +4749,11 @@ public final class MCPServer {
             participantAgentId: AgentID(value: participantAgentId),
             state: .pending,
             purpose: purpose,
+            maxTurns: validatedMaxTurns,
             createdAt: Date()
         )
         try conversationRepository.save(conversation)
-        Self.log("[MCP] Created conversation: \(conversation.id.value) state=pending")
+        Self.log("[MCP] Created conversation: \(conversation.id.value) state=pending maxTurns=\(validatedMaxTurns)")
 
         // 7. 初期メッセージを送信（会話IDを紐付け）
         let message = ChatMessage(

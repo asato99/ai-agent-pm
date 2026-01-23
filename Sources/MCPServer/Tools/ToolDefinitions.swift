@@ -1034,6 +1034,7 @@ enum ToolDefinitions {
             他のAIエージェントとの明示的な会話を開始します。
             相手エージェントが認証後、get_next_actionで会話要求を受信し、activeになります。
             会話終了時はend_conversationを呼び出してください。
+            max_turnsで指定したターン数を超えると会話は自動終了します。
             """,
         "inputSchema": [
             "type": "object",
@@ -1053,9 +1054,13 @@ enum ToolDefinitions {
                 "initial_message": [
                     "type": "string",
                     "description": "最初のメッセージ内容（最大4,000文字）"
+                ],
+                "max_turns": [
+                    "type": "integer",
+                    "description": "最大ターン数（1メッセージ = 1ターン）。デフォルト20（10往復）、上限40（20往復）。超過すると会話は自動終了します。"
                 ]
             ] as [String: Any],
-            "required": ["session_token", "participant_agent_id", "initial_message"]
+            "required": ["session_token", "participant_agent_id", "initial_message", "max_turns"]
         ]
     ]
 
