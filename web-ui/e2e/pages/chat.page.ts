@@ -22,7 +22,7 @@ export class ChatPage extends BasePage {
     this.closeButton = page.getByRole('button', { name: /Close/i })
     this.loadingIndicator = page.getByTestId('chat-loading')
     this.emptyState = page.getByText('No messages yet')
-    this.messages = page.getByTestId('chat-message')
+    this.messages = page.locator('[data-testid^="chat-message-"]')
   }
 
   /**

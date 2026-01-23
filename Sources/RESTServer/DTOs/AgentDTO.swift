@@ -77,8 +77,16 @@ public struct UpdateAgentRequest: Decodable {
     let status: String?
 }
 
-/// Response for agent session counts
-/// 参照: docs/design/CHAT_FEATURE.md - セッション状態表示
+/// Purpose-based session counts for an agent
+/// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - セッション状態表示
+public struct AgentSessionPurposeCountsDTO: Encodable {
+    let chat: Int
+    let task: Int
+}
+
+/// Response for agent session counts (purpose-based)
+/// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - セッション状態表示
 public struct AgentSessionCountsDTO: Encodable {
-    let agentSessionCounts: [String: Int]
+    /// Session counts grouped by purpose for each agent
+    let agentSessions: [String: AgentSessionPurposeCountsDTO]
 }

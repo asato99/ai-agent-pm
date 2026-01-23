@@ -204,6 +204,26 @@ public final class AgentSessionRepository: AgentSessionRepositoryProtocol, Senda
         }
     }
 
+    /// アクティブなセッション数をpurpose別にカウント（Chat Session Maintenance Mode用）
+    /// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+    public func countActiveSessionsByPurpose(agentId: AgentID) throws -> [AgentPurpose: Int] {
+        try db.read { db in
+            let sessions = try AgentSessionRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("expires_at") > Date())
+                .fetchAll(db)
+
+            var counts: [AgentPurpose: Int] = [.chat: 0, .task: 0]
+            for session in sessions {
+                // purpose is optional in DB, default to .task if nil or invalid
+                let purposeStr = session.purpose ?? "task"
+                let purpose = AgentPurpose(rawValue: purposeStr) ?? .task
+                counts[purpose, default: 0] += 1
+            }
+            return counts
+        }
+    }
+
     /// 最終アクティビティ日時を更新（アイドルタイムアウト管理用）
     public func updateLastActivity(token: String, at date: Date = Date()) throws {
         try db.write { db in

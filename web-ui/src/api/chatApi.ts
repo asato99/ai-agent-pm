@@ -89,4 +89,21 @@ export const chatApi = {
       throw new Error(result.error.message)
     }
   },
+
+  /**
+   * チャットセッションを開始する
+   * Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Phase 3
+   * @param projectId プロジェクトID
+   * @param agentId エージェントID（対話相手）
+   */
+  async startSession(projectId: string, agentId: string): Promise<void> {
+    const result = await api.post<{ success: boolean }>(
+      `/projects/${projectId}/agents/${agentId}/chat/start`,
+      {}
+    )
+
+    if (result.error) {
+      throw new Error(result.error.message)
+    }
+  },
 }

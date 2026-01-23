@@ -179,6 +179,9 @@ public protocol AgentSessionRepositoryProtocol: Sendable {
     func countActiveSessions(agentId: AgentID) throws -> Int
     /// アクティブなセッション一覧を取得（有効期限内のもの）
     func findActiveSessions(agentId: AgentID) throws -> [AgentSession]
+    /// アクティブなセッション数をpurpose別にカウント（Chat Session Maintenance Mode用）
+    /// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+    func countActiveSessionsByPurpose(agentId: AgentID) throws -> [AgentPurpose: Int]
 }
 
 // MARK: - ExecutionLogRepositoryProtocol

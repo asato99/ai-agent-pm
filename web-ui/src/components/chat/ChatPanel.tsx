@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useChat } from '@/hooks/useChat'
 import { useAuthStore } from '@/stores/authStore'
 import { useAssignableAgents } from '@/hooks/useAssignableAgents'
+import { useAgentSessions } from '@/hooks/useAgentSessions'
 import { chatApi } from '@/api/chatApi'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
@@ -27,6 +28,7 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
     agent.id
   )
   const { agents: projectAgents } = useAssignableAgents(projectId)
+  const { hasChatSession } = useAgentSessions(projectId)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
 
@@ -59,6 +61,19 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
     }
     markAsRead()
   }, [projectId, agent.id, queryClient])
+
+  // Start chat session when chat panel opens
+  // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Phase 5
+  useEffect(() => {
+    const startSession = async () => {
+      try {
+        await chatApi.startSession(projectId, agent.id)
+      } catch (error) {
+        console.error('Failed to start chat session:', error)
+      }
+    }
+    startSession()
+  }, [projectId, agent.id])
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -201,7 +216,11 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
       </div>
 
       {/* Input */}
-      <ChatInput onSend={handleSend} disabled={isSending} />
+      <ChatInput
+        onSend={handleSend}
+        disabled={isSending}
+        sessionReady={hasChatSession(agent.id)}
+      />
     </div>
   )
 }

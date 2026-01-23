@@ -2194,6 +2194,24 @@ public final class MCPServer {
 
         // 1.6. Chat機能: purpose=chat の場合はチャット応答フローへ
         if session.purpose == .chat {
+            // セッションタイムアウトチェック（10分）
+            // lastActivityAt からの経過時間を使用（アイドル時間ベース）
+            let idleTime = Date().timeIntervalSince(session.lastActivityAt)
+            let softTimeoutSeconds = 10.0 * 60.0  // 10分
+
+            if idleTime > softTimeoutSeconds {
+                Self.log("[MCP] getNextAction: Chat session soft timeout reached (\(Int(idleTime))s idle)")
+                return [
+                    "action": "logout",
+                    "instruction": """
+                        セッションがタイムアウトしました（10分経過）。
+                        logout を呼び出してセッションを終了してください。
+                        """,
+                    "state": "chat_timeout",
+                    "reason": "session_timeout"
+                ]
+            }
+
             // 未読メッセージがあるか確認してからアクションを決定
             let pendingMessages = try chatRepository.findUnreadMessages(
                 projectId: session.projectId,
@@ -2201,15 +2219,19 @@ public final class MCPServer {
             )
 
             if pendingMessages.isEmpty {
-                // 未読メッセージなし = チャット応答完了 → logout を指示
-                Self.log("[MCP] getNextAction: Chat session with no pending messages, directing to logout")
+                // 未読メッセージなし = 待機モードへ（セッション維持）
+                // Note: 2秒間隔でポーリングして、5秒以内の応答を実現する
+                let remainingMinutes = Int((softTimeoutSeconds - idleTime) / 60)
+                Self.log("[MCP] getNextAction: Chat session with no pending messages, waiting for messages (remaining: \(remainingMinutes)min)")
                 return [
-                    "action": "logout",
+                    "action": "wait_for_messages",
                     "instruction": """
-                        チャット応答が完了しました。
-                        logout を呼び出してセッションを終了してください。
+                        現在処理待ちのメッセージがありません。
+                        2秒後に再度 get_next_action を呼び出して新しいメッセージを確認してください。
                         """,
-                    "state": "chat_complete"
+                    "state": "chat_waiting",
+                    "wait_seconds": 2,
+                    "remaining_timeout_minutes": remainingMinutes
                 ]
             } else {
                 Self.log("[MCP] getNextAction: Chat session detected with \(pendingMessages.count) pending message(s), directing to get_pending_messages")
@@ -4297,6 +4319,10 @@ public final class MCPServer {
             try chatRepository.saveMessage(message, projectId: session.projectId, agentId: session.agentId)
             Self.log("[MCP] Chat response saved (no receiver): \(message.id.value)")
         }
+
+        // セッションの lastActivityAt を更新（チャットタイムアウトのリセット）
+        try agentSessionRepository.updateLastActivity(token: session.token)
+        Self.log("[MCP] respondChat: Updated lastActivityAt for session: \(session.token.prefix(8))...")
 
         return [
             "success": true,

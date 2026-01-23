@@ -10,8 +10,10 @@ import type { ChatMessage, GetChatMessagesOptions } from '@/types'
 interface UseChatOptions {
   /** ポーリング有効化（デフォルト: true） */
   polling?: boolean
-  /** ポーリング間隔（ミリ秒、デフォルト: 5000） */
+  /** ポーリング間隔（ミリ秒、デフォルト: 2000） */
   pollingInterval?: number
+  /** 応答待ち時のポーリング間隔（ミリ秒、デフォルト: 1000） */
+  waitingPollingInterval?: number
   /** 取得上限数 */
   limit?: number
 }
@@ -49,7 +51,12 @@ export function useChat(
   agentId: string,
   options?: UseChatOptions
 ): UseChatResult {
-  const { polling = true, pollingInterval = 5000, limit } = options ?? {}
+  const {
+    polling = true,
+    pollingInterval = 2000,
+    waitingPollingInterval = 1000,
+    limit
+  } = options ?? {}
   const queryClient = useQueryClient()
   const queryKey = ['chat', projectId, agentId]
 
@@ -63,6 +70,12 @@ export function useChat(
     queryOptions.limit = limit
   }
 
+  // 応答待ち時はより頻繁にポーリング
+  // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+  const currentPollingInterval = isWaitingForResponse
+    ? waitingPollingInterval
+    : pollingInterval
+
   const {
     data,
     isLoading,
@@ -75,7 +88,8 @@ export function useChat(
     },
     enabled: !!projectId && !!agentId,
     // ポーリング設定（新しいメッセージを検出するため）
-    refetchInterval: polling ? pollingInterval : false,
+    // 応答待ち時は1秒、それ以外は2秒間隔でポーリング
+    refetchInterval: polling ? currentPollingInterval : false,
     refetchOnWindowFocus: false,
   })
 

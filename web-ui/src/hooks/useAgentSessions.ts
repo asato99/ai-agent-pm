@@ -2,11 +2,20 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
 /**
+ * Session counts by purpose (chat/task)
+ * 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+ */
+export interface AgentSessionPurposeCounts {
+  chat: number
+  task: number
+}
+
+/**
  * Response type for agent session counts API
  * 参照: docs/design/CHAT_FEATURE.md - セッション状態表示
  */
 export interface AgentSessionCountsResponse {
-  agentSessionCounts: Record<string, number>
+  agentSessions: Record<string, AgentSessionPurposeCounts>
 }
 
 /**
@@ -34,8 +43,35 @@ export function useAgentSessions(projectId: string) {
     refetchOnWindowFocus: false,
   })
 
+  const agentSessions = query.data?.agentSessions ?? {}
+
+  // Helper to check if agent has active chat session
+  const hasChatSession = (agentId: string): boolean => {
+    return (agentSessions[agentId]?.chat ?? 0) > 0
+  }
+
+  // Helper to check if agent has any active session (for backward compatibility)
+  const hasAnySession = (agentId: string): boolean => {
+    const sessions = agentSessions[agentId]
+    if (!sessions) return false
+    return sessions.chat > 0 || sessions.task > 0
+  }
+
+  // Backward compatible sessionCounts (total sessions per agent)
+  const sessionCounts: Record<string, number> = {}
+  for (const [agentId, counts] of Object.entries(agentSessions)) {
+    sessionCounts[agentId] = counts.chat + counts.task
+  }
+
   return {
-    sessionCounts: query.data?.agentSessionCounts ?? {},
+    /** Session counts by purpose for each agent */
+    agentSessions,
+    /** Total session counts per agent (backward compatible) */
+    sessionCounts,
+    /** Check if agent has active chat session */
+    hasChatSession,
+    /** Check if agent has any active session */
+    hasAnySession,
     isLoading: query.isLoading,
     error: query.error,
     refetch: query.refetch,

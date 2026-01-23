@@ -46,6 +46,19 @@ vi.mock('@/hooks/useAssignableAgents', () => ({
   })),
 }))
 
+// Mock useAgentSessions - always return hasChatSession as true for tests
+vi.mock('@/hooks/useAgentSessions', () => ({
+  useAgentSessions: vi.fn(() => ({
+    agentSessions: { 'agent-1': { chat: 1, task: 0 } },
+    sessionCounts: { 'agent-1': 1 },
+    hasChatSession: () => true,
+    hasAnySession: () => true,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+}))
+
 // Import the mocked module
 import { useChat } from '@/hooks/useChat'
 const mockUseChat = vi.mocked(useChat)
@@ -195,6 +208,51 @@ describe('ChatPanel', () => {
 
       const sendButton = screen.getByTestId('chat-send-button')
       expect(sendButton).toBeDisabled()
+    })
+  })
+
+  describe('Session ready state', () => {
+    it('disables send button when session is not ready', async () => {
+      // Mock useAgentSessions to return no chat session
+      const mockUseAgentSessions = vi.mocked(await import('@/hooks/useAgentSessions')).useAgentSessions
+      mockUseAgentSessions.mockReturnValue({
+        agentSessions: {},
+        sessionCounts: {},
+        hasChatSession: () => false,  // No active chat session
+        hasAnySession: () => false,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
+
+      const sendButton = screen.getByTestId('chat-send-button')
+      expect(sendButton).toBeDisabled()
+      expect(sendButton).toHaveTextContent('準備中')
+    })
+
+    it('enables send button when session is ready', async () => {
+      // Mock useAgentSessions to return active chat session
+      const mockUseAgentSessions = vi.mocked(await import('@/hooks/useAgentSessions')).useAgentSessions
+      mockUseAgentSessions.mockReturnValue({
+        agentSessions: { 'agent-1': { chat: 1, task: 0 } },
+        sessionCounts: { 'agent-1': 1 },
+        hasChatSession: () => true,  // Active chat session
+        hasAnySession: () => true,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
+
+      const input = screen.getByTestId('chat-input')
+      await userEvent.setup().type(input, 'Test message')
+
+      const sendButton = screen.getByTestId('chat-send-button')
+      expect(sendButton).not.toBeDisabled()
+      expect(sendButton).toHaveTextContent('送信')
     })
   })
 

@@ -9,6 +9,8 @@ interface ChatInputProps {
   disabled?: boolean
   placeholder?: string
   maxLength?: number
+  /** Whether the chat session is ready for sending messages */
+  sessionReady?: boolean
 }
 
 export function ChatInput({
@@ -16,6 +18,7 @@ export function ChatInput({
   disabled = false,
   placeholder = 'Type a message...',
   maxLength = 4000,
+  sessionReady = true,
 }: ChatInputProps) {
   const [content, setContent] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -49,7 +52,7 @@ export function ChatInput({
     [handleSubmit]
   )
 
-  const isDisabled = disabled || isSubmitting
+  const isDisabled = disabled || isSubmitting || !sessionReady
 
   return (
     <form onSubmit={handleSubmit} className="border-t p-4">
@@ -71,9 +74,11 @@ export function ChatInput({
           data-testid="chat-send-button"
           className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
           disabled={isDisabled || !content.trim()}
-          aria-label="Send"
+          aria-label={sessionReady ? '送信' : '準備中'}
         >
-          {isSubmitting ? (
+          {!sessionReady ? (
+            '準備中...'
+          ) : isSubmitting ? (
             <span className="flex items-center gap-1">
               <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                 <circle
@@ -91,10 +96,10 @@ export function ChatInput({
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 />
               </svg>
-              Sending
+              送信中
             </span>
           ) : (
-            'Send'
+            '送信'
           )}
         </button>
       </div>

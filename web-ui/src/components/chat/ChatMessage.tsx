@@ -142,7 +142,7 @@ export function ChatMessage({ message, currentAgentId, targetAgentId, agentMap }
   return (
     <div
       className={`flex mb-4 ${style.position}`}
-      data-testid="chat-message"
+      data-testid={`chat-message-${message.id}`}
       data-message-id={message.id}
       data-sender-id={message.senderId}
     >

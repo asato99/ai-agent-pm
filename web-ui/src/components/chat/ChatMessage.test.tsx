@@ -65,7 +65,7 @@ describe('ChatMessage', () => {
           />
         )
 
-        const messageElement = screen.getByTestId('chat-message')
+        const messageElement = screen.getByTestId('chat-message-msg-1')
         // Should be positioned on right (justify-end)
         expect(messageElement).toHaveClass('justify-end')
 
@@ -110,7 +110,7 @@ describe('ChatMessage', () => {
           />
         )
 
-        const messageElement = screen.getByTestId('chat-message')
+        const messageElement = screen.getByTestId('chat-message-msg-1')
         // Should be positioned on left (justify-start)
         expect(messageElement).toHaveClass('justify-start')
 
@@ -156,7 +156,7 @@ describe('ChatMessage', () => {
           />
         )
 
-        const messageElement = screen.getByTestId('chat-message')
+        const messageElement = screen.getByTestId('chat-message-msg-1')
         // Third-party should be on right side
         expect(messageElement).toHaveClass('justify-end')
 
@@ -201,7 +201,7 @@ describe('ChatMessage', () => {
           />
         )
 
-        const messageElement = screen.getByTestId('chat-message')
+        const messageElement = screen.getByTestId('chat-message-msg-1')
         // System messages should be on left side
         expect(messageElement).toHaveClass('justify-start')
 
@@ -291,7 +291,7 @@ describe('ChatMessage', () => {
         />
       )
 
-      const messageElement = screen.getByTestId('chat-message')
+      const messageElement = screen.getByTestId('chat-message-msg-1')
       expect(messageElement).toHaveClass('justify-end')
       const bubble = messageElement.querySelector('[class*="bg-blue"]')
       expect(bubble).toBeInTheDocument()
@@ -335,7 +335,7 @@ describe('ChatMessage', () => {
         />
       )
 
-      const messageElement = screen.getByTestId('chat-message')
+      const messageElement = screen.getByTestId('chat-message-msg-1')
       // Should be on LEFT side (incoming message), NOT right side
       expect(messageElement).toHaveClass('justify-start')
 
@@ -359,7 +359,7 @@ describe('ChatMessage', () => {
         />
       )
 
-      const messageElement = screen.getByTestId('chat-message')
+      const messageElement = screen.getByTestId('chat-message-msg-1')
       expect(messageElement).toHaveClass('justify-start')
       const bubble = messageElement.querySelector('[class*="bg-yellow"]')
       expect(bubble).toBeInTheDocument()

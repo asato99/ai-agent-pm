@@ -350,7 +350,8 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
-  // Agent sessions (active session counts per agent)
+  // Agent sessions (active session counts per agent, by purpose)
+  // 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
   http.get('/api/projects/:projectId/agent-sessions', ({ params, request }) => {
     const authHeader = request.headers.get('Authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -360,20 +361,20 @@ export const handlers = [
 
     if (projectId === 'project-1') {
       return HttpResponse.json({
-        agentSessionCounts: {
-          'worker-1': 1,
-          'worker-2': 0,
+        agentSessions: {
+          'worker-1': { chat: 1, task: 0 },  // has active chat session
+          'worker-2': { chat: 0, task: 0 },  // no sessions
         },
       })
     }
     if (projectId === 'project-2') {
       return HttpResponse.json({
-        agentSessionCounts: {
-          'worker-2': 0,
+        agentSessions: {
+          'worker-2': { chat: 0, task: 0 },
         },
       })
     }
-    return HttpResponse.json({ agentSessionCounts: {} })
+    return HttpResponse.json({ agentSessions: {} })
   }),
 
   // Assignable agents (project-specific)
@@ -712,6 +713,24 @@ export const handlers = [
 
   // Chat mark-read - POST
   http.post('/api/projects/:projectId/agents/:agentId/chat/mark-read', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { projectId, agentId } = params
+
+    // Valid project and agents
+    if (projectId === 'project-1' && (agentId === 'worker-1' || agentId === 'worker-2' || agentId === 'agent-1')) {
+      return HttpResponse.json({ success: true })
+    }
+
+    // Invalid project or agent
+    return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
+
+  // Chat session start - POST
+  // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Phase 3
+  http.post('/api/projects/:projectId/agents/:agentId/chat/start', ({ params, request }) => {
     const authHeader = request.headers.get('Authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })

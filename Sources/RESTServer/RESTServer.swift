@@ -444,7 +444,13 @@ final class RESTServer {
             debugLog("POST /api/projects/:projectId/agents/:agentId/chat/mark-read called")
             return try await markChatAsRead(request: request, context: context)
         }
-        debugLog("Chat routes registered: GET/messages, POST/messages, POST/mark-read")
+        // Chat session start endpoint
+        // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Phase 3
+        chatRouter.post("start") { [self] request, context in
+            debugLog("POST /api/projects/:projectId/agents/:agentId/chat/start called")
+            return try await startChatSession(request: request, context: context)
+        }
+        debugLog("Chat routes registered: GET/messages, POST/messages, POST/mark-read, POST/start")
 
         // Unread counts (project-level aggregation)
         // Reference: docs/design/CHAT_FEATURE.md - Unread count feature
@@ -924,7 +930,7 @@ final class RESTServer {
     }
 
     /// GET /api/projects/:projectId/agent-sessions - プロジェクトのエージェントセッション数を取得
-    /// 参照: docs/design/CHAT_FEATURE.md - セッション状態表示
+    /// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - セッション状態表示
     private func listProjectAgentSessions(request: Request, context: AuthenticatedContext) async throws -> Response {
         guard let projectIdStr = context.parameters.get("projectId") else {
             return errorResponse(status: .badRequest, message: "Project ID is required")
@@ -935,14 +941,17 @@ final class RESTServer {
         let projectAgents = try projectAgentAssignmentRepository.findAgentsByProject(projectId)
         let activeAgents = projectAgents.filter { $0.status == .active }
 
-        // Count active sessions for each active agent
-        var sessionCounts: [String: Int] = [:]
+        // Count active sessions by purpose for each active agent
+        var agentSessions: [String: AgentSessionPurposeCountsDTO] = [:]
         for agent in activeAgents {
-            let count = try sessionRepository.countActiveSessions(agentId: agent.id)
-            sessionCounts[agent.id.value] = count
+            let counts = try sessionRepository.countActiveSessionsByPurpose(agentId: agent.id)
+            agentSessions[agent.id.value] = AgentSessionPurposeCountsDTO(
+                chat: counts[.chat] ?? 0,
+                task: counts[.task] ?? 0
+            )
         }
 
-        let dto = AgentSessionCountsDTO(agentSessionCounts: sessionCounts)
+        let dto = AgentSessionCountsDTO(agentSessions: agentSessions)
         return jsonResponse(dto)
     }
 
@@ -1485,6 +1494,67 @@ final class RESTServer {
         } catch {
             debugLog("Failed to mark chat as read: \(error)")
             return errorResponse(status: .internalServerError, message: "Failed to mark as read")
+        }
+    }
+
+    /// POST /projects/:projectId/agents/:agentId/chat/start
+    /// Start a chat session with an agent
+    /// Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Phase 3
+    private func startChatSession(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        // Extract path parameters
+        guard let projectIdStr = context.parameters.get("projectId"),
+              let agentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Missing project or agent ID")
+        }
+
+        let projectId = ProjectID(value: projectIdStr)
+        let targetAgentId = AgentID(value: agentIdStr)
+
+        // Verify agent can chat with target
+        guard try canChatWithAgent(currentAgentId: currentAgentId, targetAgentId: targetAgentId, projectId: projectId) else {
+            return errorResponse(status: .forbidden, message: "Cannot access this agent's chat")
+        }
+
+        do {
+            // Check if there's already an active session for this agent/project
+            let existingSessions = try sessionRepository.findByAgentIdAndProjectId(
+                targetAgentId,
+                projectId: projectId
+            )
+            // Filter to active sessions (not expired) with chat purpose
+            let hasActiveChatSession = existingSessions.contains { !$0.isExpired && $0.purpose == .chat }
+
+            if hasActiveChatSession {
+                debugLog("startChatSession: Active chat session already exists for agent=\(agentIdStr)")
+                return jsonResponse(["success": true, "alreadyActive": true])
+            }
+
+            // Check if there's already a pending purpose for this agent/project
+            if let existingPurpose = try pendingAgentPurposeRepository.find(
+                agentId: targetAgentId,
+                projectId: projectId
+            ) {
+                debugLog("startChatSession: Pending purpose already exists: \(existingPurpose.purpose)")
+                return jsonResponse(["success": true, "pendingExists": true])
+            }
+
+            // Create PendingAgentPurpose with purpose=chat
+            let pendingPurpose = PendingAgentPurpose(
+                agentId: targetAgentId,
+                projectId: projectId,
+                purpose: .chat
+            )
+            try pendingAgentPurposeRepository.save(pendingPurpose)
+
+            debugLog("startChatSession: Created pending purpose for agent=\(agentIdStr), project=\(projectIdStr)")
+            return jsonResponse(["success": true])
+        } catch {
+            debugLog("Failed to start chat session: \(error)")
+            return errorResponse(status: .internalServerError, message: "Failed to start chat session")
         }
     }
 
