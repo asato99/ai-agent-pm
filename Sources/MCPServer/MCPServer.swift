@@ -2453,8 +2453,17 @@ public final class MCPServer {
                 ]
             }
 
-            // 次のサブタスクを開始
-            if let nextSubTask = pendingSubTasks.first {
+            // 次のサブタスクを開始（依存関係を考慮）
+            // 依存タスクが全て完了しているサブタスクのみを実行可能とする
+            let completedTaskIds = Set(completedSubTasks.map { $0.id })
+            let executableSubTasks = pendingSubTasks.filter { task in
+                // 依存関係がないか、全ての依存タスクが完了している
+                task.dependencies.isEmpty || task.dependencies.allSatisfy { completedTaskIds.contains($0) }
+            }
+
+            Self.log("[MCP] getWorkerNextAction: executableSubTasks=\(executableSubTasks.count) (filtered from \(pendingSubTasks.count) pending)")
+
+            if let nextSubTask = executableSubTasks.first {
                 return [
                     "action": "start_subtask",
                     "instruction": """
@@ -2472,6 +2481,36 @@ public final class MCPServer {
                         "completed": completedSubTasks.count,
                         "total": subTasks.count
                     ]
+                ]
+            }
+
+            // 待機中のサブタスクはあるが、依存関係が満たされていない
+            // → 循環依存または不正な依存関係の可能性
+            if !pendingSubTasks.isEmpty {
+                let waitingTasks = pendingSubTasks.map { task -> [String: Any] in
+                    let unmetDeps = task.dependencies.filter { !completedTaskIds.contains($0) }
+                    return [
+                        "id": task.id.value,
+                        "title": task.title,
+                        "waiting_for": unmetDeps.map { $0.value }
+                    ]
+                }
+                Self.log("[MCP] getWorkerNextAction: All pending subtasks have unmet dependencies")
+                return [
+                    "action": "dependency_deadlock",
+                    "instruction": """
+                        全ての待機中サブタスクに未完了の依存関係があります。
+                        循環依存または不正な依存関係の可能性があります。
+
+                        対処方法:
+                        1. 依存関係を確認し、不要な依存を削除する
+                        2. または、このタスク全体を blocked として報告し、
+                           report_completed で result='blocked' を指定してください。
+                        """,
+                    "state": "dependency_deadlock",
+                    "waiting_subtasks": waitingTasks,
+                    "completed_subtasks": completedSubTasks.count,
+                    "total_subtasks": subTasks.count
                 ]
             }
         }
