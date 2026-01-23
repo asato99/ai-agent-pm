@@ -112,6 +112,7 @@ struct ToolAuthorization {
         "get_task": .authenticated,
         "report_execution_start": .authenticated,
         "report_execution_complete": .authenticated,
+        "logout": .authenticated,  // セッション終了
 
         // チャット機能（チャットセッション専用）- UC009
         // 参照: docs/design/CHAT_FEATURE.md

@@ -46,6 +46,7 @@ enum ToolDefinitions {
             // ========================================
             // 認証済み共通（Manager + Worker）
             // ========================================
+            logout,            // セッション終了
             reportModel,
             getMyProfile,
             getMyTask,
@@ -171,6 +172,26 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["agent_id", "passkey", "project_id"]
+        ] as [String: Any]
+    ]
+
+    // MARK: - Logout（認証済みエージェント用）
+
+    /// logout - セッションを終了
+    /// 認証済みエージェントがセッションを明示的に終了する際に使用
+    /// チャット完了後などにget_next_actionから指示される
+    static let logout: [String: Any] = [
+        "name": "logout",
+        "description": "現在のセッションを終了します。チャット応答完了後など、get_next_actionから「logout」アクションが指示された場合に呼び出してください。セッション終了後、エージェントプロセスを終了してください。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ] as [String: Any]
+            ] as [String: Any],
+            "required": ["session_token"]
         ] as [String: Any]
     ]
 

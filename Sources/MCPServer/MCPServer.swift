@@ -581,6 +581,12 @@ public final class MCPServer {
             }
             return try getNextAction(session: session)
 
+        case "logout":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            return try logout(session: session)
+
         case "report_model":
             guard let session = caller.session else {
                 throw MCPError.sessionTokenRequired
@@ -2094,6 +2100,36 @@ public final class MCPServer {
             "success": true,
             "action": "exit",
             "instruction": "タスクが完了しました。プロセスを終了してください。"
+        ]
+    }
+
+    // MARK: - Logout
+
+    /// logout - セッション終了
+    /// 認証済みエージェントがセッションを明示的に終了する
+    /// チャット完了後など、get_next_actionから指示される
+    private func logout(session: AgentSession) throws -> [String: Any] {
+        let agentId = session.agentId
+        let projectId = session.projectId
+        Self.log("[MCP] logout called for agent: '\(agentId.value)', project: '\(projectId.value)'")
+
+        // AgentSession を削除
+        try agentSessionRepository.delete(session.id)
+        Self.log("[MCP] logout: AgentSession deleted for agent: '\(agentId.value)', project: '\(projectId.value)'")
+
+        // ワークフローSession（作業セッション）も終了（completed扱い）
+        let endSessionsUseCase = EndActiveSessionsUseCase(sessionRepository: sessionRepository)
+        let endedWorkflowSessionCount = try endSessionsUseCase.execute(
+            agentId: agentId,
+            projectId: projectId,
+            status: .completed
+        )
+        Self.log("[MCP] logout: \(endedWorkflowSessionCount) workflow session(s) ended")
+
+        return [
+            "success": true,
+            "message": "セッションを終了しました。",
+            "instruction": "セッションが正常に終了しました。エージェントプロセスを終了してください。"
         ]
     }
 
