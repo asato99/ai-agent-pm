@@ -36,6 +36,7 @@ data/*.db-wal
 dist/
 *.xcodeproj/
 DerivedData/
+bin/
 
 # AI/IDE tools
 .gemini/
