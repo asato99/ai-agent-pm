@@ -62,9 +62,11 @@ enum ToolDefinitions {
             // ========================================
             // チャット機能（認証済み）
             // 参照: docs/design/CHAT_FEATURE.md
+            // 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
             // ========================================
             getPendingMessages,
             respondChat,
+            sendMessage,  // タスク・チャット両方で使用可能
 
             // ========================================
             // 削除済み（権限なし - 呼び出し不可）
@@ -947,9 +949,10 @@ enum ToolDefinitions {
 
     /// respond_chat - チャット応答を保存
     /// Agent Instance用: ユーザーメッセージに対する応答を保存
+    /// target_agent_idを指定することで、メッセージリレーなど特定エージェントへの送信が可能
     static let respondChat: [String: Any] = [
         "name": "respond_chat",
-        "description": "チャットメッセージに対する応答を保存します。get_pending_messagesで取得したメッセージに対して応答する際に使用します。",
+        "description": "チャットメッセージに対する応答を保存します。get_pending_messagesで取得したメッセージに対して応答する際に使用します。target_agent_idを指定すると特定のエージェントに送信できます（リレーシナリオ用）。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -960,9 +963,47 @@ enum ToolDefinitions {
                 "content": [
                     "type": "string",
                     "description": "応答メッセージの内容"
+                ],
+                "target_agent_id": [
+                    "type": "string",
+                    "description": "送信先エージェントID（省略時は未読メッセージの送信者に返信）。メッセージリレーの場合は明示的に送信先のエージェントIDを指定"
                 ]
             ] as [String: Any],
             "required": ["session_token", "content"]
+        ]
+    ]
+
+    /// send_message - プロジェクト内の他のエージェントにメッセージを送信
+    /// 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
+    /// タスクセッション・チャットセッションの両方で使用可能（.authenticated権限）
+    static let sendMessage: [String: Any] = [
+        "name": "send_message",
+        "description": """
+            プロジェクト内の他のエージェントにメッセージを送信します（非同期）。
+            受信者は get_pending_messages またはチャット画面で確認できます。
+            タスクセッション・チャットセッションの両方で使用可能です。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "target_agent_id": [
+                    "type": "string",
+                    "description": "送信先エージェントID（同一プロジェクト内のエージェントのみ指定可能）"
+                ],
+                "content": [
+                    "type": "string",
+                    "description": "メッセージ内容（最大4,000文字）"
+                ],
+                "related_task_id": [
+                    "type": "string",
+                    "description": "関連タスクID（任意）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "target_agent_id", "content"]
         ]
     ]
 }

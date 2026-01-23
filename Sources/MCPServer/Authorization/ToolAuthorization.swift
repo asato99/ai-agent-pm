@@ -120,6 +120,10 @@ struct ToolAuthorization {
         "get_pending_messages": .chatOnly,
         "respond_chat": .chatOnly,
 
+        // メッセージ送信（タスク・チャット両方で使用可能）- UC012, UC013
+        // 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
+        "send_message": .authenticated,
+
         // ヘルプ（未認証でも利用可能）
         "help": .unauthenticated,
     ]

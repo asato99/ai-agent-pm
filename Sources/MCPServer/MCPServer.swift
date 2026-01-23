@@ -672,7 +672,26 @@ public final class MCPServer {
             guard let content = arguments["content"] as? String else {
                 throw MCPError.missingArguments(["content"])
             }
-            return try respondChat(session: session, content: content)
+            let targetAgentId = arguments["target_agent_id"] as? String
+            return try respondChat(session: session, content: content, targetAgentId: targetAgentId)
+
+        case "send_message":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let targetAgentId = arguments["target_agent_id"] as? String else {
+                throw MCPError.missingArguments(["target_agent_id"])
+            }
+            guard let content = arguments["content"] as? String else {
+                throw MCPError.missingArguments(["content"])
+            }
+            let relatedTaskId = arguments["related_task_id"] as? String
+            return try sendMessage(
+                session: session,
+                targetAgentId: targetAgentId,
+                content: content,
+                relatedTaskId: relatedTaskId
+            )
 
         // ========================================
         // 削除済み（エラーを返す）
@@ -4221,18 +4240,39 @@ public final class MCPServer {
     /// respond_chat - チャット応答を保存
     /// エージェントがユーザーメッセージに対する応答を保存する
     /// Dual write: saves to both agent's and receiver's storage
-    private func respondChat(session: AgentSession, content: String) throws -> [String: Any] {
-        Self.log("[MCP] respondChat called: agentId='\(session.agentId.value)', content length=\(content.count)")
+    /// - Parameters:
+    ///   - targetAgentId: 送信先エージェントID（省略時は最新未読メッセージの送信者に返信）
+    ///                    UC013のようなリレーシナリオでは、明示的に人間を指定する
+    private func respondChat(session: AgentSession, content: String, targetAgentId: String? = nil) throws -> [String: Any] {
+        Self.log("[MCP] respondChat called: agentId='\(session.agentId.value)', content length=\(content.count), targetAgentId='\(targetAgentId ?? "auto")'")
 
-        // Find unread messages to determine who to respond to
-        let unreadMessages = try chatRepository.findUnreadMessages(
-            projectId: session.projectId,
-            agentId: session.agentId
-        )
-
-        // Get the receiver (the sender of the most recent unread message)
-        // If no unread messages, use a fallback (save only to agent's own storage)
-        let receiverId: AgentID? = unreadMessages.last?.senderId
+        // Determine receiver
+        let receiverId: AgentID?
+        if let explicitTarget = targetAgentId {
+            // 明示的な送信先が指定された場合（リレーシナリオなど）
+            // 送信先エージェントの存在確認
+            guard let _ = try agentRepository.findById(AgentID(value: explicitTarget)) else {
+                throw MCPError.agentNotFound(explicitTarget)
+            }
+            // 同一プロジェクト内のエージェントか確認
+            let isTargetInProject = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+                agentId: AgentID(value: explicitTarget),
+                projectId: session.projectId
+            )
+            guard isTargetInProject else {
+                throw MCPError.targetAgentNotInProject(targetAgentId: explicitTarget, projectId: session.projectId.value)
+            }
+            receiverId = AgentID(value: explicitTarget)
+            Self.log("[MCP] respondChat: Using explicit target agent: \(explicitTarget)")
+        } else {
+            // 送信先が未指定の場合は最新未読メッセージの送信者に返信
+            let unreadMessages = try chatRepository.findUnreadMessages(
+                projectId: session.projectId,
+                agentId: session.agentId
+            )
+            receiverId = unreadMessages.last?.senderId
+            Self.log("[MCP] respondChat: Auto-detected receiver from unread messages: \(receiverId?.value ?? "none")")
+        }
 
         // エージェント応答メッセージを作成
         let message = ChatMessage(
@@ -4263,6 +4303,80 @@ public final class MCPServer {
             "message_id": message.id.value,
             "receiver_id": receiverId?.value as Any,
             "instruction": "応答を保存しました。get_next_action を呼び出して次の指示を確認してください。"
+        ]
+    }
+
+    /// send_message - プロジェクト内の他のエージェントにメッセージを送信
+    /// タスクセッション・チャットセッションの両方で使用可能（.authenticated権限）
+    /// 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
+    private func sendMessage(
+        session: AgentSession,
+        targetAgentId: String,
+        content: String,
+        relatedTaskId: String?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] sendMessage called: from='\(session.agentId.value)' to='\(targetAgentId)' content_length=\(content.count)")
+
+        // 1. コンテンツ長チェック（最大4,000文字）
+        guard content.count <= 4000 else {
+            throw MCPError.contentTooLong(maxLength: 4000, actual: content.count)
+        }
+
+        // 2. 自分自身への送信は禁止
+        guard targetAgentId != session.agentId.value else {
+            throw MCPError.cannotMessageSelf
+        }
+
+        // 3. 送信先エージェントの存在確認
+        guard let _ = try agentRepository.findById(AgentID(value: targetAgentId)) else {
+            throw MCPError.agentNotFound(targetAgentId)
+        }
+
+        // 4. 同一プロジェクト内のエージェントか確認
+        let isTargetInProject = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+            agentId: AgentID(value: targetAgentId),
+            projectId: session.projectId
+        )
+        guard isTargetInProject else {
+            throw MCPError.targetAgentNotInProject(targetAgentId: targetAgentId, projectId: session.projectId.value)
+        }
+
+        // 5. メッセージ作成
+        let message = ChatMessage(
+            id: ChatMessageID.generate(),
+            senderId: session.agentId,
+            receiverId: AgentID(value: targetAgentId),
+            content: content,
+            createdAt: Date(),
+            relatedTaskId: relatedTaskId.map { TaskID(value: $0) }
+        )
+
+        // 6. 双方向保存
+        try chatRepository.saveMessageDualWrite(
+            message,
+            projectId: session.projectId,
+            senderAgentId: session.agentId,
+            receiverAgentId: AgentID(value: targetAgentId)
+        )
+
+        // 7. ターゲットエージェントのPendingAgentPurposeを作成
+        // これにより、get_agent_actionがターゲットエージェントに対してstart(reason=has_pending_messages)を返す
+        let pendingPurpose = PendingAgentPurpose(
+            agentId: AgentID(value: targetAgentId),
+            projectId: session.projectId,
+            purpose: .chat,
+            createdAt: Date(),
+            startedAt: nil
+        )
+        try pendingAgentPurposeRepository.save(pendingPurpose)
+        Self.log("[MCP] Created pending purpose for target agent: agent=\(targetAgentId), project=\(session.projectId.value), purpose=chat")
+
+        Self.log("[MCP] Message sent successfully: \(message.id.value) from \(session.agentId.value) to \(targetAgentId)")
+
+        return [
+            "success": true,
+            "message_id": message.id.value,
+            "target_agent_id": targetAgentId
         ]
     }
 
@@ -4668,7 +4782,7 @@ private enum BlockType {
 
 // MARK: - MCPError
 
-enum MCPError: Error, CustomStringConvertible {
+enum MCPError: Error, CustomStringConvertible, LocalizedError {
     case agentNotFound(String)
     case taskNotFound(String)
     case projectNotFound(String)
@@ -4695,6 +4809,11 @@ enum MCPError: Error, CustomStringConvertible {
     case validationError(String)  // バリデーションエラー
     case invalidCoordinatorToken  // Phase 5: Coordinatorトークン無効
     case notSubordinate(managerId: String, targetId: String)  // Phase 5: 下位エージェントではない
+
+    // send_message用エラー（UC012, UC013）
+    case cannotMessageSelf  // 自分自身へのメッセージ送信禁止
+    case targetAgentNotInProject(targetAgentId: String, projectId: String)  // 送信先がプロジェクト外
+    case contentTooLong(maxLength: Int, actual: Int)  // コンテンツ長超過
 
     var description: String {
         switch self {
@@ -4750,6 +4869,17 @@ enum MCPError: Error, CustomStringConvertible {
             return "Invalid coordinator token. Set MCP_COORDINATOR_TOKEN environment variable."
         case .notSubordinate(let managerId, let targetId):
             return "Agent '\(targetId)' is not a subordinate of manager '\(managerId)'"
+        case .cannotMessageSelf:
+            return "Cannot send message to yourself"
+        case .targetAgentNotInProject(let targetAgentId, let projectId):
+            return "Target agent '\(targetAgentId)' is not assigned to project '\(projectId)'"
+        case .contentTooLong(let maxLength, let actual):
+            return "Content too long: \(actual) characters (max \(maxLength))"
         }
+    }
+
+    /// LocalizedError conformance - errorDescription returns the same as description
+    var errorDescription: String? {
+        return description
     }
 }
