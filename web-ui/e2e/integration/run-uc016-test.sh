@@ -52,14 +52,18 @@ cleanup() {
 
     rm -f "$MCP_SOCKET_PATH"
 
-    if [ "$TEST_PASSED" == "true" ]; then
+    # デバッグ用: ログは常に保持（PRESERVE_LOGS=false で削除可能）
+    if [ "${PRESERVE_LOGS:-true}" == "false" ] && [ "$TEST_PASSED" == "true" ]; then
         rm -f /tmp/uc016_webui_*.log
         rm -f /tmp/coordinator_uc016_webui_config.yaml
         rm -rf /tmp/coordinator_logs_uc016_webui
         rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal"
         rm -rf /tmp/uc016
     else
-        echo "Logs preserved: /tmp/uc016_webui_*.log"
+        echo -e "${YELLOW}Logs preserved for debugging:${NC}"
+        echo "  - /tmp/uc016_webui_*.log"
+        echo "  - /tmp/coordinator_logs_uc016_webui/"
+        echo "  - /tmp/uc016/.ai-pm/agents/*/chat.jsonl"
     fi
 }
 
@@ -242,6 +246,35 @@ echo ""
 echo "=== ConversationId Check ==="
 CONV_ID_COUNT=$(grep -o '"conversationId"' /tmp/uc016/.ai-pm/agents/uc016-initiator/chat.jsonl 2>/dev/null | wc -l | tr -d ' ')
 echo "Messages with conversationId in initiator chat: $CONV_ID_COUNT"
+
+# 追加検証: Conversation状態の確認
+echo ""
+echo "=== Conversation State Check ==="
+CONV_STATE=$(sqlite3 "$TEST_DB_PATH" "SELECT state FROM conversations WHERE project_id = 'uc016-project' LIMIT 1;" 2>/dev/null || echo "unknown")
+echo "Conversation state: $CONV_STATE"
+if [ "$CONV_STATE" == "ended" ]; then
+    echo -e "${GREEN}✓ Conversation properly ended${NC}"
+else
+    echo -e "${YELLOW}⚠ Conversation not ended (state: $CONV_STATE)${NC}"
+fi
+
+# AIエージェントのログ表示（会話終了付近の挙動確認用）
+echo ""
+echo "=== AI Agent Logs (Last 100 lines each) ==="
+echo ""
+echo "--- Initiator Log ---"
+if [ -f "/tmp/coordinator_logs_uc016_webui/uc016-initiator.log" ]; then
+    tail -100 /tmp/coordinator_logs_uc016_webui/uc016-initiator.log 2>/dev/null || echo "(no log)"
+else
+    echo "(log file not found)"
+fi
+echo ""
+echo "--- Participant Log ---"
+if [ -f "/tmp/coordinator_logs_uc016_webui/uc016-participant.log" ]; then
+    tail -100 /tmp/coordinator_logs_uc016_webui/uc016-participant.log 2>/dev/null || echo "(no log)"
+else
+    echo "(log file not found)"
+fi
 
 # 結果判定
 if grep -qE "[0-9]+ passed" /tmp/uc016_webui_playwright.log && ! grep -qE "[0-9]+ failed" /tmp/uc016_webui_playwright.log; then

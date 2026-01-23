@@ -97,7 +97,11 @@ public final class ConversationRepository: ConversationRepositoryProtocol, Senda
                     Column("initiator_agent_id") == agentId.value ||
                     Column("participant_agent_id") == agentId.value
                 )
-                .filter(Column("state") == ConversationState.active.rawValue)
+                // active または terminating 状態の会話を検索
+                .filter(
+                    Column("state") == ConversationState.active.rawValue ||
+                    Column("state") == ConversationState.terminating.rawValue
+                )
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }

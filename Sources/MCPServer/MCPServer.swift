@@ -4249,13 +4249,46 @@ public final class MCPServer {
         )
         Self.log("[MCP] invalidateSession: \(endedWorkflowSessionCount) workflow session(s) ended")
 
+        // AI-to-AI会話のクリーンアップ
+        // どちらかのエージェントがセッションを抜けた時点で会話は成立しないため、自動終了する
+        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
+        let endedConversationCount = try cleanupAgentConversations(agentId: agId, projectId: projId)
+
         return [
             "success": true,
             "agent_id": agentId,
             "project_id": projectId,
             "deleted_agent_sessions": deletedCount,
-            "ended_workflow_sessions": endedWorkflowSessionCount
+            "ended_workflow_sessions": endedWorkflowSessionCount,
+            "ended_conversations": endedConversationCount
         ]
+    }
+
+    /// AI-to-AI会話のクリーンアップ
+    /// エージェントがセッションを終了する際、参加中の会話を自動終了する
+    /// - Returns: 終了した会話の数
+    private func cleanupAgentConversations(agentId: AgentID, projectId: ProjectID) throws -> Int {
+        // このエージェントが参加しているactive/terminating会話を取得
+        let activeConversations = try conversationRepository.findActiveByAgentId(agentId, projectId: projectId)
+
+        var endedCount = 0
+        for conversation in activeConversations {
+            // initiatorまたはparticipantとして参加している会話を終了
+            try conversationRepository.updateState(
+                conversation.id,
+                state: .ended,
+                endedAt: Date()
+            )
+            let role = conversation.initiatorAgentId == agentId ? "initiator" : "participant"
+            Self.log("[MCP] Auto-ended conversation on session invalidation: \(conversation.id.value) (agent was \(role))")
+            endedCount += 1
+        }
+
+        if endedCount > 0 {
+            Self.log("[MCP] invalidateSession: \(endedCount) conversation(s) auto-ended")
+        }
+
+        return endedCount
     }
 
     /// エージェントエラーを報告（Coordinator用）
