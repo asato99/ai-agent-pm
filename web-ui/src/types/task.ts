@@ -8,6 +8,9 @@ export type TaskStatus =
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
 
+// Note: Values match Domain/Entities/Task.swift ApprovalStatus rawValue
+export type ApprovalStatus = 'approved' | 'pending_approval' | 'rejected'
+
 export interface TaskContext {
   id: string
   agentId: string
@@ -26,6 +29,9 @@ export interface Task {
   creatorId: string
   dependencies: string[]
   contexts: TaskContext[]
+  approvalStatus: ApprovalStatus
+  requesterId: string | null
+  rejectedReason: string | null
   createdAt: string
   updatedAt: string
 }

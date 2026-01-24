@@ -1,4 +1,4 @@
-import type { Task, TaskPriority, Agent } from '@/types'
+import type { Task, TaskPriority, ApprovalStatus, Agent } from '@/types'
 
 interface TaskCardProps {
   task: Task
@@ -20,6 +20,24 @@ const priorityStyles: Record<TaskPriority, string> = {
   urgent: 'bg-red-100 text-red-700',
 }
 
+const approvalBadgeConfig: Record<ApprovalStatus, { text: string; className: string } | null> = {
+  approved: null,
+  pending_approval: {
+    text: '🔔 承認待ち',
+    className: 'bg-orange-100 text-orange-700 border border-orange-300',
+  },
+  rejected: {
+    text: '❌ 却下',
+    className: 'bg-gray-100 text-gray-700 border border-gray-300',
+  },
+}
+
+const cardBackgroundStyles: Record<ApprovalStatus, string> = {
+  approved: 'bg-white',
+  pending_approval: 'bg-orange-50 border-orange-200',
+  rejected: 'bg-gray-50 border-gray-200',
+}
+
 export function TaskCard({ task, agents, onClick }: TaskCardProps) {
   const handleClick = () => {
     onClick?.(task.id)
@@ -30,13 +48,23 @@ export function TaskCard({ task, agents, onClick }: TaskCardProps) {
     ? agents?.find((a) => a.id === task.assigneeId)?.name ?? null
     : null
 
+  const approvalBadge = approvalBadgeConfig[task.approvalStatus]
+  const cardBackground = cardBackgroundStyles[task.approvalStatus]
+
   return (
     <div
       data-testid="task-card"
       data-task-id={task.id}
-      className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow cursor-pointer"
+      className={`rounded-lg shadow p-4 hover:shadow-md transition-shadow cursor-pointer border ${cardBackground}`}
       onClick={handleClick}
     >
+      {approvalBadge && (
+        <span
+          className={`inline-block px-2 py-0.5 text-xs font-medium rounded mb-2 ${approvalBadge.className}`}
+        >
+          {approvalBadge.text}
+        </span>
+      )}
       <h4 className="text-sm font-medium text-gray-900 mb-2">{task.title}</h4>
       <div className="flex items-center justify-between">
         <span

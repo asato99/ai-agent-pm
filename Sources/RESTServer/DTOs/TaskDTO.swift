@@ -5,6 +5,7 @@ import Foundation
 import Domain
 
 /// Task data transfer object for REST API
+/// Note: Uses Swift's default camelCase JSON encoding (no CodingKeys)
 public struct TaskDTO: Codable {
     let id: String
     let projectId: String
@@ -19,6 +20,9 @@ public struct TaskDTO: Codable {
     let estimatedMinutes: Int?     // Phase 2: 見積もり時間（分）
     let actualMinutes: Int?        // Phase 2: 実績時間（分）
     let blockedReason: String?     // Phase 3: ブロック理由
+    let approvalStatus: String     // Task Request/Approval: 承認状態
+    let requesterId: String?       // Task Request/Approval: 依頼者ID
+    let rejectedReason: String?    // Task Request/Approval: 却下理由
     let createdAt: String
     let updatedAt: String
 
@@ -36,6 +40,9 @@ public struct TaskDTO: Codable {
         self.estimatedMinutes = task.estimatedMinutes
         self.actualMinutes = task.actualMinutes
         self.blockedReason = task.blockedReason
+        self.approvalStatus = task.approvalStatus.rawValue
+        self.requesterId = task.requesterId?.value
+        self.rejectedReason = task.rejectedReason
         self.createdAt = ISO8601DateFormatter().string(from: task.createdAt)
         self.updatedAt = ISO8601DateFormatter().string(from: task.updatedAt)
     }

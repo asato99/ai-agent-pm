@@ -2,9 +2,21 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '@/api/client'
 import { useTaskPermissions, useTaskHandoffs, useCreateHandoff, useAssignableAgents } from '@/hooks'
-import type { Task, TaskStatus, CreateHandoffInput } from '@/types'
+import type { Task, TaskStatus, CreateHandoffInput, ApprovalStatus } from '@/types'
 import { StatusPicker } from './StatusPicker'
 import { TaskEditForm } from '../TaskEditForm'
+
+const approvalStatusLabels: Record<ApprovalStatus, string> = {
+  approved: '承認済み',
+  pending_approval: '承認待ち',
+  rejected: '却下',
+}
+
+const approvalStatusStyles: Record<ApprovalStatus, string> = {
+  approved: 'bg-green-100 text-green-700 border-green-300',
+  pending_approval: 'bg-orange-100 text-orange-700 border-orange-300',
+  rejected: 'bg-gray-100 text-gray-700 border-gray-300',
+}
 
 interface TaskDetailPanelProps {
   task: Task | null
@@ -42,6 +54,42 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
   const updateStatusMutation = useMutation({
     mutationFn: async ({ taskId, status }: { taskId: string; status: TaskStatus }) => {
       const result = await api.patch<Task>(`/tasks/${taskId}`, { status })
+      if (result.error) {
+        throw new Error(result.error.message)
+      }
+      return result.data!
+    },
+    onSuccess: () => {
+      setError(null)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task-permissions', task?.id] })
+    },
+    onError: (err: Error) => {
+      setError(err.message)
+    },
+  })
+
+  const approveTaskMutation = useMutation({
+    mutationFn: async (taskId: string) => {
+      const result = await api.post<Task>(`/tasks/${taskId}/approve`, {})
+      if (result.error) {
+        throw new Error(result.error.message)
+      }
+      return result.data!
+    },
+    onSuccess: () => {
+      setError(null)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task-permissions', task?.id] })
+    },
+    onError: (err: Error) => {
+      setError(err.message)
+    },
+  })
+
+  const rejectTaskMutation = useMutation({
+    mutationFn: async ({ taskId, reason }: { taskId: string; reason?: string }) => {
+      const result = await api.post<Task>(`/tasks/${taskId}/reject`, { reason })
       if (result.error) {
         throw new Error(result.error.message)
       }
@@ -132,6 +180,59 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
               <p className="mt-1 text-xs text-gray-500">{permissions.reason}</p>
             )}
           </div>
+
+          {/* Approval Section - only show when not approved */}
+          {task.approvalStatus !== 'approved' && (
+            <div className="p-4 rounded-lg border bg-orange-50 border-orange-200">
+              <div className="flex items-center justify-between mb-3">
+                <span
+                  className={`inline-block px-2 py-1 text-sm font-medium rounded border ${approvalStatusStyles[task.approvalStatus]}`}
+                >
+                  {approvalStatusLabels[task.approvalStatus]}
+                </span>
+              </div>
+
+              {/* Requester info */}
+              {task.requesterId && (
+                <div className="mb-3">
+                  <span className="text-sm text-gray-600">依頼者: </span>
+                  <span className="text-sm font-medium text-gray-900">
+                    {agents.find((a) => a.id === task.requesterId)?.name ?? task.requesterId}
+                  </span>
+                </div>
+              )}
+
+              {/* Rejected reason */}
+              {task.approvalStatus === 'rejected' && task.rejectedReason && (
+                <div className="mb-3 p-2 bg-gray-100 rounded">
+                  <span className="text-sm text-gray-600">却下理由: </span>
+                  <span className="text-sm text-gray-900">{task.rejectedReason}</span>
+                </div>
+              )}
+
+              {/* Approve/Reject buttons - only show when pending */}
+              {task.approvalStatus === 'pending_approval' && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => approveTaskMutation.mutate(task.id)}
+                    disabled={approveTaskMutation.isPending || rejectTaskMutation.isPending}
+                    className="px-4 py-2 text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+                  >
+                    {approveTaskMutation.isPending ? '処理中...' : '承認'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => rejectTaskMutation.mutate({ taskId: task.id })}
+                    disabled={approveTaskMutation.isPending || rejectTaskMutation.isPending}
+                    className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 text-sm font-medium"
+                  >
+                    {rejectTaskMutation.isPending ? '処理中...' : '却下'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Description */}
           <div>
