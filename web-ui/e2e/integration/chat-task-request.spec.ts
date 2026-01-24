@@ -49,6 +49,9 @@ test.describe('Chat Task Request Flow - UC018', () => {
    *       チャットにメッセージを送信し、それが表示されることを確認する。
    */
   test('Step 1: 田中のメッセージがチャットに表示される', async ({ page }) => {
+    // タイムアウト延長（Coordinatorがエージェントをspawnするまで時間がかかる）
+    test.setTimeout(180_000) // 3 minutes
+
     // 田中がログイン
     await page.goto('/login')
     await page.getByLabel('Agent ID').fill(TANAKA.agentId)
@@ -70,9 +73,9 @@ test.describe('Chat Task Request Flow - UC018', () => {
     await expect(chatPanel).toBeVisible({ timeout: 5000 })
 
     // セッションが準備完了するまで待機（送信ボタンが「送信」になる）
-    // seed dataでchatセッションを作成済みなので、短時間で準備完了になるはず
+    // Coordinatorがエージェントをspawnし、認証が完了するまで待機
     const sendButton = page.getByTestId('chat-send-button')
-    await expect(sendButton).toHaveText('送信', { timeout: 10_000 })
+    await expect(sendButton).toHaveText('送信', { timeout: 90_000 })
 
     // メッセージを入力
     const chatInput = page.getByTestId('chat-input')

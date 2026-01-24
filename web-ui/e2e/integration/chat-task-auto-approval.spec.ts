@@ -41,6 +41,9 @@ test.describe('Parent Agent Auto-Approval - UC018-B', () => {
    *   - 送信したメッセージがチャットに表示される
    */
   test('Step 1: 佐藤（上位）のメッセージがチャットに表示される', async ({ page }) => {
+    // タイムアウト延長（Coordinatorがエージェントをspawnするまで時間がかかる）
+    test.setTimeout(180_000) // 3 minutes
+
     // 佐藤がログイン
     await page.goto('/login')
     await page.getByLabel('Agent ID').fill(SATO.agentId)
@@ -62,8 +65,9 @@ test.describe('Parent Agent Auto-Approval - UC018-B', () => {
     await expect(chatPanel).toBeVisible({ timeout: 5000 })
 
     // セッションが準備完了するまで待機
+    // Coordinatorがエージェントをspawnし、認証が完了するまで待機
     const sendButton = page.getByTestId('chat-send-button')
-    await expect(sendButton).toHaveText('送信', { timeout: 10_000 })
+    await expect(sendButton).toHaveText('送信', { timeout: 90_000 })
 
     // メッセージを入力
     const chatInput = page.getByTestId('chat-input')

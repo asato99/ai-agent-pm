@@ -57,12 +57,10 @@ VALUES
   ('uc018-project', 'uc018-worker-01', datetime('now')),
   ('uc018-project', 'uc018-tanaka', datetime('now'));
 
--- Create Worker-01's chat session (simulates Coordinator having started the agent)
--- This allows the chat panel to be in "ready" state without actual Coordinator
-INSERT INTO agent_sessions (id, token, agent_id, expires_at, created_at, project_id, purpose, last_activity_at, state)
-VALUES
-  ('uc018-worker01-chat-session', 'uc018-worker01-chat-token', 'uc018-worker-01',
-   datetime('now', '+1 day'), datetime('now'), 'uc018-project', 'chat', datetime('now'), 'active');
+-- ⚠️ chat sessionはシードしない
+-- チャットパネルを開くとPOST /chat/startが呼ばれ、セッションが作成される
+-- Coordinatorがエージェントをspawnするのは、セッションがwaiting_for_kickの状態のとき
+-- セッションを事前にactiveでシードすると、Coordinatorはalready_runningと判断してspawnしない
 
 -- ⚠️ タスクはシードしない
 -- Worker-01がrequest_taskを呼び出したとき、タスクがpending_approvalで作成されるべき

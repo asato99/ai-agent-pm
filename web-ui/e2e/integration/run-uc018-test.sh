@@ -7,9 +7,10 @@
 # フロー:
 #   1. テスト環境準備
 #   2. MCP + RESTサーバー起動
-#   3. Web UI起動
-#   4. Playwrightテスト実行
-#   5. 結果検証
+#   3. Coordinator起動
+#   4. Web UI起動
+#   5. Playwrightテスト実行
+#   6. 結果検証
 
 set -e
 
@@ -31,6 +32,9 @@ MCP_SOCKET_PATH="/tmp/aiagentpm_uc018_webui.sock"
 REST_PORT="8090"
 WEB_UI_PORT="5173"  # Must be 5173 for CORS (allowed origins in REST server)
 
+export MCP_COORDINATOR_TOKEN="test_coordinator_token_uc018_webui"
+
+COORDINATOR_PID=""
 MCP_PID=""
 REST_PID=""
 WEB_UI_PID=""
@@ -41,6 +45,7 @@ cleanup() {
     echo -e "${YELLOW}Cleanup${NC}"
 
     [ -n "$WEB_UI_PID" ] && kill -0 "$WEB_UI_PID" 2>/dev/null && kill "$WEB_UI_PID" 2>/dev/null
+    [ -n "$COORDINATOR_PID" ] && kill -0 "$COORDINATOR_PID" 2>/dev/null && kill "$COORDINATOR_PID" 2>/dev/null
     [ -n "$REST_PID" ] && kill -0 "$REST_PID" 2>/dev/null && kill "$REST_PID" 2>/dev/null
     [ -n "$MCP_PID" ] && kill -0 "$MCP_PID" 2>/dev/null && kill "$MCP_PID" 2>/dev/null
 
@@ -48,7 +53,10 @@ cleanup() {
 
     if [ "$TEST_PASSED" == "true" ]; then
         rm -f /tmp/uc018_webui_*.log
+        rm -f /tmp/coordinator_uc018_webui_config.yaml
+        rm -rf /tmp/coordinator_logs_uc018_webui
         rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal"
+        rm -rf /tmp/uc018_webui_work
     else
         echo "Logs preserved: /tmp/uc018_webui_*.log"
     fi
@@ -122,37 +130,19 @@ SQL_FILE="$SCRIPT_DIR/setup/seed-uc018-data.sql"
 [ -f "$SQL_FILE" ] && sqlite3 "$TEST_DB_PATH" < "$SQL_FILE"
 echo "Database initialized with UC018 test data"
 
-# Create chat files for test data
+# Create working directory structure (chat files will be created by actual agents)
 WORKING_DIR="/tmp/uc018_webui_work"
-CHAT_BASE="$WORKING_DIR/.ai-pm/agents"
+mkdir -p "$WORKING_DIR/.ai-pm/agents/uc018-tanaka"
+mkdir -p "$WORKING_DIR/.ai-pm/agents/uc018-worker-01"
+mkdir -p "$WORKING_DIR/.ai-pm/agents/uc018-sato"
 
-# Create directory structure
-mkdir -p "$CHAT_BASE/uc018-tanaka"
-mkdir -p "$CHAT_BASE/uc018-worker-01"
-mkdir -p "$CHAT_BASE/uc018-sato"
-
-# Create .gitignore
 cat > "$WORKING_DIR/.ai-pm/.gitignore" << 'GITIGNORE'
 # AI Agent PM - auto-generated
 chat.jsonl
 context.md
 GITIGNORE
 
-# Get current timestamp in ISO8601 format
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-# All messages go to Worker-01's file (UI reads target agent's file)
-# Format must match Swift Codable encoding with value wrappers
-#
-# Message flow:
-#   - Step 2: Worker-01's response to Tanaka (receiverId = tanaka)
-#   - Step 4: Worker-01's notification to Sato (receiverId = sato)
-cat > "$CHAT_BASE/uc018-worker-01/chat.jsonl" << EOF
-{"id":{"value":"msg-uc018-001"},"senderId":{"value":"uc018-worker-01"},"receiverId":{"value":"uc018-tanaka"},"content":"承知しました。佐藤さんに承認を依頼します。タスクを作成しましたので、承認後に作業を開始します。","createdAt":"$TIMESTAMP"}
-{"id":{"value":"msg-uc018-002"},"senderId":{"value":"uc018-worker-01"},"receiverId":{"value":"uc018-sato"},"content":"タスク依頼があります: ユーザー一覧に検索機能追加。承認をお願いします。","createdAt":"$TIMESTAMP"}
-EOF
-
-echo "Chat files created"
+echo "Working directory created: $WORKING_DIR"
 echo ""
 
 # Step 4: サーバー起動
@@ -173,8 +163,37 @@ for i in {1..10}; do curl -s "http://localhost:$REST_PORT/health" > /dev/null 2>
 echo -e "${GREEN}✓ REST server running at :$REST_PORT${NC}"
 echo ""
 
-# Step 5: Web UI起動
-echo -e "${YELLOW}Step 5: Starting Web UI${NC}"
+# Step 5: Coordinator起動
+echo -e "${YELLOW}Step 5: Starting Coordinator${NC}"
+
+RUNNER_DIR="$PROJECT_ROOT/runner"
+PYTHON="${RUNNER_DIR}/.venv/bin/python"
+[ ! -x "$PYTHON" ] && PYTHON="python3"
+
+cat > /tmp/coordinator_uc018_webui_config.yaml << EOF
+polling_interval: 2
+max_concurrent: 1
+coordinator_token: ${MCP_COORDINATOR_TOKEN}
+mcp_socket_path: $MCP_SOCKET_PATH
+ai_providers:
+  claude:
+    cli_command: claude
+    cli_args: ["--dangerously-skip-permissions", "--max-turns", "50"]
+agents:
+  uc018-worker-01:
+    passkey: test-passkey
+log_directory: /tmp/coordinator_logs_uc018_webui
+EOF
+
+mkdir -p /tmp/coordinator_logs_uc018_webui
+$PYTHON -m aiagent_runner --coordinator -c /tmp/coordinator_uc018_webui_config.yaml -v > /tmp/uc018_webui_coordinator.log 2>&1 &
+COORDINATOR_PID=$!
+sleep 2
+echo -e "${GREEN}✓ Coordinator running${NC}"
+echo ""
+
+# Step 6: Web UI起動
+echo -e "${YELLOW}Step 6: Starting Web UI${NC}"
 cd "$WEB_UI_ROOT"
 
 # AIAGENTPM_WEBSERVER_PORT is used by vite.config.ts to inject VITE_API_PORT
@@ -185,21 +204,22 @@ for i in {1..20}; do curl -s "http://localhost:$WEB_UI_PORT" > /dev/null 2>&1 &&
 echo -e "${GREEN}✓ Web UI running at :$WEB_UI_PORT${NC}"
 echo ""
 
-# Step 6: Playwrightテスト実行
-echo -e "${YELLOW}Step 6: Running Playwright tests${NC}"
+# Step 7: Playwrightテスト実行
+echo -e "${YELLOW}Step 7: Running Playwright tests${NC}"
 echo ""
 
 INTEGRATION_WEB_URL="http://localhost:$WEB_UI_PORT" \
+INTEGRATION_WITH_COORDINATOR="true" \
 AIAGENTPM_WEBSERVER_PORT="$REST_PORT" \
 npx playwright test \
     --config=e2e/integration/playwright.integration.config.ts \
     chat-task-request.spec.ts \
-    2>&1 | tee /tmp/uc018_webui_playwright.log | grep -E "(✓|✗|passed|failed|skipped|Step)" || true
+    2>&1 | tee /tmp/uc018_webui_playwright.log | grep -E "(✓|✗|passed|failed|skipped|Step|UC018)" || true
 
 echo ""
 
-# Step 7: 結果検証
-echo -e "${YELLOW}Step 7: Verifying results${NC}"
+# Step 8: 結果検証
+echo -e "${YELLOW}Step 8: Verifying results${NC}"
 echo "=== Agents ==="
 sqlite3 "$TEST_DB_PATH" "SELECT id, name, role, type FROM agents WHERE id LIKE 'uc018-%';"
 echo ""

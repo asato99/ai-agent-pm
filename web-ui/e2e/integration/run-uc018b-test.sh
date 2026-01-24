@@ -26,6 +26,9 @@ MCP_SOCKET_PATH="/tmp/aiagentpm_uc018b_webui.sock"
 REST_PORT="8090"
 WEB_UI_PORT="5173"  # Must be 5173 for CORS (allowed origins in REST server)
 
+export MCP_COORDINATOR_TOKEN="test_coordinator_token_uc018b_webui"
+
+COORDINATOR_PID=""
 MCP_PID=""
 REST_PID=""
 WEB_UI_PID=""
@@ -36,6 +39,7 @@ cleanup() {
     echo -e "${YELLOW}Cleanup${NC}"
 
     [ -n "$WEB_UI_PID" ] && kill -0 "$WEB_UI_PID" 2>/dev/null && kill "$WEB_UI_PID" 2>/dev/null
+    [ -n "$COORDINATOR_PID" ] && kill -0 "$COORDINATOR_PID" 2>/dev/null && kill "$COORDINATOR_PID" 2>/dev/null
     [ -n "$REST_PID" ] && kill -0 "$REST_PID" 2>/dev/null && kill "$REST_PID" 2>/dev/null
     [ -n "$MCP_PID" ] && kill -0 "$MCP_PID" 2>/dev/null && kill "$MCP_PID" 2>/dev/null
 
@@ -43,7 +47,10 @@ cleanup() {
 
     if [ "$TEST_PASSED" == "true" ]; then
         rm -f /tmp/uc018b_webui_*.log
+        rm -f /tmp/coordinator_uc018b_webui_config.yaml
+        rm -rf /tmp/coordinator_logs_uc018b_webui
         rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal"
+        rm -rf /tmp/uc018b_webui_work
     else
         echo "Logs preserved: /tmp/uc018b_webui_*.log"
     fi
@@ -115,12 +122,10 @@ SQL_FILE="$SCRIPT_DIR/setup/seed-uc018b-data.sql"
 [ -f "$SQL_FILE" ] && sqlite3 "$TEST_DB_PATH" < "$SQL_FILE"
 echo "Database initialized with UC018-B test data"
 
-# Create chat files for test data
+# Create working directory structure (chat files will be created by actual agents)
 WORKING_DIR="/tmp/uc018b_webui_work"
-CHAT_BASE="$WORKING_DIR/.ai-pm/agents"
-
-mkdir -p "$CHAT_BASE/uc018b-sato"
-mkdir -p "$CHAT_BASE/uc018b-worker-01"
+mkdir -p "$WORKING_DIR/.ai-pm/agents/uc018b-sato"
+mkdir -p "$WORKING_DIR/.ai-pm/agents/uc018b-worker-01"
 
 cat > "$WORKING_DIR/.ai-pm/.gitignore" << 'GITIGNORE'
 # AI Agent PM - auto-generated
@@ -128,15 +133,7 @@ chat.jsonl
 context.md
 GITIGNORE
 
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-# Worker-01's response to Sato (parent)
-# 上位からの依頼なので、承認依頼ではなく直接作業開始の旨を伝える
-cat > "$CHAT_BASE/uc018b-worker-01/chat.jsonl" << EOF
-{"id":{"value":"msg-uc018b-001"},"senderId":{"value":"uc018b-worker-01"},"receiverId":{"value":"uc018b-sato"},"content":"承知しました。API認証機能の実装を開始します。JWTを使用した認証システムを構築します。","createdAt":"$TIMESTAMP"}
-EOF
-
-echo "Chat files created"
+echo "Working directory created: $WORKING_DIR"
 echo ""
 
 # Step 4: サーバー起動
@@ -157,8 +154,37 @@ for i in {1..10}; do curl -s "http://localhost:$REST_PORT/health" > /dev/null 2>
 echo -e "${GREEN}✓ REST server running at :$REST_PORT${NC}"
 echo ""
 
-# Step 5: Web UI起動
-echo -e "${YELLOW}Step 5: Starting Web UI${NC}"
+# Step 5: Coordinator起動
+echo -e "${YELLOW}Step 5: Starting Coordinator${NC}"
+
+RUNNER_DIR="$PROJECT_ROOT/runner"
+PYTHON="${RUNNER_DIR}/.venv/bin/python"
+[ ! -x "$PYTHON" ] && PYTHON="python3"
+
+cat > /tmp/coordinator_uc018b_webui_config.yaml << EOF
+polling_interval: 2
+max_concurrent: 1
+coordinator_token: ${MCP_COORDINATOR_TOKEN}
+mcp_socket_path: $MCP_SOCKET_PATH
+ai_providers:
+  claude:
+    cli_command: claude
+    cli_args: ["--dangerously-skip-permissions", "--max-turns", "50"]
+agents:
+  uc018b-worker-01:
+    passkey: test-passkey
+log_directory: /tmp/coordinator_logs_uc018b_webui
+EOF
+
+mkdir -p /tmp/coordinator_logs_uc018b_webui
+$PYTHON -m aiagent_runner --coordinator -c /tmp/coordinator_uc018b_webui_config.yaml -v > /tmp/uc018b_webui_coordinator.log 2>&1 &
+COORDINATOR_PID=$!
+sleep 2
+echo -e "${GREEN}✓ Coordinator running${NC}"
+echo ""
+
+# Step 6: Web UI起動
+echo -e "${YELLOW}Step 6: Starting Web UI${NC}"
 cd "$WEB_UI_ROOT"
 
 AIAGENTPM_WEBSERVER_PORT="$REST_PORT" npm run dev -- --port "$WEB_UI_PORT" > /tmp/uc018b_webui_vite.log 2>&1 &
@@ -168,21 +194,22 @@ for i in {1..20}; do curl -s "http://localhost:$WEB_UI_PORT" > /dev/null 2>&1 &&
 echo -e "${GREEN}✓ Web UI running at :$WEB_UI_PORT${NC}"
 echo ""
 
-# Step 6: Playwrightテスト実行
-echo -e "${YELLOW}Step 6: Running Playwright tests${NC}"
+# Step 7: Playwrightテスト実行
+echo -e "${YELLOW}Step 7: Running Playwright tests${NC}"
 echo ""
 
 INTEGRATION_WEB_URL="http://localhost:$WEB_UI_PORT" \
+INTEGRATION_WITH_COORDINATOR="true" \
 AIAGENTPM_WEBSERVER_PORT="$REST_PORT" \
 npx playwright test \
     --config=e2e/integration/playwright.integration.config.ts \
     chat-task-auto-approval.spec.ts \
-    2>&1 | tee /tmp/uc018b_webui_playwright.log | grep -E "(✓|✗|passed|failed|skipped|Step)" || true
+    2>&1 | tee /tmp/uc018b_webui_playwright.log | grep -E "(✓|✗|passed|failed|skipped|Step|UC018)" || true
 
 echo ""
 
-# Step 7: 結果検証
-echo -e "${YELLOW}Step 7: Verifying results${NC}"
+# Step 8: 結果検証
+echo -e "${YELLOW}Step 8: Verifying results${NC}"
 echo "=== Agents ==="
 sqlite3 "$TEST_DB_PATH" "SELECT id, name, role, parent_agent_id FROM agents WHERE id LIKE 'uc018b-%';"
 echo ""
