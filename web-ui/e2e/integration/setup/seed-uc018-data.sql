@@ -7,6 +7,17 @@
 -- - 佐藤 (human Tech Lead): approver - Worker-01's parent, receives notification
 --
 -- IMPORTANT: Only run against test database!
+--
+-- ⚠️⚠️⚠️ 警告: 期待結果のシードは絶対禁止 ⚠️⚠️⚠️
+--
+-- このファイルには「前提条件」のみをシードすること。
+-- テストで検証すべきデータ（タスク作成、ステータス変更等）は絶対にシードしない。
+--
+-- ❌ 禁止: タスクをシードして「タスクが作成される」テストを通す
+-- ❌ 禁止: approvedステータスをシードして「自動承認される」テストを通す
+-- ✅ 許可: エージェント、プロジェクト、セッション等の前提条件のみ
+--
+-- 違反すると統合テストの価値がゼロになる。
 
 -- Clear existing UC018 test data
 DELETE FROM agent_sessions WHERE agent_id IN ('uc018-tanaka', 'uc018-worker-01', 'uc018-sato');
@@ -53,10 +64,6 @@ VALUES
   ('uc018-worker01-chat-session', 'uc018-worker01-chat-token', 'uc018-worker-01',
    datetime('now', '+1 day'), datetime('now'), 'uc018-project', 'chat', datetime('now'), 'active');
 
--- Create task with pending_approval status (Step 3)
--- This simulates Worker-01 having created a task via request_task tool
-INSERT INTO tasks (id, project_id, title, status, assignee_id, description, priority, requester_id, approval_status, created_at, updated_at)
-VALUES
-  ('uc018-search-task', 'uc018-project', 'ユーザー一覧に検索機能追加', 'backlog', 'uc018-worker-01',
-   '名前・メールアドレスでの絞り込み機能を実装', 'medium', 'uc018-worker-01', 'pending_approval',
-   datetime('now'), datetime('now'));
+-- ⚠️ タスクはシードしない
+-- Worker-01がrequest_taskを呼び出したとき、タスクがpending_approvalで作成されるべき
+-- この機能が未実装の場合、テストStep 3が失敗する（それが正しい動作）
