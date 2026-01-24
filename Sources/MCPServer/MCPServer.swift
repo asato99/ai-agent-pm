@@ -741,6 +741,56 @@ public final class MCPServer {
             )
 
         // ========================================
+        // タスク依頼・承認機能
+        // 参照: docs/design/TASK_REQUEST_APPROVAL.md
+        // ========================================
+        case "request_task":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let title = arguments["title"] as? String else {
+                throw MCPError.missingArguments(["title"])
+            }
+            guard let assigneeId = arguments["assignee_id"] as? String else {
+                throw MCPError.missingArguments(["assignee_id"])
+            }
+            let description = arguments["description"] as? String
+            let priority = arguments["priority"] as? String
+            return try requestTask(
+                session: session,
+                title: title,
+                description: description,
+                assigneeId: assigneeId,
+                priority: priority
+            )
+
+        case "approve_task_request":
+            guard case .manager(_, let session) = caller else {
+                throw ToolAuthorizationError.managerRequired("approve_task_request")
+            }
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            return try approveTaskRequest(
+                session: session,
+                taskId: taskId
+            )
+
+        case "reject_task_request":
+            guard case .manager(_, let session) = caller else {
+                throw ToolAuthorizationError.managerRequired("reject_task_request")
+            }
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            let reason = arguments["reason"] as? String
+            return try rejectTaskRequest(
+                session: session,
+                taskId: taskId,
+                reason: reason
+            )
+
+        // ========================================
         // 削除済み（エラーを返す）
         // ========================================
         case "list_agents":
@@ -3901,6 +3951,207 @@ public final class MCPServer {
         return [
             "success": true,
             "task": taskToDict(task)
+        ]
+    }
+
+    // MARK: - Task Request/Approval
+    // 参照: docs/design/TASK_REQUEST_APPROVAL.md
+
+    /// request_task - タスク依頼を作成
+    /// 依頼者が担当者の上位（祖先）であれば自動承認、そうでなければ承認待ち
+    private func requestTask(
+        session: AgentSession,
+        title: String,
+        description: String?,
+        assigneeId: String,
+        priority: String?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] requestTask: requester=\(session.agentId.value), assignee=\(assigneeId), title=\(title)")
+
+        // 担当者エージェントを取得
+        guard let assignee = try agentRepository.findById(AgentID(value: assigneeId)) else {
+            throw MCPError.agentNotFound(assigneeId)
+        }
+
+        // 担当者がプロジェクトに割り当てられているか確認
+        let isAssigneeInProject = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+            agentId: assignee.id,
+            projectId: session.projectId
+        )
+        guard isAssigneeInProject else {
+            throw MCPError.agentNotAssignedToProject(agentId: assigneeId, projectId: session.projectId.value)
+        }
+
+        // 全エージェントを取得（階層判定用）
+        let allAgents = try agentRepository.findAll()
+        let agentsDict = Dictionary(uniqueKeysWithValues: allAgents.map { ($0.id, $0) })
+
+        // 依頼者が担当者の祖先かどうか判定
+        let isAncestor = AgentHierarchy.isAncestorOf(
+            ancestor: session.agentId,
+            descendant: assignee.id,
+            agents: agentsDict
+        )
+
+        // 優先度のパース
+        let taskPriority: TaskPriority
+        if let priorityStr = priority, let parsed = TaskPriority(rawValue: priorityStr) {
+            taskPriority = parsed
+        } else {
+            taskPriority = .medium
+        }
+
+        // 承認ステータスの決定
+        let approvalStatus: ApprovalStatus = isAncestor ? .approved : .pendingApproval
+
+        // タスク作成
+        var newTask = Task(
+            id: TaskID.generate(),
+            projectId: session.projectId,
+            title: title,
+            description: description ?? "",
+            status: .backlog,
+            priority: taskPriority,
+            assigneeId: assignee.id,
+            createdByAgentId: session.agentId,
+            requesterId: session.agentId,
+            approvalStatus: approvalStatus
+        )
+
+        // 自動承認の場合は承認情報も設定
+        if isAncestor {
+            newTask.approve(by: session.agentId)
+        }
+
+        try taskRepository.save(newTask)
+
+        Self.log("[MCP] requestTask: created task \(newTask.id.value) with approval_status=\(approvalStatus.rawValue)")
+
+        // 承認待ちの場合、承認可能なエージェント（担当者の祖先）を取得
+        var approvers: [String] = []
+        if approvalStatus == .pendingApproval {
+            for agent in allAgents {
+                if agent.type == .human && AgentHierarchy.isAncestorOf(ancestor: agent.id, descendant: assignee.id, agents: agentsDict) {
+                    approvers.append(agent.id.value)
+                }
+            }
+        }
+
+        return [
+            "success": true,
+            "task_id": newTask.id.value,
+            "approval_status": approvalStatus.rawValue,
+            "approvers": approvers,
+            "message": isAncestor
+                ? "タスクが自動承認されました"
+                : "タスク依頼が作成されました。承認を待っています。"
+        ]
+    }
+
+    /// approve_task_request - タスク依頼を承認
+    /// 承認者は担当者の祖先である必要がある
+    private func approveTaskRequest(
+        session: AgentSession,
+        taskId: String
+    ) throws -> [String: Any] {
+        Self.log("[MCP] approveTaskRequest: approver=\(session.agentId.value), taskId=\(taskId)")
+
+        // タスクを取得
+        guard var task = try taskRepository.findById(TaskID(value: taskId)) else {
+            throw MCPError.taskNotFound(taskId)
+        }
+
+        // 承認待ち状態であることを確認
+        guard task.approvalStatus == .pendingApproval else {
+            throw MCPError.validationError("Task is not pending approval (current status: \(task.approvalStatus.rawValue))")
+        }
+
+        // 担当者を取得
+        guard let assigneeId = task.assigneeId,
+              let assignee = try agentRepository.findById(assigneeId) else {
+            throw MCPError.validationError("Task has no assignee")
+        }
+
+        // 全エージェントを取得（階層判定用）
+        let allAgents = try agentRepository.findAll()
+        let agentsDict = Dictionary(uniqueKeysWithValues: allAgents.map { ($0.id, $0) })
+
+        // 承認者が担当者の祖先であることを確認
+        let isAncestor = AgentHierarchy.isAncestorOf(
+            ancestor: session.agentId,
+            descendant: assignee.id,
+            agents: agentsDict
+        )
+        guard isAncestor else {
+            throw MCPError.permissionDenied("You are not authorized to approve this task request (must be an ancestor of the assignee)")
+        }
+
+        // タスクを承認
+        task.approve(by: session.agentId)
+        task.updatedAt = Date()
+        try taskRepository.save(task)
+
+        Self.log("[MCP] approveTaskRequest: approved task \(taskId)")
+
+        return [
+            "success": true,
+            "task_id": taskId,
+            "status": task.status.rawValue,
+            "message": "タスク依頼を承認しました"
+        ]
+    }
+
+    /// reject_task_request - タスク依頼を却下
+    /// 却下者は担当者の祖先である必要がある
+    private func rejectTaskRequest(
+        session: AgentSession,
+        taskId: String,
+        reason: String?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] rejectTaskRequest: rejector=\(session.agentId.value), taskId=\(taskId)")
+
+        // タスクを取得
+        guard var task = try taskRepository.findById(TaskID(value: taskId)) else {
+            throw MCPError.taskNotFound(taskId)
+        }
+
+        // 承認待ち状態であることを確認
+        guard task.approvalStatus == .pendingApproval else {
+            throw MCPError.validationError("Task is not pending approval (current status: \(task.approvalStatus.rawValue))")
+        }
+
+        // 担当者を取得
+        guard let assigneeId = task.assigneeId,
+              let assignee = try agentRepository.findById(assigneeId) else {
+            throw MCPError.validationError("Task has no assignee")
+        }
+
+        // 全エージェントを取得（階層判定用）
+        let allAgents = try agentRepository.findAll()
+        let agentsDict = Dictionary(uniqueKeysWithValues: allAgents.map { ($0.id, $0) })
+
+        // 却下者が担当者の祖先であることを確認
+        let isAncestor = AgentHierarchy.isAncestorOf(
+            ancestor: session.agentId,
+            descendant: assignee.id,
+            agents: agentsDict
+        )
+        guard isAncestor else {
+            throw MCPError.permissionDenied("You are not authorized to reject this task request (must be an ancestor of the assignee)")
+        }
+
+        // タスクを却下
+        task.reject(reason: reason)
+        task.updatedAt = Date()
+        try taskRepository.save(task)
+
+        Self.log("[MCP] rejectTaskRequest: rejected task \(taskId)")
+
+        return [
+            "success": true,
+            "task_id": taskId,
+            "status": "rejected",
+            "message": "タスク依頼を却下しました"
         ]
     }
 

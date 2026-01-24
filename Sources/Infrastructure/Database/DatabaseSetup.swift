@@ -926,6 +926,26 @@ public final class DatabaseSetup {
             }
         }
 
+        // v40: タスク依頼・承認機能
+        // 参照: docs/design/TASK_REQUEST_APPROVAL.md
+        migrator.registerMigration("v40_task_approval") { db in
+            try db.alter(table: "tasks") { t in
+                // 依頼者のエージェントID（直接作成時はNULL）
+                t.add(column: "requester_id", .text)
+                // 承認ステータス（approved, pending_approval, rejected）
+                t.add(column: "approval_status", .text).notNull().defaults(to: "approved")
+                // 却下理由（rejected時のみ）
+                t.add(column: "rejected_reason", .text)
+                // 承認者のエージェントID
+                t.add(column: "approved_by", .text)
+                // 承認日時
+                t.add(column: "approved_at", .datetime)
+            }
+            // 承認待ちタスク検索用インデックス
+            try db.create(indexOn: "tasks", columns: ["approval_status"])
+            try db.create(indexOn: "tasks", columns: ["requester_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

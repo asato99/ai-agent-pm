@@ -577,3 +577,138 @@ public struct GetPendingTasksUseCase: Sendable {
         try taskRepository.findPendingByAssignee(agentId)
     }
 }
+
+// MARK: - ApproveTaskUseCase
+// 参照: docs/design/TASK_REQUEST_APPROVAL.md
+
+/// タスク承認ユースケース
+/// 承認者が担当者の祖先であることを確認し、タスクを承認する
+public struct ApproveTaskUseCase: Sendable {
+    private let taskRepository: any TaskRepositoryProtocol
+    private let agentRepository: any AgentRepositoryProtocol
+    private let eventRepository: any EventRepositoryProtocol
+
+    public init(
+        taskRepository: any TaskRepositoryProtocol,
+        agentRepository: any AgentRepositoryProtocol,
+        eventRepository: any EventRepositoryProtocol
+    ) {
+        self.taskRepository = taskRepository
+        self.agentRepository = agentRepository
+        self.eventRepository = eventRepository
+    }
+
+    public func execute(
+        taskId: TaskID,
+        approverId: AgentID
+    ) throws -> Task {
+        guard var task = try taskRepository.findById(taskId) else {
+            throw UseCaseError.taskNotFound(taskId)
+        }
+
+        // 承認待ち状態の確認
+        guard task.approvalStatus == .pendingApproval else {
+            throw UseCaseError.validationFailed("Task is not pending approval")
+        }
+
+        // 担当者の確認
+        guard let assigneeId = task.assigneeId else {
+            throw UseCaseError.validationFailed("Task has no assignee")
+        }
+
+        // 承認者が担当者の祖先であることを確認
+        let allAgents = try agentRepository.findAll()
+        let agentsDict = Dictionary(uniqueKeysWithValues: allAgents.map { ($0.id, $0) })
+        guard AgentHierarchy.isAncestorOf(ancestor: approverId, descendant: assigneeId, agents: agentsDict) else {
+            throw UseCaseError.permissionDenied("You are not authorized to approve this task")
+        }
+
+        // 承認処理
+        task.approve(by: approverId)
+        try taskRepository.save(task)
+
+        // イベント記録
+        let event = StateChangeEvent(
+            id: EventID.generate(),
+            projectId: task.projectId,
+            entityType: .task,
+            entityId: task.id.value,
+            eventType: .statusChanged,
+            agentId: approverId,
+            previousState: ApprovalStatus.pendingApproval.rawValue,
+            newState: ApprovalStatus.approved.rawValue,
+            reason: "Task approved"
+        )
+        try eventRepository.save(event)
+
+        return task
+    }
+}
+
+// MARK: - RejectTaskUseCase
+// 参照: docs/design/TASK_REQUEST_APPROVAL.md
+
+/// タスク却下ユースケース
+/// 却下者が担当者の祖先であることを確認し、タスクを却下する
+public struct RejectTaskUseCase: Sendable {
+    private let taskRepository: any TaskRepositoryProtocol
+    private let agentRepository: any AgentRepositoryProtocol
+    private let eventRepository: any EventRepositoryProtocol
+
+    public init(
+        taskRepository: any TaskRepositoryProtocol,
+        agentRepository: any AgentRepositoryProtocol,
+        eventRepository: any EventRepositoryProtocol
+    ) {
+        self.taskRepository = taskRepository
+        self.agentRepository = agentRepository
+        self.eventRepository = eventRepository
+    }
+
+    public func execute(
+        taskId: TaskID,
+        rejecterId: AgentID,
+        reason: String?
+    ) throws -> Task {
+        guard var task = try taskRepository.findById(taskId) else {
+            throw UseCaseError.taskNotFound(taskId)
+        }
+
+        // 承認待ち状態の確認
+        guard task.approvalStatus == .pendingApproval else {
+            throw UseCaseError.validationFailed("Task is not pending approval")
+        }
+
+        // 担当者の確認
+        guard let assigneeId = task.assigneeId else {
+            throw UseCaseError.validationFailed("Task has no assignee")
+        }
+
+        // 却下者が担当者の祖先であることを確認
+        let allAgents = try agentRepository.findAll()
+        let agentsDict = Dictionary(uniqueKeysWithValues: allAgents.map { ($0.id, $0) })
+        guard AgentHierarchy.isAncestorOf(ancestor: rejecterId, descendant: assigneeId, agents: agentsDict) else {
+            throw UseCaseError.permissionDenied("You are not authorized to reject this task")
+        }
+
+        // 却下処理
+        task.reject(reason: reason)
+        try taskRepository.save(task)
+
+        // イベント記録
+        let event = StateChangeEvent(
+            id: EventID.generate(),
+            projectId: task.projectId,
+            entityType: .task,
+            entityId: task.id.value,
+            eventType: .statusChanged,
+            agentId: rejecterId,
+            previousState: ApprovalStatus.pendingApproval.rawValue,
+            newState: ApprovalStatus.rejected.rawValue,
+            reason: reason ?? "Task rejected"
+        )
+        try eventRepository.save(event)
+
+        return task
+    }
+}

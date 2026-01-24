@@ -129,6 +129,12 @@ struct ToolAuthorization {
         "start_conversation": .authenticated,
         "end_conversation": .authenticated,
 
+        // タスク依頼・承認機能
+        // 参照: docs/design/TASK_REQUEST_APPROVAL.md
+        "request_task": .authenticated,          // AIエージェント用（認証済み）
+        "approve_task_request": .managerOnly,    // Manager専用（人間）
+        "reject_task_request": .managerOnly,     // Manager専用（人間）
+
         // ヘルプ（未認証でも利用可能）
         "help": .unauthenticated,
     ]

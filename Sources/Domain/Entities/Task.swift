@@ -42,6 +42,19 @@ public struct Task: Identifiable, Equatable, Sendable {
     /// ロック日時
     public var lockedAt: Date?
 
+    // MARK: - Approval Fields
+    /// 参照: docs/design/TASK_REQUEST_APPROVAL.md - 承認フロー
+    /// 依頼者のエージェントID（直接作成時はNULL）
+    public var requesterId: AgentID?
+    /// 承認ステータス
+    public var approvalStatus: ApprovalStatus
+    /// 却下理由（rejected時のみ）
+    public var rejectedReason: String?
+    /// 承認者のエージェントID
+    public var approvedBy: AgentID?
+    /// 承認日時
+    public var approvedAt: Date?
+
     public init(
         id: TaskID,
         projectId: ProjectID,
@@ -63,7 +76,12 @@ public struct Task: Identifiable, Equatable, Sendable {
         blockedReason: String? = nil,
         isLocked: Bool = false,
         lockedByAuditId: InternalAuditID? = nil,
-        lockedAt: Date? = nil
+        lockedAt: Date? = nil,
+        requesterId: AgentID? = nil,
+        approvalStatus: ApprovalStatus = .approved,
+        rejectedReason: String? = nil,
+        approvedBy: AgentID? = nil,
+        approvedAt: Date? = nil
     ) {
         self.id = id
         self.projectId = projectId
@@ -86,6 +104,11 @@ public struct Task: Identifiable, Equatable, Sendable {
         self.isLocked = isLocked
         self.lockedByAuditId = lockedByAuditId
         self.lockedAt = lockedAt
+        self.requesterId = requesterId
+        self.approvalStatus = approvalStatus
+        self.rejectedReason = rejectedReason
+        self.approvedBy = approvedBy
+        self.approvedAt = approvedAt
     }
 
     /// タスクが完了状態かどうか
@@ -101,6 +124,30 @@ public struct Task: Identifiable, Equatable, Sendable {
     /// ステータス変更が可能かどうか（ロックされていない場合のみ）
     public var canChangeStatus: Bool {
         !isLocked
+    }
+
+    /// 承認待ちかどうか
+    public var isPendingApproval: Bool {
+        approvalStatus == .pendingApproval
+    }
+
+    // MARK: - Approval Methods
+
+    /// タスクを承認する
+    /// - Parameters:
+    ///   - approverId: 承認者のエージェントID
+    ///   - date: 承認日時
+    public mutating func approve(by approverId: AgentID, at date: Date = Date()) {
+        approvalStatus = .approved
+        approvedBy = approverId
+        approvedAt = date
+    }
+
+    /// タスクを却下する
+    /// - Parameter reason: 却下理由
+    public mutating func reject(reason: String?) {
+        approvalStatus = .rejected
+        rejectedReason = reason
     }
 }
 
@@ -165,6 +212,25 @@ public enum TaskPriority: String, Codable, Sendable, CaseIterable {
         case .high: return 3
         case .medium: return 2
         case .low: return 1
+        }
+    }
+}
+
+// MARK: - ApprovalStatus
+
+/// タスク依頼の承認ステータス
+/// 参照: docs/design/TASK_REQUEST_APPROVAL.md
+public enum ApprovalStatus: String, Codable, Sendable, CaseIterable {
+    case approved
+    case pendingApproval = "pending_approval"
+    case rejected
+
+    /// 表示用ラベル
+    public var displayName: String {
+        switch self {
+        case .approved: return "Approved"
+        case .pendingApproval: return "Pending Approval"
+        case .rejected: return "Rejected"
         }
     }
 }

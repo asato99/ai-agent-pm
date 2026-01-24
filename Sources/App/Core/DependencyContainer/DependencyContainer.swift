@@ -136,6 +136,22 @@ public final class DependencyContainer: ObservableObject {
         )
     }()
 
+    public lazy var approveTaskUseCase: ApproveTaskUseCase = {
+        ApproveTaskUseCase(
+            taskRepository: taskRepository,
+            agentRepository: agentRepository,
+            eventRepository: eventRepository
+        )
+    }()
+
+    public lazy var rejectTaskUseCase: RejectTaskUseCase = {
+        RejectTaskUseCase(
+            taskRepository: taskRepository,
+            agentRepository: agentRepository,
+            eventRepository: eventRepository
+        )
+    }()
+
     // MARK: - Use Cases (Session)
 
     public lazy var startSessionUseCase: StartSessionUseCase = {

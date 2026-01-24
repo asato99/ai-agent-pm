@@ -41,6 +41,9 @@ public enum UseCaseError: Error, Sendable {
 
     // Feature 14: プロジェクト一時停止
     case invalidProjectStatus(projectId: ProjectID, currentStatus: ProjectStatus, requiredStatus: String)
+
+    // Task Request/Approval
+    case permissionDenied(String)
 }
 
 extension UseCaseError: LocalizedError {
@@ -89,6 +92,8 @@ extension UseCaseError: LocalizedError {
             return "Cannot reassign task \(taskId.value) in \(status.rawValue) status"
         case .invalidProjectStatus(let projectId, let currentStatus, let requiredStatus):
             return "Project \(projectId.value) has status '\(currentStatus.rawValue)' but requires '\(requiredStatus)'"
+        case .permissionDenied(let reason):
+            return "Permission denied: \(reason)"
         }
     }
 }

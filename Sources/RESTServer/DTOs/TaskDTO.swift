@@ -62,3 +62,117 @@ public struct UpdateTaskRequest: Decodable {
     public let actualMinutes: Int?       // Phase 2: 実績時間（分）
     public let blockedReason: String?    // Phase 3: ブロック理由
 }
+
+// MARK: - Task Request/Approval DTOs
+// 参照: docs/design/TASK_REQUEST_APPROVAL.md
+
+/// Request body for creating a task request
+public struct RequestTaskRequest: Decodable {
+    public let title: String
+    public let description: String?
+    public let assigneeId: String
+    public let priority: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case description
+        case assigneeId = "assignee_id"
+        case priority
+    }
+}
+
+/// Request body for rejecting a task request
+public struct RejectTaskRequest: Decodable {
+    public let reason: String?
+}
+
+/// Response for task request creation
+public struct TaskRequestResponseDTO: Encodable {
+    public let taskId: String
+    public let approvalStatus: String
+    public let status: String?  // backlog when approved
+    public let approvers: [String]?  // approver IDs when pending
+
+    enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+        case approvalStatus = "approval_status"
+        case status
+        case approvers
+    }
+}
+
+/// Response for task approval
+public struct TaskApprovalResponseDTO: Encodable {
+    public let taskId: String
+    public let approvalStatus: String
+    public let status: String
+    public let approvedBy: String
+    public let approvedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+        case approvalStatus = "approval_status"
+        case status
+        case approvedBy = "approved_by"
+        case approvedAt = "approved_at"
+    }
+}
+
+/// Response for task rejection
+public struct TaskRejectionResponseDTO: Encodable {
+    public let taskId: String
+    public let approvalStatus: String
+    public let rejectedReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+        case approvalStatus = "approval_status"
+        case rejectedReason = "rejected_reason"
+    }
+}
+
+/// Task DTO with approval information
+public struct TaskWithApprovalDTO: Encodable {
+    public let id: String
+    public let projectId: String
+    public let title: String
+    public let description: String
+    public let status: String
+    public let priority: String
+    public let assigneeId: String?
+    public let requesterId: String?
+    public let approvalStatus: String
+    public let rejectedReason: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case projectId = "project_id"
+        case title
+        case description
+        case status
+        case priority
+        case assigneeId = "assignee_id"
+        case requesterId = "requester_id"
+        case approvalStatus = "approval_status"
+        case rejectedReason = "rejected_reason"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    public init(from task: Task) {
+        self.id = task.id.value
+        self.projectId = task.projectId.value
+        self.title = task.title
+        self.description = task.description
+        self.status = task.status.rawValue
+        self.priority = task.priority.rawValue
+        self.assigneeId = task.assigneeId?.value
+        self.requesterId = task.requesterId?.value
+        self.approvalStatus = task.approvalStatus.rawValue
+        self.rejectedReason = task.rejectedReason
+        self.createdAt = ISO8601DateFormatter().string(from: task.createdAt)
+        self.updatedAt = ISO8601DateFormatter().string(from: task.updatedAt)
+    }
+}

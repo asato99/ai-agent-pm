@@ -76,6 +76,14 @@ enum ToolDefinitions {
             endConversation,    // 会話終了
 
             // ========================================
+            // タスク依頼・承認機能
+            // 参照: docs/design/TASK_REQUEST_APPROVAL.md
+            // ========================================
+            requestTask,         // タスク依頼作成（認証済み）
+            approveTaskRequest,  // 依頼承認（Manager専用）
+            rejectTaskRequest,   // 依頼却下（Manager専用）
+
+            // ========================================
             // 削除済み（権限なし - 呼び出し不可）
             // ========================================
             // - list_agents: → list_subordinates を使用
@@ -1090,6 +1098,104 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "conversation_id"]
+        ]
+    ]
+
+    // MARK: - Task Request/Approval Tools
+    // 参照: docs/design/TASK_REQUEST_APPROVAL.md
+
+    /// request_task - タスク依頼を作成
+    /// 依頼者が担当者の上位（祖先）であれば自動承認される
+    /// AIエージェントがタスク依頼に使用（create_taskの代わり）
+    static let requestTask: [String: Any] = [
+        "name": "request_task",
+        "description": """
+            タスク依頼を作成します。依頼者が担当者の上位（祖先）であれば自動承認され、
+            そうでなければ担当者の上位エージェントによる承認待ち状態になります。
+            AIエージェントは直接create_taskを使用せず、このツールを使用してタスクを依頼してください。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "title": [
+                    "type": "string",
+                    "description": "タスクのタイトル"
+                ],
+                "description": [
+                    "type": "string",
+                    "description": "タスクの詳細説明"
+                ],
+                "assignee_id": [
+                    "type": "string",
+                    "description": "タスクの担当者エージェントID"
+                ],
+                "priority": [
+                    "type": "string",
+                    "description": "優先度",
+                    "enum": ["low", "medium", "high", "urgent"]
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "title", "assignee_id"]
+        ]
+    ]
+
+    /// approve_task_request - タスク依頼を承認
+    /// 承認者は担当者の上位（祖先）である必要がある
+    /// Manager専用: 人間エージェントがUI経由で使用
+    static let approveTaskRequest: [String: Any] = [
+        "name": "approve_task_request",
+        "description": """
+            タスク依頼を承認し、正式なタスクとして有効化します。
+            承認者は担当者の上位エージェント（祖先）である必要があります。
+            承認されたタスクはbacklogステータスで作業可能になります。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "task_id": [
+                    "type": "string",
+                    "description": "承認するタスクのID"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "task_id"]
+        ]
+    ]
+
+    /// reject_task_request - タスク依頼を却下
+    /// 却下者は担当者の上位（祖先）である必要がある
+    /// Manager専用: 人間エージェントがUI経由で使用
+    static let rejectTaskRequest: [String: Any] = [
+        "name": "reject_task_request",
+        "description": """
+            タスク依頼を却下します。
+            却下者は担当者の上位エージェント（祖先）である必要があります。
+            却下されたタスクはrejectedステータスになり、作業対象から除外されます。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "task_id": [
+                    "type": "string",
+                    "description": "却下するタスクのID"
+                ],
+                "reason": [
+                    "type": "string",
+                    "description": "却下理由（任意）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "task_id"]
         ]
     ]
 }

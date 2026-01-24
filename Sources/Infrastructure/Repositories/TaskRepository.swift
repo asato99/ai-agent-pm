@@ -34,6 +34,12 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
     var isLocked: Bool
     var lockedByAuditId: String?
     var lockedAt: Date?
+    // Approval fields
+    var requesterId: String?
+    var approvalStatus: String
+    var rejectedReason: String?
+    var approvedBy: String?
+    var approvedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -57,6 +63,11 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
         case isLocked = "is_locked"
         case lockedByAuditId = "locked_by_audit_id"
         case lockedAt = "locked_at"
+        case requesterId = "requester_id"
+        case approvalStatus = "approval_status"
+        case rejectedReason = "rejected_reason"
+        case approvedBy = "approved_by"
+        case approvedAt = "approved_at"
     }
 
     func toDomain() -> Task {
@@ -88,7 +99,12 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             blockedReason: blockedReason,
             isLocked: isLocked,
             lockedByAuditId: lockedByAuditId.map { InternalAuditID(value: $0) },
-            lockedAt: lockedAt
+            lockedAt: lockedAt,
+            requesterId: requesterId.map { AgentID(value: $0) },
+            approvalStatus: ApprovalStatus(rawValue: approvalStatus) ?? .approved,
+            rejectedReason: rejectedReason,
+            approvedBy: approvedBy.map { AgentID(value: $0) },
+            approvedAt: approvedAt
         )
     }
 
@@ -122,7 +138,12 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             blockedReason: task.blockedReason,
             isLocked: task.isLocked,
             lockedByAuditId: task.lockedByAuditId?.value,
-            lockedAt: task.lockedAt
+            lockedAt: task.lockedAt,
+            requesterId: task.requesterId?.value,
+            approvalStatus: task.approvalStatus.rawValue,
+            rejectedReason: task.rejectedReason,
+            approvedBy: task.approvedBy?.value,
+            approvedAt: task.approvedAt
         )
     }
 }
@@ -223,6 +244,19 @@ public final class TaskRepository: TaskRepositoryProtocol, Sendable {
             }
             return try request
                 .order(Column("locked_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
+        }
+    }
+
+    /// 承認待ちタスクを取得（プロジェクト単位）
+    /// 参照: docs/design/TASK_REQUEST_APPROVAL.md
+    public func findPendingApproval(projectId: ProjectID) throws -> [Task] {
+        try db.read { db in
+            try TaskRecord
+                .filter(Column("project_id") == projectId.value)
+                .filter(Column("approval_status") == ApprovalStatus.pendingApproval.rawValue)
+                .order(Column("created_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }
         }

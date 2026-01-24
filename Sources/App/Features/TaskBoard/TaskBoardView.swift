@@ -513,8 +513,44 @@ struct TaskCardView: View {
         return agent.type == .ai ? "🤖" : "👤"
     }
 
+    /// 依頼者名を取得
+    var requesterName: String? {
+        guard let requesterId = task.requesterId else { return nil }
+        return agents.first { $0.id == requesterId }?.name
+    }
+
+    /// カード背景色（承認状態に応じて変化）
+    var cardBackground: Color {
+        switch task.approvalStatus {
+        case .pendingApproval:
+            return Color.orange.opacity(0.1)
+        case .rejected:
+            return Color.gray.opacity(0.1)
+        case .approved:
+            return Color(.textBackgroundColor)
+        }
+    }
+
+    /// カード枠線色（承認待ちと却下は目立つ色）
+    var borderColor: Color {
+        switch task.approvalStatus {
+        case .pendingApproval:
+            return Color.orange.opacity(0.5)
+        case .rejected:
+            return Color.gray.opacity(0.5)
+        case .approved:
+            return Color.clear
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // 承認待ちまたは却下の場合はバッジを表示
+            if task.approvalStatus != .approved {
+                ApprovalStatusBadge(status: task.approvalStatus)
+                    .accessibilityIdentifier("ApprovalStatusBadge_\(task.id.value)")
+            }
+
             Text(task.title)
                 .font(.subheadline)
                 .fontWeight(.medium)
@@ -529,6 +565,20 @@ struct TaskCardView: View {
                     .lineLimit(2)
                     .accessibilityLabel(task.description)  // 明示的にラベルを設定
                     .accessibilityIdentifier("TaskDescription")
+            }
+
+            // 依頼者を表示（承認待ち/却下タスクの場合）
+            if let requester = requesterName, task.approvalStatus != .approved {
+                HStack(spacing: 4) {
+                    Text("依頼者:")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(requester)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fontWeight(.medium)
+                }
+                .accessibilityIdentifier("TaskRequester_\(task.id.value)")
             }
 
             HStack {
@@ -546,10 +596,53 @@ struct TaskCardView: View {
             }
         }
         .padding(12)
-        .background(.background)
+        .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(borderColor, lineWidth: 1)
+        )
         .contentShape(RoundedRectangle(cornerRadius: 8))  // タップ領域を明確に定義
         .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+}
+
+/// 承認ステータスバッジ
+struct ApprovalStatusBadge: View {
+    let status: ApprovalStatus
+
+    var text: String {
+        switch status {
+        case .pendingApproval:
+            return "🔔 承認待ち"
+        case .rejected:
+            return "❌ 却下"
+        case .approved:
+            return ""
+        }
+    }
+
+    var color: Color {
+        switch status {
+        case .pendingApproval:
+            return .orange
+        case .rejected:
+            return .gray
+        case .approved:
+            return .clear
+        }
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.caption2)
+            .fontWeight(.medium)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.2))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+            .accessibilityLabel(status == .pendingApproval ? "Pending approval" : "Rejected")
     }
 }
 

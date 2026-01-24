@@ -53,7 +53,11 @@ struct TaskDetailView: View {
     @State private var historyEvents: [StateChangeEvent] = []
     @State private var executionLogs: [ExecutionLog] = []
     @State private var assignee: Agent?
+    @State private var requester: Agent?
+    @State private var agents: [Agent] = []
     @State private var isLoading = false
+    @State private var showRejectDialog = false
+    @State private var rejectReason: String = ""
 
     /// イニシャライザ: taskStoreを監視するためのobserverを初期化
     init(taskId: TaskID, taskStore: TaskStore? = nil) {
@@ -69,6 +73,11 @@ struct TaskDetailView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         // Header
                         taskHeader(task)
+
+                        // Approval Section (for pending/rejected tasks)
+                        if task.approvalStatus != .approved {
+                            approvalSection(task)
+                        }
 
                         Divider()
 
@@ -197,6 +206,125 @@ struct TaskDetailView: View {
                 .accessibilityIdentifier("TaskTitle")
         }
         .accessibilityIdentifier("TaskHeader")
+    }
+
+    // MARK: - Approval Section
+    // 参照: docs/design/TASK_REQUEST_APPROVAL.md
+
+    @ViewBuilder
+    private func approvalSection(_ task: Task) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // 承認ステータスバッジ
+            HStack {
+                ApprovalStatusDetailBadge(status: task.approvalStatus)
+                    .accessibilityIdentifier("ApprovalStatus")
+                Spacer()
+            }
+
+            // 依頼者情報
+            if let requester = requester {
+                LabeledContent("依頼者") {
+                    HStack {
+                        Text(requester.type == .ai ? "🤖" : "👤")
+                        Text(requester.name)
+                    }
+                }
+                .accessibilityIdentifier("RequesterInfo")
+            }
+
+            // 却下理由（却下された場合のみ）
+            if task.approvalStatus == .rejected, let reason = task.rejectedReason {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("却下理由")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(reason)
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                }
+                .accessibilityIdentifier("RejectedReason")
+            }
+
+            // 承認/却下ボタン（承認待ちの場合のみ）
+            if task.approvalStatus == .pendingApproval {
+                HStack(spacing: 12) {
+                    Button {
+                        approveTask(task)
+                    } label: {
+                        Label("承認", systemImage: "checkmark.circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .accessibilityIdentifier("ApproveButton")
+
+                    Button {
+                        showRejectDialog = true
+                    } label: {
+                        Label("却下", systemImage: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .accessibilityIdentifier("RejectButton")
+                }
+            }
+        }
+        .padding()
+        .background(task.approvalStatus == .pendingApproval ? Color.orange.opacity(0.1) : Color.gray.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(task.approvalStatus == .pendingApproval ? Color.orange.opacity(0.5) : Color.gray.opacity(0.5), lineWidth: 1)
+        )
+        .accessibilityIdentifier("ApprovalSection")
+        .sheet(isPresented: $showRejectDialog) {
+            RejectTaskDialog(
+                taskTitle: task.title,
+                reason: $rejectReason,
+                onReject: {
+                    rejectTask(task, reason: rejectReason)
+                    showRejectDialog = false
+                    rejectReason = ""
+                },
+                onCancel: {
+                    showRejectDialog = false
+                    rejectReason = ""
+                }
+            )
+        }
+    }
+
+    private func approveTask(_ task: Task) {
+        AsyncTask {
+            do {
+                // NOTE: UIからの承認では、現在ログインしているユーザーのエージェントIDを使用
+                // 現時点では簡易実装としてシステムユーザーを使用
+                // 将来的にはログイン機能と統合する必要がある
+                let updatedTask = try container.approveTaskUseCase.execute(
+                    taskId: task.id,
+                    approverId: AgentID.systemUser
+                )
+                taskStore?.updateTask(updatedTask)
+                await loadData()
+            } catch {
+                router.showAlert(.error(message: error.localizedDescription))
+            }
+        }
+    }
+
+    private func rejectTask(_ task: Task, reason: String?) {
+        AsyncTask {
+            do {
+                let updatedTask = try container.rejectTaskUseCase.execute(
+                    taskId: task.id,
+                    rejecterId: AgentID.systemUser,
+                    reason: reason
+                )
+                taskStore?.updateTask(updatedTask)
+                await loadData()
+            } catch {
+                router.showAlert(.error(message: error.localizedDescription))
+            }
+        }
     }
 
     @ViewBuilder
@@ -520,6 +648,12 @@ struct TaskDetailView: View {
             if let assigneeId = detail.task.assigneeId {
                 assignee = try container.agentRepository.findById(assigneeId)
             }
+
+            if let requesterId = detail.task.requesterId {
+                requester = try container.agentRepository.findById(requesterId)
+            }
+
+            agents = try container.getAgentsUseCase.execute()
 
             // Load handoffs for this task
             handoffs = try container.handoffRepository.findByTask(taskId)
@@ -857,5 +991,89 @@ struct TaskExecutionLogRow: View {
         .padding()
         .background(.background.secondary)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// MARK: - Approval Status Badge (Detailed)
+// 参照: docs/design/TASK_REQUEST_APPROVAL.md
+
+struct ApprovalStatusDetailBadge: View {
+    let status: ApprovalStatus
+
+    var text: String {
+        switch status {
+        case .pendingApproval:
+            return "🔔 承認待ち"
+        case .rejected:
+            return "❌ 却下"
+        case .approved:
+            return "✅ 承認済み"
+        }
+    }
+
+    var color: Color {
+        switch status {
+        case .pendingApproval:
+            return .orange
+        case .rejected:
+            return .gray
+        case .approved:
+            return .green
+        }
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.2))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+}
+
+// MARK: - Reject Task Dialog
+// 参照: docs/design/TASK_REQUEST_APPROVAL.md
+
+struct RejectTaskDialog: View {
+    let taskTitle: String
+    @Binding var reason: String
+    let onReject: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("タスクを却下")
+                .font(.headline)
+
+            Text("「\(taskTitle)」を却下しますか？")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            TextField("却下理由（任意）", text: $reason, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(3...6)
+                .accessibilityIdentifier("RejectReasonField")
+
+            HStack(spacing: 16) {
+                Button("キャンセル") {
+                    onCancel()
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("CancelRejectButton")
+
+                Button("却下する") {
+                    onReject()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .accessibilityIdentifier("ConfirmRejectButton")
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 300)
+        .accessibilityIdentifier("RejectTaskDialog")
     }
 }
