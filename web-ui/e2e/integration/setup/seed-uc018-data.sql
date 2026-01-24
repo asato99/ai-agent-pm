@@ -20,8 +20,10 @@
 -- 違反すると統合テストの価値がゼロになる。
 
 -- Clear existing UC018 test data
+-- Note: chat_messages don't exist in DB (stored in files), cleared by test script
+DELETE FROM pending_agent_purposes WHERE project_id = 'uc018-project';
 DELETE FROM agent_sessions WHERE agent_id IN ('uc018-tanaka', 'uc018-worker-01', 'uc018-sato');
-DELETE FROM tasks WHERE id LIKE 'uc018-%';
+DELETE FROM tasks WHERE id LIKE 'uc018-%' OR project_id = 'uc018-project';
 DELETE FROM agent_credentials WHERE agent_id IN ('uc018-tanaka', 'uc018-worker-01', 'uc018-sato');
 DELETE FROM agents WHERE id IN ('uc018-tanaka', 'uc018-worker-01', 'uc018-sato');
 DELETE FROM project_agents WHERE project_id = 'uc018-project';

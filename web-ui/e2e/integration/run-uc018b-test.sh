@@ -68,6 +68,7 @@ echo ""
 echo -e "${YELLOW}Step 1: Preparing environment${NC}"
 ps aux | grep -E "(mcp-server-pm|rest-server-pm)" | grep -v grep | awk '{print $2}' | xargs -I {} kill -9 {} 2>/dev/null || true
 rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal" "$MCP_SOCKET_PATH"
+rm -rf /tmp/uc018b_webui_work  # Clear stale chat data from previous runs
 mkdir -p /tmp/uc018b_webui_work
 echo "DB: $TEST_DB_PATH"
 echo ""
@@ -115,11 +116,14 @@ AIAGENTPM_DB_PATH="$TEST_DB_PATH" "$MCP_SERVER_BIN" daemon \
     --socket-path "$MCP_SOCKET_PATH" --foreground > /tmp/uc018b_webui_mcp_init.log 2>&1 &
 INIT_PID=$!
 sleep 3
-kill "$INIT_PID" 2>/dev/null || true
+kill -9 "$INIT_PID" 2>/dev/null || true
+sleep 1  # Wait for process to fully terminate
 rm -f "$MCP_SOCKET_PATH"
 
 SQL_FILE="$SCRIPT_DIR/setup/seed-uc018b-data.sql"
 [ -f "$SQL_FILE" ] && sqlite3 "$TEST_DB_PATH" < "$SQL_FILE"
+# Ensure no stale sessions from init phase
+sqlite3 "$TEST_DB_PATH" "DELETE FROM agent_sessions WHERE agent_id LIKE 'uc018b-%';"
 echo "Database initialized with UC018-B test data"
 
 # Create working directory structure (chat files will be created by actual agents)

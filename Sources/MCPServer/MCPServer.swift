@@ -2393,6 +2393,10 @@ public final class MCPServer {
                     "instruction": """
                         現在処理待ちのメッセージがありません。
                         2秒後に再度 get_next_action を呼び出して新しいメッセージを確認してください。
+
+                        【重要】作業依頼（「〜を実装してください」「〜を追加してください」など）を受けた場合は、
+                        まず request_task を呼び出してタスクを登録し、respond_chat で「承知しました」と応答してください。
+
                         他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                         その他の可能な操作は help ツールで確認できます。
                         """,
@@ -2407,7 +2411,14 @@ public final class MCPServer {
                     "instruction": """
                         チャットセッションです。
                         get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
-                        メッセージに対する応答は respond_chat で送信してください。
+
+                        【重要】以下のような作業依頼を受けた場合は、まず request_task を呼び出してタスクを登録してください:
+                        - 「〜を実装してください」「〜を追加してください」「〜を修正してください」
+                        - 「〜機能を作ってください」「〜をお願いします」
+                        - その他、具体的な開発作業や修正を依頼された場合
+                        タスク登録後、respond_chat で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください。
+
+                        単なる質問や相談への応答は respond_chat で送信してください。
                         他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                         その他の可能な操作は help ツールで確認できます。
                         """,
@@ -4035,6 +4046,28 @@ public final class MCPServer {
                     approvers.append(agent.id.value)
                 }
             }
+
+            // 承認者にシステム通知を送信
+            for approverId in approvers {
+                let notificationMessage = ChatMessage(
+                    id: ChatMessageID(value: "sys_task_\(UUID().uuidString.prefix(8))"),
+                    senderId: session.agentId,
+                    receiverId: AgentID(value: approverId),
+                    content: "【タスク依頼】承認依頼があります。\n\nタスク: \(title)\nタスクID: \(newTask.id.value)\n\nタスクボードから承認または却下してください。",
+                    createdAt: Date()
+                )
+                do {
+                    try chatRepository.saveMessageDualWrite(
+                        notificationMessage,
+                        projectId: session.projectId,
+                        senderAgentId: session.agentId,
+                        receiverAgentId: AgentID(value: approverId)
+                    )
+                    Self.log("[MCP] requestTask: Sent approval notification to approver \(approverId)")
+                } catch {
+                    Self.log("[MCP] requestTask: Failed to send notification to \(approverId): \(error)")
+                }
+            }
         }
 
         return [
@@ -4646,9 +4679,14 @@ public final class MCPServer {
             instruction = "未読メッセージはありません。get_next_action を呼び出して次のアクションを確認してください。"
         } else {
             instruction = """
-            上記の pending_messages に応答してください。
+            上記の pending_messages を確認してください。
             context_messages は会話の文脈理解用です（応答対象ではありません）。
-            respond_chat ツールを使用して応答を保存してください。
+
+            【重要】メッセージが作業依頼の場合（「〜を実装してください」「〜を追加してください」など）:
+            1. まず request_task を呼び出してタスクを登録してください
+            2. その後 respond_chat で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください
+
+            単なる質問や相談の場合は、respond_chat で直接応答してください。
             """
         }
 
