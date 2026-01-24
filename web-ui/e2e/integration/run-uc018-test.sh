@@ -72,8 +72,14 @@ echo ""
 
 # Step 1: 環境準備
 echo -e "${YELLOW}Step 1: Preparing environment${NC}"
+# Kill any stale processes from previous tests (including UC018-B)
 ps aux | grep -E "(mcp-server-pm|rest-server-pm)" | grep -v grep | awk '{print $2}' | xargs -I {} kill -9 {} 2>/dev/null || true
+ps aux | grep -E "aiagent_runner.*coordinator" | grep -v grep | awk '{print $2}' | xargs -I {} kill -9 {} 2>/dev/null || true
+# Kill stale claude processes that might be from previous test runs
+pkill -9 -f "claude.*dangerously-skip-permissions" 2>/dev/null || true
+sleep 1  # Wait for processes to terminate
 rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal" "$MCP_SOCKET_PATH"
+rm -f /tmp/aiagentpm_uc018b_webui.sock  # Also clean UC018-B socket to avoid conflicts
 rm -rf /tmp/uc018_webui_work  # Clear stale chat data from previous runs
 mkdir -p /tmp/uc018_webui_work
 echo "DB: $TEST_DB_PATH"

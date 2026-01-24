@@ -119,11 +119,13 @@ test.describe('Parent Agent Auto-Approval - UC018-B', () => {
     await sendButton.click()
 
     // === アサーション ===
-    // Worker-01からの応答が表示される（「承知」「開始」を含むメッセージ）
+    // Worker-01からの応答が表示される（「承認」「依頼」を含むメッセージ）
+    // Note: エージェントはUC018と同じ振る舞いをする。承認はシステム側で自動的に行われる
+    // Note: Claude processing + request_task + respond_chat takes ~40-60 seconds
     await expect(
-      page.getByText(/承知.*開始|開始.*承知|承知しました/).first(),
+      page.getByText(/承認.*依頼|依頼.*承認/).first(),
       'UC018-B Step 2: Worker-01の応答メッセージがチャットに表示されない'
-    ).toBeVisible({ timeout: 10_000 })
+    ).toBeVisible({ timeout: 60_000 })
   })
 
   /**

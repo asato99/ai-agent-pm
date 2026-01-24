@@ -3997,9 +3997,25 @@ public final class MCPServer {
         let allAgents = try agentRepository.findAll()
         let agentsDict = Dictionary(uniqueKeysWithValues: allAgents.map { ($0.id, $0) })
 
+        // 依頼者（実際にタスクを依頼した人）を特定
+        // - タスクセッションの場合: session.agentId（エージェント自身）
+        // - チャットセッションの場合: チャットメッセージの送信者（依頼者）
+        // UC018-B: 上位者からのチャット依頼は自動承認されるべき
+        var actualRequester = session.agentId
+        if session.purpose == .chat {
+            // チャットセッションの場合、最近のメッセージから依頼者を特定
+            let messages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
+            // 自分宛てのメッセージ（他者からの依頼）を取得
+            let incomingMessages = messages.filter({ $0.senderId != session.agentId })
+            if let lastIncomingMessage = incomingMessages.last {
+                actualRequester = lastIncomingMessage.senderId
+                Self.log("[MCP] requestTask: Chat session - actual requester is \(actualRequester.value) (from chat message)")
+            }
+        }
+
         // 依頼者が担当者の祖先かどうか判定
         let isAncestor = AgentHierarchy.isAncestorOf(
-            ancestor: session.agentId,
+            ancestor: actualRequester,
             descendant: assignee.id,
             agents: agentsDict
         )
