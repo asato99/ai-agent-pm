@@ -31,3 +31,12 @@ ai_providers:
 
 # Logging (optional)
 # log_directory: /tmp/coordinator_logs
+
+# Log upload configuration (for multi-device environments)
+# 参照: docs/design/LOG_TRANSFER_DESIGN.md
+log_upload:
+  enabled: false  # デフォルトは無効
+  endpoint: "http://localhost:8080/api/v1/execution-logs/upload"
+  max_file_size_mb: 10  # 最大ファイルサイズ（MB）
+  retry_count: 3        # リトライ回数
+  retry_delay_seconds: 1.0  # リトライ間隔（秒）

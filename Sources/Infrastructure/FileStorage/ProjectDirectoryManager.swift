@@ -43,6 +43,8 @@ public final class ProjectDirectoryManager: Sendable {
     private static let appDirectoryName = ".ai-pm"
     /// エージェントディレクトリ名
     private static let agentsDirectoryName = "agents"
+    /// ログディレクトリ名
+    private static let logsDirectoryName = "logs"
     /// チャットファイル名
     private static let chatFileName = "chat.jsonl"
     /// .gitignore の内容
@@ -50,6 +52,7 @@ public final class ProjectDirectoryManager: Sendable {
         # AI Agent PM - auto-generated
         chat.jsonl
         context.md
+        logs/
         """
 
     private let fileManager: FileManager
@@ -95,6 +98,32 @@ public final class ProjectDirectoryManager: Sendable {
         let agentDirURL = agentsDirURL.appendingPathComponent(agentId.value)
         try createDirectoryIfNeeded(at: agentDirURL)
         return agentDirURL
+    }
+
+    /// 実行ログ用ディレクトリのパスを取得（なければ作成）
+    /// - Parameters:
+    ///   - workingDirectory: プロジェクトの作業ディレクトリ
+    ///   - agentId: エージェントID
+    /// - Returns: ログディレクトリの URL
+    /// - Throws: workingDirectory が nil の場合
+    ///
+    /// ディレクトリ構成:
+    /// ```
+    /// {project.workingDirectory}/
+    /// └── .ai-pm/
+    ///     └── logs/
+    ///         └── {agent-id}/
+    ///             ├── 20260125_143022.log
+    ///             └── ...
+    /// ```
+    public func getOrCreateLogDirectory(workingDirectory: String?, agentId: AgentID) throws -> URL {
+        let appDirURL = try getOrCreateAppDirectory(workingDirectory: workingDirectory)
+        let logsDirURL = appDirURL.appendingPathComponent(Self.logsDirectoryName)
+        try createDirectoryIfNeeded(at: logsDirURL)
+
+        let agentLogDirURL = logsDirURL.appendingPathComponent(agentId.value)
+        try createDirectoryIfNeeded(at: agentLogDirURL)
+        return agentLogDirURL
     }
 
     /// チャットファイルのパスを取得

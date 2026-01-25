@@ -42,7 +42,7 @@ bin/
 .gemini/
 .cursor/
 .serena/
-.ai-pm/
+.ai-pm/          # Includes .ai-pm/logs/ for execution logs
 .playwright-mcp/
 
 # Local config

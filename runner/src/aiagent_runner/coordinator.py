@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional, TextIO
 
 from aiagent_runner.coordinator_config import CoordinatorConfig
+from aiagent_runner.log_uploader import LogUploader, LogUploadConfig
 from aiagent_runner.mcp_client import MCPClient, MCPError
 from aiagent_runner.platform import get_data_directory, is_windows
 
@@ -48,6 +49,17 @@ class AgentInstanceInfo:
     task_id: Optional[str] = None              # Phase 4: ログファイルパス登録用
     log_file_path: Optional[str] = None        # Phase 4: ログファイルパス
     mcp_config_file: Optional[str] = None      # Temp file for MCP config (Claude CLI)
+    execution_log_id: Optional[str] = None     # ログアップロード用実行ログID
+
+
+@dataclass
+class _LogUploadInfo:
+    """Internal info for async log upload task."""
+    log_file_path: str
+    execution_log_id: str
+    agent_id: str
+    task_id: str
+    project_id: str
 
 
 class Coordinator:
@@ -86,6 +98,21 @@ class Coordinator:
 
         self._running = False
         self._instances: dict[AgentInstanceKey, AgentInstanceInfo] = {}
+
+        # Phase 6: Log upload configuration
+        # 参照: docs/design/LOG_TRANSFER_DESIGN.md
+        self._pending_uploads: dict[str, asyncio.Task] = {}  # execution_log_id -> Task
+        self.log_uploader: Optional[LogUploader] = None
+        if hasattr(config, 'log_upload') and config.log_upload and config.log_upload.enabled:
+            upload_config = LogUploadConfig(
+                enabled=config.log_upload.enabled,
+                endpoint=config.log_upload.endpoint,
+                max_file_size_mb=getattr(config.log_upload, 'max_file_size_mb', 10),
+                retry_count=getattr(config.log_upload, 'retry_count', 3),
+                retry_delay_seconds=getattr(config.log_upload, 'retry_delay_seconds', 1.0)
+            )
+            self.log_uploader = LogUploader(upload_config, config.coordinator_token or "")
+            logger.info("LogUploader initialized with endpoint: %s", upload_config.endpoint)
 
     @property
     def log_directory(self) -> Path:
@@ -391,12 +418,80 @@ class Coordinator:
                         logger.debug(f"Removed temp MCP config: {info.mcp_config_file}")
                     except Exception:
                         pass
+
+                # Phase 6: Start async log upload (non-blocking)
+                # 参照: docs/design/LOG_TRANSFER_DESIGN.md
+                if (self.log_uploader and info.execution_log_id and
+                    info.log_file_path and info.task_id):
+                    upload_info = _LogUploadInfo(
+                        log_file_path=info.log_file_path,
+                        execution_log_id=info.execution_log_id,
+                        agent_id=key.agent_id,
+                        task_id=info.task_id,
+                        project_id=key.project_id
+                    )
+                    task = asyncio.create_task(self._upload_log_async(upload_info))
+                    self._pending_uploads[info.execution_log_id] = task
+                    logger.debug(f"Started async log upload for {info.execution_log_id}")
+
                 finished.append((key, info, retcode))
 
         for key, _, _ in finished:
             del self._instances[key]
 
         return finished
+
+    async def _upload_log_async(self, upload_info: _LogUploadInfo) -> None:
+        """Upload log file asynchronously.
+
+        On success: deletes local temp file
+        On failure: registers local path via MCP as fallback
+
+        Args:
+            upload_info: Log upload information
+        """
+        try:
+            result = await self.log_uploader.upload(
+                log_file_path=upload_info.log_file_path,
+                execution_log_id=upload_info.execution_log_id,
+                agent_id=upload_info.agent_id,
+                task_id=upload_info.task_id,
+                project_id=upload_info.project_id
+            )
+
+            if result:
+                # Upload succeeded - delete local temp file
+                try:
+                    Path(upload_info.log_file_path).unlink()
+                    logger.info(f"Log uploaded and temp file deleted: {upload_info.execution_log_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete temp log file: {e}")
+            else:
+                # Upload failed - register local path as fallback
+                logger.warning(f"Log upload failed for {upload_info.execution_log_id}, registering local path")
+                try:
+                    await self.mcp_client.register_execution_log_file(
+                        execution_log_id=upload_info.execution_log_id,
+                        log_file_path=upload_info.log_file_path
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to register local log path: {e}")
+
+        except Exception as e:
+            logger.error(f"Async log upload error for {upload_info.execution_log_id}: {e}")
+            # Try to register local path as fallback
+            try:
+                await self.mcp_client.register_execution_log_file(
+                    execution_log_id=upload_info.execution_log_id,
+                    log_file_path=upload_info.log_file_path
+                )
+            except Exception as e2:
+                logger.error(f"Failed to register local log path as fallback: {e2}")
+
+        finally:
+            # Remove from pending uploads
+            if upload_info.execution_log_id in self._pending_uploads:
+                del self._pending_uploads[upload_info.execution_log_id]
 
     def _extract_error_from_log(self, log_file_path: str) -> Optional[str]:
         """Extract error message from log file.
