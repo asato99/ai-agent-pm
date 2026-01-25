@@ -45,6 +45,11 @@ bin/
 .ai-pm/          # Includes .ai-pm/logs/ for execution logs
 .playwright-mcp/
 
+# Playwright test artifacts
+web-ui/playwright-report/
+web-ui/playwright-report-pilot/
+web-ui/test-results/
+
 # Local config
 coordinator.yaml
 ~/
