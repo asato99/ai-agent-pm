@@ -11,6 +11,10 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    // SLOW_MO環境変数でスローモーション実行（ミリ秒）
+    launchOptions: {
+      slowMo: process.env.SLOW_MO ? parseInt(process.env.SLOW_MO) : 0,
+    },
   },
   webServer: {
     command: 'npm run dev',
