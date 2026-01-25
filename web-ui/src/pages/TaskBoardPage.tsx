@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppHeader } from '@/components/layout'
@@ -11,6 +11,7 @@ import { useTasks } from '@/hooks/useTasks'
 import { useAssignableAgents, useAgentSessions, useAuth, useSubordinates } from '@/hooks'
 import { useUnreadCounts } from '@/hooks/useUnreadCounts'
 import { api } from '@/api/client'
+import { getAncestorPath, getChildTasks, getBlockingTasks } from '@/utils/taskSorting'
 import type { Task, TaskStatus, TaskPriority, Agent } from '@/types'
 
 export function TaskBoardPage() {
@@ -36,6 +37,53 @@ export function TaskBoardPage() {
     () => (selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) ?? null : null),
     [selectedTaskId, tasks]
   )
+
+  // Compute hierarchy data for the selected task
+  const hierarchyData = useMemo(() => {
+    if (!selectedTask) {
+      return { ancestors: [], childTasks: [], upstreamTasks: [], downstreamTasks: [] }
+    }
+
+    // Get ancestors (for hierarchy path)
+    const ancestorTitles = getAncestorPath(selectedTask.id, tasks)
+    const ancestors: { id: string; title: string; status: TaskStatus }[] = []
+    let currentParentId = selectedTask.parentTaskId
+    for (const title of ancestorTitles) {
+      const parent = tasks.find((t) => t.id === currentParentId)
+      if (parent) {
+        ancestors.push({ id: parent.id, title: parent.title, status: parent.status })
+        currentParentId = parent.parentTaskId
+      }
+    }
+    // Reverse to get root-first order
+    ancestors.reverse()
+
+    // Get child tasks
+    const children = getChildTasks(selectedTask.id, tasks)
+    const childTasks = children.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+    }))
+
+    // Get upstream dependencies (tasks this task depends on)
+    const upstreamTasks = (selectedTask.dependencies ?? [])
+      .map((depId) => tasks.find((t) => t.id === depId))
+      .filter((t): t is Task => t !== undefined)
+      .map((t) => ({ id: t.id, title: t.title, status: t.status }))
+
+    // Get downstream dependencies (tasks that depend on this task)
+    const downstreamTasks = (selectedTask.dependentTasks ?? [])
+      .map((depId) => tasks.find((t) => t.id === depId))
+      .filter((t): t is Task => t !== undefined)
+      .map((t) => ({ id: t.id, title: t.title, status: t.status }))
+
+    return { ancestors, childTasks, upstreamTasks, downstreamTasks }
+  }, [selectedTask, tasks])
+
+  const handleTaskSelect = useCallback((taskId: string) => {
+    setSelectedTaskId(taskId)
+  }, [])
 
   const createTaskMutation = useMutation({
     mutationFn: async (data: { title: string; description: string; priority: TaskPriority; assigneeId?: string }) => {
@@ -176,6 +224,11 @@ export function TaskBoardPage() {
           setIsDetailPanelOpen(false)
           setSelectedTaskId(null)
         }}
+        ancestors={hierarchyData.ancestors}
+        childTasks={hierarchyData.childTasks}
+        upstreamTasks={hierarchyData.upstreamTasks}
+        downstreamTasks={hierarchyData.downstreamTasks}
+        onTaskSelect={handleTaskSelect}
       />
 
       {/* Chat Panel - opens when clicking on an agent avatar */}

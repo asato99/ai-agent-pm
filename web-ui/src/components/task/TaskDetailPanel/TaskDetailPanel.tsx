@@ -18,10 +18,22 @@ const approvalStatusStyles: Record<ApprovalStatus, string> = {
   rejected: 'bg-gray-100 text-gray-700 border-gray-300',
 }
 
+// Minimal task info for hierarchy display
+interface TaskSummary {
+  id: string
+  title: string
+  status: TaskStatus
+}
+
 interface TaskDetailPanelProps {
   task: Task | null
   isOpen: boolean
   onClose: () => void
+  ancestors?: TaskSummary[]
+  childTasks?: TaskSummary[]
+  upstreamTasks?: TaskSummary[]
+  downstreamTasks?: TaskSummary[]
+  onTaskSelect?: (taskId: string) => void
 }
 
 const priorityLabels: Record<string, string> = {
@@ -38,7 +50,34 @@ const priorityStyles: Record<string, string> = {
   urgent: 'bg-red-100 text-red-700',
 }
 
-export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps) {
+const statusIcons: Record<TaskStatus, string> = {
+  backlog: '📋',
+  todo: '📝',
+  in_progress: '🔴',
+  blocked: '⏸️',
+  done: '✅',
+  cancelled: '❌',
+}
+
+const statusLabels: Record<TaskStatus, string> = {
+  backlog: 'Backlog',
+  todo: 'To Do',
+  in_progress: 'In Progress',
+  blocked: 'Blocked',
+  done: 'Done',
+  cancelled: 'Cancelled',
+}
+
+export function TaskDetailPanel({
+  task,
+  isOpen,
+  onClose,
+  ancestors = [],
+  childTasks = [],
+  upstreamTasks = [],
+  downstreamTasks = [],
+  onTaskSelect,
+}: TaskDetailPanelProps) {
   const queryClient = useQueryClient()
   const { permissions, isLoading: permissionsLoading } = useTaskPermissions(task?.id ?? null)
   const { handoffs, isLoading: handoffsLoading } = useTaskHandoffs(task?.id ?? null)
@@ -268,8 +307,103 @@ export function TaskDetailPanel({ task, isOpen, onClose }: TaskDetailPanelProps)
             </p>
           </div>
 
-          {/* Dependencies */}
-          {task.dependencies.length > 0 && (
+          {/* Hierarchy Path - only show for non-root tasks */}
+          {ancestors.length > 0 && (
+            <div data-testid="hierarchy-path">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">階層パス</h3>
+              <div className="flex items-center flex-wrap gap-1 text-sm">
+                {ancestors.map((ancestor, index) => (
+                  <span key={ancestor.id} className="flex items-center gap-1">
+                    {index > 0 && <span className="text-gray-400">{'>'}</span>}
+                    <button
+                      type="button"
+                      onClick={() => onTaskSelect?.(ancestor.id)}
+                      className="text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      {ancestor.title}
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Child Tasks - only show if there are children */}
+          {childTasks.length > 0 && (
+            <div data-testid="children-section">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">
+                子タスク ({childTasks.length}件)
+              </h3>
+              <div className="space-y-2">
+                {childTasks.map((child) => (
+                  <div
+                    key={child.id}
+                    className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onTaskSelect?.(child.id)}
+                      className="text-sm text-gray-900 hover:text-blue-600 hover:underline"
+                    >
+                      {child.title}
+                    </button>
+                    <span className="text-xs text-gray-500">{statusLabels[child.status]}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Upstream Dependencies */}
+          {upstreamTasks.length > 0 && (
+            <div data-testid="upstream-dependencies">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">依存先</h3>
+              <div className="space-y-2">
+                {upstreamTasks.map((dep) => (
+                  <div
+                    key={dep.id}
+                    className="flex items-center gap-2 p-2 bg-gray-50 rounded"
+                  >
+                    <span>{statusIcons[dep.status]}</span>
+                    <button
+                      type="button"
+                      onClick={() => onTaskSelect?.(dep.id)}
+                      className="text-sm text-gray-900 hover:text-blue-600 hover:underline"
+                    >
+                      {dep.title}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Downstream Dependencies */}
+          {downstreamTasks.length > 0 && (
+            <div data-testid="downstream-dependencies">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">依存元</h3>
+              <div className="space-y-2">
+                {downstreamTasks.map((dep) => (
+                  <div
+                    key={dep.id}
+                    className="flex items-center gap-2 p-2 bg-gray-50 rounded"
+                  >
+                    <span>{statusIcons[dep.status]}</span>
+                    <button
+                      type="button"
+                      onClick={() => onTaskSelect?.(dep.id)}
+                      className="text-sm text-gray-900 hover:text-blue-600 hover:underline"
+                    >
+                      {dep.title}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Dependencies (legacy - show task IDs) */}
+          {task.dependencies.length > 0 && upstreamTasks.length === 0 && (
             <div>
               <h3 className="text-sm font-medium text-gray-700 mb-2">Dependencies</h3>
               <div className="flex flex-wrap gap-2">

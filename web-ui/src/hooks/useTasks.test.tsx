@@ -34,9 +34,12 @@ describe('useTasks', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    expect(result.current.tasks).toHaveLength(2)
+    expect(result.current.tasks).toHaveLength(5)
     expect(result.current.tasks[0].title).toBe('API実装')
     expect(result.current.tasks[1].title).toBe('DB設計')
+    expect(result.current.tasks[2].title).toBe('エンドポイント実装')
+    expect(result.current.tasks[3].title).toBe('ユーザーAPI')
+    expect(result.current.tasks[4].title).toBe('フロントエンド実装')
   })
 
   it('includes status and priority in task information', async () => {
@@ -65,5 +68,8 @@ describe('useTasks', () => {
     const grouped = result.current.tasksByStatus
     expect(grouped.in_progress).toHaveLength(1)
     expect(grouped.done).toHaveLength(1)
+    expect(grouped.todo).toHaveLength(1)
+    expect(grouped.backlog).toHaveLength(1)
+    expect(grouped.blocked).toHaveLength(1)
   })
 })

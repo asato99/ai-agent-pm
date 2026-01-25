@@ -5,10 +5,26 @@ import { TaskCard } from '../TaskCard'
 interface DraggableTaskCardProps {
   task: Task
   agents?: Agent[]
+  depth?: number
+  parentTask?: Task
+  blockingTasks?: Task[]
+  showBlockedReason?: boolean
   onClick: (taskId: string) => void
+  onParentClick?: (taskId: string) => void
+  onTaskClick?: (taskId: string) => void
 }
 
-export function DraggableTaskCard({ task, agents, onClick }: DraggableTaskCardProps) {
+export function DraggableTaskCard({
+  task,
+  agents,
+  depth = 0,
+  parentTask,
+  blockingTasks,
+  showBlockedReason,
+  onClick,
+  onParentClick,
+  onTaskClick,
+}: DraggableTaskCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   })
@@ -28,7 +44,17 @@ export function DraggableTaskCard({ task, agents, onClick }: DraggableTaskCardPr
       {...listeners}
       {...attributes}
     >
-      <TaskCard task={task} agents={agents} onClick={onClick} />
+      <TaskCard
+        task={task}
+        agents={agents}
+        depth={depth}
+        parentTask={parentTask}
+        blockingTasks={blockingTasks}
+        showBlockedReason={showBlockedReason}
+        onClick={onClick}
+        onParentClick={onParentClick}
+        onTaskClick={onTaskClick}
+      />
     </div>
   )
 }

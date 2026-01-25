@@ -27,13 +27,44 @@ export interface Task {
   priority: TaskPriority
   assigneeId: string | null
   creatorId: string
+
+  // Parent-child relationship
+  parentTaskId: string | null
+
+  // Dependencies
   dependencies: string[]
-  contexts: TaskContext[]
+  dependentTasks: string[]
+
+  // Block info
+  blockedReason: string | null
+
+  // Time tracking
+  estimatedMinutes: number | null
+  actualMinutes: number | null
+
+  // Approval (existing)
   approvalStatus: ApprovalStatus
   requesterId: string | null
   rejectedReason: string | null
+
+  // Other
+  contexts: TaskContext[]
   createdAt: string
   updatedAt: string
+}
+
+// Task depth info for display
+export interface TaskDepthInfo {
+  level: number           // 0 = root, 1 = first level, ...
+  parentTitle: string | null
+  ancestorPath: string[]  // ['Auth Feature', 'Login', 'UI Implementation']
+}
+
+// Dependency display info
+export interface DependencyDisplayInfo {
+  id: string
+  title: string
+  status: TaskStatus
 }
 
 export interface CreateTaskInput {

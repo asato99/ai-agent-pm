@@ -9,14 +9,21 @@ interface Task {
   priority: string
   assigneeId: string | null
   creatorId: string
+  parentTaskId: string | null
   dependencies: string[]
+  dependentTasks: string[]
+  blockedReason: string | null
+  estimatedMinutes: number | null
+  actualMinutes: number | null
   contexts: unknown[]
   createdAt: string
   updatedAt: string
 }
 
 // In-memory task store for E2E tests
+// Includes hierarchy test data: root → child → grandchild
 const initialTasks: Task[] = [
+  // Root task (L0)
   {
     id: 'task-1',
     projectId: 'project-1',
@@ -26,11 +33,17 @@ const initialTasks: Task[] = [
     priority: 'high',
     assigneeId: 'worker-1',
     creatorId: 'manager-1',
-    dependencies: [],
+    parentTaskId: null,
+    dependencies: ['task-2'],  // depends on DB設計
+    dependentTasks: ['task-3'],  // task-3 depends on this
+    blockedReason: null,
+    estimatedMinutes: 480,
+    actualMinutes: 240,
     contexts: [],
     createdAt: '2024-01-10T00:00:00Z',
     updatedAt: '2024-01-15T10:00:00Z',
   },
+  // Done task (L0)
   {
     id: 'task-2',
     projectId: 'project-1',
@@ -40,10 +53,75 @@ const initialTasks: Task[] = [
     priority: 'medium',
     assigneeId: null,
     creatorId: 'manager-1',
+    parentTaskId: null,
     dependencies: [],
+    dependentTasks: ['task-1'],
+    blockedReason: null,
+    estimatedMinutes: 120,
+    actualMinutes: 90,
     contexts: [],
     createdAt: '2024-01-08T00:00:00Z',
     updatedAt: '2024-01-12T14:00:00Z',
+  },
+  // Child task (L1) - child of task-1
+  {
+    id: 'task-3',
+    projectId: 'project-1',
+    title: 'エンドポイント実装',
+    description: 'APIエンドポイントの実装詳細',
+    status: 'todo',
+    priority: 'high',
+    assigneeId: null,
+    creatorId: 'manager-1',
+    parentTaskId: 'task-1',
+    dependencies: ['task-1'],
+    dependentTasks: ['task-4'],
+    blockedReason: null,
+    estimatedMinutes: 240,
+    actualMinutes: null,
+    contexts: [],
+    createdAt: '2024-01-11T00:00:00Z',
+    updatedAt: '2024-01-11T00:00:00Z',
+  },
+  // Grandchild task (L2) - child of task-3
+  {
+    id: 'task-4',
+    projectId: 'project-1',
+    title: 'ユーザーAPI',
+    description: 'ユーザー管理APIの実装',
+    status: 'backlog',
+    priority: 'medium',
+    assigneeId: null,
+    creatorId: 'manager-1',
+    parentTaskId: 'task-3',
+    dependencies: ['task-3'],
+    dependentTasks: [],
+    blockedReason: null,
+    estimatedMinutes: 120,
+    actualMinutes: null,
+    contexts: [],
+    createdAt: '2024-01-12T00:00:00Z',
+    updatedAt: '2024-01-12T00:00:00Z',
+  },
+  // Blocked task (L0)
+  {
+    id: 'task-5',
+    projectId: 'project-1',
+    title: 'フロントエンド実装',
+    description: 'フロントエンドUIの実装',
+    status: 'blocked',
+    priority: 'high',
+    assigneeId: 'worker-2',
+    creatorId: 'manager-1',
+    parentTaskId: null,
+    dependencies: ['task-1', 'task-3'],
+    dependentTasks: [],
+    blockedReason: 'API実装の完了待ち',
+    estimatedMinutes: 480,
+    actualMinutes: null,
+    contexts: [],
+    createdAt: '2024-01-13T00:00:00Z',
+    updatedAt: '2024-01-13T00:00:00Z',
   },
 ]
 
@@ -251,7 +329,12 @@ export const handlers = [
       priority: body.priority || 'medium',
       assigneeId: null,
       creatorId: 'manager-1',
+      parentTaskId: null,
       dependencies: [],
+      dependentTasks: [],
+      blockedReason: null,
+      estimatedMinutes: null,
+      actualMinutes: null,
       contexts: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

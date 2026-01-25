@@ -36,20 +36,25 @@ VALUES
   ('project-2', 'モバイルアプリ', 'iOSアプリ開発', 'active', datetime('now'), datetime('now'));
 
 -- Insert test tasks for project-1 (12 total)
-INSERT INTO tasks (id, project_id, title, description, status, priority, assignee_id, created_by_agent_id, dependencies, created_at, updated_at)
+-- Hierarchy structure for testing:
+--   task-1 (API実装) - L0 root, has dependency on task-2
+--     └── task-3 (エンドポイント実装) - L1 child of task-1
+--           └── task-4 (ユーザーAPI) - L2 grandchild
+--   task-5 (ブロックされたタスク) - blocked by task-1
+INSERT INTO tasks (id, project_id, title, description, status, priority, assignee_id, created_by_agent_id, dependencies, parent_task_id, created_at, updated_at)
 VALUES
-  ('task-1', 'project-1', 'API実装', 'REST APIエンドポイントの実装', 'in_progress', 'high', 'worker-1', 'manager-1', '[]', datetime('now'), datetime('now')),
-  ('task-2', 'project-1', 'DB設計', 'データベーススキーマの設計', 'done', 'medium', 'worker-2', 'manager-1', '[]', datetime('now'), datetime('now')),
-  ('task-3', 'project-1', 'フロントエンド実装', 'React コンポーネントの実装', 'todo', 'medium', 'worker-1', 'manager-1', '["task-2"]', datetime('now'), datetime('now')),
-  ('task-4', 'project-1', 'テスト作成', 'E2Eテストの作成', 'backlog', 'low', NULL, 'manager-1', '["task-1","task-3"]', datetime('now'), datetime('now')),
-  ('task-5', 'project-1', 'ログイン機能', 'ユーザー認証の実装', 'done', 'high', 'worker-1', 'manager-1', '[]', datetime('now'), datetime('now')),
-  ('task-6', 'project-1', 'カート機能', 'ショッピングカートの実装', 'done', 'high', 'worker-2', 'manager-1', '[]', datetime('now'), datetime('now')),
-  ('task-7', 'project-1', '決済連携', '外部決済サービスとの連携', 'in_progress', 'high', 'manager-1', 'manager-1', '["task-6"]', datetime('now'), datetime('now')),
-  ('task-8', 'project-1', '商品管理', '商品CRUD機能', 'done', 'medium', 'worker-1', 'manager-1', '[]', datetime('now'), datetime('now')),
-  ('task-9', 'project-1', '注文管理', '注文処理フロー', 'in_progress', 'medium', 'manager-1', 'manager-1', '["task-7"]', datetime('now'), datetime('now')),
-  ('task-10', 'project-1', 'メール通知', '注文確認メールの送信', 'blocked', 'medium', 'worker-2', 'manager-1', '["task-9"]', datetime('now'), datetime('now')),
-  ('task-11', 'project-1', 'レスポンシブ対応', 'モバイル対応UI', 'todo', 'low', NULL, 'manager-1', '["task-3"]', datetime('now'), datetime('now')),
-  ('task-12', 'project-1', 'パフォーマンス最適化', 'クエリ最適化・キャッシュ', 'backlog', 'low', NULL, 'manager-1', '[]', datetime('now'), datetime('now'));
+  ('task-1', 'project-1', 'API実装', 'REST APIエンドポイントの実装', 'in_progress', 'high', 'worker-1', 'manager-1', '["task-2"]', NULL, datetime('now'), datetime('now')),
+  ('task-2', 'project-1', 'DB設計', 'データベーススキーマの設計', 'done', 'medium', 'worker-2', 'manager-1', '[]', NULL, datetime('now'), datetime('now')),
+  ('task-3', 'project-1', 'エンドポイント実装', 'REST APIエンドポイントの詳細実装', 'todo', 'medium', 'worker-1', 'manager-1', '[]', 'task-1', datetime('now'), datetime('now')),
+  ('task-4', 'project-1', 'ユーザーAPI', 'ユーザー関連APIの実装', 'backlog', 'low', NULL, 'manager-1', '[]', 'task-3', datetime('now'), datetime('now')),
+  ('task-5', 'project-1', 'ブロックされたタスク', '依存関係でブロック中', 'blocked', 'high', 'worker-1', 'manager-1', '["task-1"]', NULL, datetime('now'), datetime('now')),
+  ('task-6', 'project-1', 'カート機能', 'ショッピングカートの実装', 'done', 'high', 'worker-2', 'manager-1', '[]', NULL, datetime('now'), datetime('now')),
+  ('task-7', 'project-1', '決済連携', '外部決済サービスとの連携', 'in_progress', 'high', 'manager-1', 'manager-1', '["task-6"]', NULL, datetime('now'), datetime('now')),
+  ('task-8', 'project-1', '商品管理', '商品CRUD機能', 'done', 'medium', 'worker-1', 'manager-1', '[]', NULL, datetime('now'), datetime('now')),
+  ('task-9', 'project-1', '注文管理', '注文処理フロー', 'in_progress', 'medium', 'manager-1', 'manager-1', '["task-7"]', NULL, datetime('now'), datetime('now')),
+  ('task-10', 'project-1', 'メール通知', '注文確認メールの送信', 'blocked', 'medium', 'worker-2', 'manager-1', '["task-9"]', NULL, datetime('now'), datetime('now')),
+  ('task-11', 'project-1', 'レスポンシブ対応', 'モバイル対応UI', 'todo', 'low', NULL, 'manager-1', '["task-3"]', NULL, datetime('now'), datetime('now')),
+  ('task-12', 'project-1', 'パフォーマンス最適化', 'クエリ最適化・キャッシュ', 'backlog', 'low', NULL, 'manager-1', '[]', NULL, datetime('now'), datetime('now'));
 
 -- Tasks for project-2 (8 total)
 INSERT INTO tasks (id, project_id, title, description, status, priority, assignee_id, created_by_agent_id, dependencies, created_at, updated_at)
