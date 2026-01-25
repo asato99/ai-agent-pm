@@ -1508,29 +1508,20 @@ public final class MCPServer {
         }
 
         // Debug: log all tasks found for this agent with full details
-        Self.log("[MCP] getAgentAction: Agent '\(agentId)' checking for actionable tasks in project '\(projectId)'")
+        Self.log("[MCP] getAgentAction: Agent '\(agentId)' checking for in_progress tasks in project '\(projectId)'")
         Self.log("[MCP] getAgentAction: Found \(tasks.count) total assigned task(s)")
         for task in tasks {
             let matchesProject = task.projectId == projId
-            let isActionable = task.status == .inProgress || task.status == .todo
-            Self.log("[MCP] getAgentAction:   - Task '\(task.id.value)': status=\(task.status.rawValue), projectId=\(task.projectId.value), matchesProject=\(matchesProject), isActionable=\(isActionable)")
+            let isInProgress = task.status == .inProgress
+            Self.log("[MCP] getAgentAction:   - Task '\(task.id.value)': status=\(task.status.rawValue), projectId=\(task.projectId.value), matchesProject=\(matchesProject), isInProgress=\(isInProgress)")
         }
 
-        // Workers: Check for both in_progress and todo tasks
-        // - in_progress: task is actively being worked on
-        // - todo: task is ready to be started (worker should pick it up)
         let inProgressTask = tasks.first { task in
             task.status == .inProgress && task.projectId == projId
         }
-        let todoTask = tasks.first { task in
-            task.status == .todo && task.projectId == projId
-        }
-        // Prefer in_progress over todo (continue existing work)
-        let actionableTask = inProgressTask ?? todoTask
         let hasInProgressTask = inProgressTask != nil
-        let hasActionableTask = actionableTask != nil
 
-        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasInProgressTask=\(hasInProgressTask), hasActionableTask=\(hasActionableTask) (task: \(actionableTask?.id.value ?? "none"))")
+        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasInProgressTask=\(hasInProgressTask) (in_progress task: \(inProgressTask?.id.value ?? "none"))")
 
         // Manager の待機状態チェック
         // Context.progress に基づいて起動/待機を判断
@@ -1671,20 +1662,15 @@ public final class MCPServer {
         }
 
         // action と reason を設定（pending purposeがあれば起動）
-        // Workers: todoタスクでも起動する（作業開始のため）
-        // Managers: in_progressタスクのみ起動する（ワーカー管理のため）
-        let hasWorkToDo = agent.hierarchyType == .worker ? hasActionableTask : hasInProgressTask
-        let shouldStart = hasWorkToDo || hasPendingPurpose
+        let shouldStart = hasInProgressTask || hasPendingPurpose
         let action = shouldStart ? "start" : "hold"
         let reason: String
         if hasInProgressTask {
             reason = "has_in_progress_task"
-        } else if agent.hierarchyType == .worker && todoTask != nil {
-            reason = "has_todo_task"
         } else if hasPendingPurpose {
             reason = "has_pending_purpose"
         } else {
-            reason = "no_actionable_task"
+            reason = "no_in_progress_task"
         }
 
         var result: [String: Any] = [
@@ -1693,10 +1679,7 @@ public final class MCPServer {
         ]
 
         // task_id を返す（Coordinatorがログファイルパスを登録するため）
-        // Workers: actionableTask (in_progress or todo)
-        // Managers: inProgressTask only
-        let taskForResult = agent.hierarchyType == .worker ? actionableTask : inProgressTask
-        if let task = taskForResult {
+        if let task = inProgressTask {
             result["task_id"] = task.id.value
         }
 
@@ -1732,42 +1715,10 @@ public final class MCPServer {
         let projId = ProjectID(value: projectId)
 
         // Phase 4: in_progress 状態のタスクを該当プロジェクトでフィルタリング
-        // Worker向け: "todo" タスクも検索し、自動的に "in_progress" に遷移
         let tasks = try taskRepository.findByAssignee(id)
         let inProgressTasks = tasks.filter { $0.status == .inProgress && $0.projectId == projId }
-        let todoTasks = tasks.filter { $0.status == .todo && $0.projectId == projId }
 
-        // 優先度: in_progress > todo
-        var task: Task? = inProgressTasks.first
-        var autoTransitioned = false
-
-        if task == nil, let todoTask = todoTasks.first {
-            // "todo" タスクを "in_progress" に自動遷移
-            Self.log("[MCP] getMyTask: Auto-transitioning todo task \(todoTask.id.value) to in_progress")
-
-            let useCase = UpdateTaskStatusUseCase(
-                taskRepository: taskRepository,
-                agentRepository: agentRepository,
-                eventRepository: eventRepository
-            )
-
-            do {
-                let result = try useCase.executeWithResult(
-                    taskId: todoTask.id,
-                    newStatus: .inProgress,
-                    agentId: id,
-                    sessionId: nil,
-                    reason: "Auto-transitioned by get_my_task"
-                )
-                task = result.task
-                autoTransitioned = true
-                Self.log("[MCP] getMyTask: Task \(todoTask.id.value) transitioned to in_progress")
-            } catch {
-                Self.log("[MCP] getMyTask: Failed to transition task \(todoTask.id.value): \(error)")
-            }
-        }
-
-        if let task = task {
+        if let task = inProgressTasks.first {
             // タスクのコンテキストを取得
             let latestContext = try contextRepository.findLatest(taskId: task.id)
 

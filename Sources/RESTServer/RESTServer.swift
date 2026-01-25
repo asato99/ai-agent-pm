@@ -723,7 +723,7 @@ final class RESTServer {
             projectId: projectId,
             title: createRequest.title,
             description: createRequest.description ?? "",
-            status: .todo,  // Changed from .backlog to match MCP create_task behavior
+            status: .backlog,
             priority: createRequest.priority.flatMap { TaskPriority(rawValue: $0) } ?? .medium,
             assigneeId: createRequest.assigneeId.map { AgentID(value: $0) },
             createdByAgentId: agentId,
