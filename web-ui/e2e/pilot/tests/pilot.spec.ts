@@ -12,6 +12,7 @@
 import { test, expect, Page } from '@playwright/test'
 import * as path from 'path'
 import * as fs from 'fs'
+import { execSync } from 'child_process'
 import { VariationLoader } from '../lib/variation-loader.js'
 import { ResultRecorder, aggregateAgentStats } from '../lib/result-recorder.js'
 import { ScenarioConfig, VariationConfig, TaskResult } from '../lib/types.js'
@@ -72,6 +73,12 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     // タスク作成を待機
     await waitForTaskCreation(page)
 
+    // オーナーがタスクのステータスを更新（backlog → in_progress）
+    // 注: todoに設定すると、ワーカーがtodo→in_progressへの自動遷移を試みるが、
+    // 現在のバリデーションロジックでは、最終変更者(owner)がワーカーの下位でないため拒否される
+    // このため、直接in_progressに設定してワーカーが作業できるようにする
+    await updateTaskStatusByOwner(page, 'in_progress')
+
     // タスク完了を待機
     await waitForTaskCompletion(page)
 
@@ -110,13 +117,14 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     }
 
     // ログイン
-    await page.goto('/login')
+    const baseUrl = process.env.INTEGRATION_WEB_URL || 'http://localhost:5173'
+    await page.goto(`${baseUrl}/login`)
     await page.getByLabel('Agent ID').fill(owner.id)
     await page.getByLabel('Passkey').fill(credentials.passkey)
     await page.getByRole('button', { name: 'Log in' }).click()
 
     // プロジェクト一覧にリダイレクト
-    await expect(page).toHaveURL('/projects')
+    await expect(page).toHaveURL(`${baseUrl}/projects`)
 
     // プロジェクトが表示されることを確認
     const projectName = scenarioConfig.project.name
@@ -134,9 +142,10 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
   async function executeInitialAction(page: Page) {
     const action = scenarioConfig.initial_action
     const project = scenarioConfig.project
+    const baseUrl = process.env.INTEGRATION_WEB_URL || 'http://localhost:5173'
 
     // プロジェクトに移動
-    await page.goto(`/projects/${project.id}`)
+    await page.goto(`${baseUrl}/projects/${project.id}`)
 
     // Managerのアバターをクリックしてチャットを開く
     const managerAvatar = page.locator(`[data-testid="agent-avatar-${action.to}"]`)
@@ -183,14 +192,14 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     while (Date.now() - startTime < timeout) {
       // タスクボードでタスクを確認
       const tasks = await fetchTaskStates()
-      const createdTasks = tasks.filter((t) => t.status !== 'backlog')
 
-      if (createdTasks.length > 0) {
+      // タスクが1つでも存在すれば「作成済み」とみなす
+      if (tasks.length > 0) {
         recorder.recordEvent('tasks_created', {
-          count: createdTasks.length,
-          tasks: createdTasks.map((t) => ({ id: t.task_id, title: t.title, status: t.status })),
+          count: tasks.length,
+          tasks: tasks.map((t) => ({ id: t.task_id, title: t.title, status: t.status })),
         })
-        console.log(`Tasks created: ${createdTasks.length}`)
+        console.log(`Tasks created: ${tasks.length}`)
         return
       }
 
@@ -198,6 +207,39 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     }
 
     throw new Error(`Task creation timeout after ${timeout / 1000}s`)
+  }
+
+  /**
+   * オーナーがタスクのステータスを更新
+   * 現状の仕様では、マネージャーが作成したタスクはbacklog状態のため、
+   * オーナーが手動でステータスを更新して作業を開始させる必要がある
+   */
+  async function updateTaskStatusByOwner(page: Page, targetStatus: 'todo' | 'in_progress') {
+    console.log(`Updating task status to ${targetStatus}...`)
+
+    // タスクカードをクリックして詳細ダイアログを開く
+    const taskCard = page.locator('[data-testid="task-card"]').first()
+    await taskCard.click()
+    await page.waitForTimeout(1000) // ダイアログが開くのを待つ
+
+    // ダイアログ内のステータスセレクトボックスを操作
+    const dialog = page.getByRole('dialog')
+    const statusSelect = dialog.getByRole('combobox')
+
+    // selectOptionを使ってステータスを変更
+    await statusSelect.selectOption(targetStatus)
+
+    await page.waitForTimeout(1000) // 更新を待つ
+
+    // ダイアログを閉じる
+    await dialog.getByRole('button', { name: 'Close' }).first().click()
+    await page.waitForTimeout(500)
+
+    recorder.recordEvent('task_status_updated', {
+      target_status: targetStatus,
+      updated_by: 'owner',
+    })
+    console.log(`Task status updated to ${targetStatus}`)
   }
 
   /**
@@ -275,13 +317,13 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
    */
   async function fetchTaskStates(): Promise<TaskResult[]> {
     const projectId = scenarioConfig.project.id
-    const dbPath = path.join(BASE_DIR, '../../..', 'data/test.db')
+    // パイロットテスト用のDB
+    const dbPath = '/tmp/AIAgentPM_Pilot.db'
 
     // sqlite3コマンドで直接クエリ
-    const { execSync } = require('child_process')
     try {
       const result = execSync(
-        `sqlite3 -json "${dbPath}" "SELECT id, title, status, assigned_to FROM tasks WHERE project_id = '${projectId}'"`,
+        `sqlite3 -json "${dbPath}" "SELECT id, title, status, assignee_id FROM tasks WHERE project_id = '${projectId}'"`,
         { encoding: 'utf8' }
       )
 
@@ -290,11 +332,11 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
       }
 
       const rows = JSON.parse(result)
-      return rows.map((row: { id: string; title: string; status: string; assigned_to: string }) => ({
+      return rows.map((row: { id: string; title: string; status: string; assignee_id: string }) => ({
         task_id: row.id,
         title: row.title,
         status: row.status as 'backlog' | 'todo' | 'in_progress' | 'done' | 'cancelled',
-        assigned_to: row.assigned_to,
+        assignee_id: row.assignee_id,
       }))
     } catch {
       return []

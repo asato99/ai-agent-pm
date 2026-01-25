@@ -69,6 +69,8 @@ export function generateSeedSQL(
     `-- Expected results (tasks, status changes) are NEVER seeded.`,
     ``,
     `-- Cleanup existing data`,
+    `DELETE FROM pending_agent_purposes WHERE project_id = '${project.id}';`,
+    `DELETE FROM conversations WHERE project_id = '${project.id}';`,
     `DELETE FROM tasks WHERE project_id = '${project.id}';`,
     `DELETE FROM agent_sessions WHERE agent_id IN (${agentIds});`,
     `DELETE FROM agent_credentials WHERE agent_id IN (${agentIds});`,

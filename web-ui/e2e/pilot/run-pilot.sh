@@ -3,10 +3,19 @@
 # Pilot Test Runner
 #
 # バリエーションを指定してパイロットテストを実行
+# 既存の統合テストスクリプトと同様のパターンを使用
 #
 
 set -e
 
+# 色付き出力
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# パス設定
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 E2E_DIR="$(dirname "$SCRIPT_DIR")"
 WEB_UI_DIR="$(dirname "$E2E_DIR")"
@@ -17,6 +26,21 @@ SCENARIO="hello-world"
 VARIATION="baseline"
 SKIP_SERVER_START=false
 VERBOSE=false
+
+# テスト設定
+TEST_DB_PATH="/tmp/AIAgentPM_Pilot.db"
+MCP_SOCKET_PATH="/tmp/aiagentpm_pilot.sock"
+REST_PORT="8085"
+WEB_UI_PORT="5173"
+
+export MCP_COORDINATOR_TOKEN="test_coordinator_token_pilot"
+
+# PID管理
+COORDINATOR_PID=""
+MCP_PID=""
+REST_PID=""
+WEB_UI_PID=""
+TEST_PASSED=false
 
 # 使用方法
 usage() {
@@ -38,6 +62,30 @@ Examples:
 EOF
   exit 0
 }
+
+cleanup() {
+  echo ""
+  echo -e "${YELLOW}Cleanup${NC}"
+
+  [ -n "$WEB_UI_PID" ] && kill -0 "$WEB_UI_PID" 2>/dev/null && kill "$WEB_UI_PID" 2>/dev/null
+  [ -n "$COORDINATOR_PID" ] && kill -0 "$COORDINATOR_PID" 2>/dev/null && kill "$COORDINATOR_PID" 2>/dev/null
+  [ -n "$REST_PID" ] && kill -0 "$REST_PID" 2>/dev/null && kill "$REST_PID" 2>/dev/null
+  [ -n "$MCP_PID" ] && kill -0 "$MCP_PID" 2>/dev/null && kill "$MCP_PID" 2>/dev/null
+
+  rm -f "$MCP_SOCKET_PATH"
+
+  if [ "$TEST_PASSED" == "true" ]; then
+    rm -f /tmp/pilot_*.log
+    rm -f /tmp/coordinator_pilot_config.yaml
+    rm -rf /tmp/coordinator_logs_pilot
+    rm -rf /tmp/pilot_work/.aiagent
+    rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal"
+  else
+    echo "Logs preserved: /tmp/pilot_*.log"
+  fi
+}
+
+trap cleanup EXIT
 
 # 引数解析
 while [[ $# -gt 0 ]]; do
@@ -69,7 +117,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+  echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
 log_verbose() {
@@ -97,104 +145,239 @@ if [ ! -f "$VARIATION_YAML" ]; then
   exit 1
 fi
 
-log "=== Pilot Test Runner ==="
-log "Scenario: $SCENARIO"
-log "Variation: $VARIATION"
+echo "=========================================="
+echo -e "${BLUE}Pilot Test Runner${NC}"
+echo -e "${BLUE}Scenario: $SCENARIO / Variation: $VARIATION${NC}"
+echo "=========================================="
+echo ""
 
-# 1. Seed SQL 生成
-log "Generating seed SQL..."
+# Step 1: 環境準備
+echo -e "${YELLOW}Step 1: Preparing environment${NC}"
+ps aux | grep -E "(mcp-server-pm|rest-server-pm)" | grep -v grep | awk '{print $2}' | xargs -I {} kill -9 {} 2>/dev/null || true
+rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal" "$MCP_SOCKET_PATH"
+mkdir -p /tmp/pilot_work
+
+# 作業ディレクトリのチャットファイルをクリーンアップ
+PILOT_WORKING_DIR=$(cd "$SCRIPT_DIR" && npx tsx -e "
+import * as yaml from 'js-yaml';
+import * as fs from 'fs';
+const s = yaml.load(fs.readFileSync('$SCENARIO_YAML', 'utf8'));
+console.log(s.project.working_directory);
+" 2>/dev/null || echo "")
+if [ -n "$PILOT_WORKING_DIR" ] && [ -d "$PILOT_WORKING_DIR/.ai-pm" ]; then
+  rm -rf "$PILOT_WORKING_DIR/.ai-pm"
+  echo "Cleaned: $PILOT_WORKING_DIR/.ai-pm"
+fi
+
+echo "DB: $TEST_DB_PATH"
+echo ""
+
+# Step 2: Seed SQL 生成
+echo -e "${YELLOW}Step 2: Generating seed SQL${NC}"
 mkdir -p "$SCRIPT_DIR/generated"
-
 cd "$SCRIPT_DIR"
 npx tsx lib/seed-generator.ts "$SCENARIO_YAML" "$VARIATION_YAML" > "$SEED_SQL"
+echo -e "${GREEN}✓ Generated: $SEED_SQL${NC}"
+echo ""
 
-log_verbose "Generated: $SEED_SQL"
+# Step 3: サーバーバイナリ確認
+echo -e "${YELLOW}Step 3: Checking server binaries${NC}"
+cd "$PROJECT_ROOT"
 
-# 2. データベース初期化
-log "Initializing database..."
-DB_PATH="$PROJECT_ROOT/data/test.db"
-
-if [ -f "$DB_PATH" ]; then
-  log_verbose "Removing existing database..."
-  rm -f "$DB_PATH"
+DERIVED_DATA_DIR=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name "AIAgentPM-*" -type d 2>/dev/null | head -1)
+if [ -n "$DERIVED_DATA_DIR" ] && [ -x "$DERIVED_DATA_DIR/Build/Products/Debug/mcp-server-pm" ]; then
+  MCP_SERVER_BIN="$DERIVED_DATA_DIR/Build/Products/Debug/mcp-server-pm"
+  REST_SERVER_BIN="$DERIVED_DATA_DIR/Build/Products/Debug/rest-server-pm"
+elif [ -x ".build/release/mcp-server-pm" ]; then
+  MCP_SERVER_BIN=".build/release/mcp-server-pm"
+  REST_SERVER_BIN=".build/release/rest-server-pm"
+else
+  MCP_SERVER_BIN=""
+  REST_SERVER_BIN=""
 fi
 
-# スキーマ適用
-sqlite3 "$DB_PATH" < "$PROJECT_ROOT/data/schema.sql"
+if [ -x "$MCP_SERVER_BIN" ] && [ -x "$REST_SERVER_BIN" ]; then
+  echo -e "${GREEN}✓ Server binaries found${NC}"
+  log_verbose "  MCP: $MCP_SERVER_BIN"
+  log_verbose "  REST: $REST_SERVER_BIN"
+else
+  echo -e "${YELLOW}Building servers...${NC}"
+  if [ -f "project.yml" ]; then
+    xcodebuild -scheme MCPServer -configuration Debug 2>&1 | tail -5
+    xcodebuild -scheme RESTServer -configuration Debug 2>&1 | tail -5
+    DERIVED_DATA_DIR=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name "AIAgentPM-*" -type d 2>/dev/null | head -1)
+    MCP_SERVER_BIN="$DERIVED_DATA_DIR/Build/Products/Debug/mcp-server-pm"
+    REST_SERVER_BIN="$DERIVED_DATA_DIR/Build/Products/Debug/rest-server-pm"
+  else
+    swift build -c release --product mcp-server-pm 2>&1 | tail -2
+    swift build -c release --product rest-server-pm 2>&1 | tail -2
+    MCP_SERVER_BIN=".build/release/mcp-server-pm"
+    REST_SERVER_BIN=".build/release/rest-server-pm"
+  fi
+fi
+echo ""
+
+# Step 4: DB初期化
+echo -e "${YELLOW}Step 4: Initializing database${NC}"
+# MCPサーバーのdaemonコマンドでスキーマを自動初期化
+AIAGENTPM_DB_PATH="$TEST_DB_PATH" "$MCP_SERVER_BIN" daemon \
+  --socket-path "$MCP_SOCKET_PATH" --foreground > /tmp/pilot_mcp_init.log 2>&1 &
+INIT_PID=$!
+sleep 3
+kill "$INIT_PID" 2>/dev/null || true
+rm -f "$MCP_SOCKET_PATH"
 
 # シード適用
-sqlite3 "$DB_PATH" < "$SEED_SQL"
+sqlite3 "$TEST_DB_PATH" < "$SEED_SQL"
+echo -e "${GREEN}✓ Database initialized${NC}"
+echo ""
 
-log_verbose "Database initialized: $DB_PATH"
-
-# 3. サーバー起動（オプション）
-if [ "$SKIP_SERVER_START" = false ]; then
-  log "Starting servers..."
-
-  # 既存プロセスを停止
-  pkill -f "node.*rest-server" || true
-  pkill -f "node.*mcp-server" || true
-  sleep 1
-
-  # REST サーバー起動
-  cd "$WEB_UI_DIR"
-  npm run dev:rest > /tmp/pilot-rest.log 2>&1 &
-  REST_PID=$!
-  log_verbose "REST server PID: $REST_PID"
-
-  # MCP サーバー起動（WebSocket）
-  npm run dev:mcp > /tmp/pilot-mcp.log 2>&1 &
-  MCP_PID=$!
-  log_verbose "MCP server PID: $MCP_PID"
-
-  # 起動待機
-  log "Waiting for servers to start..."
-  sleep 3
-
-  # ヘルスチェック
-  if ! curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
-    echo "Error: REST server failed to start"
-    cat /tmp/pilot-rest.log
-    exit 1
-  fi
-
-  log_verbose "Servers are running"
+if [ "$SKIP_SERVER_START" = true ]; then
+  echo -e "${YELLOW}Skipping server startup (--skip-server)${NC}"
+  echo "Please ensure servers are running manually."
+  exit 0
 fi
 
-# 4. Playwright テスト実行
-log "Running Playwright test..."
+# Step 5: サーバー起動
+echo -e "${YELLOW}Step 5: Starting servers${NC}"
+
+AIAGENTPM_DB_PATH="$TEST_DB_PATH" "$MCP_SERVER_BIN" daemon \
+  --socket-path "$MCP_SOCKET_PATH" --foreground > /tmp/pilot_mcp.log 2>&1 &
+MCP_PID=$!
+
+for i in {1..10}; do [ -S "$MCP_SOCKET_PATH" ] && break; sleep 0.5; done
+echo -e "${GREEN}✓ MCP server running${NC}"
+
+AIAGENTPM_DB_PATH="$TEST_DB_PATH" AIAGENTPM_WEBSERVER_PORT="$REST_PORT" \
+  "$REST_SERVER_BIN" > /tmp/pilot_rest.log 2>&1 &
+REST_PID=$!
+
+for i in {1..10}; do curl -s "http://localhost:$REST_PORT/health" > /dev/null 2>&1 && break; sleep 0.5; done
+echo -e "${GREEN}✓ REST server running at :$REST_PORT${NC}"
+echo ""
+
+# Step 6: Coordinator起動
+echo -e "${YELLOW}Step 6: Starting Coordinator${NC}"
+
+RUNNER_DIR="$PROJECT_ROOT/runner"
+PYTHON="${RUNNER_DIR}/.venv/bin/python"
+[ ! -x "$PYTHON" ] && PYTHON="python3"
+
+# バリエーションからエージェントIDを取得（web-ui ディレクトリで実行してnode_modulesにアクセス）
+cd "$WEB_UI_DIR"
+AGENT_IDS=$(npx tsx -e "
+import * as yaml from 'js-yaml';
+import * as fs from 'fs';
+const v = yaml.load(fs.readFileSync('$VARIATION_YAML', 'utf8'));
+const aiAgents = Object.values(v.agents).filter(a => a.type === 'ai');
+console.log(aiAgents.map(a => a.id).join(' '));
+")
+
+# Coordinator設定ファイル生成
+cat > /tmp/coordinator_pilot_config.yaml << EOF
+polling_interval: 2
+max_concurrent: 3
+coordinator_token: ${MCP_COORDINATOR_TOKEN}
+mcp_socket_path: $MCP_SOCKET_PATH
+ai_providers:
+  claude:
+    cli_command: claude
+    cli_args: ["--dangerously-skip-permissions", "--max-turns", "50"]
+agents:
+EOF
+
+for AGENT_ID in $AGENT_IDS; do
+  cat >> /tmp/coordinator_pilot_config.yaml << EOF
+  $AGENT_ID:
+    passkey: test-passkey
+EOF
+done
+
+cat >> /tmp/coordinator_pilot_config.yaml << EOF
+log_directory: /tmp/coordinator_logs_pilot
+log_upload:
+  enabled: true
+EOF
+
+mkdir -p /tmp/coordinator_logs_pilot
+AIAGENTPM_WEBSERVER_PORT="$REST_PORT" $PYTHON -m aiagent_runner --coordinator -c /tmp/coordinator_pilot_config.yaml -v > /tmp/pilot_coordinator.log 2>&1 &
+COORDINATOR_PID=$!
+sleep 2
+echo -e "${GREEN}✓ Coordinator running${NC}"
+echo ""
+
+# Step 7: Web UI起動
+echo -e "${YELLOW}Step 7: Starting Web UI${NC}"
+cd "$WEB_UI_DIR"
+
+AIAGENTPM_WEBSERVER_PORT="$REST_PORT" npm run dev -- --port "$WEB_UI_PORT" > /tmp/pilot_vite.log 2>&1 &
+WEB_UI_PID=$!
+
+for i in {1..20}; do curl -s "http://localhost:$WEB_UI_PORT" > /dev/null 2>&1 && break; sleep 1; done
+echo -e "${GREEN}✓ Web UI running at :$WEB_UI_PORT${NC}"
+echo ""
+
+# Step 8: Playwrightテスト実行
+echo -e "${YELLOW}Step 8: Running Playwright test${NC}"
 
 cd "$E2E_DIR"
 
-# 環境変数でバリエーション情報を渡す
 export PILOT_SCENARIO="$SCENARIO"
 export PILOT_VARIATION="$VARIATION"
 export PILOT_BASE_DIR="$SCRIPT_DIR"
+export INTEGRATION_WEB_URL="http://localhost:$WEB_UI_PORT"
+export INTEGRATION_WITH_COORDINATOR="true"
+export AIAGENTPM_WEBSERVER_PORT="$REST_PORT"
 
-# Playwright 実行
-npx playwright test pilot/tests/pilot.spec.ts --reporter=list
+set -o pipefail
+npx playwright test pilot/tests/pilot.spec.ts \
+  --reporter=list \
+  --timeout=300000 \
+  2>&1 | tee /tmp/pilot_playwright.log
 
-TEST_EXIT_CODE=$?
+PLAYWRIGHT_EXIT=${PIPESTATUS[0]}
+set +o pipefail
+echo ""
 
-# 5. クリーンアップ
-if [ "$SKIP_SERVER_START" = false ]; then
-  log "Stopping servers..."
-  kill $REST_PID 2>/dev/null || true
-  kill $MCP_PID 2>/dev/null || true
-fi
+# Step 9: 結果検証
+echo -e "${YELLOW}Step 9: Verifying results${NC}"
+echo "=== Tasks ==="
+sqlite3 "$TEST_DB_PATH" "SELECT id, title, status, assignee_id FROM tasks WHERE project_id = 'pilot-hello';" 2>/dev/null || true
+echo ""
 
-# 6. 結果サマリー
-log "=== Test Result ==="
-if [ $TEST_EXIT_CODE -eq 0 ]; then
-  log "✅ PASSED: $SCENARIO / $VARIATION"
+# 成果物確認
+echo "=== Artifacts ==="
+cd "$WEB_UI_DIR"
+WORKING_DIR=$(npx tsx -e "
+import * as yaml from 'js-yaml';
+import * as fs from 'fs';
+const s = yaml.load(fs.readFileSync('$SCENARIO_YAML', 'utf8'));
+console.log(s.project.working_directory);
+")
+
+if [ -f "$WORKING_DIR/hello.py" ]; then
+  echo -e "${GREEN}✓ hello.py exists${NC}"
+  echo "Content:"
+  cat "$WORKING_DIR/hello.py"
+  echo ""
+  echo "Execution:"
+  python3 "$WORKING_DIR/hello.py" 2>&1 || true
 else
-  log "❌ FAILED: $SCENARIO / $VARIATION"
+  echo -e "${RED}✗ hello.py not found${NC}"
 fi
+echo ""
 
-# 結果ディレクトリを表示
-LATEST_RESULT=$(ls -dt "$SCRIPT_DIR/results/$SCENARIO"/*_${VARIATION} 2>/dev/null | head -1)
-if [ -n "$LATEST_RESULT" ]; then
-  log "Results: $LATEST_RESULT"
+# 結果判定
+if [ $PLAYWRIGHT_EXIT -eq 0 ]; then
+  TEST_PASSED=true
+  echo -e "${GREEN}========================================${NC}"
+  echo -e "${GREEN}Pilot Test PASSED: $SCENARIO / $VARIATION${NC}"
+  echo -e "${GREEN}========================================${NC}"
+  exit 0
+else
+  echo -e "${RED}========================================${NC}"
+  echo -e "${RED}Pilot Test FAILED: $SCENARIO / $VARIATION${NC}"
+  echo -e "${RED}========================================${NC}"
+  echo "Check logs: /tmp/pilot_*.log"
+  exit 1
 fi
-
-exit $TEST_EXIT_CODE
