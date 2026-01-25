@@ -5,6 +5,9 @@ import { useTaskPermissions, useTaskHandoffs, useCreateHandoff, useAssignableAge
 import type { Task, TaskStatus, CreateHandoffInput, ApprovalStatus } from '@/types'
 import { StatusPicker } from './StatusPicker'
 import { TaskEditForm } from '../TaskEditForm'
+import { TaskHistoryTab } from './TaskHistoryTab'
+
+type TabType = 'details' | 'history'
 
 const approvalStatusLabels: Record<ApprovalStatus, string> = {
   approved: '承認済み',
@@ -86,6 +89,7 @@ export function TaskDetailPanel({
   const [error, setError] = useState<string | null>(null)
   const [isEditFormOpen, setIsEditFormOpen] = useState(false)
   const [isHandoffFormOpen, setIsHandoffFormOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<TabType>('details')
   const [handoffSummary, setHandoffSummary] = useState('')
   const [handoffContext, setHandoffContext] = useState('')
   const [handoffToAgentId, setHandoffToAgentId] = useState('')
@@ -194,14 +198,46 @@ export function TaskDetailPanel({
           </button>
         </div>
 
+        {/* Tab Navigation */}
+        <div className="flex border-b bg-gray-50">
+          <button
+            type="button"
+            onClick={() => setActiveTab('details')}
+            className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'details'
+                ? 'text-blue-600 border-blue-600 bg-white'
+                : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            詳細
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('history')}
+            className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'history'
+                ? 'text-blue-600 border-blue-600 bg-white'
+                : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            履歴
+          </button>
+        </div>
+
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Error message */}
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          )}
+          {/* History Tab */}
+          {activeTab === 'history' && <TaskHistoryTab taskId={task.id} />}
+
+          {/* Details Tab */}
+          {activeTab === 'details' && (
+            <>
+              {/* Error message */}
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                  <p className="text-sm text-red-700">{error}</p>
+                </div>
+              )}
 
           {/* Status picker */}
           <div>
@@ -551,6 +587,8 @@ export function TaskDetailPanel({
               </div>
             )}
           </div>
+            </>
+          )}
         </div>
 
         {/* Footer */}

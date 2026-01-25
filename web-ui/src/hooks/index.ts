@@ -9,3 +9,6 @@ export { useHandoffs, useTaskHandoffs, useCreateHandoff, useAcceptHandoff } from
 export { useSubordinates } from './useSubordinates'
 export { useAgent, useUpdateAgent } from './useAgent'
 export { useChat } from './useChat'
+export { useExecutionLogs, useExecutionLogContent } from './useExecutionLogs'
+export { useTaskContexts } from './useTaskContexts'
+export { useTaskHistory } from './useTaskHistory'

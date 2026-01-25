@@ -6,6 +6,9 @@
 -- NEVER run this directly against the production database.
 
 -- Clear existing test data (if any)
+DELETE FROM contexts WHERE id LIKE 'ctx-%';
+DELETE FROM execution_logs WHERE id LIKE 'log-%';
+DELETE FROM sessions WHERE id LIKE 'session-%';
 DELETE FROM tasks WHERE id LIKE 'task-%' OR id LIKE 'task-2%';
 DELETE FROM agent_credentials WHERE agent_id IN ('manager-1', 'worker-1', 'worker-2', 'owner-1');
 DELETE FROM agents WHERE id IN ('manager-1', 'worker-1', 'worker-2', 'owner-1');
@@ -67,3 +70,24 @@ VALUES
   ('task-206', 'project-2', 'プッシュ通知', 'プッシュ通知の実装', 'done', 'medium', 'worker-2', 'manager-1', '["task-205"]', datetime('now'), datetime('now')),
   ('task-207', 'project-2', 'オフライン対応', 'オフライン時の対応', 'done', 'low', 'worker-1', 'manager-1', '["task-205"]', datetime('now'), datetime('now')),
   ('task-208', 'project-2', 'App Store申請', 'App Store審査準備', 'in_progress', 'high', 'manager-1', 'manager-1', '["task-202","task-203","task-204"]', datetime('now'), datetime('now'));
+
+-- Insert test sessions for execution logs and contexts
+INSERT INTO sessions (id, project_id, agent_id, started_at, ended_at, status)
+VALUES
+  ('session-1', 'project-1', 'worker-1', datetime('now', '-2 hours'), datetime('now', '-1 hour'), 'ended'),
+  ('session-2', 'project-1', 'worker-1', datetime('now', '-1 hour'), NULL, 'active'),
+  ('session-3', 'project-1', 'manager-1', datetime('now', '-30 minutes'), NULL, 'active');
+
+-- Insert test execution logs for task-1 (API実装)
+INSERT INTO execution_logs (id, task_id, agent_id, status, started_at, completed_at, exit_code, duration_seconds, log_file_path, error_message, reported_provider, reported_model, model_verified)
+VALUES
+  ('log-1', 'task-1', 'worker-1', 'completed', datetime('now', '-2 hours'), datetime('now', '-1 hour 45 minutes'), 0, 900.5, '/logs/task-1/log-1.txt', NULL, 'anthropic', 'claude-sonnet-4-20250514', 1),
+  ('log-2', 'task-1', 'worker-1', 'failed', datetime('now', '-1 hour 30 minutes'), datetime('now', '-1 hour 25 minutes'), 1, 300.0, '/logs/task-1/log-2.txt', 'Test failure: assertion failed at line 42', 'anthropic', 'claude-sonnet-4-20250514', 1),
+  ('log-3', 'task-1', 'worker-1', 'running', datetime('now', '-10 minutes'), NULL, NULL, NULL, NULL, NULL, 'anthropic', 'claude-sonnet-4-20250514', NULL);
+
+-- Insert test contexts for task-1 (API実装)
+INSERT INTO contexts (id, task_id, session_id, agent_id, progress, findings, blockers, next_steps, created_at, updated_at)
+VALUES
+  ('ctx-1', 'task-1', 'session-1', 'worker-1', 'エンドポイント設計完了', 'REST API設計パターンを採用', NULL, 'コントローラー実装を開始', datetime('now', '-2 hours'), datetime('now', '-1 hour 45 minutes')),
+  ('ctx-2', 'task-1', 'session-2', 'worker-1', 'コントローラー実装中', 'バリデーション層の追加が必要', 'テストデータの準備が必要', 'バリデーション実装後、テスト作成', datetime('now', '-1 hour'), datetime('now', '-30 minutes')),
+  ('ctx-3', 'task-1', 'session-3', 'manager-1', NULL, NULL, 'Worker-1のテストデータ待ち', 'テストデータ準備を依頼済み', datetime('now', '-20 minutes'), datetime('now', '-20 minutes'));

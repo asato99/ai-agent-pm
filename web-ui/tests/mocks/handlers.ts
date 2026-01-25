@@ -848,4 +848,193 @@ export const handlers = [
     // If no active session, still return success (idempotent)
     return HttpResponse.json({ success: true, noActiveSession: true })
   }),
+
+  // Task Execution Logs - GET
+  // Reference: docs/design/TASK_EXECUTION_LOG_DISPLAY.md
+  http.get('/api/tasks/:taskId/execution-logs', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { taskId } = params
+
+    // task-1 (API実装) has execution logs
+    if (taskId === 'task-1') {
+      return HttpResponse.json({
+        executionLogs: [
+          {
+            id: 'log-1',
+            taskId: 'task-1',
+            agentId: 'worker-1',
+            agentName: 'Worker 1',
+            status: 'completed',
+            startedAt: '2024-01-15T08:00:00Z',
+            completedAt: '2024-01-15T08:15:00Z',
+            exitCode: 0,
+            durationSeconds: 900.5,
+            logFilePath: '/logs/task-1/log-1.txt',
+            hasLogFile: true,
+            errorMessage: null,
+            reportedProvider: 'anthropic',
+            reportedModel: 'claude-sonnet-4-20250514',
+            modelVerified: true,
+          },
+          {
+            id: 'log-2',
+            taskId: 'task-1',
+            agentId: 'worker-1',
+            agentName: 'Worker 1',
+            status: 'failed',
+            startedAt: '2024-01-15T08:30:00Z',
+            completedAt: '2024-01-15T08:35:00Z',
+            exitCode: 1,
+            durationSeconds: 300.0,
+            logFilePath: '/logs/task-1/log-2.txt',
+            hasLogFile: true,
+            errorMessage: 'Test failure: assertion failed at line 42',
+            reportedProvider: 'anthropic',
+            reportedModel: 'claude-sonnet-4-20250514',
+            modelVerified: true,
+          },
+          {
+            id: 'log-3',
+            taskId: 'task-1',
+            agentId: 'worker-1',
+            agentName: 'Worker 1',
+            status: 'running',
+            startedAt: '2024-01-15T09:50:00Z',
+            completedAt: null,
+            exitCode: null,
+            durationSeconds: null,
+            logFilePath: null,
+            hasLogFile: false,
+            errorMessage: null,
+            reportedProvider: 'anthropic',
+            reportedModel: 'claude-sonnet-4-20250514',
+            modelVerified: null,
+          },
+        ],
+      })
+    }
+
+    // task-2 (DB設計) has no execution logs (for empty state test)
+    if (taskId === 'task-2') {
+      return HttpResponse.json({ executionLogs: [] })
+    }
+
+    // Other tasks return empty array
+    return HttpResponse.json({ executionLogs: [] })
+  }),
+
+  // Task Contexts - GET
+  // Reference: docs/design/TASK_EXECUTION_LOG_DISPLAY.md
+  http.get('/api/tasks/:taskId/contexts', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { taskId } = params
+
+    // task-1 (API実装) has contexts
+    if (taskId === 'task-1') {
+      return HttpResponse.json({
+        contexts: [
+          {
+            id: 'ctx-1',
+            taskId: 'task-1',
+            sessionId: 'session-1',
+            agentId: 'worker-1',
+            agentName: 'Worker 1',
+            progress: 'エンドポイント設計完了',
+            findings: 'REST API設計パターンを採用',
+            blockers: null,
+            nextSteps: 'コントローラー実装を開始',
+            createdAt: '2024-01-15T08:00:00Z',
+            updatedAt: '2024-01-15T08:15:00Z',
+          },
+          {
+            id: 'ctx-2',
+            taskId: 'task-1',
+            sessionId: 'session-2',
+            agentId: 'worker-1',
+            agentName: 'Worker 1',
+            progress: 'コントローラー実装中',
+            findings: 'バリデーション層の追加が必要',
+            blockers: 'テストデータの準備が必要',
+            nextSteps: 'バリデーション実装後、テスト作成',
+            createdAt: '2024-01-15T09:00:00Z',
+            updatedAt: '2024-01-15T09:30:00Z',
+          },
+          {
+            id: 'ctx-3',
+            taskId: 'task-1',
+            sessionId: 'session-3',
+            agentId: 'manager-1',
+            agentName: 'Manager A',
+            progress: null,
+            findings: null,
+            blockers: 'Worker-1のテストデータ待ち',
+            nextSteps: 'テストデータ準備を依頼済み',
+            createdAt: '2024-01-15T09:40:00Z',
+            updatedAt: '2024-01-15T09:40:00Z',
+          },
+        ],
+      })
+    }
+
+    // task-2 (DB設計) has no contexts (for empty state test)
+    if (taskId === 'task-2') {
+      return HttpResponse.json({ contexts: [] })
+    }
+
+    // Other tasks return empty array
+    return HttpResponse.json({ contexts: [] })
+  }),
+
+  // Execution Log Content - GET
+  // Reference: docs/design/TASK_EXECUTION_LOG_DISPLAY.md
+  http.get('/api/execution-logs/:logId/content', ({ params, request }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })
+    }
+    const { logId } = params
+
+    // log-1: Completed execution log
+    if (logId === 'log-1') {
+      return HttpResponse.json({
+        content: `[2024-01-15 08:00:00] Starting task execution...
+[2024-01-15 08:00:01] Loading project configuration
+[2024-01-15 08:00:05] Setting up REST API endpoints
+[2024-01-15 08:05:00] Implementing GET /api/users endpoint
+[2024-01-15 08:10:00] Implementing POST /api/users endpoint
+[2024-01-15 08:14:00] Running tests...
+[2024-01-15 08:14:30] All tests passed (15/15)
+[2024-01-15 08:15:00] Task completed successfully`,
+      })
+    }
+
+    // log-2: Failed execution log
+    if (logId === 'log-2') {
+      return HttpResponse.json({
+        content: `[2024-01-15 08:30:00] Starting task execution...
+[2024-01-15 08:30:01] Loading project configuration
+[2024-01-15 08:32:00] Implementing validation logic
+[2024-01-15 08:34:00] Running tests...
+[2024-01-15 08:34:55] FAILED: test_user_validation (line 42)
+[2024-01-15 08:35:00] Task failed with exit code 1`,
+      })
+    }
+
+    // log-3: Running (no content yet)
+    if (logId === 'log-3') {
+      return HttpResponse.json({
+        content: `[2024-01-15 09:50:00] Starting task execution...
+[2024-01-15 09:50:01] Loading project configuration
+[2024-01-15 09:50:05] Processing...`,
+      })
+    }
+
+    return HttpResponse.json({ message: 'Not Found' }, { status: 404 })
+  }),
 ]

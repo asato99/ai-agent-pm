@@ -78,6 +78,11 @@ export class TaskBoardPage extends BasePage {
     await this.getTaskCard(taskTitle).click()
   }
 
+  async clickTaskById(taskId: string) {
+    // Use data-testid to avoid matching the draggable wrapper
+    await this.page.locator(`[data-task-id="${taskId}"][data-testid="task-card"]`).click()
+  }
+
   async openCreateTaskModal() {
     await this.createTaskButton.click()
   }

@@ -56,6 +56,8 @@ final class RESTServer {
     private let notificationRepository: NotificationRepository
     /// 参照: docs/design/LOG_TRANSFER_DESIGN.md - ログアップロード
     private let executionLogRepository: ExecutionLogRepository
+    /// 参照: docs/design/TASK_EXECUTION_LOG_DISPLAY.md - 実行ログ表示
+    private let contextRepository: ContextRepository
 
     // MCP Server for HTTP transport
     // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
@@ -97,6 +99,8 @@ final class RESTServer {
         self.notificationRepository = NotificationRepository(database: database)
         // 参照: docs/design/LOG_TRANSFER_DESIGN.md - ログアップロード
         self.executionLogRepository = ExecutionLogRepository(database: database)
+        // 参照: docs/design/TASK_EXECUTION_LOG_DISPLAY.md - 実行ログ表示
+        self.contextRepository = ContextRepository(database: database)
     }
 
     func run() async throws {
@@ -450,6 +454,27 @@ final class RESTServer {
             return try await listTaskHandoffs(request: request, context: context)
         }
         debugLog("Task handoffs route registered: GET/:taskId/handoffs")
+
+        // Execution logs and contexts for a task
+        // 参照: docs/design/TASK_EXECUTION_LOG_DISPLAY.md
+        taskRouter.get(":taskId/execution-logs") { [self] request, context in
+            debugLog("GET /api/tasks/:taskId/execution-logs called")
+            return try await listTaskExecutionLogs(request: request, context: context)
+        }
+        taskRouter.get(":taskId/contexts") { [self] request, context in
+            debugLog("GET /api/tasks/:taskId/contexts called")
+            return try await listTaskContexts(request: request, context: context)
+        }
+        debugLog("Task execution logs/contexts routes registered")
+
+        // Execution log content (top-level endpoint for log file access)
+        // 参照: docs/design/TASK_EXECUTION_LOG_DISPLAY.md
+        let executionLogRouter = protectedRouter.group("execution-logs")
+        executionLogRouter.get(":logId/content") { [self] request, context in
+            debugLog("GET /api/execution-logs/:logId/content called")
+            return try await getExecutionLogContent(request: request, context: context)
+        }
+        debugLog("Execution log content route registered")
 
         // Chat messages
         // 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
@@ -1542,6 +1567,111 @@ final class RESTServer {
         let handoffs = try handoffRepository.findByTask(taskId)
         let dtos = handoffs.map { HandoffDTO(from: $0) }
         return jsonResponse(dtos)
+    }
+
+    // MARK: - Execution Log Handlers
+    // 参照: docs/design/TASK_EXECUTION_LOG_DISPLAY.md
+
+    /// GET /tasks/:taskId/execution-logs
+    /// Returns execution logs for a task with agent names
+    private func listTaskExecutionLogs(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard context.agentId != nil else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let taskIdStr = context.parameters.get("taskId") else {
+            return errorResponse(status: .badRequest, message: "Missing task ID")
+        }
+
+        let taskId = TaskID(value: taskIdStr)
+        guard try taskRepository.findById(taskId) != nil else {
+            return errorResponse(status: .notFound, message: "Task not found")
+        }
+
+        let logs = try executionLogRepository.findByTaskId(taskId)
+
+        // Resolve agent names for each log
+        var agentNameCache: [String: String] = [:]
+        let dtos = logs.map { log -> ExecutionLogDTO in
+            let agentIdValue = log.agentId.value
+            if agentNameCache[agentIdValue] == nil {
+                agentNameCache[agentIdValue] = (try? agentRepository.findById(log.agentId))?.name ?? "Unknown"
+            }
+            return ExecutionLogDTO(from: log, agentName: agentNameCache[agentIdValue]!)
+        }
+
+        return jsonResponse(ExecutionLogsResponseDTO(executionLogs: dtos))
+    }
+
+    /// GET /execution-logs/:logId/content
+    /// Returns the content of a log file
+    private func getExecutionLogContent(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard context.agentId != nil else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let logIdStr = context.parameters.get("logId") else {
+            return errorResponse(status: .badRequest, message: "Missing log ID")
+        }
+
+        let logId = ExecutionLogID(value: logIdStr)
+        guard let log = try executionLogRepository.findById(logId) else {
+            return errorResponse(status: .notFound, message: "Execution log not found")
+        }
+
+        guard let logFilePath = log.logFilePath else {
+            return errorResponse(status: .notFound, message: "No log file associated with this execution")
+        }
+
+        // Read log file content
+        let fileURL = URL(fileURLWithPath: logFilePath)
+        guard FileManager.default.fileExists(atPath: logFilePath) else {
+            return errorResponse(status: .notFound, message: "Log file not found on disk")
+        }
+
+        let content: String
+        let fileSize: Int
+        do {
+            content = try String(contentsOf: fileURL, encoding: .utf8)
+            let attributes = try FileManager.default.attributesOfItem(atPath: logFilePath)
+            fileSize = attributes[.size] as? Int ?? content.utf8.count
+        } catch {
+            return errorResponse(status: .internalServerError, message: "Failed to read log file: \(error.localizedDescription)")
+        }
+
+        let filename = fileURL.lastPathComponent
+        return jsonResponse(ExecutionLogContentDTO(content: content, filename: filename, fileSize: fileSize))
+    }
+
+    /// GET /tasks/:taskId/contexts
+    /// Returns contexts for a task with agent names
+    private func listTaskContexts(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard context.agentId != nil else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let taskIdStr = context.parameters.get("taskId") else {
+            return errorResponse(status: .badRequest, message: "Missing task ID")
+        }
+
+        let taskId = TaskID(value: taskIdStr)
+        guard try taskRepository.findById(taskId) != nil else {
+            return errorResponse(status: .notFound, message: "Task not found")
+        }
+
+        let contexts = try contextRepository.findByTask(taskId)
+
+        // Resolve agent names for each context
+        var agentNameCache: [String: String] = [:]
+        let dtos = contexts.map { ctx -> ContextDTO in
+            let agentIdValue = ctx.agentId.value
+            if agentNameCache[agentIdValue] == nil {
+                agentNameCache[agentIdValue] = (try? agentRepository.findById(ctx.agentId))?.name ?? "Unknown"
+            }
+            return ContextDTO(from: ctx, agentName: agentNameCache[agentIdValue]!)
+        }
+
+        return jsonResponse(ContextsResponseDTO(contexts: dtos))
     }
 
     // MARK: - Chat Handlers
