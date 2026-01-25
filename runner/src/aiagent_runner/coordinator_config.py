@@ -9,6 +9,7 @@ from typing import Optional
 
 import yaml
 
+from aiagent_runner.log_uploader import LogUploadConfig
 from aiagent_runner.platform import get_default_socket_path, get_log_directory
 
 
@@ -46,9 +47,14 @@ class CoordinatorConfig:
     polling_interval: int = 10
     max_concurrent: int = 3
 
-    # MCP connection (Unix socket or HTTP URL - used by both Coordinator and Agent Instances)
-    # Unix socket: platform-specific (see aiagent_runner.platform)
-    # HTTP URL: http://hostname:port/mcp (required for Windows)
+    # Server URL (HTTP base URL for both MCP and REST API)
+    # When specified, MCP endpoint is {server_url}/mcp, REST API is {server_url}/api/v1/...
+    # For local Unix socket operation, leave this None and set mcp_socket_path instead
+    server_url: Optional[str] = None
+
+    # MCP connection (Unix socket path for local operation)
+    # When server_url is set, this is ignored (MCP uses {server_url}/mcp)
+    # When server_url is None, this specifies the Unix socket path
     mcp_socket_path: Optional[str] = None
 
     # Phase 5: Coordinator token for Coordinator-only API authorization
@@ -68,6 +74,9 @@ class CoordinatorConfig:
     # Logging
     log_directory: Optional[str] = None
 
+    # Log upload configuration
+    log_upload: Optional[LogUploadConfig] = None
+
     # Debug mode (adds --verbose to CLI commands)
     debug_mode: bool = True
 
@@ -81,9 +90,9 @@ class CoordinatorConfig:
         if self.max_concurrent <= 0:
             raise ValueError("max_concurrent must be positive")
 
-        # Set default MCP socket path if not specified
+        # Set default MCP socket path if not specified and no server_url
         # Uses platform-specific default (empty on Windows - requires HTTP)
-        if self.mcp_socket_path is None:
+        if self.server_url is None and self.mcp_socket_path is None:
             self.mcp_socket_path = get_default_socket_path()
 
         # Phase 5: Set coordinator token from environment if not specified
@@ -96,6 +105,46 @@ class CoordinatorConfig:
                 cli_command="claude",
                 cli_args=["--dangerously-skip-permissions"]
             )
+
+        # Set log_upload endpoint from REST API base URL
+        if self.log_upload and self.log_upload.enabled and not self.log_upload.endpoint:
+            base_url = self.get_rest_api_base_url()
+            if base_url:
+                self.log_upload.endpoint = f"{base_url}/api/v1/execution-logs/upload"
+            else:
+                raise ValueError(
+                    "Cannot determine REST API URL for log_upload. "
+                    "Set server_url or ensure AIAGENTPM_WEBSERVER_PORT is set."
+                )
+
+    def get_mcp_connection_path(self) -> str:
+        """Get MCP connection path (HTTP URL or Unix socket).
+
+        Returns:
+            HTTP URL ({server_url}/mcp) if server_url is set,
+            otherwise the Unix socket path.
+        """
+        if self.server_url:
+            return f"{self.server_url.rstrip('/')}/mcp"
+        return self.mcp_socket_path or ""
+
+    def get_rest_api_base_url(self) -> Optional[str]:
+        """Get REST API base URL.
+
+        Returns:
+            Base URL for REST API, or None if not determinable.
+            - If server_url is set: returns server_url
+            - If mcp_socket_path is Unix socket: returns http://localhost:{AIAGENTPM_WEBSERVER_PORT}
+        """
+        if self.server_url:
+            return self.server_url.rstrip('/')
+
+        # Unix socket means local operation - use localhost with REST port
+        if self.mcp_socket_path and not self.mcp_socket_path.startswith("http"):
+            port = os.environ.get("AIAGENTPM_WEBSERVER_PORT", "8080")
+            return f"http://localhost:{port}"
+
+        return None
 
     @classmethod
     def from_yaml(cls, path: Path) -> "CoordinatorConfig":
@@ -172,15 +221,29 @@ class CoordinatorConfig:
             env_var = coordinator_token[2:-1]
             coordinator_token = os.environ.get(env_var)
 
+        # Parse log_upload configuration (endpoint is derived from server_url or mcp_socket_path)
+        log_upload = None
+        log_upload_data = data.get("log_upload")
+        if log_upload_data and log_upload_data.get("enabled"):
+            log_upload = LogUploadConfig(
+                enabled=True,
+                max_file_size_mb=log_upload_data.get("max_file_size_mb", 10),
+                retry_count=log_upload_data.get("retry_count", 3),
+                retry_delay_seconds=log_upload_data.get("retry_delay_seconds", 1.0),
+            )
+            # Note: endpoint is set in __post_init__ via get_rest_api_base_url()
+
         return cls(
             polling_interval=data.get("polling_interval", 10),
             max_concurrent=data.get("max_concurrent", 3),
+            server_url=data.get("server_url"),
             mcp_socket_path=data.get("mcp_socket_path"),
             coordinator_token=coordinator_token,
             root_agent_id=data.get("root_agent_id"),
             ai_providers=ai_providers,
             agents=agents,
             log_directory=data.get("log_directory"),
+            log_upload=log_upload,
             debug_mode=data.get("debug_mode", True),
             config_path=str(path),
         )

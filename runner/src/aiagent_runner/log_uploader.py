@@ -15,9 +15,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LogUploadConfig:
-    """ログアップロード設定"""
+    """ログアップロード設定
+
+    Note: endpoint is typically set by CoordinatorConfig based on server_url
+    or mcp_socket_path. Direct specification is optional.
+    """
     enabled: bool = False
-    endpoint: str = "http://localhost:8080/api/v1/execution-logs/upload"
+    endpoint: str = ""  # Set by CoordinatorConfig or directly
     max_file_size_mb: int = 10
     retry_count: int = 3
     retry_delay_seconds: float = 1.0

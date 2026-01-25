@@ -53,6 +53,7 @@ cleanup() {
         rm -f /tmp/uc001_webui_*.log
         rm -f /tmp/coordinator_uc001_webui_config.yaml
         rm -rf /tmp/coordinator_logs_uc001_webui
+        rm -rf /tmp/uc001_webui_work/.aiagent
         rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal"
     else
         echo "Logs preserved: /tmp/uc001_webui_*.log"
@@ -166,10 +167,12 @@ agents:
   integ-worker:
     passkey: test-passkey
 log_directory: /tmp/coordinator_logs_uc001_webui
+log_upload:
+  enabled: true
 EOF
 
 mkdir -p /tmp/coordinator_logs_uc001_webui
-$PYTHON -m aiagent_runner --coordinator -c /tmp/coordinator_uc001_webui_config.yaml -v > /tmp/uc001_webui_coordinator.log 2>&1 &
+AIAGENTPM_WEBSERVER_PORT="$REST_PORT" $PYTHON -m aiagent_runner --coordinator -c /tmp/coordinator_uc001_webui_config.yaml -v > /tmp/uc001_webui_coordinator.log 2>&1 &
 COORDINATOR_PID=$!
 sleep 2
 echo -e "${GREEN}✓ Coordinator running${NC}"
@@ -213,11 +216,57 @@ echo ""
 # Note: "failed" という文字列はステータスメッセージにも含まれるため、
 # 実際のテスト失敗は "X failed" パターン（Xは数字）でチェックする
 if grep -qE "[0-9]+ passed" /tmp/uc001_webui_playwright.log && ! grep -qE "[0-9]+ failed" /tmp/uc001_webui_playwright.log; then
-    TEST_PASSED=true
-    echo -e "${GREEN}UC001 Web UI Integration Test: PASSED${NC}"
-    exit 0
+    echo -e "${GREEN}✓ Playwright tests passed${NC}"
 else
-    echo -e "${RED}UC001 Web UI Integration Test: FAILED${NC}"
+    echo -e "${RED}UC001 Web UI Integration Test: FAILED (Playwright)${NC}"
     echo "Logs: /tmp/uc001_webui_*.log"
     exit 1
 fi
+
+# Step 8.1: ログ転送検証
+echo ""
+echo -e "${YELLOW}Step 8.1: Verifying log transfer${NC}"
+
+# execution_logsテーブルにlog_file_pathが設定されているか確認
+LOG_FILE_PATH=$(sqlite3 "$TEST_DB_PATH" "
+    SELECT log_file_path
+    FROM execution_logs
+    WHERE status = 'completed'
+    ORDER BY completed_at DESC
+    LIMIT 1;
+" 2>/dev/null)
+
+if [ -z "$LOG_FILE_PATH" ]; then
+    echo -e "${RED}ERROR: No log_file_path found in execution_logs${NC}"
+    exit 1
+fi
+
+# パスがプロジェクトの.aiagent/logs/配下になっているか確認
+EXPECTED_PATH_PREFIX="/tmp/uc001_webui_work/.aiagent/logs/"
+if [[ "$LOG_FILE_PATH" != ${EXPECTED_PATH_PREFIX}* ]]; then
+    echo -e "${RED}ERROR: log_file_path is not in expected directory${NC}"
+    echo "  Expected prefix: ${EXPECTED_PATH_PREFIX}"
+    echo "  Actual: $LOG_FILE_PATH"
+    exit 1
+fi
+
+# ファイルが実際に存在するか確認
+if [ ! -f "$LOG_FILE_PATH" ]; then
+    echo -e "${RED}ERROR: Log file does not exist at: $LOG_FILE_PATH${NC}"
+    exit 1
+fi
+
+# ファイル内容が空でないか確認
+if [ ! -s "$LOG_FILE_PATH" ]; then
+    echo -e "${RED}ERROR: Log file is empty: $LOG_FILE_PATH${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Log transfer verification passed${NC}"
+echo "  Log file: $LOG_FILE_PATH"
+echo "  File size: $(wc -c < "$LOG_FILE_PATH") bytes"
+
+TEST_PASSED=true
+echo ""
+echo -e "${GREEN}UC001 Web UI Integration Test: PASSED${NC}"
+exit 0
