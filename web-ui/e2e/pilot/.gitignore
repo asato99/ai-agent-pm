@@ -1,0 +1,14 @@
+# Generated files
+generated/*.sql
+
+# Test results (large, machine-specific)
+results/*/
+
+# Reports (regeneratable)
+reports/*.yaml
+reports/*.md
+
+# Keep directory structure
+!generated/.gitkeep
+!results/.gitkeep
+!reports/.gitkeep

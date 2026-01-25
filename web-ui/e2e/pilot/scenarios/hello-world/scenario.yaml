@@ -1,0 +1,34 @@
+# Hello World Scenario - シナリオ定義
+#
+# このファイルはシナリオの共通設定を定義します。
+# エージェント構成やシステムプロンプトは variations/ 以下で定義します。
+
+name: hello-world
+description: "Hello World スクリプト作成 - AIエージェントによる基本的な開発フロー検証"
+version: "1.0"
+
+# プロジェクト設定
+project:
+  id: pilot-hello
+  name: "Hello World パイロット"
+  working_directory: /tmp/pilot_hello_workspace
+
+# 期待する成果物
+expected_artifacts:
+  - path: hello.py
+    validation: |
+      python3 {path} 2>&1 | grep -q "Hello, World!"
+
+# タイムアウト設定（秒）
+timeouts:
+  task_creation: 600     # タスク作成待ち
+  task_completion: 1800  # 全タスク完了待ち
+
+# 初期アクション（テストスクリプトが実行）
+initial_action:
+  type: chat
+  from: pilot-owner
+  to: pilot-manager
+  message: |
+    「Hello, World!」を出力するPythonスクリプト hello.py を作成してください。
+    作業ディレクトリに保存し、動作確認まで行ってください。
