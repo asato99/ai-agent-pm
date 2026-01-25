@@ -678,38 +678,120 @@ class TestCoordinatorAsyncLogUpload:
 
 ---
 
-## Phase 3: 統合テスト
+## Phase 3: 統合テスト（UC001拡張）
 
-### 3.1 E2Eテスト
+**方針**: 新規テストを作成せず、既存のUC001統合テストを拡張してログ転送機能を検証する。
 
-**ファイル**: `Tests/IntegrationTests/LogTransferIntegrationTests.swift`
+### 3.1 テスト設計
 
-```swift
-final class LogTransferIntegrationTests: XCTestCase {
-    // TEST 1: 完全なフロー（ログ生成 → アップロード → 参照）
-    func testEndToEndLogTransfer() async throws {
-        // 1. プロジェクトを作成（workingDirectory設定済み）
-        // 2. Coordinatorを起動
-        // 3. タスクを実行（ログ生成）
-        // 4. タスク完了を待つ
-        // 5. ExecutionLogのlogFilePathがサーバー側パスになっていることを確認
-        // 6. ファイルが実際に存在することを確認
-    }
+**拡張対象**: `web-ui/e2e/run-uc001-test.sh`
 
-    // TEST 2: アップロード失敗時のフォールバック
-    func testLogTransferFallback() async throws {
-        // 1. サーバーを停止またはエンドポイントを無効化
-        // 2. タスクを実行
-        // 3. ExecutionLogのlogFilePathがローカルパスになっていることを確認
-    }
+**検証シナリオ**: UC001のタスク完了フローにおいて、Coordinatorが生成したログがプロジェクトの`.ai-pm/logs/{agentId}/`に転送されることを確認。
 
-    // TEST 3: 大きなログファイル（10MB未満）
-    func testLargeLogFile() async throws {
-        // 1. 大量の出力を生成するタスクを実行
-        // 2. アップロードが成功することを確認
-    }
-}
+#### ディレクトリ構成（既存）
+
+UC001テストでは以下のディレクトリが分離されている：
+
+- **Coordinatorログディレクトリ**: `/tmp/coordinator_logs_uc001_webui/`
+- **プロジェクトWorkingDirectory**: `/tmp/uc001_webui_work/`
+
+この構成により、マルチデバイス環境をシミュレートできる。
+
+### 3.2 run-uc001-test.sh への変更
+
+#### Step 4: Coordinator設定に `log_upload` セクション追加
+
+```bash
+# Step 4: Coordinatorの設定を生成
+cat > /tmp/uc001_coordinator.yaml << EOF
+polling_interval: 2
+max_concurrent: 1
+mcp_socket_path: "http://localhost:\${REST_PORT}/mcp"
+coordinator_token: "${TEST_TOKEN}"
+log_directory: /tmp/coordinator_logs_uc001_webui
+
+# ログ転送設定（新規追加）
+log_upload:
+  enabled: true
+  endpoint: "http://localhost:\${REST_PORT}/api/v1/execution-logs/upload"
+  max_file_size_mb: 10
+  retry_count: 3
+  retry_delay_seconds: 1.0
+
+ai_providers:
+  test:
+    cli_command: echo
+    cli_args: ["Task completed successfully"]
+
+agents:
+  \${WORKER_AGENT_ID}:
+    passkey: test_passkey
+EOF
 ```
+
+#### Step 8: ログ転送の検証を追加
+
+```bash
+# Step 8: 結果を検証（既存）
+echo "Step 8: Verifying test results..."
+
+# 既存の検証（タスク完了確認）
+COMPLETED_TASKS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM tasks WHERE status = 'done';")
+if [ "$COMPLETED_TASKS" -lt 1 ]; then
+    echo "ERROR: No completed tasks found"
+    exit 1
+fi
+
+# ====== ログ転送検証（新規追加） ======
+echo "Verifying log transfer..."
+
+# 8.1: execution_logsテーブルにlog_file_pathが設定されているか確認
+LOG_FILE_PATH=$(sqlite3 "$DB_PATH" "
+    SELECT log_file_path
+    FROM execution_logs
+    WHERE status = 'completed'
+    ORDER BY completed_at DESC
+    LIMIT 1;
+")
+
+if [ -z "$LOG_FILE_PATH" ]; then
+    echo "ERROR: No log_file_path found in execution_logs"
+    exit 1
+fi
+
+# 8.2: パスがプロジェクトの.ai-pm/logs/配下になっているか確認
+EXPECTED_PATH_PATTERN="/tmp/uc001_webui_work/.ai-pm/logs/${WORKER_AGENT_ID}/"
+if [[ "$LOG_FILE_PATH" != ${EXPECTED_PATH_PATTERN}* ]]; then
+    echo "ERROR: log_file_path is not in expected directory"
+    echo "  Expected pattern: ${EXPECTED_PATH_PATTERN}*"
+    echo "  Actual: $LOG_FILE_PATH"
+    exit 1
+fi
+
+# 8.3: ファイルが実際に存在するか確認
+if [ ! -f "$LOG_FILE_PATH" ]; then
+    echo "ERROR: Log file does not exist at: $LOG_FILE_PATH"
+    exit 1
+fi
+
+# 8.4: ファイル内容が空でないか確認
+if [ ! -s "$LOG_FILE_PATH" ]; then
+    echo "ERROR: Log file is empty: $LOG_FILE_PATH"
+    exit 1
+fi
+
+echo "Log transfer verification: PASSED"
+echo "  - Log file path: $LOG_FILE_PATH"
+echo "  - File size: $(wc -c < "$LOG_FILE_PATH") bytes"
+```
+
+### 3.3 Playwrightテストへの変更
+
+**ファイル**: `web-ui/e2e/integration/task-completion.spec.ts`
+
+Playwrightテスト自体の変更は不要。ログ転送はバックグラウンドで実行され、ファイルシステムレベルの検証はシェルスクリプト（Step 8）で実施する。
+
+UIからログファイルパスを確認するテストが必要な場合は、将来的に拡張可能。
 
 ---
 
@@ -749,6 +831,8 @@ final class LogTransferIntegrationTests: XCTestCase {
 - [ ] `coordinator.yaml` サンプル更新
 
 ### Phase 3 完了条件
-- [ ] `LogTransferIntegrationTests` 全テストパス
-- [ ] マルチデバイス環境での動作確認
-- [ ] ドキュメント更新
+- [ ] `run-uc001-test.sh` Step 4 に `log_upload` 設定追加
+- [ ] `run-uc001-test.sh` Step 8 にログ転送検証追加
+- [ ] UC001統合テスト実行成功（`./run-uc001-test.sh`）
+- [ ] ログファイルがプロジェクトWD配下に存在することを確認
+- [ ] ドキュメント更新（本ファイル）
