@@ -1,18 +1,18 @@
-# Windows環境でのGeminiエージェントSpawn問題
+# Windows環境でのエージェントSpawn問題（Gemini/Claude）
 
 ## 概要
 
-Windows環境でrunner（aiagent-runner）からGeminiエージェントをspawnする際、プロンプトの改行処理に起因する問題が発生している。
+Windows環境でrunner（aiagent-runner）からGemini/Claudeエージェントをspawnする際、プロンプトの改行処理に起因する問題が発生している。
 
 ## 問題の詳細
 
 ### 発生条件
 - OS: Windows
-- Provider: Gemini
+- Provider: Gemini または Claude
 - 操作: Coordinatorからエージェントインスタンスをspawn
 
 ### 症状
-Gemini CLIが正しくプロンプトを受け取れず、エージェントが正常に起動しない。
+Gemini CLI / Claude Code が正しくプロンプトを受け取れず、エージェントが正常に起動しない。
 
 ## 原因分析
 
@@ -129,10 +129,24 @@ else:
 
 ## ステータス
 
-- [ ] 調査完了: 2026-01-26
-- [ ] 修正実装: 未着手
-- [ ] テスト: 未着手
+- [x] 調査完了: 2026-01-26
+- [x] 修正実装: 2026-01-26
+- [ ] テスト: Windows環境での実機テスト未実施
 - [ ] リリース: 未着手
+
+## 実装内容
+
+`runner/src/aiagent_runner/coordinator.py` に以下の修正を実施:
+
+1. **`AgentInstanceInfo`データクラス**: `prompt_file`フィールドを追加（一時ファイルパス保持用）
+
+2. **`_spawn_instance`メソッド**: Windows + Gemini/Claude の場合の特別処理を追加
+   - プロンプトを一時ファイル（`{provider}_prompt_*.txt`）に書き出し
+   - `type "prompt.txt" | <cli_command> ...` 形式でコマンドを実行
+   - stdin経由でプロンプトをパイプ
+   - Gemini CLI と Claude Code の両方に対応
+
+3. **`_cleanup_finished`メソッド**: プロンプト一時ファイルのクリーンアップを追加
 
 ## 備考
 

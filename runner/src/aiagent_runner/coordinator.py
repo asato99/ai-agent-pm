@@ -50,6 +50,7 @@ class AgentInstanceInfo:
     log_file_path: Optional[str] = None        # Phase 4: ログファイルパス
     mcp_config_file: Optional[str] = None      # Temp file for MCP config (Claude CLI)
     execution_log_id: Optional[str] = None     # ログアップロード用実行ログID
+    prompt_file: Optional[str] = None          # Temp file for prompt (Windows + Gemini)
 
 
 @dataclass
@@ -418,6 +419,13 @@ class Coordinator:
                         logger.debug(f"Removed temp MCP config: {info.mcp_config_file}")
                     except Exception:
                         pass
+                # Clean up prompt temp file (Windows + Gemini)
+                if info.prompt_file:
+                    try:
+                        os.unlink(info.prompt_file)
+                        logger.debug(f"Removed temp prompt file: {info.prompt_file}")
+                    except Exception:
+                        pass
 
                 # Phase 6: Start async log upload (non-blocking)
                 # 参照: docs/design/LOG_TRANSFER_DESIGN.md
@@ -698,7 +706,26 @@ class Coordinator:
         # so the prompt itself is simpler and safer to pass as command-line argument
         # Gemini: uses positional argument for one-shot mode (-p is deprecated)
         # Claude: uses -p flag
-        if provider == "gemini":
+        #
+        # Windows special handling:
+        # On Windows with shell=True, multi-line prompts cause issues with cmd.exe.
+        # We use stdin to pipe the prompt instead of command-line argument.
+        # Both Gemini CLI and Claude Code support reading prompts from stdin.
+        # See: docs/issues/WINDOWS_GEMINI_SPAWN_ISSUE.md
+        prompt_file_path: Optional[str] = None
+
+        if is_windows() and provider in ("gemini", "claude"):
+            # Write prompt to temp file for piping via stdin
+            prompt_fd, prompt_file_path = tempfile.mkstemp(
+                suffix='.txt',
+                prefix=f'{provider}_prompt_',
+                text=True
+            )
+            with os.fdopen(prompt_fd, 'w', encoding='utf-8') as f:
+                f.write(prompt)
+            logger.debug(f"Created prompt temp file: {prompt_file_path}")
+            # Don't add prompt to cmd; will pipe via stdin
+        elif provider == "gemini":
             cmd.append(prompt)
         else:
             cmd.extend(["-p", prompt])
@@ -721,23 +748,42 @@ class Coordinator:
         # Open log file (keep handle open during process lifetime)
         log_f = open(log_file, "w")
 
+        # Prepare environment
+        spawn_env = {
+            **os.environ,
+            "AGENT_ID": agent_id,
+            "PROJECT_ID": project_id,
+            "AGENT_PASSKEY": passkey,
+            "WORKING_DIRECTORY": working_dir,
+        }
+
         # Spawn process
         # On Windows, shell=True is required to find commands in PATH
         # This is safe since cmd is constructed from configuration, not user input
-        process = subprocess.Popen(
-            cmd,
-            cwd=working_dir,
-            stdout=log_f,
-            stderr=subprocess.STDOUT,
-            shell=is_windows(),
-            env={
-                **os.environ,
-                "AGENT_ID": agent_id,
-                "PROJECT_ID": project_id,
-                "AGENT_PASSKEY": passkey,
-                "WORKING_DIRECTORY": working_dir,
-            }
-        )
+        if prompt_file_path:
+            # Windows: Use 'type' command to pipe prompt file content to stdin
+            # Format: type "prompt.txt" | <cli_command> ...
+            # Works for both Gemini CLI and Claude Code
+            cmd_str = ' '.join(cmd)  # cmd doesn't include prompt yet
+            shell_cmd = f'type "{prompt_file_path}" | {cmd_str}'
+            logger.debug(f"Windows {provider} shell command: type ... | {cmd_str}")
+            process = subprocess.Popen(
+                shell_cmd,
+                cwd=working_dir,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                shell=True,
+                env=spawn_env
+            )
+        else:
+            process = subprocess.Popen(
+                cmd,
+                cwd=working_dir,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                shell=is_windows(),
+                env=spawn_env
+            )
 
         key = AgentInstanceKey(agent_id, project_id)
         self._instances[key] = AgentInstanceInfo(
@@ -750,7 +796,8 @@ class Coordinator:
             log_file_handle=log_f,
             task_id=task_id,
             log_file_path=str(log_file),
-            mcp_config_file=mcp_config_file_path
+            mcp_config_file=mcp_config_file_path,
+            prompt_file=prompt_file_path
         )
 
         logger.info(f"Spawned instance {agent_id}/{project_id} (PID: {process.pid})")
