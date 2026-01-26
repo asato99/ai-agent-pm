@@ -826,6 +826,24 @@ public final class MCPServer {
         }
     }
 
+    /// 非同期版ツール実行（Long Polling対応）
+    /// get_next_actionのようなLong Polling対応ツールで使用
+    /// Note: internal for @testable access in tests
+    func executeToolAsync(name: String, arguments: [String: Any], caller: CallerType) async throws -> Any {
+        switch name {
+        case "get_next_action":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            let timeoutSeconds = (arguments["timeout_seconds"] as? Int) ?? 30
+            return try await getNextActionAsync(session: session, timeoutSeconds: timeoutSeconds)
+
+        default:
+            // その他のツールは同期版にフォールバック
+            return try executeTool(name: name, arguments: arguments, caller: caller)
+        }
+    }
+
     /// 結果をJSON文字列にフォーマット
     private func formatResult(_ result: Any) -> String {
         if let data = try? JSONSerialization.data(
@@ -2489,6 +2507,145 @@ public final class MCPServer {
         case .manager:
             return try getManagerNextAction(mainTask: main, phase: phase, allTasks: allTasks)
         }
+    }
+
+    /// get_next_action - Long Polling 対応非同期版
+    /// 参照: docs/design/CHAT_LONG_POLLING.md
+    /// チャットセッションの場合、新しいメッセージが到着するかタイムアウトまでサーバーサイドで待機
+    /// これによりGemini APIのレート制限を回避しつつリアルタイムなチャット体験を維持
+    private func getNextActionAsync(session: AgentSession, timeoutSeconds: Int) async throws -> [String: Any] {
+        let agentId = session.agentId
+        let projectId = session.projectId
+        Self.log("[MCP] getNextActionAsync called for agent: '\(agentId.value)', project: '\(projectId.value)', timeout: \(timeoutSeconds)s")
+
+        // チャットセッション以外は同期版にフォールバック
+        guard session.purpose == .chat else {
+            Self.log("[MCP] getNextActionAsync: Not a chat session, falling back to sync version")
+            return try getNextAction(session: session)
+        }
+
+        // モデル検証チェック
+        if session.modelVerified == nil {
+            return try getNextAction(session: session)
+        }
+
+        // セッション終了チェック
+        if session.state == .terminating {
+            return try getNextAction(session: session)
+        }
+
+        let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+        let checkInterval: UInt64 = 1_000_000_000  // 1秒（ナノ秒）
+        let softTimeoutSeconds = 10.0 * 60.0  // 10分
+
+        // Long Polling: メッセージが来るかタイムアウトまで待機
+        while Date() < deadline {
+            // 1. セッションタイムアウトチェック
+            let idleTime = Date().timeIntervalSince(session.lastActivityAt)
+            if idleTime > softTimeoutSeconds {
+                Self.log("[MCP] getNextActionAsync: Chat session soft timeout reached (\(Int(idleTime))s idle)")
+                return [
+                    "action": "logout",
+                    "instruction": """
+                        セッションがタイムアウトしました（10分経過）。
+                        logout を呼び出してセッションを終了してください。
+                        """,
+                    "state": "chat_timeout",
+                    "reason": "session_timeout"
+                ]
+            }
+
+            // 2. セッション状態の再チェック（terminatingになったら即座に終了）
+            if let currentSession = try? agentSessionRepository.findByToken(session.token),
+               currentSession.state == .terminating {
+                Self.log("[MCP] getNextActionAsync: Session is terminating, returning exit action")
+                return [
+                    "action": "exit",
+                    "instruction": """
+                        ユーザーがチャットを閉じました。
+                        logout を呼び出してセッションを終了してください。
+                        """,
+                    "state": "session_terminating",
+                    "reason": "user_closed_chat"
+                ]
+            }
+
+            // 3. 未読メッセージのチェック
+            let pendingMessages = try chatRepository.findUnreadMessages(
+                projectId: projectId,
+                agentId: agentId
+            )
+
+            if !pendingMessages.isEmpty {
+                Self.log("[MCP] getNextActionAsync: \(pendingMessages.count) pending message(s) found, returning get_pending_messages")
+                return [
+                    "action": "get_pending_messages",
+                    "instruction": """
+                        チャットセッションです。
+                        get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
+
+                        【重要】以下のような作業依頼を受けた場合は、まず request_task を呼び出してタスクを登録してください:
+                        - 「〜を実装してください」「〜を追加してください」「〜を修正してください」
+                        - 「〜機能を作ってください」「〜をお願いします」
+                        - その他、具体的な開発作業や修正を依頼された場合
+                        タスク登録後、respond_chat で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください。
+
+                        単なる質問や相談への応答は respond_chat で送信してください。
+                        他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
+                        その他の可能な操作は help ツールで確認できます。
+                        """,
+                    "state": "chat_session"
+                ]
+            }
+
+            // 4. AI-to-AI会話のチェック（未読メッセージがない場合のみ）
+            let pendingConversations = try conversationRepository.findPendingForParticipant(
+                agentId,
+                projectId: projectId
+            )
+            if let pendingConv = pendingConversations.first {
+                // 会話をactiveに遷移
+                try conversationRepository.updateState(pendingConv.id, state: .active)
+                Self.log("[MCP] getNextActionAsync: Accepted conversation request: \(pendingConv.id.value)")
+
+                return [
+                    "action": "conversation_request",
+                    "instruction": """
+                        AI-to-AI会話の要求を受信しました。
+                        相手エージェントからの会話を受け入れ、get_pending_messages でメッセージを取得してください。
+                        会話を終了する場合は end_conversation を呼び出してください。
+                        """,
+                    "state": "conversation_active",
+                    "conversation_id": pendingConv.id.value,
+                    "initiator_agent_id": pendingConv.initiatorAgentId.value,
+                    "purpose": pendingConv.purpose ?? ""
+                ]
+            }
+
+            // 5. 待機（CPU負荷なし）
+            // Note: Domain.Task と衝突するため _Concurrency.Task を明示的に使用
+            try await _Concurrency.Task.sleep(nanoseconds: checkInterval)
+        }
+
+        // タイムアウト: 再度ポーリングを要求
+        let remainingMinutes = Int((softTimeoutSeconds - Date().timeIntervalSince(session.lastActivityAt)) / 60)
+        Self.log("[MCP] getNextActionAsync: Timeout reached, returning wait_for_messages (remaining: \(remainingMinutes)min)")
+        return [
+            "action": "wait_for_messages",
+            "instruction": """
+                現在処理待ちのメッセージがありません。
+                再度 get_next_action を呼び出して新しいメッセージを確認してください。
+
+                【重要】作業依頼（「〜を実装してください」「〜を追加してください」など）を受けた場合は、
+                まず request_task を呼び出してタスクを登録し、respond_chat で「承知しました」と応答してください。
+
+                他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
+                その他の可能な操作は help ツールで確認できます。
+                """,
+            "state": "chat_waiting",
+            "wait_seconds": timeoutSeconds,
+            "remaining_timeout_minutes": remainingMinutes
+        ]
     }
 
     /// Worker のワークフロー制御
