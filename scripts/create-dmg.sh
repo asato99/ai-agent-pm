@@ -54,31 +54,32 @@ echo -e "${GREEN}App built successfully${NC}"
 # Step 1.5: Build and embed MCP Server (Universal Binary)
 echo -e "${YELLOW}Step 1.5: Building MCP Server (Universal Binary)...${NC}"
 
-# Build MCP server for arm64
-echo "  Building for arm64..."
-swift build -c release --product mcp-server-pm --triple arm64-apple-macosx
+cd "${PROJECT_ROOT}"
 
-# Build MCP server for x86_64
-echo "  Building for x86_64..."
-swift build -c release --product mcp-server-pm --triple x86_64-apple-macosx
+# Build MCP server as Universal Binary in one step
+MCP_BUILD_DIR="${PROJECT_ROOT}/.build/mcp-universal"
+xcodebuild -scheme MCPServer \
+    -configuration Release \
+    -derivedDataPath "${PROJECT_ROOT}/.build/DerivedData" \
+    -destination 'platform=macOS' \
+    build \
+    CONFIGURATION_BUILD_DIR="${MCP_BUILD_DIR}" \
+    CODE_SIGN_IDENTITY="-" \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_ALLOWED=NO \
+    ONLY_ACTIVE_ARCH=NO \
+    ARCHS="arm64 x86_64"
 
-MCP_SERVER_ARM64="${PROJECT_ROOT}/.build/arm64-apple-macosx/release/mcp-server-pm"
-MCP_SERVER_X86="${PROJECT_ROOT}/.build/x86_64-apple-macosx/release/mcp-server-pm"
+MCP_SERVER_SRC="${MCP_BUILD_DIR}/mcp-server-pm"
 MCP_SERVER_DST="${DIST_DIR}/${APP_NAME}.app/Contents/MacOS/mcp-server-pm"
 
-if [ ! -f "${MCP_SERVER_ARM64}" ]; then
-    echo -e "${RED}Error: MCP server arm64 build failed${NC}"
+if [ ! -f "${MCP_SERVER_SRC}" ]; then
+    echo -e "${RED}Error: MCP server build failed${NC}"
     exit 1
 fi
 
-if [ ! -f "${MCP_SERVER_X86}" ]; then
-    echo -e "${RED}Error: MCP server x86_64 build failed${NC}"
-    exit 1
-fi
-
-# Create Universal Binary using lipo
-echo "  Creating Universal Binary..."
-lipo -create -output "${MCP_SERVER_DST}" "${MCP_SERVER_ARM64}" "${MCP_SERVER_X86}"
+# Copy to app bundle
+cp "${MCP_SERVER_SRC}" "${MCP_SERVER_DST}"
 chmod +x "${MCP_SERVER_DST}"
 
 # Verify Universal Binary
