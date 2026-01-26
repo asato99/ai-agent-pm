@@ -119,10 +119,17 @@ public final class MCPDaemonManager: ObservableObject {
 
     /// Path to mcp-server-pm executable
     private var executablePath: String {
-        // First check if bundled with the app
-        if let bundledPath = Bundle.main.path(forResource: "mcp-server-pm", ofType: nil) {
-            debugLog(" Found bundled executable: \(bundledPath)")
-            return bundledPath
+        // First check if bundled with the app (in Contents/MacOS/)
+        if let execURL = Bundle.main.executableURL {
+            let bundledPath = execURL
+                .deletingLastPathComponent()  // Remove app executable name
+                .appendingPathComponent("mcp-server-pm")
+                .path
+            debugLog(" Checking bundled path: \(bundledPath)")
+            if FileManager.default.fileExists(atPath: bundledPath) {
+                debugLog(" Found bundled executable: \(bundledPath)")
+                return bundledPath
+            }
         }
 
         // Fallback: Check in the same Products/Debug directory as the app bundle (for Xcode development)
