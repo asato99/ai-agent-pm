@@ -17,12 +17,13 @@ ai_providers:
       - "--dangerously-skip-permissions"
       - "--max-turns"
       - "50"
+      - "--verbose"  # 人間向け詳細ログ出力
 
   gemini:
     cli_command: gemini
     cli_args:
       - "-y"  # YOLO mode: auto-approve all tool calls
-      - "--verbose"  # Enable verbose output for debugging
+      - "--verbosity=info"  # 人間向け詳細ログ出力
 
 # Agents configuration
 # 本番環境では環境変数または別ファイルでpasskeyを管理
