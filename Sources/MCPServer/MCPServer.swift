@@ -1621,7 +1621,7 @@ public final class MCPServer {
             else if pending.isExpired(now: now, ttlSeconds: configuredTTL) {
                 Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose EXPIRED (created: \(pending.createdAt), TTL: \(Int(configuredTTL))s)")
                 // 期限切れのpending purposeを削除
-                try pendingAgentPurposeRepository.delete(agentId: id, projectId: projId)
+                try pendingAgentPurposeRepository.delete(agentId: id, projectId: projId, purpose: pending.purpose)
                 pendingPurposeExpired = true
             }
             // 未起動でTTL内 → startを返し、started_atを更新
@@ -1629,7 +1629,7 @@ public final class MCPServer {
                 Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose exists, marking as started")
                 hasPendingPurpose = true
                 // started_atを更新（次回以降はholdを返す）
-                try pendingAgentPurposeRepository.markAsStarted(agentId: id, projectId: projId, startedAt: now)
+                try pendingAgentPurposeRepository.markAsStarted(agentId: id, projectId: projId, purpose: pending.purpose, startedAt: now)
             }
         }
 

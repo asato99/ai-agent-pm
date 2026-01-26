@@ -60,11 +60,37 @@ public final class PendingAgentPurposeRepository: PendingAgentPurposeRepositoryP
         self.db = database
     }
 
-    public func find(agentId: AgentID, projectId: ProjectID) throws -> PendingAgentPurpose? {
+    public func find(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws -> PendingAgentPurpose? {
         try db.read { db in
             try PendingAgentPurposeRecord
                 .filter(Column("agent_id") == agentId.value)
                 .filter(Column("project_id") == projectId.value)
+                .filter(Column("purpose") == purpose.rawValue)
+                .fetchOne(db)?
+                .toDomain()
+        }
+    }
+
+    public func find(agentId: AgentID, projectId: ProjectID) throws -> PendingAgentPurpose? {
+        // 最も最近startedAtが設定されたものを優先的に返す
+        // これにより、複数のpurpose（chat/task）が同時に存在する場合、
+        // 最後に起動されたエージェントに対応するpurposeが返される
+        // 参照: docs/design/CHAT_FEATURE.md - 同時セッション対応
+        //
+        // ORDER BY:
+        //   1. started_atがある（起動済み）レコードを優先
+        //   2. started_at DESC（最近起動されたものを優先）
+        //   3. created_at DESC（最近作成されたものを優先）
+        try db.read { db in
+            try PendingAgentPurposeRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("project_id") == projectId.value)
+                .order(
+                    // CASE WHEN started_at IS NULL THEN 1 ELSE 0 END - NULLを後ろに
+                    SQL("CASE WHEN started_at IS NULL THEN 1 ELSE 0 END"),
+                    Column("started_at").desc,
+                    Column("created_at").desc
+                )
                 .fetchOne(db)?
                 .toDomain()
         }
@@ -89,6 +115,16 @@ public final class PendingAgentPurposeRepository: PendingAgentPurposeRepositoryP
         }
     }
 
+    public func delete(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws {
+        _ = try db.write { db in
+            try PendingAgentPurposeRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("project_id") == projectId.value)
+                .filter(Column("purpose") == purpose.rawValue)
+                .deleteAll(db)
+        }
+    }
+
     public func delete(agentId: AgentID, projectId: ProjectID) throws {
         _ = try db.write { db in
             try PendingAgentPurposeRecord
@@ -107,15 +143,15 @@ public final class PendingAgentPurposeRepository: PendingAgentPurposeRepositoryP
     }
 
     /// 起動済みとしてマーク（started_atを更新）
-    public func markAsStarted(agentId: AgentID, projectId: ProjectID, startedAt: Date) throws {
+    public func markAsStarted(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose, startedAt: Date) throws {
         try db.write { db in
             try db.execute(
                 sql: """
                     UPDATE pending_agent_purposes
                     SET started_at = ?
-                    WHERE agent_id = ? AND project_id = ?
+                    WHERE agent_id = ? AND project_id = ? AND purpose = ?
                 """,
-                arguments: [startedAt, agentId.value, projectId.value]
+                arguments: [startedAt, agentId.value, projectId.value, purpose.rawValue]
             )
         }
 

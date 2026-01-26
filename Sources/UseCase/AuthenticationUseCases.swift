@@ -93,8 +93,8 @@ public struct AuthenticateUseCase: Sendable {
         if let pendingRepo = pendingPurposeRepository,
            let pendingPurpose = try pendingRepo.find(agentId: agentID, projectId: projID) {
             purpose = pendingPurpose.purpose
-            // 使用済みのpending purposeを削除
-            try pendingRepo.delete(agentId: agentID, projectId: projID)
+            // 使用済みのpending purposeを削除（purpose指定で特定のpurposeのみ削除）
+            try pendingRepo.delete(agentId: agentID, projectId: projID, purpose: purpose)
         }
 
         // Phase 4: 新しいセッションを作成（projectId, purpose を含む）

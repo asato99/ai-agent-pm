@@ -50,6 +50,7 @@ cleanup() {
     echo ""
     echo -e "${YELLOW}Cleanup${NC}"
 
+    # Kill processes started by this script
     [ -n "$WEB_UI_PID" ] && kill -0 "$WEB_UI_PID" 2>/dev/null && kill "$WEB_UI_PID" 2>/dev/null
     [ -n "$COORDINATOR_PID" ] && kill -0 "$COORDINATOR_PID" 2>/dev/null && kill "$COORDINATOR_PID" 2>/dev/null
     [ -n "$REST_PID" ] && kill -0 "$REST_PID" 2>/dev/null && kill "$REST_PID" 2>/dev/null
@@ -58,7 +59,12 @@ cleanup() {
     # Kill any gemini/claude processes spawned for this test
     pkill -f "uc019-worker" 2>/dev/null || true
 
+    # Kill any orphaned coordinator processes using our config
+    pkill -f "coordinator_uc019_webui_config.yaml" 2>/dev/null || true
+
+    # Clean up socket and lock files
     rm -f "$MCP_SOCKET_PATH"
+    rm -f /tmp/aiagent-runner-*/coordinator-*.lock 2>/dev/null || true
 
     if [ "$TEST_PASSED" == "true" ]; then
         rm -f /tmp/uc019_webui_*.log
@@ -88,6 +94,17 @@ echo ""
 
 # Step 1: 環境準備
 echo -e "${YELLOW}Step 1: Preparing environment${NC}"
+
+# Kill any leftover AI agent processes from previous test runs
+# These might still be connected to the old MCP server and will authenticate on new sessions
+pkill -f "claude.*--mcp-socket.*uc019" 2>/dev/null || true
+pkill -f "gemini.*uc019" 2>/dev/null || true
+# Kill any stale coordinator processes
+pkill -f "coordinator_uc019" 2>/dev/null || true
+pkill -f "coordinator-.*lock" 2>/dev/null || true
+# Remove any stale coordinator lock files
+rm -f /tmp/aiagent-runner-*/coordinator-*.lock 2>/dev/null || true
+
 ps aux | grep -E "(mcp-server-pm|rest-server-pm)" | grep -v grep | awk '{print $2}' | xargs -I {} kill -9 {} 2>/dev/null || true
 # Kill any processes using the required ports
 lsof -ti:$REST_PORT | xargs kill -9 2>/dev/null || true
@@ -250,6 +267,12 @@ echo ""
 
 # Step 7: Playwrightテスト実行
 echo -e "${YELLOW}Step 7: Running Playwright tests${NC}"
+
+# Clear any stale sessions that might have been created during startup
+# (e.g., from leftover AI processes connecting to the new MCP server)
+sqlite3 "$TEST_DB_PATH" "DELETE FROM agent_sessions WHERE agent_id LIKE 'uc019-%';" 2>/dev/null || true
+sqlite3 "$TEST_DB_PATH" "DELETE FROM pending_agent_purposes WHERE agent_id LIKE 'uc019-%';" 2>/dev/null || true
+echo "Cleared stale sessions before test"
 echo ""
 
 INTEGRATION_WEB_URL="http://localhost:$WEB_UI_PORT" \

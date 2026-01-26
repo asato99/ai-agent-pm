@@ -40,9 +40,10 @@ public struct PendingAgentPurpose: Identifiable, Equatable, Sendable {
     /// TTL（Time To Live）: 5分
     public static let ttlSeconds: TimeInterval = 5 * 60
 
-    /// (agentId, projectId) の複合キー
+    /// (agentId, projectId, purpose) の複合キー
+    /// 同一エージェントでtaskとchatを同時に持てるようにpurposeも含める
     public var id: String {
-        "\(agentId.value)_\(projectId.value)"
+        "\(agentId.value)_\(projectId.value)_\(purpose.rawValue)"
     }
 
     public let agentId: AgentID
@@ -97,18 +98,25 @@ public struct PendingAgentPurpose: Identifiable, Equatable, Sendable {
 
 /// PendingAgentPurpose リポジトリプロトコル
 public protocol PendingAgentPurposeRepositoryProtocol: Sendable {
-    /// 起動理由を検索
+    /// 起動理由を検索（purpose指定）
+    func find(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws -> PendingAgentPurpose?
+
+    /// 起動理由を検索（後方互換: 任意のpurposeを返す）
+    /// 注意: 複数のpurposeがある場合、どちらが返るかは保証されない
     func find(agentId: AgentID, projectId: ProjectID) throws -> PendingAgentPurpose?
 
     /// 起動理由を保存（既存があれば上書き）
     func save(_ purpose: PendingAgentPurpose) throws
 
-    /// 起動理由を削除
+    /// 起動理由を削除（purpose指定）
+    func delete(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws
+
+    /// 起動理由を削除（後方互換: 全purposeを削除）
     func delete(agentId: AgentID, projectId: ProjectID) throws
 
     /// 期限切れレコードを削除（TTL: デフォルト5分）
     func deleteExpired(olderThan: Date) throws
 
     /// 起動済みとしてマーク（started_atを更新）
-    func markAsStarted(agentId: AgentID, projectId: ProjectID, startedAt: Date) throws
+    func markAsStarted(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose, startedAt: Date) throws
 }

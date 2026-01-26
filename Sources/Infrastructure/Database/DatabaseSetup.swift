@@ -946,6 +946,41 @@ public final class DatabaseSetup {
             try db.create(indexOn: "tasks", columns: ["requester_id"])
         }
 
+        // v41: pending_agent_purposes の主キーに purpose を追加
+        // 同一エージェントでタスクとチャットを同時に起動可能にする
+        migrator.registerMigration("v41_pending_purpose_composite_key") { db in
+            // SQLiteでは主キー変更不可のため、テーブル再作成
+            // 1. 新テーブル作成
+            try db.create(table: "pending_agent_purposes_new") { t in
+                t.column("agent_id", .text).notNull()
+                t.column("project_id", .text).notNull()
+                t.column("purpose", .text).notNull() // "task" | "chat"
+                t.column("created_at", .datetime).notNull()
+                t.column("started_at", .datetime)
+                t.column("conversation_id", .text)
+                // 新しい複合主キー: (agent_id, project_id, purpose)
+                t.primaryKey(["agent_id", "project_id", "purpose"])
+            }
+
+            // 2. データをコピー
+            try db.execute(sql: """
+                INSERT INTO pending_agent_purposes_new
+                (agent_id, project_id, purpose, created_at, started_at, conversation_id)
+                SELECT agent_id, project_id, purpose, created_at, started_at, conversation_id
+                FROM pending_agent_purposes
+            """)
+
+            // 3. 古いテーブルを削除
+            try db.drop(table: "pending_agent_purposes")
+
+            // 4. 新テーブルをリネーム
+            try db.rename(table: "pending_agent_purposes_new", to: "pending_agent_purposes")
+
+            // 5. インデックス再作成
+            try db.create(indexOn: "pending_agent_purposes", columns: ["agent_id"])
+            try db.create(indexOn: "pending_agent_purposes", columns: ["project_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -11,7 +11,7 @@ import { useTasks } from '@/hooks/useTasks'
 import { useAssignableAgents, useAgentSessions, useAuth, useSubordinates } from '@/hooks'
 import { useUnreadCounts } from '@/hooks/useUnreadCounts'
 import { api } from '@/api/client'
-import { getAncestorPath, getChildTasks, getBlockingTasks } from '@/utils/taskSorting'
+import { getAncestorPath, getChildTasks } from '@/utils/taskSorting'
 import type { Task, TaskStatus, TaskPriority, Agent } from '@/types'
 
 export function TaskBoardPage() {
@@ -48,7 +48,7 @@ export function TaskBoardPage() {
     const ancestorTitles = getAncestorPath(selectedTask.id, tasks)
     const ancestors: { id: string; title: string; status: TaskStatus }[] = []
     let currentParentId = selectedTask.parentTaskId
-    for (const title of ancestorTitles) {
+    for (const _title of ancestorTitles) {
       const parent = tasks.find((t) => t.id === currentParentId)
       if (parent) {
         ancestors.push({ id: parent.id, title: parent.title, status: parent.status })

@@ -88,6 +88,52 @@ lipo -info "${MCP_SERVER_DST}"
 
 echo -e "${GREEN}MCP Server (Universal) embedded in app bundle${NC}"
 
+# Step 1.6: Build and embed REST Server (Universal Binary)
+echo -e "${YELLOW}Step 1.6: Building REST Server (Universal Binary)...${NC}"
+
+cd "${PROJECT_ROOT}"
+
+# Build REST server as Universal Binary
+REST_BUILD_DIR="${PROJECT_ROOT}/.build/rest-universal"
+xcodebuild -scheme RESTServer \
+    -configuration Release \
+    -derivedDataPath "${PROJECT_ROOT}/.build/DerivedData" \
+    -destination 'platform=macOS' \
+    build \
+    CONFIGURATION_BUILD_DIR="${REST_BUILD_DIR}" \
+    CODE_SIGN_IDENTITY="-" \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_ALLOWED=NO \
+    ONLY_ACTIVE_ARCH=NO \
+    ARCHS="arm64 x86_64"
+
+REST_SERVER_SRC="${REST_BUILD_DIR}/rest-server-pm"
+REST_SERVER_DST="${DIST_DIR}/${APP_NAME}.app/Contents/MacOS/rest-server-pm"
+REST_ENTITLEMENTS="${PROJECT_ROOT}/Sources/RESTServer/RESTServer.entitlements"
+
+if [ ! -f "${REST_SERVER_SRC}" ]; then
+    echo -e "${RED}Error: REST server build failed${NC}"
+    exit 1
+fi
+
+# Copy to app bundle
+cp "${REST_SERVER_SRC}" "${REST_SERVER_DST}"
+chmod +x "${REST_SERVER_DST}"
+
+# Sign with entitlements (required for SwiftNIO network operations)
+echo "  Signing REST server with entitlements..."
+codesign --force --sign - --entitlements "${REST_ENTITLEMENTS}" "${REST_SERVER_DST}"
+
+# Verify Universal Binary
+echo "  Verifying architectures:"
+lipo -info "${REST_SERVER_DST}"
+
+# Verify code signature
+echo "  Verifying code signature:"
+codesign -dv --entitlements - "${REST_SERVER_DST}" 2>&1 | head -10
+
+echo -e "${GREEN}REST Server (Universal) embedded and signed in app bundle${NC}"
+
 # Step 2: Prepare DMG staging directory
 echo -e "${YELLOW}Step 2: Preparing DMG contents...${NC}"
 rm -rf "${DMG_DIR}"

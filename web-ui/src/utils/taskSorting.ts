@@ -93,11 +93,8 @@ export function sortTasksWithHierarchy(
  */
 function buildSortedTree(
   tasksWithDepth: TaskWithDepth[],
-  inColumnIds: Set<string>
+  _inColumnIds: Set<string>
 ): Task[] {
-  // Create a map for quick lookup
-  const taskMap = new Map(tasksWithDepth.map((t) => [t.task.id, t]))
-
   // Find root tasks (either no parent, or parent not in this column)
   const rootTasks = tasksWithDepth.filter((t) => !t.parentInColumn)
 

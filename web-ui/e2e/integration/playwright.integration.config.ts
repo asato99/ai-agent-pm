@@ -28,9 +28,9 @@ export default defineConfig({
   use: {
     // Connect to the real backend
     baseURL: process.env.INTEGRATION_WEB_URL || 'http://localhost:5173',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'on-first-retry',
+    trace: 'on',
+    screenshot: 'on',
+    video: 'on',
   },
   projects: [
     {
