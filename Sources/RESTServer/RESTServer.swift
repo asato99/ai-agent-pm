@@ -2014,6 +2014,10 @@ final class RESTServer {
 
             if activeChatSessions.isEmpty {
                 debugLog("endChatSession: No active chat session found for agent=\(agentIdStr)")
+                // Clean up PendingAgentPurpose even if no active session
+                // This handles cases where session was never created but pending purpose exists
+                try pendingAgentPurposeRepository.delete(agentId: targetAgentId, projectId: projectId, purpose: .chat)
+                debugLog("endChatSession: Deleted pending purpose (chat) for agent=\(agentIdStr)")
                 // Return success even if no session exists (idempotent)
                 return jsonResponse(["success": true, "noActiveSession": true])
             }
@@ -2027,6 +2031,13 @@ final class RESTServer {
             }
 
             debugLog("endChatSession: Terminated \(terminatedCount) session(s) for agent=\(agentIdStr)")
+
+            // Clean up PendingAgentPurpose for chat
+            // This ensures that when user reopens chat, a fresh pending purpose is created
+            // without stale started_at that could cause "stuck in preparing" issue
+            try pendingAgentPurposeRepository.delete(agentId: targetAgentId, projectId: projectId, purpose: .chat)
+            debugLog("endChatSession: Deleted pending purpose (chat) for agent=\(agentIdStr)")
+
             return jsonResponse(["success": true])
         } catch {
             debugLog("Failed to end chat session: \(error)")

@@ -119,4 +119,7 @@ public protocol PendingAgentPurposeRepositoryProtocol: Sendable {
 
     /// 起動済みとしてマーク（started_atを更新）
     func markAsStarted(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose, startedAt: Date) throws
+
+    /// started_atをクリア（スポーンタイムアウト時の再スポーン用）
+    func clearStartedAt(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws
 }

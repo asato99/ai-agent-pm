@@ -52,7 +52,10 @@ export function ChatInput({
     [handleSubmit]
   )
 
-  const isDisabled = disabled || isSubmitting || !sessionReady
+  // Input field: always enabled (unless explicitly disabled or submitting)
+  const isInputDisabled = disabled || isSubmitting
+  // Send button: disabled when session is not ready
+  const isButtonDisabled = disabled || isSubmitting || !sessionReady
 
   return (
     <form onSubmit={handleSubmit} className="border-t p-4">
@@ -64,7 +67,7 @@ export function ChatInput({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={isDisabled}
+          disabled={isInputDisabled}
           maxLength={maxLength}
           rows={2}
           aria-label="Chat message input"
@@ -73,7 +76,7 @@ export function ChatInput({
           type="submit"
           data-testid="chat-send-button"
           className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
-          disabled={isDisabled || !content.trim()}
+          disabled={isButtonDisabled || !content.trim()}
           aria-label={sessionReady ? '送信' : '準備中'}
         >
           {!sessionReady ? (

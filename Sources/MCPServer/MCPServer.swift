@@ -1612,10 +1612,26 @@ public final class MCPServer {
             let now = Date()
 
             // 起動済みチェック（started_atがあれば既に起動済み）
-            // 起動済みの場合はTTLチェックをスキップ（起動後のタイムアウトは別途検討）
-            if pending.startedAt != nil {
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose already STARTED at \(pending.startedAt!), returning hold")
-                hasPendingPurpose = false  // 起動済みなのでstartは返さない
+            // ただし、セッションが存在しない場合はスポーンに失敗した可能性がある
+            // スポーンタイムアウト（120秒）経過後は再スポーンを許可する
+            if let startedAt = pending.startedAt {
+                let spawnTimeout: TimeInterval = 120  // スポーン試行のタイムアウト（秒）
+                let timeSinceStart = now.timeIntervalSince(startedAt)
+
+                // この時点でactiveSessions.isEmptyは確定（line 1502-1508で早期リターンするため）
+                // つまりセッションが存在しない状態
+                if timeSinceStart > spawnTimeout {
+                    // スポーンタイムアウト：セッションが作成されなかった
+                    Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': spawn TIMED OUT (started: \(startedAt), elapsed: \(Int(timeSinceStart))s > \(Int(spawnTimeout))s, no active session)")
+                    // started_atをクリアして再スポーンを許可
+                    try pendingAgentPurposeRepository.clearStartedAt(agentId: id, projectId: projId, purpose: pending.purpose)
+                    Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': cleared started_at, allowing re-spawn")
+                    hasPendingPurpose = true  // 再スポーンを許可
+                } else {
+                    // まだタイムアウトしていない：スポーン中と見なしてhold
+                    Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose already STARTED at \(startedAt), elapsed \(Int(timeSinceStart))s, returning hold")
+                    hasPendingPurpose = false  // 起動済みなのでstartは返さない
+                }
             }
             // 未起動の場合: TTLチェック（設定された時間経過でタイムアウト）
             else if pending.isExpired(now: now, ttlSeconds: configuredTTL) {

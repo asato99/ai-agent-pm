@@ -165,6 +165,29 @@ public final class PendingAgentPurposeRepository: PendingAgentPurposeRepositoryP
         }
     }
 
+    /// started_atをクリア（スポーンタイムアウト時の再スポーン用）
+    public func clearStartedAt(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws {
+        try db.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE pending_agent_purposes
+                    SET started_at = NULL
+                    WHERE agent_id = ? AND project_id = ? AND purpose = ?
+                """,
+                arguments: [agentId.value, projectId.value, purpose.rawValue]
+            )
+        }
+
+        // WAL mode: 他プロセスからの可視性を確保
+        do {
+            try db.write { db in
+                try db.execute(sql: "PRAGMA wal_checkpoint(PASSIVE)")
+            }
+        } catch {
+            NSLog("[PendingAgentPurposeRepository] WAL checkpoint failed (non-fatal): \(error)")
+        }
+    }
+
     /// デバッグ用: 全レコードをダンプ
     public func dumpAllForDebug() throws -> [[String: Any]] {
         try db.read { db in

@@ -1072,7 +1072,7 @@ private struct CoordinatorConfigExporter {
             cli_command: gemini
             cli_args:
               - "-y"
-              - "--verbosity=info"
+              - "-d"
 
         # Agent credentials
         agents:
