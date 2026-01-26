@@ -291,6 +291,11 @@ final class RESTServer {
             return errorResponse(status: .unauthorized, message: "Invalid agent ID or passkey")
         }
 
+        // Only human agents can login to Web UI
+        guard agent.type == .human else {
+            return errorResponse(status: .forbidden, message: "Only human agents can login to Web UI")
+        }
+
         // Validate passkey
         guard let credential = try credentialRepository.findByAgentId(agentId),
               credential.verify(passkey: loginRequest.passkey) else {

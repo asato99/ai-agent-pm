@@ -61,11 +61,12 @@ final class RESTServerTests: XCTestCase {
         )
         try projectRepository.save(project)
 
-        // Create test agent (manager type for full permissions)
+        // Create test agent (human type + manager for full permissions)
         let agent = Agent(
             id: testAgentId,
             name: "Test Agent",
             role: "Test Manager",
+            type: .human,
             hierarchyType: .manager,
             systemPrompt: "You are a test agent"
         )
@@ -430,11 +431,12 @@ final class HTTPIntegrationTests: XCTestCase {
         )
         try projectRepository.save(project)
 
-        // Create test agent (manager type)
+        // Create test agent (human type + manager for full permissions)
         let agent = Agent(
             id: testAgentId,
             name: "HTTP Test Agent",
             role: "Test Manager",
+            type: .human,
             hierarchyType: .manager,
             systemPrompt: "You are a test agent"
         )
@@ -554,6 +556,46 @@ final class HTTPIntegrationTests: XCTestCase {
         )
 
         XCTAssertEqual(response.statusCode, 401, "Login with wrong credentials should return 401")
+    }
+
+    func testLoginWithAIAgentShouldFail() async throws {
+        // Create an AI agent
+        let aiAgentId = AgentID(value: "agt_ai_test")
+        let aiPasskey = "ai_passkey_12345"
+
+        let aiAgent = Agent(
+            id: aiAgentId,
+            name: "AI Test Agent",
+            role: "Test Worker",
+            type: .ai,
+            hierarchyType: .worker
+        )
+        try agentRepository.save(aiAgent)
+
+        // Create credential for AI agent
+        let credential = AgentCredential(
+            agentId: aiAgentId,
+            rawPasskey: aiPasskey
+        )
+        try agentCredentialRepository.save(credential)
+
+        // Try to login with AI agent - should be rejected
+        let loginBody = try JSONEncoder().encode([
+            "agentId": aiAgentId.value,
+            "passkey": aiPasskey
+        ])
+
+        let (data, response) = try await makeRequest(
+            method: "POST",
+            path: "/api/auth/login",
+            body: loginBody
+        )
+
+        XCTAssertEqual(response.statusCode, 403, "AI agent login should return 403 Forbidden")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertTrue((json["message"] as? String)?.contains("human") ?? false,
+                      "Error message should mention human agents only")
     }
 
     // MARK: - Task Permissions Tests (The 404 issue)
