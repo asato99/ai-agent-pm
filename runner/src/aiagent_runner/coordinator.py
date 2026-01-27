@@ -363,7 +363,8 @@ class Coordinator:
                             provider=provider,
                             model=result.model,
                             kick_command=result.kick_command,
-                            task_id=result.task_id
+                            task_id=result.task_id,
+                            reason=result.reason
                         )
                     else:
                         logger.debug(f"get_agent_action returned action='{result.action}' (reason: {result.reason}) for {agent_id}/{project_id}")
@@ -611,7 +612,8 @@ class Coordinator:
         provider: str,
         model: Optional[str] = None,
         kick_command: Optional[str] = None,
-        task_id: Optional[str] = None
+        task_id: Optional[str] = None,
+        reason: Optional[str] = None
     ) -> None:
         """Spawn an Agent Instance process.
 
@@ -751,6 +753,20 @@ class Coordinator:
             model_flag = "-m" if provider == "gemini" else "--model"
             cmd.extend([model_flag, model])
             logger.debug(f"Using model: {model} (flag: {model_flag})")
+
+        # Add permission restrictions for chat sessions
+        # Chat sessions should not have write/edit permissions
+        # Reference: docs/design/CHAT_SESSION_PERMISSIONS.md
+        if reason == "has_pending_purpose":
+            if provider == "claude":
+                # Claude Code: use --disallowedTools to restrict dangerous tools
+                # Note: Bash is allowed for reading environment variables during authentication
+                cmd.extend(["--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit"])
+                logger.info(f"Chat session: added tool restrictions for {agent_id}/{project_id}")
+            elif provider == "gemini":
+                # Gemini CLI: tool restrictions via settings.json (coreTools/excludeTools)
+                # TODO: Implement Gemini tool restrictions if needed
+                logger.debug(f"Chat session: Gemini tool restrictions not yet implemented for {agent_id}/{project_id}")
 
         # Add verbose flag for debugging if enabled
         if self.config.debug_mode:
