@@ -878,9 +878,8 @@ public final class MCPServer {
             guard let title = arguments["title"] as? String else {
                 throw MCPError.missingArguments(["title"])
             }
-            guard let assigneeId = arguments["assignee_id"] as? String else {
-                throw MCPError.missingArguments(["assignee_id"])
-            }
+            // assignee_id は常に自分自身（チャットから他者への割り当ては不可）
+            let assigneeId = session.agentId.value
             let description = arguments["description"] as? String
             let priority = arguments["priority"] as? String
             return try requestTask(

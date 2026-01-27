@@ -1111,13 +1111,14 @@ enum ToolDefinitions {
     // 参照: docs/design/TASK_REQUEST_APPROVAL.md
 
     /// request_task - タスク依頼を作成
-    /// 依頼者が担当者の上位（祖先）であれば自動承認される
+    /// タスクは自分自身に割り当てられる。依頼元が上位（祖先）であれば自動承認される
     /// AIエージェントがタスク依頼に使用（create_taskの代わり）
     static let requestTask: [String: Any] = [
         "name": "request_task",
         "description": """
-            タスク依頼を作成します。依頼者が担当者の上位（祖先）であれば自動承認され、
-            そうでなければ担当者の上位エージェントによる承認待ち状態になります。
+            タスク依頼を作成します。タスクは自分自身（呼び出したエージェント）に割り当てられます。
+            チャットで依頼を受けた場合、依頼元が自分の上位（祖先）であれば自動承認され、
+            そうでなければ自分の上位エージェントによる承認待ち状態になります。
             AIエージェントは直接create_taskを使用せず、このツールを使用してタスクを依頼してください。
             """,
         "inputSchema": [
@@ -1135,17 +1136,13 @@ enum ToolDefinitions {
                     "type": "string",
                     "description": "タスクの詳細説明"
                 ],
-                "assignee_id": [
-                    "type": "string",
-                    "description": "タスクの担当者エージェントID"
-                ],
                 "priority": [
                     "type": "string",
                     "description": "優先度",
                     "enum": ["low", "medium", "high", "urgent"]
                 ]
             ] as [String: Any],
-            "required": ["session_token", "title", "assignee_id"]
+            "required": ["session_token", "title"]
         ]
     ]
 
