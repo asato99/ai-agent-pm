@@ -28,7 +28,7 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
     agent.id
   )
   const { agents: projectAgents } = useAssignableAgents(projectId)
-  const { getChatStatus } = useAgentSessions(projectId)
+  const { getChatStatus, refetch: refetchSessions } = useAgentSessions(projectId)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
 
@@ -68,12 +68,15 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
     const startSession = async () => {
       try {
         await chatApi.startSession(projectId, agent.id)
+        // Immediately refetch session status to update UI
+        // Without this, UI waits for next 3-second polling cycle
+        await refetchSessions()
       } catch (error) {
         console.error('Failed to start chat session:', error)
       }
     }
     startSession()
-  }, [projectId, agent.id])
+  }, [projectId, agent.id, refetchSessions])
 
   // Handle close: end chat session before closing panel
   // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6
@@ -119,10 +122,13 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
   const handleReconnect = useCallback(async () => {
     try {
       await chatApi.startSession(projectId, agent.id)
+      // Immediately refetch session status to update UI
+      // Without this, UI waits for next 3-second polling cycle
+      await refetchSessions()
     } catch (error) {
       console.error('Failed to reconnect chat session:', error)
     }
-  }, [projectId, agent.id])
+  }, [projectId, agent.id, refetchSessions])
 
   // Handle scroll to load more messages
   const handleScroll = () => {

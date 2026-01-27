@@ -1983,12 +1983,16 @@ final class RESTServer {
                 return jsonResponse(["success": true, "alreadyActive": true])
             }
 
-            // Check if there's already a pending purpose for this agent/project
-            if let existingPurpose = try pendingAgentPurposeRepository.find(
+            // Check if there's already a pending purpose for chat specifically
+            // Note: We must check for .chat specifically, not any purpose.
+            // A .task pending purpose should not block chat session creation.
+            // Reference: listProjectAgentSessions checks for .chat pending purpose to show "connecting" status
+            if try pendingAgentPurposeRepository.find(
                 agentId: targetAgentId,
-                projectId: projectId
-            ) {
-                debugLog("startChatSession: Pending purpose already exists: \(existingPurpose.purpose)")
+                projectId: projectId,
+                purpose: .chat
+            ) != nil {
+                debugLog("startChatSession: Chat pending purpose already exists")
                 return jsonResponse(["success": true, "pendingExists": true])
             }
 
