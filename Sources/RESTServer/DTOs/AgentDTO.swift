@@ -77,16 +77,30 @@ public struct UpdateAgentRequest: Decodable {
     let status: String?
 }
 
-/// Purpose-based session counts for an agent
-/// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - セッション状態表示
+/// Chat session info including count and status
+/// 参照: docs/design/CHAT_SESSION_STATUS.md - チャットセッション状態表示
+public struct ChatSessionDTO: Encodable {
+    let count: Int
+    /// Status: "connected" | "connecting" | "disconnected"
+    let status: String
+}
+
+/// Task session info (count only, no status)
+/// 参照: docs/design/CHAT_SESSION_STATUS.md - タスクはステータス不要
+public struct TaskSessionDTO: Encodable {
+    let count: Int
+}
+
+/// Purpose-based session info for an agent
+/// 参照: docs/design/CHAT_SESSION_STATUS.md - セッション状態表示
 public struct AgentSessionPurposeCountsDTO: Encodable {
-    let chat: Int
-    let task: Int
+    let chat: ChatSessionDTO
+    let task: TaskSessionDTO
 }
 
 /// Response for agent session counts (purpose-based)
-/// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - セッション状態表示
+/// 参照: docs/design/CHAT_SESSION_STATUS.md - セッション状態表示
 public struct AgentSessionCountsDTO: Encodable {
-    /// Session counts grouped by purpose for each agent
+    /// Session info grouped by purpose for each agent
     let agentSessions: [String: AgentSessionPurposeCountsDTO]
 }

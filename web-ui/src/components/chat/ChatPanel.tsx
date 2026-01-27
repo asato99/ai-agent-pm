@@ -28,7 +28,7 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
     agent.id
   )
   const { agents: projectAgents } = useAssignableAgents(projectId)
-  const { hasChatSession } = useAgentSessions(projectId)
+  const { getChatStatus } = useAgentSessions(projectId)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
 
@@ -113,6 +113,16 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
   const handleSend = async (content: string) => {
     await sendMessage(content)
   }
+
+  // Handle reconnect: start chat session again
+  // Reference: docs/design/CHAT_SESSION_STATUS.md - disconnected状態からの再接続
+  const handleReconnect = useCallback(async () => {
+    try {
+      await chatApi.startSession(projectId, agent.id)
+    } catch (error) {
+      console.error('Failed to reconnect chat session:', error)
+    }
+  }, [projectId, agent.id])
 
   // Handle scroll to load more messages
   const handleScroll = () => {
@@ -245,7 +255,8 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
       <ChatInput
         onSend={handleSend}
         disabled={isSending}
-        sessionReady={hasChatSession(agent.id)}
+        chatStatus={getChatStatus(agent.id)}
+        onReconnect={handleReconnect}
       />
     </div>
   )

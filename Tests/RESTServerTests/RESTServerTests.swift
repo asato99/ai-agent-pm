@@ -873,3 +873,313 @@ final class HTTPIntegrationTests: XCTestCase {
         XCTAssertEqual(response.statusCode, 401, "Chat endpoint without auth should return 401")
     }
 }
+
+// MARK: - Chat Session Status Tests
+// 参照: docs/design/CHAT_SESSION_STATUS.md
+// TDD: RED → GREEN で実装
+// 目的: チャットセッション状態（connected/connecting/disconnected）の正確な表示
+
+/// Chat Session Status API Tests
+/// These tests verify that the chat session status is correctly returned
+/// based on active sessions and pending agent purposes.
+final class ChatSessionStatusTests: XCTestCase {
+
+    var db: DatabaseQueue!
+    var projectRepository: ProjectRepository!
+    var agentRepository: AgentRepository!
+    var agentSessionRepository: AgentSessionRepository!
+    var agentCredentialRepository: AgentCredentialRepository!
+    var projectAgentAssignmentRepository: ProjectAgentAssignmentRepository!
+    var pendingAgentPurposeRepository: PendingAgentPurposeRepository!
+    var server: RESTServer!
+    fileprivate var serverTask: ConcurrencyTask<Void, Error>?
+
+    let testPort = 18081  // Different port from other tests
+    let testProjectId = ProjectID(value: "prj_chat_status_test")
+    let testAgentId = AgentID(value: "agt_chat_status_test")
+    let testHumanAgentId = AgentID(value: "agt_human_chat_status")
+    let testPasskey = "chat_status_test_passkey"
+
+    override func setUpWithError() throws {
+        // Create test database
+        let tempDir = FileManager.default.temporaryDirectory
+        let dbPath = tempDir.appendingPathComponent("test_chat_status_\(UUID().uuidString).db").path
+        db = try DatabaseSetup.createDatabase(at: dbPath)
+
+        // Initialize repositories
+        projectRepository = ProjectRepository(database: db)
+        agentRepository = AgentRepository(database: db)
+        agentSessionRepository = AgentSessionRepository(database: db)
+        agentCredentialRepository = AgentCredentialRepository(database: db)
+        projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: db)
+        pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: db)
+
+        // Setup test data
+        try setupTestData()
+
+        // Create and start server
+        server = RESTServer(database: db, port: testPort, webUIPath: nil)
+        serverTask = ConcurrencyTask {
+            try await self.server.run()
+        }
+
+        // Wait for server to start
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    override func tearDownWithError() throws {
+        serverTask?.cancel()
+        db = nil
+        server = nil
+    }
+
+    private func setupTestData() throws {
+        // Create temporary working directory
+        let tempDir = FileManager.default.temporaryDirectory
+        let testWorkingDir = tempDir.appendingPathComponent("chat_status_test_\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: testWorkingDir, withIntermediateDirectories: true)
+
+        // Create test project
+        let project = Project(
+            id: testProjectId,
+            name: "Chat Status Test Project",
+            description: "Project for chat status testing",
+            workingDirectory: testWorkingDir
+        )
+        try projectRepository.save(project)
+
+        // Create test AI agent (will be tested for chat status)
+        let agent = Agent(
+            id: testAgentId,
+            name: "Chat Status Test Agent",
+            role: "Test Worker",
+            type: .ai,
+            hierarchyType: .worker,
+            systemPrompt: "Test agent"
+        )
+        try agentRepository.save(agent)
+
+        // Create human agent for login (API authentication)
+        let humanAgent = Agent(
+            id: testHumanAgentId,
+            name: "Human Manager",
+            role: "Manager",
+            type: .human,
+            hierarchyType: .manager,
+            systemPrompt: "Human manager"
+        )
+        try agentRepository.save(humanAgent)
+
+        // Assign both agents to project
+        _ = try projectAgentAssignmentRepository.assign(
+            projectId: testProjectId,
+            agentId: testAgentId
+        )
+        _ = try projectAgentAssignmentRepository.assign(
+            projectId: testProjectId,
+            agentId: testHumanAgentId
+        )
+
+        // Create credential for human agent (for API login)
+        let credential = AgentCredential(
+            agentId: testHumanAgentId,
+            rawPasskey: testPasskey
+        )
+        try agentCredentialRepository.save(credential)
+    }
+
+    // MARK: - Helper Methods
+
+    private func makeRequest(
+        method: String,
+        path: String,
+        body: Data? = nil,
+        token: String? = nil
+    ) async throws -> (Data, HTTPURLResponse) {
+        let url = URL(string: "http://127.0.0.1:\(testPort)\(path)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        if let token = token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        if let body = body {
+            request.httpBody = body
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        return (data, response as! HTTPURLResponse)
+    }
+
+    private func login() async throws -> String {
+        let loginBody = try JSONEncoder().encode([
+            "agentId": testHumanAgentId.value,
+            "passkey": testPasskey
+        ])
+
+        let (data, response) = try await makeRequest(
+            method: "POST",
+            path: "/api/auth/login",
+            body: loginBody
+        )
+
+        XCTAssertEqual(response.statusCode, 200, "Login should succeed")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        return json["sessionToken"] as! String
+    }
+
+    // MARK: - Test 1.1: connected 状態 (アクティブなchatセッションあり)
+
+    func testAgentSessionsAPI_ReturnsChatStatusConnected() async throws {
+        // Arrange: Create active chat session for the AI agent
+        let session = AgentSession(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            purpose: .chat
+        )
+        try agentSessionRepository.save(session)
+
+        // Act: Login and call agent-sessions API
+        let token = try await login()
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agent-sessions",
+            token: token
+        )
+
+        // Assert
+        XCTAssertEqual(response.statusCode, 200, "API should return 200")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let agentSessions = json["agentSessions"] as! [String: Any]
+        let agentData = agentSessions[testAgentId.value] as! [String: Any]
+        let chatData = agentData["chat"] as! [String: Any]
+
+        XCTAssertEqual(chatData["count"] as? Int, 1, "Chat count should be 1")
+        XCTAssertEqual(chatData["status"] as? String, "connected", "Chat status should be 'connected' when session exists")
+    }
+
+    // MARK: - Test 1.2: connecting 状態 (PendingAgentPurposeあり、セッションなし)
+
+    func testAgentSessionsAPI_ReturnsChatStatusConnecting() async throws {
+        // Arrange: Create PendingAgentPurpose with chat purpose, but NO session
+        let pendingPurpose = PendingAgentPurpose(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            purpose: .chat
+        )
+        try pendingAgentPurposeRepository.save(pendingPurpose)
+        // Note: No AgentSession created
+
+        // Act: Login and call agent-sessions API
+        let token = try await login()
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agent-sessions",
+            token: token
+        )
+
+        // Assert
+        XCTAssertEqual(response.statusCode, 200, "API should return 200")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let agentSessions = json["agentSessions"] as! [String: Any]
+        let agentData = agentSessions[testAgentId.value] as! [String: Any]
+        let chatData = agentData["chat"] as! [String: Any]
+
+        XCTAssertEqual(chatData["count"] as? Int, 0, "Chat count should be 0")
+        XCTAssertEqual(chatData["status"] as? String, "connecting", "Chat status should be 'connecting' when pending purpose exists")
+    }
+
+    // MARK: - Test 1.3: disconnected 状態 (PendingAgentPurposeもセッションもなし)
+
+    func testAgentSessionsAPI_ReturnsChatStatusDisconnected() async throws {
+        // Arrange: No PendingAgentPurpose and no AgentSession
+        // (nothing to create, just ensure clean state)
+
+        // Act: Login and call agent-sessions API
+        let token = try await login()
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agent-sessions",
+            token: token
+        )
+
+        // Assert
+        XCTAssertEqual(response.statusCode, 200, "API should return 200")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let agentSessions = json["agentSessions"] as! [String: Any]
+        let agentData = agentSessions[testAgentId.value] as! [String: Any]
+        let chatData = agentData["chat"] as! [String: Any]
+
+        XCTAssertEqual(chatData["count"] as? Int, 0, "Chat count should be 0")
+        XCTAssertEqual(chatData["status"] as? String, "disconnected", "Chat status should be 'disconnected' when nothing exists")
+    }
+
+    // MARK: - Test 1.4: task は status を持たない (count のみ)
+
+    func testAgentSessionsAPI_TaskHasNoStatus() async throws {
+        // Arrange: Create task session (not chat)
+        let session = AgentSession(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            purpose: .task
+        )
+        try agentSessionRepository.save(session)
+
+        // Act: Login and call agent-sessions API
+        let token = try await login()
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agent-sessions",
+            token: token
+        )
+
+        // Assert
+        XCTAssertEqual(response.statusCode, 200, "API should return 200")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let agentSessions = json["agentSessions"] as! [String: Any]
+        let agentData = agentSessions[testAgentId.value] as! [String: Any]
+        let taskData = agentData["task"] as! [String: Any]
+
+        XCTAssertEqual(taskData["count"] as? Int, 1, "Task count should be 1")
+        XCTAssertNil(taskData["status"], "Task should NOT have status field")
+    }
+
+    // MARK: - Test 1.5: PendingAgentPurpose が task の場合、chat status は disconnected
+
+    func testAgentSessionsAPI_TaskPendingDoesNotAffectChatStatus() async throws {
+        // Arrange: Create PendingAgentPurpose with TASK purpose (not chat)
+        let pendingPurpose = PendingAgentPurpose(
+            agentId: testAgentId,
+            projectId: testProjectId,
+            purpose: .task  // Task, not chat
+        )
+        try pendingAgentPurposeRepository.save(pendingPurpose)
+
+        // Act: Login and call agent-sessions API
+        let token = try await login()
+        let (data, response) = try await makeRequest(
+            method: "GET",
+            path: "/api/projects/\(testProjectId.value)/agent-sessions",
+            token: token
+        )
+
+        // Assert
+        XCTAssertEqual(response.statusCode, 200, "API should return 200")
+
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let agentSessions = json["agentSessions"] as! [String: Any]
+        let agentData = agentSessions[testAgentId.value] as! [String: Any]
+        let chatData = agentData["chat"] as! [String: Any]
+
+        // Chat status should be disconnected (task pending doesn't affect chat)
+        XCTAssertEqual(chatData["status"] as? String, "disconnected",
+                       "Chat status should be 'disconnected' even when task pending exists")
+    }
+}

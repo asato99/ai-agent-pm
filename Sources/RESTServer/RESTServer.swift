@@ -1245,8 +1245,8 @@ final class RESTServer {
         return jsonResponse(dtos)
     }
 
-    /// GET /api/projects/:projectId/agent-sessions - プロジェクトのエージェントセッション数を取得
-    /// 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - セッション状態表示
+    /// GET /api/projects/:projectId/agent-sessions - プロジェクトのエージェントセッション情報を取得
+    /// 参照: docs/design/CHAT_SESSION_STATUS.md - セッション状態表示
     private func listProjectAgentSessions(request: Request, context: AuthenticatedContext) async throws -> Response {
         guard let projectIdStr = context.parameters.get("projectId") else {
             return errorResponse(status: .badRequest, message: "Project ID is required")
@@ -1257,13 +1257,33 @@ final class RESTServer {
         let projectAgents = try projectAgentAssignmentRepository.findAgentsByProject(projectId)
         let activeAgents = projectAgents.filter { $0.status == .active }
 
-        // Count active sessions by purpose for each active agent
+        // Get session counts and chat status for each active agent
         var agentSessions: [String: AgentSessionPurposeCountsDTO] = [:]
         for agent in activeAgents {
             let counts = try sessionRepository.countActiveSessionsByPurpose(agentId: agent.id)
+            let chatCount = counts[.chat] ?? 0
+            let taskCount = counts[.task] ?? 0
+
+            // Determine chat status: connected > connecting > disconnected
+            let chatStatus: String
+            if chatCount > 0 {
+                // Active chat session exists
+                chatStatus = "connected"
+            } else if try pendingAgentPurposeRepository.find(
+                agentId: agent.id,
+                projectId: projectId,
+                purpose: .chat
+            ) != nil {
+                // Chat pending (agent is starting up)
+                chatStatus = "connecting"
+            } else {
+                // No session and no pending
+                chatStatus = "disconnected"
+            }
+
             agentSessions[agent.id.value] = AgentSessionPurposeCountsDTO(
-                chat: counts[.chat] ?? 0,
-                task: counts[.task] ?? 0
+                chat: ChatSessionDTO(count: chatCount, status: chatStatus),
+                task: TaskSessionDTO(count: taskCount)
             )
         }
 

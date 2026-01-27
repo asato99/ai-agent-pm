@@ -2,17 +2,40 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
 /**
- * Session counts by purpose (chat/task)
- * 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+ * Chat session status
+ * 参照: docs/design/CHAT_SESSION_STATUS.md
+ */
+export type ChatSessionStatus = 'connected' | 'connecting' | 'disconnected'
+
+/**
+ * Chat session info including count and status
+ * 参照: docs/design/CHAT_SESSION_STATUS.md
+ */
+export interface ChatSessionInfo {
+  count: number
+  status: ChatSessionStatus
+}
+
+/**
+ * Task session info (count only)
+ * 参照: docs/design/CHAT_SESSION_STATUS.md
+ */
+export interface TaskSessionInfo {
+  count: number
+}
+
+/**
+ * Session info by purpose (chat/task)
+ * 参照: docs/design/CHAT_SESSION_STATUS.md
  */
 export interface AgentSessionPurposeCounts {
-  chat: number
-  task: number
+  chat: ChatSessionInfo
+  task: TaskSessionInfo
 }
 
 /**
  * Response type for agent session counts API
- * 参照: docs/design/CHAT_FEATURE.md - セッション状態表示
+ * 参照: docs/design/CHAT_SESSION_STATUS.md - セッション状態表示
  */
 export interface AgentSessionCountsResponse {
   agentSessions: Record<string, AgentSessionPurposeCounts>
@@ -45,29 +68,39 @@ export function useAgentSessions(projectId: string) {
 
   const agentSessions = query.data?.agentSessions ?? {}
 
+  /**
+   * Get chat session status for an agent
+   * 参照: docs/design/CHAT_SESSION_STATUS.md
+   */
+  const getChatStatus = (agentId: string): ChatSessionStatus => {
+    return agentSessions[agentId]?.chat?.status ?? 'disconnected'
+  }
+
   // Helper to check if agent has active chat session
   const hasChatSession = (agentId: string): boolean => {
-    return (agentSessions[agentId]?.chat ?? 0) > 0
+    return (agentSessions[agentId]?.chat?.count ?? 0) > 0
   }
 
   // Helper to check if agent has any active session (for backward compatibility)
   const hasAnySession = (agentId: string): boolean => {
     const sessions = agentSessions[agentId]
     if (!sessions) return false
-    return sessions.chat > 0 || sessions.task > 0
+    return (sessions.chat?.count ?? 0) > 0 || (sessions.task?.count ?? 0) > 0
   }
 
   // Backward compatible sessionCounts (total sessions per agent)
   const sessionCounts: Record<string, number> = {}
   for (const [agentId, counts] of Object.entries(agentSessions)) {
-    sessionCounts[agentId] = counts.chat + counts.task
+    sessionCounts[agentId] = (counts.chat?.count ?? 0) + (counts.task?.count ?? 0)
   }
 
   return {
-    /** Session counts by purpose for each agent */
+    /** Session info by purpose for each agent */
     agentSessions,
     /** Total session counts per agent (backward compatible) */
     sessionCounts,
+    /** Get chat status: 'connected' | 'connecting' | 'disconnected' */
+    getChatStatus,
     /** Check if agent has active chat session */
     hasChatSession,
     /** Check if agent has any active session */

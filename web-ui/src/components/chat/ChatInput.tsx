@@ -1,15 +1,23 @@
 // web-ui/src/components/chat/ChatInput.tsx
 // Message input component
-// Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
+// Reference: docs/design/CHAT_SESSION_STATUS.md - Phase 3
 
 import { useState, useCallback, type FormEvent, type KeyboardEvent } from 'react'
+import type { ChatSessionStatus } from '@/hooks/useAgentSessions'
 
 interface ChatInputProps {
   onSend: (content: string) => Promise<void>
   disabled?: boolean
   placeholder?: string
   maxLength?: number
-  /** Whether the chat session is ready for sending messages */
+  /**
+   * Chat session status: 'connected' | 'connecting' | 'disconnected'
+   * 参照: docs/design/CHAT_SESSION_STATUS.md
+   */
+  chatStatus?: ChatSessionStatus
+  /** Called when user clicks reconnect button (only in disconnected state) */
+  onReconnect?: () => void
+  /** @deprecated Use chatStatus instead */
   sessionReady?: boolean
 }
 
@@ -18,7 +26,9 @@ export function ChatInput({
   disabled = false,
   placeholder = 'Type a message...',
   maxLength = 4000,
-  sessionReady = true,
+  chatStatus = 'connected',
+  onReconnect,
+  sessionReady: _sessionReady, // deprecated, ignored
 }: ChatInputProps) {
   const [content, setContent] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -28,7 +38,7 @@ export function ChatInput({
       e.preventDefault()
 
       const trimmedContent = content.trim()
-      if (!trimmedContent || isSubmitting || disabled) return
+      if (!trimmedContent || isSubmitting || disabled || chatStatus !== 'connected') return
 
       setIsSubmitting(true)
       try {
@@ -38,7 +48,7 @@ export function ChatInput({
         setIsSubmitting(false)
       }
     },
-    [content, isSubmitting, disabled, onSend]
+    [content, isSubmitting, disabled, chatStatus, onSend]
   )
 
   const handleKeyDown = useCallback(
@@ -52,10 +62,98 @@ export function ChatInput({
     [handleSubmit]
   )
 
+  const handleReconnect = useCallback(() => {
+    onReconnect?.()
+  }, [onReconnect])
+
   // Input field: always enabled (unless explicitly disabled or submitting)
   const isInputDisabled = disabled || isSubmitting
-  // Send button: disabled when session is not ready
-  const isButtonDisabled = disabled || isSubmitting || !sessionReady
+  // Send button: disabled when not connected
+  const isSendDisabled = disabled || isSubmitting || chatStatus !== 'connected'
+
+  // Render appropriate button based on status
+  const renderButton = () => {
+    if (chatStatus === 'disconnected') {
+      return (
+        <button
+          type="button"
+          data-testid="chat-reconnect-button"
+          className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+          onClick={handleReconnect}
+          aria-label="再接続"
+        >
+          再接続
+        </button>
+      )
+    }
+
+    if (chatStatus === 'connecting') {
+      return (
+        <button
+          type="button"
+          data-testid="chat-send-button"
+          className="rounded-lg bg-gray-300 px-4 py-2 text-sm font-medium text-gray-500 cursor-not-allowed"
+          disabled
+          aria-label="接続中"
+        >
+          <span className="flex items-center gap-1">
+            <svg data-testid="spinner" className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+                fill="none"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              />
+            </svg>
+            接続中...
+          </span>
+        </button>
+      )
+    }
+
+    // Connected state
+    return (
+      <button
+        type="submit"
+        data-testid="chat-send-button"
+        className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
+        disabled={isSendDisabled || !content.trim()}
+        aria-label="送信"
+      >
+        {isSubmitting ? (
+          <span className="flex items-center gap-1">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+                fill="none"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              />
+            </svg>
+            送信中
+          </span>
+        ) : (
+          '送信'
+        )}
+      </button>
+    )
+  }
 
   return (
     <form onSubmit={handleSubmit} className="border-t p-4">
@@ -72,39 +170,7 @@ export function ChatInput({
           rows={2}
           aria-label="Chat message input"
         />
-        <button
-          type="submit"
-          data-testid="chat-send-button"
-          className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
-          disabled={isButtonDisabled || !content.trim()}
-          aria-label={sessionReady ? '送信' : '準備中'}
-        >
-          {!sessionReady ? (
-            '準備中...'
-          ) : isSubmitting ? (
-            <span className="flex items-center gap-1">
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-              送信中
-            </span>
-          ) : (
-            '送信'
-          )}
-        </button>
+        {renderButton()}
       </div>
       <div className="mt-1 text-xs text-gray-400 text-right">
         {content.length}/{maxLength} characters (Ctrl+Enter to send)

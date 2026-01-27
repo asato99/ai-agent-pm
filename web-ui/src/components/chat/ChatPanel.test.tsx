@@ -46,11 +46,13 @@ vi.mock('@/hooks/useAssignableAgents', () => ({
   })),
 }))
 
-// Mock useAgentSessions - always return hasChatSession as true for tests
+// Mock useAgentSessions - return getChatStatus with 'connected' status for tests
+// Reference: docs/design/CHAT_SESSION_STATUS.md - Phase 3
 vi.mock('@/hooks/useAgentSessions', () => ({
   useAgentSessions: vi.fn(() => ({
-    agentSessions: { 'agent-1': { chat: 1, task: 0 } },
+    agentSessions: { 'agent-1': { chat: { count: 1, status: 'connected' }, task: { count: 0 } } },
     sessionCounts: { 'agent-1': 1 },
+    getChatStatus: () => 'connected',
     hasChatSession: () => true,
     hasAnySession: () => true,
     isLoading: false,
@@ -211,14 +213,37 @@ describe('ChatPanel', () => {
     })
   })
 
-  describe('Session ready state', () => {
-    it('disables send button when session is not ready', async () => {
-      // Mock useAgentSessions to return no chat session
+  describe('Chat session status', () => {
+    // Reference: docs/design/CHAT_SESSION_STATUS.md - Phase 3
+    it('shows reconnect button when disconnected', async () => {
+      // Mock useAgentSessions to return disconnected status
       const mockUseAgentSessions = vi.mocked(await import('@/hooks/useAgentSessions')).useAgentSessions
       mockUseAgentSessions.mockReturnValue({
         agentSessions: {},
         sessionCounts: {},
-        hasChatSession: () => false,  // No active chat session
+        getChatStatus: () => 'disconnected',
+        hasChatSession: () => false,
+        hasAnySession: () => false,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      render(<ChatPanel projectId="project-1" agent={mockAgent} onClose={vi.fn()} />)
+
+      const reconnectButton = screen.getByTestId('chat-reconnect-button')
+      expect(reconnectButton).toBeInTheDocument()
+      expect(reconnectButton).toHaveTextContent('再接続')
+    })
+
+    it('shows connecting spinner when connecting', async () => {
+      // Mock useAgentSessions to return connecting status
+      const mockUseAgentSessions = vi.mocked(await import('@/hooks/useAgentSessions')).useAgentSessions
+      mockUseAgentSessions.mockReturnValue({
+        agentSessions: {},
+        sessionCounts: {},
+        getChatStatus: () => 'connecting',
+        hasChatSession: () => false,
         hasAnySession: () => false,
         isLoading: false,
         error: null,
@@ -229,16 +254,18 @@ describe('ChatPanel', () => {
 
       const sendButton = screen.getByTestId('chat-send-button')
       expect(sendButton).toBeDisabled()
-      expect(sendButton).toHaveTextContent('準備中')
+      expect(sendButton).toHaveTextContent('接続中...')
+      expect(screen.getByTestId('spinner')).toBeInTheDocument()
     })
 
-    it('enables send button when session is ready', async () => {
-      // Mock useAgentSessions to return active chat session
+    it('enables send button when connected', async () => {
+      // Mock useAgentSessions to return connected status
       const mockUseAgentSessions = vi.mocked(await import('@/hooks/useAgentSessions')).useAgentSessions
       mockUseAgentSessions.mockReturnValue({
-        agentSessions: { 'agent-1': { chat: 1, task: 0 } },
+        agentSessions: { 'agent-1': { chat: { count: 1, status: 'connected' }, task: { count: 0 } } },
         sessionCounts: { 'agent-1': 1 },
-        hasChatSession: () => true,  // Active chat session
+        getChatStatus: () => 'connected',
+        hasChatSession: () => true,
         hasAnySession: () => true,
         isLoading: false,
         error: null,
