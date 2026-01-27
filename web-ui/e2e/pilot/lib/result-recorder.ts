@@ -7,7 +7,9 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
-import { PilotResult, PilotEvent, TaskResult, AgentResult, ArtifactResult } from './types.js'
+import { execSync } from 'child_process'
+import yaml from 'js-yaml'
+import { PilotResult, PilotEvent, TaskResult, AgentResult, ArtifactResult, ArtifactTestResult } from './types.js'
 
 export class ResultRecorder {
   private scenario: string
@@ -77,7 +79,6 @@ export class ResultRecorder {
 
     let validationPassed = true
     if (validationCommand) {
-      const { execSync } = require('child_process')
       const cmd = validationCommand.replace('{path}', artifactPath)
       try {
         execSync(cmd, { stdio: 'pipe' })
@@ -92,6 +93,43 @@ export class ResultRecorder {
       exists: true,
       validation_passed: validationPassed,
       content_hash: contentHash,
+    }
+  }
+
+  /**
+   * 成果物を実行してテスト
+   */
+  testArtifact(
+    artifactPath: string,
+    testCommand: string,
+    expectedOutput?: string
+  ): ArtifactTestResult {
+    const cmd = testCommand.replace('{path}', artifactPath)
+    let stdout = ''
+    let stderr = ''
+    let exitCode = 0
+
+    try {
+      stdout = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+    } catch (error: unknown) {
+      const execError = error as { status?: number; stdout?: string; stderr?: string }
+      exitCode = execError.status ?? 1
+      stdout = execError.stdout ?? ''
+      stderr = execError.stderr ?? ''
+    }
+
+    let outputMatched = true
+    if (expectedOutput) {
+      outputMatched = stdout.includes(expectedOutput)
+    }
+
+    return {
+      command: cmd,
+      exit_code: exitCode,
+      stdout: stdout.trim(),
+      stderr: stderr.trim(),
+      expected_output: expectedOutput,
+      output_matched: outputMatched,
     }
   }
 
@@ -138,7 +176,6 @@ export class ResultRecorder {
     }
 
     // YAML形式で保存
-    const yaml = require('js-yaml')
     const resultPath = path.join(this.resultsDir, 'result.yaml')
     fs.writeFileSync(resultPath, yaml.dump(result, { lineWidth: -1 }))
 

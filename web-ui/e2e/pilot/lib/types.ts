@@ -20,6 +20,10 @@ export interface ScenarioConfig {
   expected_artifacts: Array<{
     path: string
     validation?: string // Shell command template with {path}
+    test?: {
+      command: string // Execution command template with {path}
+      expected_output: string // Expected output string to match
+    }
   }>
 
   timeouts: {
@@ -87,11 +91,21 @@ export interface AgentResult {
   }>
 }
 
+export interface ArtifactTestResult {
+  command: string
+  exit_code: number
+  stdout: string
+  stderr: string
+  expected_output?: string
+  output_matched: boolean
+}
+
 export interface ArtifactResult {
   path: string
   exists: boolean
   validation_passed: boolean
   content_hash?: string
+  test_result?: ArtifactTestResult
 }
 
 export interface PilotResult {
@@ -135,6 +149,8 @@ export type PilotEventType =
   | 'chat_message'
   | 'tool_called'
   | 'artifact_created'
+  | 'artifacts_tested'
+  | 'performance_report'
   | 'error'
 
 export interface PilotEvent {

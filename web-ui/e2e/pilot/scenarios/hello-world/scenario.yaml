@@ -18,6 +18,9 @@ expected_artifacts:
   - path: hello.py
     validation: |
       python3 {path} 2>&1 | grep -q "Hello, World!"
+    test:
+      command: "python3 {path}"
+      expected_output: "Hello, World!"
 
 # タイムアウト設定（秒）
 timeouts:

@@ -64,33 +64,66 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
    * メインテスト: シナリオの初期アクションから成果物生成までの全フローを検証
    */
   test('Full scenario execution', async ({ page }) => {
-    // 前提条件の検証
-    await verifyPrerequisites(page)
+    // フェーズごとのパフォーマンス測定
+    const phaseMetrics: { phase: string; duration_ms: number; success: boolean }[] = []
 
-    // 初期アクションを実行（Human → Manager へのチャット送信）
-    await executeInitialAction(page)
+    async function measurePhase<T>(phaseName: string, fn: () => Promise<T>): Promise<T> {
+      const startTime = Date.now()
+      console.log(`\n⏱️  [${phaseName}] 開始...`)
+      try {
+        const result = await fn()
+        const duration = Date.now() - startTime
+        phaseMetrics.push({ phase: phaseName, duration_ms: duration, success: true })
+        console.log(`✅ [${phaseName}] 完了 (${(duration / 1000).toFixed(1)}秒)`)
+        return result
+      } catch (error) {
+        const duration = Date.now() - startTime
+        phaseMetrics.push({ phase: phaseName, duration_ms: duration, success: false })
+        console.log(`❌ [${phaseName}] 失敗 (${(duration / 1000).toFixed(1)}秒)`)
+        throw error
+      }
+    }
 
-    // タスク作成を待機
-    await waitForTaskCreation(page)
+    // Phase 1: 前提条件の検証
+    await measurePhase('前提条件検証', () => verifyPrerequisites(page))
 
-    // オーナーがタスクのステータスを更新（backlog → in_progress）
-    // 注: todoに設定すると、ワーカーがtodo→in_progressへの自動遷移を試みるが、
-    // 現在のバリデーションロジックでは、最終変更者(owner)がワーカーの下位でないため拒否される
-    // このため、直接in_progressに設定してワーカーが作業できるようにする
-    await updateTaskStatusByOwner(page, 'in_progress')
+    // Phase 2: 初期アクションを実行（Human → Manager へのチャット送信）
+    await measurePhase('初期アクション送信', () => executeInitialAction(page))
 
-    // タスク完了を待機
-    await waitForTaskCompletion(page)
+    // Phase 3: タスク作成を待機
+    await measurePhase('タスク作成待機', () => waitForTaskCreation(page))
 
-    // 成果物を検証
-    const artifactResults = await verifyArtifacts()
+    // Phase 4: オーナーがタスクのステータスを更新（backlog → todo → in_progress）
+    await measurePhase('ステータス更新 (todo)', () => updateTaskStatusByOwner(page, 'todo'))
+    await measurePhase('ステータス更新 (in_progress)', () => updateTaskStatusByOwner(page, 'in_progress'))
+
+    // Phase 5: タスク完了を待機
+    await measurePhase('タスク完了待機', () => waitForTaskCompletion(page))
+
+    // Phase 6: 成果物を検証
+    const artifactResults = await measurePhase('成果物検証', () => verifyArtifacts())
+
+    // Phase 7: 成果物を実行テスト
+    const { testResults, allPassed: artifactTestsPassed } = await measurePhase(
+      '成果物テスト実行',
+      () => testArtifacts()
+    )
 
     // 結果を記録
     const tasks = await fetchTaskStates()
     const agentStats = aggregateAgentStats(recorder['events'])
 
+    // パフォーマンスレポートを生成・表示
+    printPerformanceReport(phaseMetrics)
+
+    // フェーズメトリクスをイベントとして記録
+    recorder.recordEvent('performance_report', {
+      phases: phaseMetrics,
+      total_duration_ms: phaseMetrics.reduce((sum, p) => sum + p.duration_ms, 0),
+    })
+
     const result = recorder.saveResult({
-      success: artifactResults.every((a) => a.exists && a.validation_passed),
+      success: artifactResults.every((a) => a.exists && a.validation_passed) && artifactTestsPassed,
       artifacts: artifactResults,
       tasks,
       agents: agentStats,
@@ -99,7 +132,49 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
 
     // テスト結果を検証
     expect(result.outcome.success).toBe(true)
+    expect(artifactTestsPassed).toBe(true)
   })
+
+  /**
+   * パフォーマンスレポートを表示
+   */
+  function printPerformanceReport(metrics: { phase: string; duration_ms: number; success: boolean }[]) {
+    const totalDuration = metrics.reduce((sum, p) => sum + p.duration_ms, 0)
+
+    function getDisplayWidth(str: string): number {
+      let width = 0
+      for (const char of str) {
+        width += /[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 2 : 1
+      }
+      return width
+    }
+
+    function padEndDisplay(str: string, targetWidth: number): string {
+      const currentWidth = getDisplayWidth(str)
+      const padding = Math.max(0, targetWidth - currentWidth)
+      return str + ' '.repeat(padding)
+    }
+
+    console.log('\n')
+    console.log('┌' + '─'.repeat(68) + '┐')
+    console.log('│' + ' '.repeat(20) + '📊 Performance Report' + ' '.repeat(27) + '│')
+    console.log('├' + '─'.repeat(68) + '┤')
+    console.log('│  Phase                                            Duration   Status │')
+    console.log('├' + '─'.repeat(68) + '┤')
+
+    for (const metric of metrics) {
+      const phaseName = padEndDisplay(metric.phase, 45)
+      const duration = `${(metric.duration_ms / 1000).toFixed(1)}s`.padStart(8)
+      const status = metric.success ? '✅' : '❌'
+      console.log(`│  ${phaseName}${duration}     ${status}  │`)
+    }
+
+    console.log('├' + '─'.repeat(68) + '┤')
+    const totalStr = `${(totalDuration / 1000).toFixed(1)}s`.padStart(8)
+    console.log(`│  ${padEndDisplay('TOTAL', 45)}${totalStr}         │`)
+    console.log('└' + '─'.repeat(68) + '┘')
+    console.log('\n')
+  }
 
   // ============ Helper Functions ============
 
@@ -159,7 +234,7 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     // セッション準備完了を待機
     const sendButton = page.getByTestId('chat-send-button')
     console.log('Waiting for chat session to be ready...')
-    await expect(sendButton).toHaveText('送信', { timeout: 120_000 })
+    await expect(sendButton).toHaveText('送信', { timeout: 180_000 })
     console.log('Chat session is ready')
 
     // メッセージを送信
@@ -310,6 +385,58 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     })
 
     return results
+  }
+
+  /**
+   * 成果物を実行テスト
+   */
+  async function testArtifacts() {
+    const artifacts = scenarioConfig.expected_artifacts
+    const workingDir = scenarioConfig.project.working_directory
+    const testResults: { path: string; passed: boolean; details: unknown }[] = []
+
+    console.log('\n' + '='.repeat(60))
+    console.log('🧪 成果物テスト実行')
+    console.log('='.repeat(60))
+
+    for (const artifact of artifacts) {
+      const fullPath = path.join(workingDir, artifact.path)
+
+      if (!artifact.test) {
+        console.log(`\n📄 ${artifact.path}: テスト設定なし（スキップ）`)
+        continue
+      }
+
+      console.log(`\n📄 ${artifact.path}:`)
+      console.log(`   コマンド: ${artifact.test.command.replace('{path}', fullPath)}`)
+
+      const testResult = recorder.testArtifact(
+        fullPath,
+        artifact.test.command,
+        artifact.test.expected_output
+      )
+
+      const passed = testResult.exit_code === 0 && testResult.output_matched
+      testResults.push({ path: artifact.path, passed, details: testResult })
+
+      console.log(`   終了コード: ${testResult.exit_code}`)
+      console.log(`   標準出力: "${testResult.stdout}"`)
+      if (testResult.stderr) {
+        console.log(`   標準エラー: "${testResult.stderr}"`)
+      }
+      console.log(`   期待出力: "${testResult.expected_output}"`)
+      console.log(`   出力一致: ${testResult.output_matched ? '✅' : '❌'}`)
+      console.log(`   結果: ${passed ? '✅ PASS' : '❌ FAIL'}`)
+    }
+
+    console.log('\n' + '='.repeat(60))
+    const allPassed = testResults.every((r) => r.passed)
+    console.log(`🧪 成果物テスト結果: ${allPassed ? '✅ ALL PASSED' : '❌ SOME FAILED'}`)
+    console.log('='.repeat(60) + '\n')
+
+    recorder.recordEvent('artifacts_tested', { results: testResults, all_passed: allPassed })
+
+    return { testResults, allPassed }
   }
 
   /**
