@@ -209,6 +209,20 @@ public final class MCPServer {
         return JSONRPCResponse(id: request.id, result: ["acknowledged": true])
     }
 
+    /// HTTP経由のリクエストを処理（非同期版 - Long Polling対応）
+    /// 参照: docs/design/LONG_POLLING_DESIGN.md
+    public func processHTTPRequestAsync(_ request: JSONRPCRequest) async -> JSONRPCResponse {
+        logDebug("[HTTP Async] Processing request: \(request.method)")
+
+        // handleRequestAsyncを呼び出し、nilの場合は空のレスポンスを返す
+        if let response = await handleRequestAsync(request) {
+            return response
+        }
+
+        // 通知（id == nil）の場合は成功レスポンスを返す
+        return JSONRPCResponse(id: request.id, result: ["acknowledged": true])
+    }
+
     // MARK: - Request Handling
 
     /// リクエストをハンドリング
@@ -227,6 +241,41 @@ public final class MCPServer {
             return handleToolsList(request)
         case "tools/call":
             return handleToolsCall(request)
+        case "resources/list":
+            return handleResourcesList(request)
+        case "resources/read":
+            return handleResourcesRead(request)
+        case "prompts/list":
+            return handlePromptsList(request)
+        case "prompts/get":
+            return handlePromptsGet(request)
+        default:
+            guard request.id != nil else { return nil }
+            return JSONRPCResponse(
+                id: request.id,
+                error: JSONRPCError(code: -32601, message: "Method not found: \(request.method)")
+            )
+        }
+    }
+
+    /// リクエストをハンドリング（非同期版 - Long Polling対応）
+    /// 通知（id == nil）の場合は nil を返す
+    /// 参照: docs/design/LONG_POLLING_DESIGN.md
+    private func handleRequestAsync(_ request: JSONRPCRequest) async -> JSONRPCResponse? {
+        logDebug("Received (async): \(request.method)")
+
+        switch request.method {
+        case "initialize":
+            return handleInitialize(request)
+        case "initialized":
+            return nil
+        case "notifications/cancelled":
+            return nil
+        case "tools/list":
+            return handleToolsList(request)
+        case "tools/call":
+            // 非同期版を使用（Long Polling対応）
+            return await handleToolsCallAsync(request)
         case "resources/list":
             return handleResourcesList(request)
         case "resources/read":
@@ -290,6 +339,84 @@ public final class MCPServer {
             try ToolAuthorization.authorize(tool: name, caller: caller)
 
             let result = try executeTool(name: name, arguments: arguments, caller: caller)
+
+            // 通知ミドルウェア: 認証済みエージェントに未読通知の有無を通知
+            // 参照: docs/design/NOTIFICATION_SYSTEM.md
+            var responseContent: [String: Any] = [
+                "content": [
+                    ["type": "text", "text": formatResult(result)]
+                ]
+            ]
+            if let (agentId, projectId) = extractAgentAndProject(from: caller) {
+                // 未読通知を取得して種類を確認
+                let unreadNotifications = (try? notificationRepository.findUnreadByAgentAndProject(
+                    agentId: agentId,
+                    projectId: projectId
+                )) ?? []
+
+                // 中断通知がある場合は、ツールの戻り値を完全に通知メッセージに差し替える
+                // これによりエージェントは通知に対応せざるを得なくなる
+                if let interruptNotification = unreadNotifications.first(where: { $0.type == .interrupt }) {
+                    let interruptMessage = """
+                        通知があります。
+
+                        1. get_notifications() を呼び出して詳細を確認してください
+                        2. 通知の指示に従ってください
+                        """
+                    // 戻り値を完全に差し替え
+                    responseContent = [
+                        "content": [
+                            ["type": "text", "text": interruptMessage]
+                        ]
+                    ]
+                } else if !unreadNotifications.isEmpty {
+                    responseContent["notification"] = "【重要】通知があります。get_notifications を呼び出して確認してください。"
+                } else {
+                    responseContent["notification"] = "通知はありません"
+                }
+            }
+
+            return JSONRPCResponse(id: request.id, result: responseContent)
+        } catch let error as ToolAuthorizationError {
+            // 認可エラーは専用のエラーメッセージで返す
+            return JSONRPCResponse(id: request.id, result: [
+                "content": [
+                    ["type": "text", "text": "Authorization Error: \(error.errorDescription ?? error.localizedDescription)"]
+                ],
+                "isError": true
+            ])
+        } catch {
+            return JSONRPCResponse(id: request.id, result: [
+                "content": [
+                    ["type": "text", "text": "Error: \(error)"]
+                ],
+                "isError": true
+            ])
+        }
+    }
+
+    /// ツール呼び出しを処理（非同期版 - Long Polling対応）
+    /// get_next_action ツールで timeout_seconds が指定されている場合、
+    /// サーバー側でLong Polling待機を行う
+    /// 参照: docs/design/LONG_POLLING_DESIGN.md
+    private func handleToolsCallAsync(_ request: JSONRPCRequest) async -> JSONRPCResponse {
+        guard let params = request.params,
+              let name = params["name"]?.stringValue else {
+            return JSONRPCResponse(
+                id: request.id,
+                error: JSONRPCError.invalidParams
+            )
+        }
+
+        let arguments = params["arguments"]?.dictionaryValue ?? [:]
+
+        do {
+            // Phase 5: 認可チェック
+            let caller = try identifyCaller(tool: name, arguments: arguments)
+            try ToolAuthorization.authorize(tool: name, caller: caller)
+
+            // 非同期版のツール実行（Long Polling対応）
+            let result = try await executeToolAsync(name: name, arguments: arguments, caller: caller)
 
             // 通知ミドルウェア: 認証済みエージェントに未読通知の有無を通知
             // 参照: docs/design/NOTIFICATION_SYSTEM.md
@@ -835,7 +962,10 @@ public final class MCPServer {
             guard let session = caller.session else {
                 throw MCPError.sessionTokenRequired
             }
-            let timeoutSeconds = (arguments["timeout_seconds"] as? Int) ?? 30
+            let timeoutSeconds = (arguments["timeout_seconds"] as? Int) ?? 45
+            // Long Polling開始をログ出力（これが表示されればLong Pollingが有効）
+            let agentIdStr = String(describing: session.agentId)
+            logDebug("[Long Polling] getNextActionAsync called with timeout=\(timeoutSeconds)s for agent: '\(agentIdStr.prefix(15))'...")
             return try await getNextActionAsync(session: session, timeoutSeconds: timeoutSeconds)
 
         default:
@@ -2627,14 +2757,14 @@ public final class MCPServer {
             try await _Concurrency.Task.sleep(nanoseconds: checkInterval)
         }
 
-        // タイムアウト: 再度ポーリングを要求
+        // タイムアウト: 即座に再呼び出しを要求（Long Pollingなのでクライアント側待機は不要）
         let remainingMinutes = Int((softTimeoutSeconds - Date().timeIntervalSince(session.lastActivityAt)) / 60)
         Self.log("[MCP] getNextActionAsync: Timeout reached, returning wait_for_messages (remaining: \(remainingMinutes)min)")
         return [
             "action": "wait_for_messages",
             "instruction": """
                 現在処理待ちのメッセージがありません。
-                再度 get_next_action を呼び出して新しいメッセージを確認してください。
+                【待機不要】サーバー側でLong Polling待機済みです。すぐに get_next_action を呼び出してください。
 
                 【重要】作業依頼（「〜を実装してください」「〜を追加してください」など）を受けた場合は、
                 まず request_task を呼び出してタスクを登録し、respond_chat で「承知しました」と応答してください。
@@ -2643,7 +2773,7 @@ public final class MCPServer {
                 その他の可能な操作は help ツールで確認できます。
                 """,
             "state": "chat_waiting",
-            "wait_seconds": timeoutSeconds,
+            "wait_seconds": 0,  // Long Polling: サーバー側で既に待機済みのためクライアント側待機は不要
             "remaining_timeout_minutes": remainingMinutes
         ]
     }

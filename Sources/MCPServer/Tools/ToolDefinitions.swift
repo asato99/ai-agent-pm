@@ -303,16 +303,22 @@ enum ToolDefinitions {
 
     /// get_next_action - 次のアクションを取得（状態駆動ワークフロー制御）
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
+    /// 参照: docs/design/CHAT_LONG_POLLING.md - Long Polling対応
     /// Agent Instanceが定期的に呼び出し、現在の状態に応じた指示を取得
+    /// チャットセッションではLong Pollingにより新しいメッセージが届くまでサーバー側で待機
     static let getNextAction: [String: Any] = [
         "name": "get_next_action",
-        "description": "次に実行すべきアクションを取得します。Agent Instanceは作業ループ内で定期的にこのツールを呼び出し、返された指示に従ってください。状態に応じて適切な次のステップ（モデル申告、タスク取得、サブタスク作成、サブタスク実行、完了報告など）が指示されます。",
+        "description": "次に実行すべきアクションを取得します。Agent Instanceは作業ループ内で定期的にこのツールを呼び出し、返された指示に従ってください。状態に応じて適切な次のステップ（モデル申告、タスク取得、サブタスク作成、サブタスク実行、完了報告など）が指示されます。【重要】チャットセッションではtimeout_secondsを指定することでLong Pollingが有効になり、新しいメッセージが届くまでサーバー側で待機します。これによりAPI呼び出し回数を大幅に削減できます。",
         "inputSchema": [
             "type": "object",
             "properties": [
                 "session_token": [
                     "type": "string",
                     "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "timeout_seconds": [
+                    "type": "integer",
+                    "description": "Long Polling待機時間（秒）。チャットセッションで新しいメッセージが届くまでサーバー側で待機する最大時間。指定しない場合は45秒。API呼び出し回数削減のため、チャットセッションでは必ず指定してください。"
                 ]
             ] as [String: Any],
             "required": ["session_token"]

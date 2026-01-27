@@ -2204,8 +2204,9 @@ final class RESTServer {
 
         debugLog("[MCP HTTP] Request: \(jsonRPCRequest.method)")
 
-        // 4. MCPServerで処理
-        let response = mcpServer.processHTTPRequest(jsonRPCRequest)
+        // 4. MCPServerで処理（非同期版を使用 - Long Polling対応）
+        // 参照: docs/design/LONG_POLLING_DESIGN.md
+        let response = await mcpServer.processHTTPRequestAsync(jsonRPCRequest)
 
         // 5. レスポンスをJSON化して返す
         let encoder = JSONEncoder()
