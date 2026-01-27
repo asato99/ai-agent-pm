@@ -1329,7 +1329,7 @@ final class DomainTests: XCTestCase {
             purpose: .task
         )
 
-        XCTAssertEqual(pending.id, "agt_test123_prj_test456")
+        XCTAssertEqual(pending.id, "agt_test123_prj_test456_task")
     }
 
     func testPendingAgentPurposeTTL() {

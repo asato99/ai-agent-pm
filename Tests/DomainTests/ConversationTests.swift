@@ -88,6 +88,7 @@ final class ConversationTests: XCTestCase {
             "participantAgentId": {"value": "agent-b"},
             "state": "active",
             "purpose": "テスト",
+            "maxTurns": 20,
             "createdAt": "2026-01-23T10:00:00Z"
         }
         """
@@ -110,6 +111,7 @@ final class ConversationTests: XCTestCase {
             "initiatorAgentId": {"value": "agent-a"},
             "participantAgentId": {"value": "agent-b"},
             "state": "ended",
+            "maxTurns": 20,
             "createdAt": "2026-01-23T10:00:00Z",
             "endedAt": "2026-01-23T10:30:00Z"
         }

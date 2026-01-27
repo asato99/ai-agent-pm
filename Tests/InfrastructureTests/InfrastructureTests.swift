@@ -162,33 +162,46 @@ final class InfrastructureTests: XCTestCase {
 
     func testAgentRepositoryFindAll() throws {
         // PRD: エージェント一覧取得（プロジェクト非依存）
+        // Note: マイグレーションによりシステムエージェント2件が存在
+        // (system:user, system:auto)
+        let initialCount = try agentRepo.findAll().count
+
         let agent1 = Agent(id: AgentID.generate(), name: "Agent1", role: "Role1")
         let agent2 = Agent(id: AgentID.generate(), name: "Agent2", role: "Role2")
         try agentRepo.save(agent1)
         try agentRepo.save(agent2)
 
         let agents = try agentRepo.findAll()
-        XCTAssertEqual(agents.count, 2)
+        XCTAssertEqual(agents.count, initialCount + 2)
     }
 
     func testAgentRepositoryFindByType() throws {
         // PRD: エージェントタイプ別の取得（AI/Human）
+        // Note: マイグレーションによりシステムエージェント2件が存在（type: human）
+        // (system:user, system:auto)
+        let initialHumanCount = try agentRepo.findByType(.human).count
+        let initialAiCount = try agentRepo.findByType(.ai).count
+
         let aiAgent = Agent(id: AgentID.generate(), name: "AI", role: "Role", type: .ai)
         let humanAgent = Agent(id: AgentID.generate(), name: "Human", role: "Role", type: .human)
         try agentRepo.save(aiAgent)
         try agentRepo.save(humanAgent)
 
         let aiAgents = try agentRepo.findByType(.ai)
-        XCTAssertEqual(aiAgents.count, 1)
-        XCTAssertEqual(aiAgents.first?.type, .ai)
+        XCTAssertEqual(aiAgents.count, initialAiCount + 1)
+        XCTAssertTrue(aiAgents.contains { $0.type == .ai })
 
         let humanAgents = try agentRepo.findByType(.human)
-        XCTAssertEqual(humanAgents.count, 1)
-        XCTAssertEqual(humanAgents.first?.type, .human)
+        XCTAssertEqual(humanAgents.count, initialHumanCount + 1)
+        XCTAssertTrue(humanAgents.contains { $0.type == .human })
     }
 
     func testAgentRepositoryFindByParent() throws {
         // PRD: 親エージェントによる階層構造
+        // Note: マイグレーションによりシステムエージェント2件が存在（parentAgentId: nil）
+        // (system:user, system:auto)
+        let initialRootCount = try agentRepo.findRootAgents().count
+
         let parentAgent = Agent(id: AgentID.generate(), name: "Parent", role: "Manager")
         try agentRepo.save(parentAgent)
 
@@ -201,8 +214,8 @@ final class InfrastructureTests: XCTestCase {
         XCTAssertEqual(children.count, 2)
 
         let rootAgents = try agentRepo.findRootAgents()
-        XCTAssertEqual(rootAgents.count, 1)
-        XCTAssertEqual(rootAgents.first?.name, "Parent")
+        XCTAssertEqual(rootAgents.count, initialRootCount + 1)
+        XCTAssertTrue(rootAgents.contains { $0.name == "Parent" })
     }
 
     func testAgentRepositoryStatusPersistence() throws {

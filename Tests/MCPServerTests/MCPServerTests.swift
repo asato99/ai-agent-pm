@@ -529,17 +529,18 @@ final class MCPServerTests: XCTestCase {
     func testToolCount() {
         let tools = ToolDefinitions.all()
 
-        // 現在のツール一覧: 32個
+        // 現在のツール一覧: 35個
         // Unauthenticated: 2 (help, authenticate)
         // Coordinator-only: 7 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, invalidate_session, report_agent_error)
-        // Manager-only: 5 (list_subordinates, get_subordinate_profile, create_task, create_tasks_batch, assign_task)
+        // Manager-only: 7 (list_subordinates, get_subordinate_profile, create_task, create_tasks_batch, assign_task, approve_task_request, reject_task_request)
         // Worker-only: 1 (report_completed)
-        // Authenticated (Manager + Worker): 14 (logout, report_model, get_my_profile, get_my_task, get_notifications, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete, send_message, start_conversation, end_conversation)
+        // Authenticated (Manager + Worker): 15 (logout, report_model, get_my_profile, get_my_task, get_notifications, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete, send_message, start_conversation, end_conversation, request_task)
         // Chat-only: 2 (get_pending_messages, respond_chat)
         // 注: list_agents, get_agent_profile, list_projects は削除済み
         // 注: get_my_tasks, get_pending_tasks はget_my_taskに統合済み
         // 注: start_conversation, end_conversation はAI-to-AI会話用（UC016）
-        XCTAssertEqual(tools.count, 32, "Should have 32 tools defined")
+        // 注: request_task, approve_task_request, reject_task_request はタスク依頼機能用
+        XCTAssertEqual(tools.count, 35, "Should have 35 tools defined")
     }
 }
 
@@ -1900,107 +1901,11 @@ final class WorkingDirectoryResolutionTests: XCTestCase {
         try workingDirectoryRepository.save(agentWD)
     }
 
-    /// RED: getMyTask が AgentWorkingDirectory を返すことを検証
-    /// 現在のバグ: Project.workingDirectory を返している
-    /// 期待: AgentWorkingDirectory の値が返されるべき
-    func testGetMyTaskReturnsAgentWorkingDirectory() throws {
-        // Arrange: セッションを作成
-        let session = AgentSession(
-            agentId: testAgentId,
-            projectId: testProjectId,
-            purpose: .task
-        )
-        try agentSessionRepository.save(session)
-
-        // 実行ログを作成（get_my_task で自動作成される）
-        let executionLog = ExecutionLog(
-            taskId: testTaskId,
-            agentId: testAgentId
-        )
-        try executionLogRepository.save(executionLog)
-
-        // Act: get_my_task ツールを呼び出し
-        let arguments: [String: Any] = [
-            "session_token": session.token
-        ]
-        let caller = CallerType.worker(agentId: testAgentId, session: session)
-
-        let result = try mcpServer.executeTool(
-            name: "get_my_task",
-            arguments: arguments,
-            caller: caller
-        )
-
-        // Assert: 結果を検証
-        guard let resultDict = result as? [String: Any] else {
-            XCTFail("Result should be a dictionary")
-            return
-        }
-
-        XCTAssertTrue(resultDict["has_task"] as? Bool ?? false, "Should have a task")
-
-        guard let taskDict = resultDict["task"] as? [String: Any] else {
-            XCTFail("Task should be present in result")
-            return
-        }
-
-        // ★ これがREDになる検証ポイント ★
-        // 現在のバグ: Project.workingDirectory ("/project/default/path") が返される
-        // 期待: AgentWorkingDirectory ("/agent/specific/path") が返されるべき
-        let returnedWorkingDir = taskDict["working_directory"] as? String
-        XCTAssertEqual(
-            returnedWorkingDir,
-            agentWorkingDirectory,
-            "get_my_task should return AgentWorkingDirectory ('\(agentWorkingDirectory)'), not Project.workingDirectory ('\(projectWorkingDirectory)')"
-        )
-    }
-
-    /// RED: AgentWorkingDirectory が未設定の場合、Project.workingDirectory にフォールバックすることを検証
-    func testGetMyTaskFallsBackToProjectWorkingDirectoryWhenAgentWDNotSet() throws {
-        // Arrange: AgentWorkingDirectoryを削除
-        try workingDirectoryRepository.deleteByAgentAndProject(agentId: testAgentId, projectId: testProjectId)
-
-        // セッションを作成
-        let session = AgentSession(
-            agentId: testAgentId,
-            projectId: testProjectId,
-            purpose: .task
-        )
-        try agentSessionRepository.save(session)
-
-        // 実行ログを作成
-        let executionLog = ExecutionLog(
-            taskId: testTaskId,
-            agentId: testAgentId
-        )
-        try executionLogRepository.save(executionLog)
-
-        // Act: get_my_task ツールを呼び出し
-        let arguments: [String: Any] = [
-            "session_token": session.token
-        ]
-        let caller = CallerType.worker(agentId: testAgentId, session: session)
-
-        let result = try mcpServer.executeTool(
-            name: "get_my_task",
-            arguments: arguments,
-            caller: caller
-        )
-
-        // Assert: フォールバックでProject.workingDirectoryが返される
-        guard let resultDict = result as? [String: Any],
-              let taskDict = resultDict["task"] as? [String: Any] else {
-            XCTFail("Task should be present in result")
-            return
-        }
-
-        let returnedWorkingDir = taskDict["working_directory"] as? String
-        XCTAssertEqual(
-            returnedWorkingDir,
-            projectWorkingDirectory,
-            "Should fall back to Project.workingDirectory when AgentWorkingDirectory is not set"
-        )
-    }
+    // 削除済み: testGetMyTaskReturnsAgentWorkingDirectory
+    // 削除済み: testGetMyTaskFallsBackToProjectWorkingDirectoryWhenAgentWDNotSet
+    // 理由: get_my_task は設計上 working_directory を返さない
+    // (Coordinator が cwd パラメータで管理するため)
+    // 参照: commit 9b0ad78 "Remove working_directory from MCP API responses"
 
     /// list_active_projects_with_agents が agentId パラメータで AgentWorkingDirectory を返すことを検証
     /// （これは正しく実装されているはず - 参考のため）

@@ -817,7 +817,7 @@ final class HTTPIntegrationTests: XCTestCase {
 
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         XCTAssertNotNil(json["id"], "Response should contain message id")
-        XCTAssertEqual(json["sender"] as? String, "user", "Sender should be 'user'")
+        XCTAssertEqual(json["senderId"] as? String, testAgentId.value, "SenderId should be the logged-in agent")
         XCTAssertEqual(json["content"] as? String, "Hello from HTTP test", "Content should match")
     }
 
