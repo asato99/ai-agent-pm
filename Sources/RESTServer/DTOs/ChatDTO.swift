@@ -30,11 +30,16 @@ public struct ChatMessagesResponse: Codable {
     public let messages: [ChatMessageDTO]
     public let hasMore: Bool
     public let totalCount: Int?
+    /// Whether the agent has pending messages to respond to
+    /// This is determined by server-side logic (findUnreadMessages)
+    /// Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+    public let awaitingAgentResponse: Bool
 
-    public init(messages: [ChatMessageDTO], hasMore: Bool, totalCount: Int? = nil) {
+    public init(messages: [ChatMessageDTO], hasMore: Bool, totalCount: Int? = nil, awaitingAgentResponse: Bool = false) {
         self.messages = messages
         self.hasMore = hasMore
         self.totalCount = totalCount
+        self.awaitingAgentResponse = awaitingAgentResponse
     }
 }
 

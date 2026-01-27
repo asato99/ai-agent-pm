@@ -2,7 +2,7 @@
 // チャット機能用カスタムフック
 // 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 5
 
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chatApi } from '@/api/chatApi'
 import type { ChatMessage, GetChatMessagesOptions } from '@/types'
@@ -31,7 +31,7 @@ interface UseChatResult {
   sendMessage: (content: string, relatedTaskId?: string) => Promise<ChatMessage>
   /** 送信中フラグ */
   isSending: boolean
-  /** エージェント応答待ちフラグ */
+  /** エージェント応答待ちフラグ（サーバー側で判定） */
   isWaitingForResponse: boolean
   /** 手動リフレッシュ */
   refetch: () => void
@@ -60,21 +60,11 @@ export function useChat(
   const queryClient = useQueryClient()
   const queryKey = ['chat', projectId, agentId]
 
-  // エージェント応答待ち状態の追跡
-  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false)
-  const lastMessageCountRef = useRef(0)
-
   // メッセージ取得クエリ
   const queryOptions: GetChatMessagesOptions = {}
   if (limit !== undefined) {
     queryOptions.limit = limit
   }
-
-  // 応答待ち時はより頻繁にポーリング
-  // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
-  const currentPollingInterval = isWaitingForResponse
-    ? waitingPollingInterval
-    : pollingInterval
 
   const {
     data,
@@ -89,25 +79,15 @@ export function useChat(
     enabled: !!projectId && !!agentId,
     // ポーリング設定（新しいメッセージを検出するため）
     // 応答待ち時は1秒、それ以外は2秒間隔でポーリング
-    refetchInterval: polling ? currentPollingInterval : false,
+    // Note: isWaitingForResponse はサーバーから取得するため、
+    // データ取得後に次回のポーリング間隔が決まる
+    refetchInterval: (query) => {
+      if (!polling) return false
+      const awaitingResponse = query.state.data?.awaitingAgentResponse ?? false
+      return awaitingResponse ? waitingPollingInterval : pollingInterval
+    },
     refetchOnWindowFocus: false,
   })
-
-  // エージェント応答を検出して待機状態を解除
-  useEffect(() => {
-    const messages = data?.messages ?? []
-    if (isWaitingForResponse && messages.length > lastMessageCountRef.current) {
-      // 新しいメッセージが追加された
-      const lastMessage = messages[messages.length - 1]
-      // senderId が対象エージェントIDまたは'system'と一致すれば、応答として扱う
-      // system: エラーメッセージやシステム通知
-      if (lastMessage && (lastMessage.senderId === agentId || lastMessage.senderId === 'system')) {
-        // エージェントまたはシステムからの応答を受信
-        setIsWaitingForResponse(false)
-      }
-    }
-    lastMessageCountRef.current = messages.length
-  }, [data?.messages, isWaitingForResponse, agentId])
 
   // メッセージ送信ミューテーション
   const sendMutation = useMutation({
@@ -122,20 +102,22 @@ export function useChat(
     },
     onSuccess: (newMessage) => {
       // 送信成功時、キャッシュを更新してメッセージを即座に表示
+      // awaitingAgentResponse はサーバーからの次回レスポンスで更新されるが、
+      // 楽観的に true を設定することで即座に待機状態を反映
       queryClient.setQueryData(queryKey, (oldData: typeof data) => {
         if (!oldData) {
           return {
             messages: [newMessage],
             hasMore: false,
+            awaitingAgentResponse: true, // 送信後は応答待ち状態
           }
         }
         return {
           ...oldData,
           messages: [...oldData.messages, newMessage],
+          awaitingAgentResponse: true, // 送信後は応答待ち状態
         }
       })
-      // エージェント応答待ち状態を開始
-      setIsWaitingForResponse(true)
     },
   })
 
@@ -173,7 +155,9 @@ export function useChat(
     hasMore: data?.hasMore ?? false,
     sendMessage,
     isSending: sendMutation.isPending,
-    isWaitingForResponse,
+    // サーバーから判定された応答待ち状態を使用
+    // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+    isWaitingForResponse: data?.awaitingAgentResponse ?? false,
     refetch,
     loadMore,
   }

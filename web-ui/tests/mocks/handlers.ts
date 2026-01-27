@@ -741,19 +741,23 @@ export const handlers = [
           messages: [
             {
               id: 'msg-1',
-              sender: 'user',
+              senderId: 'user-1',
+              receiverId: agentId,
               content: 'こんにちは',
               createdAt: '2024-01-15T10:00:00Z',
             },
             {
               id: 'msg-2',
-              sender: 'agent',
+              senderId: agentId,
+              receiverId: 'user-1',
               content: 'こんにちは！何かお手伝いできますか？',
               createdAt: '2024-01-15T10:01:00Z',
             },
           ],
           hasMore: false,
           totalCount: 2,
+          // Agent's last message is the most recent, so no pending messages
+          awaitingAgentResponse: false,
         })
       }
       // worker-2 has no messages
@@ -762,6 +766,7 @@ export const handlers = [
           messages: [],
           hasMore: false,
           totalCount: 0,
+          awaitingAgentResponse: false,
         })
       }
     }
@@ -783,7 +788,8 @@ export const handlers = [
     if (projectId === 'project-1' && (agentId === 'worker-1' || agentId === 'worker-2' || agentId === 'agent-1')) {
       return HttpResponse.json({
         id: `msg-${Date.now()}`,
-        sender: 'user',
+        senderId: 'user-1',
+        receiverId: agentId,
         content: body.content,
         createdAt: new Date().toISOString(),
         relatedTaskId: body.relatedTaskId,

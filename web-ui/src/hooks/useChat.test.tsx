@@ -42,12 +42,12 @@ describe('useChat', () => {
 
       expect(result.current.messages).toHaveLength(2)
       expect(result.current.messages[0].content).toBe('こんにちは')
-      expect(result.current.messages[0].sender).toBe('user')
+      expect(result.current.messages[0].senderId).toBe('user-1')
       expect(result.current.messages[1].content).toBe('こんにちは！何かお手伝いできますか？')
-      expect(result.current.messages[1].sender).toBe('agent')
+      expect(result.current.messages[1].senderId).toBe('agent-1')
     })
 
-    it('メッセージにはid, sender, content, createdAtが含まれる', async () => {
+    it('メッセージにはid, senderId, content, createdAtが含まれる', async () => {
       const { result } = renderHook(
         () => useChat('project-1', 'agent-1'),
         { wrapper: createWrapper() }
@@ -59,7 +59,7 @@ describe('useChat', () => {
 
       const message = result.current.messages[0]
       expect(message.id).toBeDefined()
-      expect(message.sender).toBeDefined()
+      expect(message.senderId).toBeDefined()
       expect(message.content).toBeDefined()
       expect(message.createdAt).toBeDefined()
     })
@@ -101,7 +101,7 @@ describe('useChat', () => {
       })
       const lastMessage = result.current.messages[result.current.messages.length - 1]
       expect(lastMessage.content).toBe('新しいメッセージ')
-      expect(lastMessage.sender).toBe('user')
+      expect(lastMessage.senderId).toBe('user-1')
     })
 
     it('送信中はisSendingがtrueになる', async () => {
@@ -218,8 +218,8 @@ describe('useChat', () => {
     })
   })
 
-  describe('isWaitingForResponse', () => {
-    it('メッセージ送信後にisWaitingForResponseがtrueになる', async () => {
+  describe('isWaitingForResponse (サーバー側判定)', () => {
+    it('初期状態ではisWaitingForResponseがサーバーの値を反映する', async () => {
       const { result } = renderHook(
         () => useChat('project-1', 'agent-1'),
         { wrapper: createWrapper() }
@@ -229,7 +229,23 @@ describe('useChat', () => {
         expect(result.current.isLoading).toBe(false)
       })
 
-      // 送信前はfalse
+      // MSWモックはエージェントの最後のメッセージが最新なので、
+      // awaitingAgentResponse: false を返す
+      expect(result.current.isWaitingForResponse).toBe(false)
+    })
+
+    it('メッセージ送信後にisWaitingForResponseが楽観的にtrueになる', async () => {
+      // ポーリングを無効化して、楽観的更新がサーバーレスポンスで上書きされないようにする
+      const { result } = renderHook(
+        () => useChat('project-1', 'agent-1', { polling: false }),
+        { wrapper: createWrapper() }
+      )
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false)
+      })
+
+      // 送信前はfalse（サーバーからの値）
       expect(result.current.isWaitingForResponse).toBe(false)
 
       // メッセージを送信
@@ -237,11 +253,72 @@ describe('useChat', () => {
         await result.current.sendMessage('テストメッセージ')
       })
 
-      // 送信後はtrue（エージェントの応答を待っている）
-      expect(result.current.isWaitingForResponse).toBe(true)
+      // 送信後は楽観的にtrue（エージェントの応答を待っている）
+      // これはキャッシュ更新時に設定される
+      await waitFor(() => {
+        expect(result.current.isWaitingForResponse).toBe(true)
+      })
     })
 
-    it('システムメッセージ受信後もisWaitingForResponseがfalseになるべき（BUG: 現在はtrueのまま）', async () => {
+    it('サーバーからawaitingAgentResponse=falseが返ると待機状態が解除される', async () => {
+      // QueryClientを直接操作してサーバーからの応答をシミュレート
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: false,
+          },
+        },
+      })
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+
+      // ポーリングを無効化して、楽観的更新がサーバーレスポンスで上書きされないようにする
+      const { result } = renderHook(
+        () => useChat('project-1', 'agent-1', { polling: false }),
+        { wrapper }
+      )
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false)
+      })
+
+      // メッセージを送信（楽観的にisWaitingForResponse = true になる）
+      await act(async () => {
+        await result.current.sendMessage('テストメッセージ')
+      })
+
+      await waitFor(() => {
+        expect(result.current.isWaitingForResponse).toBe(true)
+      })
+
+      // サーバーからエージェントの応答が返ってきたことをシミュレート
+      // (awaitingAgentResponse: false = エージェントは応答済み)
+      await act(async () => {
+        queryClient.setQueryData(['chat', 'project-1', 'agent-1'], {
+          messages: [
+            ...result.current.messages,
+            {
+              id: 'msg-agent-response',
+              senderId: 'agent-1',
+              receiverId: 'user-1',
+              content: 'お手伝いします！',
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          hasMore: false,
+          // サーバーが判定: エージェントの最新メッセージが最後なので応答待ちではない
+          awaitingAgentResponse: false,
+        })
+      })
+
+      // サーバーからのawaitingAgentResponse=falseで待機状態が解除される
+      await waitFor(() => {
+        expect(result.current.isWaitingForResponse).toBe(false)
+      })
+    })
+
+    it('システムメッセージ受信後もawaitingAgentResponseに従う', async () => {
       // QueryClientを直接操作してシステムメッセージを追加
       const queryClient = new QueryClient({
         defaultOptions: {
@@ -254,8 +331,9 @@ describe('useChat', () => {
         <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
       )
 
+      // ポーリングを無効化して、楽観的更新がサーバーレスポンスで上書きされないようにする
       const { result } = renderHook(
-        () => useChat('project-1', 'agent-1'),
+        () => useChat('project-1', 'agent-1', { polling: false }),
         { wrapper }
       )
 
@@ -268,33 +346,33 @@ describe('useChat', () => {
         await result.current.sendMessage('テストメッセージ')
       })
 
-      expect(result.current.isWaitingForResponse).toBe(true)
+      await waitFor(() => {
+        expect(result.current.isWaitingForResponse).toBe(true)
+      })
 
       // システムからのエラーメッセージを受信したことをシミュレート
-      // senderId が 'agent-1' ではないので、現在のロジックでは isWaitingForResponse が解除されない
+      // サーバーがawaitingAgentResponse: falseを返す（システムメッセージも応答扱い）
       await act(async () => {
         queryClient.setQueryData(['chat', 'project-1', 'agent-1'], {
           messages: [
             ...result.current.messages,
             {
               id: 'msg-system-1',
-              senderId: 'system', // システムメッセージ - agent-1 とは異なる
+              senderId: 'system',
               content: 'エラー: エージェントに接続できませんでした',
               createdAt: new Date().toISOString(),
             },
           ],
           hasMore: false,
+          // サーバーが判定: システムメッセージも応答扱いなので待機終了
+          awaitingAgentResponse: false,
         })
       })
 
-      // 【期待動作】システムメッセージでも応答として扱い、待機状態を解除すべき
-      // 【現在の動作】senderId !== agentId のため、isWaitingForResponse が true のまま
+      // サーバーからの値に従って待機状態が解除される
       await waitFor(() => {
-        expect(result.current.messages).toHaveLength(4) // 2件 + 送信メッセージ + システムメッセージ
+        expect(result.current.isWaitingForResponse).toBe(false)
       })
-
-      // このアサーションは現在失敗する（RED）
-      expect(result.current.isWaitingForResponse).toBe(false)
     })
   })
 })

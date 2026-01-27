@@ -25,6 +25,12 @@ export interface ChatMessagesResponse {
   messages: ChatMessage[]
   hasMore: boolean
   totalCount?: number
+  /**
+   * Whether the agent has pending messages to respond to
+   * This is determined by server-side logic (findUnreadMessages)
+   * Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+   */
+  awaitingAgentResponse: boolean
 }
 
 /**

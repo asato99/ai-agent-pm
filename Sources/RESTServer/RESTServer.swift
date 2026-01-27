@@ -1746,10 +1746,19 @@ final class RESTServer {
                 before: beforeId
             )
 
+            // Check if the agent has pending messages to respond to
+            // This uses the same logic as get_next_action to determine waiting state
+            let pendingMessages = try chatRepository.findUnreadMessages(
+                projectId: projectId,
+                agentId: targetAgentId
+            )
+            let awaitingAgentResponse = !pendingMessages.isEmpty
+
             let response = ChatMessagesResponse(
                 messages: page.messages.map { ChatMessageDTO(from: $0) },
                 hasMore: page.hasMore,
-                totalCount: page.totalCount
+                totalCount: page.totalCount,
+                awaitingAgentResponse: awaitingAgentResponse
             )
 
             return jsonResponse(response)
