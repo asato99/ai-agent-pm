@@ -2,7 +2,7 @@
 // Chat panel component
 // Reference: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 6
 
-import { useRef, useEffect, useMemo, useCallback } from 'react'
+import { useRef, useEffect, useMemo, useCallback, useState, type MouseEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useChat } from '@/hooks/useChat'
 import { useAuthStore } from '@/stores/authStore'
@@ -12,6 +12,10 @@ import { chatApi } from '@/api/chatApi'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import type { Agent } from '@/types'
+
+const MIN_PANEL_WIDTH = 280
+const DEFAULT_PANEL_WIDTH = 400
+// MAX_PANEL_WIDTH is calculated dynamically based on window width (2/3 of screen)
 
 interface ChatPanelProps {
   projectId: string
@@ -31,6 +35,39 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
   const { getChatStatus, refetch: refetchSessions } = useAgentSessions(projectId)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+
+  // Panel width resize state
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH)
+  const isResizingRef = useRef(false)
+  const startXRef = useRef(0)
+  const startWidthRef = useRef(0)
+
+  // Handle panel width resize
+  const handleResizeMouseDown = useCallback((e: MouseEvent) => {
+    e.preventDefault()
+    isResizingRef.current = true
+    startXRef.current = e.clientX
+    startWidthRef.current = panelWidth
+    // Calculate max width as 2/3 of window width
+    const maxPanelWidth = Math.floor(window.innerWidth * 0.66)
+
+    const handleMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      if (!isResizingRef.current) return
+      // Dragging left = negative deltaX = increase width (panel is on right side)
+      const deltaX = startXRef.current - moveEvent.clientX
+      const newWidth = Math.max(MIN_PANEL_WIDTH, Math.min(maxPanelWidth, startWidthRef.current + deltaX))
+      setPanelWidth(newWidth)
+    }
+
+    const handleMouseUp = () => {
+      isResizingRef.current = false
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [panelWidth])
 
   // Build agent map for name resolution
   const agentMap = useMemo(() => {
@@ -142,128 +179,141 @@ export function ChatPanel({ projectId, agent, onClose }: ChatPanelProps) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-white border-l" data-testid="chat-panel">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b">
-        <div>
-          <h3 className="font-semibold text-gray-900">{agent.name}</h3>
-          <span className="text-sm text-gray-500">{agent.role}</span>
-        </div>
-        <button
-          onClick={handleClose}
-          className="p-1 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          aria-label="Close"
-        >
-          <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Messages */}
+    <div
+      className="flex h-full bg-white border-l"
+      data-testid="chat-panel"
+      style={{ width: `${panelWidth}px` }}
+    >
+      {/* Resize handle for panel width */}
       <div
-        ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4"
-        onScroll={handleScroll}
-      >
-        {isLoading ? (
-          <div
-            data-testid="chat-loading"
-            className="flex items-center justify-center h-full text-gray-500"
+        className="w-1 cursor-ew-resize bg-gray-200 hover:bg-blue-400 flex-shrink-0 transition-colors"
+        onMouseDown={handleResizeMouseDown}
+        title="ドラッグしてパネル幅を変更"
+      />
+
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b">
+          <div>
+            <h3 className="font-semibold text-gray-900">{agent.name}</h3>
+            <span className="text-sm text-gray-500">{agent.role}</span>
+          </div>
+          <button
+            onClick={handleClose}
+            className="p-1 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Close"
           >
-            <svg className="animate-spin h-6 w-6 mr-2" viewBox="0 0 24 24">
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-                fill="none"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
+            <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-            Loading...
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400">
-            <svg className="w-12 h-12 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1}
-                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-              />
-            </svg>
-            <p>No messages yet</p>
-            <p className="text-sm">Send the first message</p>
-          </div>
-        ) : (
-          <>
-            {hasMore && (
-              <div className="text-center py-2">
-                <button
-                  onClick={() => loadMore()}
-                  className="text-sm text-blue-500 hover:text-blue-700"
-                >
-                  Load more messages
-                </button>
-              </div>
-            )}
-            {messages.map((msg) => (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                currentAgentId={currentAgentId}
-                targetAgentId={agent.id}
-                agentMap={agentMap}
-              />
-            ))}
-            {/* Waiting for response indicator */}
-            {isWaitingForResponse && (
-              <div className="flex mb-4 justify-start" data-testid="chat-waiting-indicator">
-                <div className="bg-gray-100 rounded-lg px-4 py-2 max-w-[70%]">
-                  <div className="text-xs font-semibold mb-1 text-gray-500">
-                    {agent.name}
-                  </div>
-                  <div className="flex items-center text-gray-600">
-                    <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                        fill="none"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                    <span>応答を待っています...</span>
+          </button>
+        </div>
+
+        {/* Messages */}
+        <div
+          ref={messagesContainerRef}
+          className="flex-1 overflow-y-auto p-4"
+          onScroll={handleScroll}
+        >
+          {isLoading ? (
+            <div
+              data-testid="chat-loading"
+              className="flex items-center justify-center h-full text-gray-500"
+            >
+              <svg className="animate-spin h-6 w-6 mr-2" viewBox="0 0 24 24">
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  fill="none"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
+              </svg>
+              Loading...
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400">
+              <svg className="w-12 h-12 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1}
+                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                />
+              </svg>
+              <p>No messages yet</p>
+              <p className="text-sm">Send the first message</p>
+            </div>
+          ) : (
+            <>
+              {hasMore && (
+                <div className="text-center py-2">
+                  <button
+                    onClick={() => loadMore()}
+                    className="text-sm text-blue-500 hover:text-blue-700"
+                  >
+                    Load more messages
+                  </button>
+                </div>
+              )}
+              {messages.map((msg) => (
+                <ChatMessage
+                  key={msg.id}
+                  message={msg}
+                  currentAgentId={currentAgentId}
+                  targetAgentId={agent.id}
+                  agentMap={agentMap}
+                />
+              ))}
+              {/* Waiting for response indicator */}
+              {isWaitingForResponse && (
+                <div className="flex mb-4 justify-start" data-testid="chat-waiting-indicator">
+                  <div className="bg-gray-100 rounded-lg px-4 py-2 max-w-[70%]">
+                    <div className="text-xs font-semibold mb-1 text-gray-500">
+                      {agent.name}
+                    </div>
+                    <div className="flex items-center text-gray-600">
+                      <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          fill="none"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      <span>応答を待っています...</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </>
-        )}
-      </div>
+              )}
+              <div ref={messagesEndRef} />
+            </>
+          )}
+        </div>
 
-      {/* Input */}
-      <ChatInput
-        onSend={handleSend}
-        disabled={isSending}
-        chatStatus={getChatStatus(agent.id)}
-        onReconnect={handleReconnect}
-      />
+        {/* Input */}
+        <ChatInput
+          onSend={handleSend}
+          disabled={isSending}
+          chatStatus={getChatStatus(agent.id)}
+          onReconnect={handleReconnect}
+        />
+      </div>
     </div>
   )
 }

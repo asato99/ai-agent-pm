@@ -104,7 +104,9 @@ function getSenderDisplayName(
 }
 
 /**
- * Get recipient display name for self-chat mode
+ * Get recipient display name
+ * - Self-chat mode: Show recipient on self messages (who am I sending to)
+ * - Other's chat mode: Show recipient on target messages (who is the other agent sending to)
  */
 function getRecipientDisplay(
   message: ChatMessageType,
@@ -113,18 +115,29 @@ function getRecipientDisplay(
   targetAgentId: string,
   agentMap: Record<string, Agent>
 ): string | null {
-  // Only show recipient for self messages in self-chat mode
   const isSelfChatMode = currentAgentId === targetAgentId
-  if (!isSelfChatMode || senderType !== 'self') {
-    return null
+
+  // Self-chat mode: show recipient for self messages
+  if (isSelfChatMode && senderType === 'self') {
+    if (!message.receiverId) {
+      return null
+    }
+    const recipient = agentMap[message.receiverId]
+    const recipientName = recipient?.name ?? message.receiverId
+    return `@${recipientName}`
   }
-  // Need receiverId to show recipient
-  if (!message.receiverId) {
-    return null
+
+  // Other's chat mode: show recipient for target messages (the other agent's messages)
+  if (!isSelfChatMode && senderType === 'target') {
+    if (!message.receiverId) {
+      return null
+    }
+    const recipient = agentMap[message.receiverId]
+    const recipientName = recipient?.name ?? message.receiverId
+    return `@${recipientName}`
   }
-  const recipient = agentMap[message.receiverId]
-  const recipientName = recipient?.name ?? message.receiverId
-  return `@${recipientName}`
+
+  return null
 }
 
 export function ChatMessage({ message, currentAgentId, targetAgentId, agentMap }: ChatMessageProps) {

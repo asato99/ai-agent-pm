@@ -2,7 +2,7 @@
 // Message input component
 // Reference: docs/design/CHAT_SESSION_STATUS.md - Phase 3
 
-import { useState, useCallback, type FormEvent, type KeyboardEvent } from 'react'
+import { useState, useCallback, useRef, type FormEvent, type KeyboardEvent, type MouseEvent } from 'react'
 import type { ChatSessionStatus } from '@/hooks/useAgentSessions'
 
 interface ChatInputProps {
@@ -21,6 +21,10 @@ interface ChatInputProps {
   sessionReady?: boolean
 }
 
+const MIN_INPUT_HEIGHT = 60
+const DEFAULT_INPUT_HEIGHT = 60
+// MAX_INPUT_HEIGHT is calculated dynamically based on window height (2/3 of screen)
+
 export function ChatInput({
   onSend,
   disabled = false,
@@ -32,6 +36,37 @@ export function ChatInput({
 }: ChatInputProps) {
   const [content, setContent] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [inputHeight, setInputHeight] = useState(DEFAULT_INPUT_HEIGHT)
+  const isResizingRef = useRef(false)
+  const startYRef = useRef(0)
+  const startHeightRef = useRef(0)
+
+  // Handle resize drag
+  const handleResizeMouseDown = useCallback((e: MouseEvent) => {
+    e.preventDefault()
+    isResizingRef.current = true
+    startYRef.current = e.clientY
+    startHeightRef.current = inputHeight
+    // Calculate max height as 2/3 of window height
+    const maxInputHeight = Math.floor(window.innerHeight * 0.66)
+
+    const handleMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      if (!isResizingRef.current) return
+      // Dragging up = negative deltaY = increase height
+      const deltaY = startYRef.current - moveEvent.clientY
+      const newHeight = Math.max(MIN_INPUT_HEIGHT, Math.min(maxInputHeight, startHeightRef.current + deltaY))
+      setInputHeight(newHeight)
+    }
+
+    const handleMouseUp = () => {
+      isResizingRef.current = false
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [inputHeight])
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -156,24 +191,35 @@ export function ChatInput({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="border-t p-4">
-      <div className="flex gap-2">
-        <textarea
-          data-testid="chat-input"
-          className="flex-1 resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
-          placeholder={placeholder}
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={isInputDisabled}
-          maxLength={maxLength}
-          rows={2}
-          aria-label="Chat message input"
-        />
-        {renderButton()}
+    <form onSubmit={handleSubmit} className="border-t">
+      {/* Resize handle for input height */}
+      <div
+        className="h-2 cursor-ns-resize bg-gray-100 hover:bg-gray-200 flex items-center justify-center group"
+        onMouseDown={handleResizeMouseDown}
+        title="ドラッグして入力欄の高さを変更"
+      >
+        <div className="w-8 h-0.5 bg-gray-300 group-hover:bg-gray-400 rounded" />
       </div>
-      <div className="mt-1 text-xs text-gray-400 text-right">
-        {content.length}/{maxLength} characters (Ctrl+Enter to send)
+
+      <div className="p-4">
+        <div className="flex gap-2">
+          <textarea
+            data-testid="chat-input"
+            className="flex-1 resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
+            placeholder={placeholder}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isInputDisabled}
+            maxLength={maxLength}
+            style={{ height: `${inputHeight}px` }}
+            aria-label="Chat message input"
+          />
+          {renderButton()}
+        </div>
+        <div className="mt-1 text-xs text-gray-400 text-right">
+          {content.length}/{maxLength} characters (Ctrl+Enter to send)
+        </div>
       </div>
     </form>
   )

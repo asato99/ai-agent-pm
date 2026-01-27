@@ -58,11 +58,15 @@ cd "${PROJECT_ROOT}"
 
 # Build MCP server as Universal Binary in one step
 MCP_BUILD_DIR="${PROJECT_ROOT}/.build/mcp-universal"
+
+# Clean previous build to ensure fresh compilation
+rm -rf "${MCP_BUILD_DIR}"
+
 xcodebuild -scheme MCPServer \
     -configuration Release \
     -derivedDataPath "${PROJECT_ROOT}/.build/DerivedData" \
     -destination 'platform=macOS' \
-    build \
+    clean build \
     CONFIGURATION_BUILD_DIR="${MCP_BUILD_DIR}" \
     CODE_SIGN_IDENTITY="-" \
     CODE_SIGNING_REQUIRED=NO \
@@ -95,11 +99,15 @@ cd "${PROJECT_ROOT}"
 
 # Build REST server as Universal Binary
 REST_BUILD_DIR="${PROJECT_ROOT}/.build/rest-universal"
+
+# Clean previous build to ensure fresh compilation
+rm -rf "${REST_BUILD_DIR}"
+
 xcodebuild -scheme RESTServer \
     -configuration Release \
     -derivedDataPath "${PROJECT_ROOT}/.build/DerivedData" \
     -destination 'platform=macOS' \
-    build \
+    clean build \
     CONFIGURATION_BUILD_DIR="${REST_BUILD_DIR}" \
     CODE_SIGN_IDENTITY="-" \
     CODE_SIGNING_REQUIRED=NO \

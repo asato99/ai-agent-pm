@@ -233,7 +233,7 @@ export function TaskBoardPage() {
 
       {/* Chat Panel - opens when clicking on an agent avatar */}
       {isChatPanelOpen && selectedChatAgent && projectId && (
-        <div className="fixed right-0 top-0 h-full w-96 shadow-xl z-50">
+        <div className="fixed right-0 top-0 h-full shadow-xl z-50">
           <ChatPanel
             projectId={projectId}
             agent={selectedChatAgent}
