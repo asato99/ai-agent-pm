@@ -13,27 +13,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, TextIO
 
+from aiagent_runner.cooldown import CooldownManager
 from aiagent_runner.coordinator_config import CoordinatorConfig
 from aiagent_runner.log_uploader import LogUploader, LogUploadConfig
 from aiagent_runner.mcp_client import MCPClient, MCPError
 from aiagent_runner.platform import get_data_directory, is_windows
+from aiagent_runner.quota_detector import QuotaErrorDetector
+from aiagent_runner.types import AgentInstanceKey
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class AgentInstanceKey:
-    """Unique key for an Agent Instance: (agent_id, project_id)."""
-    agent_id: str
-    project_id: str
-
-    def __hash__(self):
-        return hash((self.agent_id, self.project_id))
-
-    def __eq__(self, other):
-        if not isinstance(other, AgentInstanceKey):
-            return False
-        return self.agent_id == other.agent_id and self.project_id == other.project_id
 
 
 @dataclass
@@ -114,6 +102,27 @@ class Coordinator:
             )
             self.log_uploader = LogUploader(upload_config, config.coordinator_token or "")
             logger.info("LogUploader initialized with endpoint: %s", upload_config.endpoint)
+
+        # Error protection: Cooldown manager and quota detector
+        # Reference: docs/design/SPAWN_ERROR_PROTECTION.md
+        self._cooldown_manager: Optional[CooldownManager] = None
+        self._quota_detector: Optional[QuotaErrorDetector] = None
+        if config.error_protection.enabled:
+            self._cooldown_manager = CooldownManager(
+                default_seconds=config.error_protection.default_cooldown_seconds,
+                max_seconds=config.error_protection.max_cooldown_seconds
+            )
+            if config.error_protection.quota_detection_enabled:
+                self._quota_detector = QuotaErrorDetector(
+                    max_seconds=config.error_protection.max_cooldown_seconds,
+                    margin_percent=config.error_protection.quota_margin_percent
+                )
+            logger.info(
+                "Error protection enabled: cooldown=%ds (max %ds), quota_detection=%s",
+                config.error_protection.default_cooldown_seconds,
+                config.error_protection.max_cooldown_seconds,
+                "enabled" if self._quota_detector else "disabled"
+            )
 
     @property
     def log_directory(self) -> Path:
@@ -302,6 +311,18 @@ class Coordinator:
                     logger.debug(f"No passkey configured for {agent_id}, skipping")
                     continue
 
+                # Error protection: Check cooldown before spawning
+                # Reference: docs/design/SPAWN_ERROR_PROTECTION.md
+                if self._cooldown_manager:
+                    cooldown_entry = self._cooldown_manager.check(key)
+                    if cooldown_entry:
+                        remaining = self._cooldown_manager.get_remaining_seconds(key)
+                        logger.debug(
+                            f"Skipping {agent_id}/{project_id}: in cooldown "
+                            f"({cooldown_entry.reason}, {remaining:.0f}s remaining)"
+                        )
+                        continue
+
                 # Check if instance is already running
                 instance_running = key in self._instances
 
@@ -441,6 +462,43 @@ class Coordinator:
                     task = asyncio.create_task(self._upload_log_async(upload_info))
                     self._pending_uploads[info.execution_log_id] = task
                     logger.debug(f"Started async log upload for {info.execution_log_id}")
+
+                # Error protection: Set cooldown on error exit, clear on success
+                # Reference: docs/design/SPAWN_ERROR_PROTECTION.md
+                if self._cooldown_manager:
+                    if retcode == 0:
+                        # Successful exit - clear any existing cooldown
+                        self._cooldown_manager.clear(key)
+                        logger.debug(f"Cleared cooldown for {key.agent_id}/{key.project_id} (successful exit)")
+
+                if retcode != 0 and self._cooldown_manager:
+                    error_msg = self._extract_error_from_log(info.log_file_path) if info.log_file_path else None
+                    cooldown_seconds: Optional[int] = None
+
+                    # Check for quota error if detection is enabled
+                    if self._quota_detector and info.log_file_path:
+                        cooldown_seconds = self._quota_detector.detect_from_file(info.log_file_path)
+                        if cooldown_seconds:
+                            self._cooldown_manager.set_quota(
+                                key=key,
+                                cooldown_seconds=cooldown_seconds,
+                                error_message=error_msg or f"Quota error (exit code {retcode})"
+                            )
+                            logger.warning(
+                                f"Quota error detected for {key.agent_id}/{key.project_id}: "
+                                f"cooldown {cooldown_seconds}s"
+                            )
+
+                    # If not a quota error, set regular error cooldown
+                    if cooldown_seconds is None:
+                        self._cooldown_manager.set_error(
+                            key=key,
+                            error_message=error_msg or f"Process exited with code {retcode}"
+                        )
+                        logger.warning(
+                            f"Error cooldown set for {key.agent_id}/{key.project_id}: "
+                            f"{self.config.error_protection.default_cooldown_seconds}s"
+                        )
 
                 finished.append((key, info, retcode))
 

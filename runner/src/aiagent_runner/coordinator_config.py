@@ -27,6 +27,28 @@ class AgentConfig:
 
 
 @dataclass
+class ErrorProtectionConfig:
+    """Error protection configuration for spawn cooldown.
+
+    Reference: docs/design/SPAWN_ERROR_PROTECTION.md
+    """
+    # Enable/disable error protection
+    enabled: bool = True
+
+    # Default cooldown time for normal errors (seconds)
+    default_cooldown_seconds: int = 60
+
+    # Maximum cooldown time (seconds) - caps quota-based cooldowns
+    max_cooldown_seconds: int = 3600
+
+    # Enable quota error detection from logs
+    quota_detection_enabled: bool = True
+
+    # Safety margin for quota-based cooldowns (percent)
+    quota_margin_percent: int = 10
+
+
+@dataclass
 class CoordinatorConfig:
     """Coordinator configuration.
 
@@ -79,6 +101,9 @@ class CoordinatorConfig:
 
     # Debug mode (adds --verbose to CLI commands)
     debug_mode: bool = True
+
+    # Error protection configuration
+    error_protection: ErrorProtectionConfig = field(default_factory=ErrorProtectionConfig)
 
     # Path to config file (set automatically by from_yaml)
     config_path: Optional[str] = None
@@ -233,6 +258,18 @@ class CoordinatorConfig:
             )
             # Note: endpoint is set in __post_init__ via get_rest_api_base_url()
 
+        # Parse error_protection configuration
+        error_protection = ErrorProtectionConfig()
+        error_protection_data = data.get("error_protection")
+        if error_protection_data:
+            error_protection = ErrorProtectionConfig(
+                enabled=error_protection_data.get("enabled", True),
+                default_cooldown_seconds=error_protection_data.get("default_cooldown_seconds", 60),
+                max_cooldown_seconds=error_protection_data.get("max_cooldown_seconds", 3600),
+                quota_detection_enabled=error_protection_data.get("quota_detection_enabled", True),
+                quota_margin_percent=error_protection_data.get("quota_margin_percent", 10),
+            )
+
         return cls(
             polling_interval=data.get("polling_interval", 10),
             max_concurrent=data.get("max_concurrent", 3),
@@ -245,6 +282,7 @@ class CoordinatorConfig:
             log_directory=data.get("log_directory"),
             log_upload=log_upload,
             debug_mode=data.get("debug_mode", True),
+            error_protection=error_protection,
             config_path=str(path),
         )
 

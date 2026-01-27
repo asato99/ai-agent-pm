@@ -42,3 +42,12 @@ log_upload:
   max_file_size_mb: 10  # 最大ファイルサイズ（MB）
   retry_count: 3        # リトライ回数
   retry_delay_seconds: 1.0  # リトライ間隔（秒）
+
+# Error protection configuration (spawn cooldown)
+# 参照: docs/design/SPAWN_ERROR_PROTECTION.md
+error_protection:
+  enabled: true                     # エラー保護機能の有効/無効
+  default_cooldown_seconds: 60      # 通常エラー時のクールダウン時間（秒）
+  max_cooldown_seconds: 3600        # 最大クールダウン時間（秒）- 1時間
+  quota_detection_enabled: true     # クォータエラー検出の有効/無効
+  quota_margin_percent: 10          # クォータ待機時間への安全マージン（%）
