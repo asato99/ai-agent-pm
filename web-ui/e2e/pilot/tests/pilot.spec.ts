@@ -13,9 +13,14 @@ import { test, expect, Page } from '@playwright/test'
 import * as path from 'path'
 import * as fs from 'fs'
 import { execSync } from 'child_process'
+import { fileURLToPath } from 'url'
 import { VariationLoader } from '../lib/variation-loader.js'
 import { ResultRecorder, aggregateAgentStats } from '../lib/result-recorder.js'
 import { ScenarioConfig, VariationConfig, TaskResult } from '../lib/types.js'
+
+// ES module で __dirname を取得
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 // 環境変数から設定を取得
 const SCENARIO = process.env.PILOT_SCENARIO || 'hello-world'

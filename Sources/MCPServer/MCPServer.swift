@@ -1644,15 +1644,14 @@ public final class MCPServer {
         }
 
         // Phase 4: (agent_id, project_id)単位でアクティブセッションをチェック
+        // 注意: チャットセッションとタスクセッションは独立して起動可能
+        // purpose別にセッションを分類して判定する
         let allSessions = try agentSessionRepository.findByAgentIdAndProjectId(id, projectId: projId)
         let activeSessions = allSessions.filter { $0.expiresAt > Date() }
-        if !activeSessions.isEmpty {
-            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (already running - active session exists)")
-            return [
-                "action": "hold",
-                "reason": "already_running"
-            ]
-        }
+        let activeTaskSessions = activeSessions.filter { $0.purpose == .task }
+        let activeChatSessions = activeSessions.filter { $0.purpose == .chat }
+
+        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': activeSessions=\(activeSessions.count) (task=\(activeTaskSessions.count), chat=\(activeChatSessions.count))")
 
         // Debug: log all tasks found for this agent with full details
         Self.log("[MCP] getAgentAction: Agent '\(agentId)' checking for in_progress tasks in project '\(projectId)'")
@@ -1669,6 +1668,15 @@ public final class MCPServer {
         let hasInProgressTask = inProgressTask != nil
 
         Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasInProgressTask=\(hasInProgressTask) (in_progress task: \(inProgressTask?.id.value ?? "none"))")
+
+        // タスクセッションが既に存在する場合は hold（タスク実行は1セッションのみ）
+        if hasInProgressTask && !activeTaskSessions.isEmpty {
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (task session already running)")
+            return [
+                "action": "hold",
+                "reason": "already_running"
+            ]
+        }
 
         // Manager の待機状態チェック
         // Context.progress に基づいて起動/待機を判断
@@ -1758,18 +1766,29 @@ public final class MCPServer {
         if let pending = pendingPurpose {
             let now = Date()
 
+            // purpose別にアクティブセッションをチェック
+            // チャットセッションが既に存在する場合は起動しない
+            if pending.purpose == .chat && !activeChatSessions.isEmpty {
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (chat session already running for pending chat purpose)")
+                hasPendingPurpose = false  // チャットセッション既存なのでstartは返さない
+            }
+            // タスクセッションが既に存在する場合は起動しない
+            else if pending.purpose == .task && !activeTaskSessions.isEmpty {
+                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (task session already running for pending task purpose)")
+                hasPendingPurpose = false  // タスクセッション既存なのでstartは返さない
+            }
             // 起動済みチェック（started_atがあれば既に起動済み）
-            // ただし、セッションが存在しない場合はスポーンに失敗した可能性がある
+            // ただし、同じpurposeのセッションが存在しない場合はスポーンに失敗した可能性がある
             // スポーンタイムアウト（120秒）経過後は再スポーンを許可する
-            if let startedAt = pending.startedAt {
+            else if let startedAt = pending.startedAt {
                 let spawnTimeout: TimeInterval = 120  // スポーン試行のタイムアウト（秒）
                 let timeSinceStart = now.timeIntervalSince(startedAt)
 
-                // この時点でactiveSessions.isEmptyは確定（line 1502-1508で早期リターンするため）
-                // つまりセッションが存在しない状態
+                // この時点で同じpurposeのアクティブセッションは存在しない
+                // （上のチェックで早期リターンしている）
                 if timeSinceStart > spawnTimeout {
-                    // スポーンタイムアウト：セッションが作成されなかった
-                    Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': spawn TIMED OUT (started: \(startedAt), elapsed: \(Int(timeSinceStart))s > \(Int(spawnTimeout))s, no active session)")
+                    // スポーンタイムアウト：同じpurposeのセッションが作成されなかった
+                    Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': spawn TIMED OUT (started: \(startedAt), elapsed: \(Int(timeSinceStart))s > \(Int(spawnTimeout))s, no active \(pending.purpose) session)")
                     // started_atをクリアして再スポーンを許可
                     try pendingAgentPurposeRepository.clearStartedAt(agentId: id, projectId: projId, purpose: pending.purpose)
                     Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': cleared started_at, allowing re-spawn")
