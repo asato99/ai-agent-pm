@@ -33,8 +33,10 @@ const TEST_DB_PATH = '/tmp/AIAgentPM_UC010_WebUI.db'
 const INTERRUPT_THRESHOLD_SECONDS = 60
 
 test.describe('Task Interrupt Flow - UC010', () => {
+  // NOTE: Only human agents can login to Web UI (restriction added in 891ff08)
+  // Use integ-owner (type: human) instead of integ-manager (type: ai)
   const TEST_CREDENTIALS = {
-    agentId: 'integ-manager',
+    agentId: 'integ-owner',
     passkey: 'test-passkey',
   }
 

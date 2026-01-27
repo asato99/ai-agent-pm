@@ -17,8 +17,10 @@ import { test, expect } from '@playwright/test'
  */
 
 test.describe('Task Completion Flow - UC001', () => {
+  // NOTE: Only human agents can login to Web UI (restriction added in 891ff08)
+  // Use integ-owner (type: human) instead of integ-manager (type: ai)
   const TEST_CREDENTIALS = {
-    agentId: 'integ-manager',
+    agentId: 'integ-owner',
     passkey: 'test-passkey',
   }
 
