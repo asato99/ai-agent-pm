@@ -10,10 +10,29 @@
 
 | Phase | 内容 | 状態 | 進捗 |
 |-------|------|------|------|
-| Phase 0 | リファクタリング（Logger基盤） | 未着手 | 0/10 |
+| Phase 0 | リファクタリング（Logger基盤） | 進行中 | 5/10 |
 | Phase 1 | ログローテーション | 未着手 | 0/6 |
 | Phase 2 | 構造化ログ | 未着手 | 0/5 |
 | Phase 3 | MCPLogView改善 | 未着手 | 0/6 |
+
+### 完了済み（2026-01-28）
+- ✅ 0-1: LogLevel定義
+- ✅ 0-2: LogCategory定義
+- ✅ 0-3: LogEntry定義
+- ✅ 0-4: LogOutputプロトコルと実装
+- ✅ 0-5: Loggerクラス（MCPLogger）
+
+### 実装済みファイル
+- `Sources/Infrastructure/Logging/LogLevel.swift`
+- `Sources/Infrastructure/Logging/LogCategory.swift`
+- `Sources/Infrastructure/Logging/LogEntry.swift`
+- `Sources/Infrastructure/Logging/LogOutput.swift`
+- `Sources/Infrastructure/Logging/MCPLogger.swift`
+- `Tests/InfrastructureTests/Logging/LogLevelTests.swift`
+- `Tests/InfrastructureTests/Logging/LogCategoryTests.swift`
+- `Tests/InfrastructureTests/Logging/LogEntryTests.swift`
+- `Tests/InfrastructureTests/Logging/LogOutputTests.swift`
+- `Tests/InfrastructureTests/Logging/LoggerTests.swift`
 
 ---
 
