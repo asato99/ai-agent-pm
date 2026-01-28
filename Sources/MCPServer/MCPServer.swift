@@ -1736,8 +1736,8 @@ public final class MCPServer {
             }
         }
 
-        // Chat機能: pending_agent_purposesをチェック
-        // チャットメッセージが送信された場合、purpose=chatでエージェントを起動する
+        // Session Spawn Architecture: purpose別にpendingを検索
+        // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
         Self.log("[MCP] getAgentAction: Checking pending_agent_purposes for '\(agentId)/\(projectId)'")
 
         // DEBUG: Dump all pending purposes in database to diagnose visibility issues
@@ -1748,8 +1748,14 @@ public final class MCPServer {
             Self.log("[MCP] DEBUG: Failed to dump pending_agent_purposes: \(error)")
         }
 
-        let pendingPurpose = try pendingAgentPurposeRepository.find(agentId: id, projectId: projId)
-        var hasPendingPurpose = false
+        // purpose別にpendingを検索（タスク優先ロジックのため）
+        let taskPending = try pendingAgentPurposeRepository.find(agentId: id, projectId: projId, purpose: .task)
+        let chatPending = try pendingAgentPurposeRepository.find(agentId: id, projectId: projId, purpose: .chat)
+
+        Self.log("[MCP] getAgentAction: taskPending=\(taskPending != nil), chatPending=\(chatPending != nil)")
+
+        var shouldStartTask = false
+        var shouldStartChat = false
         var pendingPurposeExpired = false
 
         // AppSettingsから設定可能なTTLを取得（デフォルト: 300秒 = 5分）
@@ -1763,59 +1769,55 @@ public final class MCPServer {
             Self.log("[MCP] getAgentAction: Failed to load TTL setting, using default: \(Int(configuredTTL))s")
         }
 
-        if let pending = pendingPurpose {
-            let now = Date()
+        let now = Date()
+        let spawnTimeout: TimeInterval = 120  // スポーン試行のタイムアウト（秒）
 
-            // purpose別にアクティブセッションをチェック
-            // チャットセッションが既に存在する場合は起動しない
-            if pending.purpose == .chat && !activeChatSessions.isEmpty {
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (chat session already running for pending chat purpose)")
-                hasPendingPurpose = false  // チャットセッション既存なのでstartは返さない
-            }
-            // タスクセッションが既に存在する場合は起動しない
-            else if pending.purpose == .task && !activeTaskSessions.isEmpty {
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (task session already running for pending task purpose)")
-                hasPendingPurpose = false  // タスクセッション既存なのでstartは返さない
-            }
-            // 起動済みチェック（started_atがあれば既に起動済み）
-            // ただし、同じpurposeのセッションが存在しない場合はスポーンに失敗した可能性がある
-            // スポーンタイムアウト（120秒）経過後は再スポーンを許可する
-            else if let startedAt = pending.startedAt {
-                let spawnTimeout: TimeInterval = 120  // スポーン試行のタイムアウト（秒）
-                let timeSinceStart = now.timeIntervalSince(startedAt)
-
-                // この時点で同じpurposeのアクティブセッションは存在しない
-                // （上のチェックで早期リターンしている）
-                if timeSinceStart > spawnTimeout {
-                    // スポーンタイムアウト：同じpurposeのセッションが作成されなかった
-                    Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': spawn TIMED OUT (started: \(startedAt), elapsed: \(Int(timeSinceStart))s > \(Int(spawnTimeout))s, no active \(pending.purpose) session)")
-                    // started_atをクリアして再スポーンを許可
-                    try pendingAgentPurposeRepository.clearStartedAt(agentId: id, projectId: projId, purpose: pending.purpose)
-                    Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': cleared started_at, allowing re-spawn")
-                    hasPendingPurpose = true  // 再スポーンを許可
-                } else {
-                    // まだタイムアウトしていない：スポーン中と見なしてhold
-                    Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose already STARTED at \(startedAt), elapsed \(Int(timeSinceStart))s, returning hold")
-                    hasPendingPurpose = false  // 起動済みなのでstartは返さない
-                }
-            }
-            // 未起動の場合: TTLチェック（設定された時間経過でタイムアウト）
-            else if pending.isExpired(now: now, ttlSeconds: configuredTTL) {
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose EXPIRED (created: \(pending.createdAt), TTL: \(Int(configuredTTL))s)")
-                // 期限切れのpending purposeを削除
-                try pendingAgentPurposeRepository.delete(agentId: id, projectId: projId, purpose: pending.purpose)
-                pendingPurposeExpired = true
-            }
-            // 未起動でTTL内 → startを返し、started_atを更新
-            else {
-                Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': pending purpose exists, marking as started")
-                hasPendingPurpose = true
-                // started_atを更新（次回以降はholdを返す）
-                try pendingAgentPurposeRepository.markAsStarted(agentId: id, projectId: projId, purpose: pending.purpose, startedAt: now)
+        // タスク優先ロジック: タスクセッションが存在しない場合にタスク起動を優先
+        // 1. in_progressタスクがある AND タスクセッションがない → タスク起動
+        if hasInProgressTask && activeTaskSessions.isEmpty {
+            // task pendingがない場合は自動作成（フォールバック）
+            if taskPending == nil {
+                Self.log("[MCP] getAgentAction: in_progress task exists but no task pending, auto-creating")
+                let newPending = PendingAgentPurpose(
+                    agentId: id,
+                    projectId: projId,
+                    purpose: .task,
+                    createdAt: now,
+                    startedAt: now  // 即座に起動済みとしてマーク
+                )
+                try pendingAgentPurposeRepository.save(newPending)
+                shouldStartTask = true
+            } else if let pending = taskPending {
+                // 既存のtask pendingをチェック
+                shouldStartTask = try checkPendingAndMarkStarted(
+                    pending: pending,
+                    agentId: id,
+                    projectId: projId,
+                    now: now,
+                    spawnTimeout: spawnTimeout,
+                    configuredTTL: configuredTTL,
+                    pendingPurposeExpired: &pendingPurposeExpired
+                )
             }
         }
 
-        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasPendingPurpose=\(hasPendingPurpose), expired=\(pendingPurposeExpired)")
+        // 2. タスクが起動しない場合、チャット起動をチェック
+        //    条件: チャットセッションがない AND chat pendingがある
+        if !shouldStartTask && activeChatSessions.isEmpty {
+            if let pending = chatPending {
+                shouldStartChat = try checkPendingAndMarkStarted(
+                    pending: pending,
+                    agentId: id,
+                    projectId: projId,
+                    now: now,
+                    spawnTimeout: spawnTimeout,
+                    configuredTTL: configuredTTL,
+                    pendingPurposeExpired: &pendingPurposeExpired
+                )
+            }
+        }
+
+        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': shouldStartTask=\(shouldStartTask), shouldStartChat=\(shouldStartChat), expired=\(pendingPurposeExpired)")
 
         // TTL超過時はチャットにエラーメッセージを書き込み、holdを返す
         if pendingPurposeExpired {
@@ -1843,16 +1845,17 @@ public final class MCPServer {
             ]
         }
 
-        // action と reason を設定（pending purposeがあれば起動）
-        let shouldStart = hasInProgressTask || hasPendingPurpose
+        // action と reason を設定
+        // Session Spawn Architecture: shouldStartTask/shouldStartChatは既にセッション存在チェック済み
+        let shouldStart = shouldStartTask || shouldStartChat
         let action = shouldStart ? "start" : "hold"
         let reason: String
-        if hasInProgressTask {
+        if shouldStartTask {
             reason = "has_in_progress_task"
-        } else if hasPendingPurpose {
-            reason = "has_pending_purpose"
+        } else if shouldStartChat {
+            reason = "has_pending_chat"
         } else {
-            reason = "no_in_progress_task"
+            reason = "no_pending_work"
         }
 
         var result: [String: Any] = [
@@ -1881,6 +1884,48 @@ public final class MCPServer {
         Self.log("[MCP] getAgentAction: returning provider='\(result["provider"] ?? "nil")', model='\(result["model"] ?? "nil")'")
 
         return result
+    }
+
+    /// pendingの状態をチェックし、起動可能ならstarted_atを更新
+    /// Session Spawn Architecture: スポーンタイムアウトとTTLチェック
+    private func checkPendingAndMarkStarted(
+        pending: PendingAgentPurpose,
+        agentId: AgentID,
+        projectId: ProjectID,
+        now: Date,
+        spawnTimeout: TimeInterval,
+        configuredTTL: TimeInterval,
+        pendingPurposeExpired: inout Bool
+    ) throws -> Bool {
+        // 起動済みチェック（started_atがあれば既に起動済み）
+        if let startedAt = pending.startedAt {
+            let timeSinceStart = now.timeIntervalSince(startedAt)
+
+            if timeSinceStart > spawnTimeout {
+                // スポーンタイムアウト：セッションが作成されなかった → 再スポーン許可
+                Self.log("[MCP] checkPending: spawn TIMED OUT for \(pending.purpose) (elapsed: \(Int(timeSinceStart))s > \(Int(spawnTimeout))s)")
+                try pendingAgentPurposeRepository.clearStartedAt(agentId: agentId, projectId: projectId, purpose: pending.purpose)
+                try pendingAgentPurposeRepository.markAsStarted(agentId: agentId, projectId: projectId, purpose: pending.purpose, startedAt: now)
+                return true
+            } else {
+                // まだタイムアウトしていない：スポーン中と見なしてhold
+                Self.log("[MCP] checkPending: \(pending.purpose) already STARTED at \(startedAt), elapsed \(Int(timeSinceStart))s, returning hold")
+                return false
+            }
+        }
+
+        // 未起動の場合: TTLチェック
+        if pending.isExpired(now: now, ttlSeconds: configuredTTL) {
+            Self.log("[MCP] checkPending: \(pending.purpose) EXPIRED (created: \(pending.createdAt), TTL: \(Int(configuredTTL))s)")
+            try pendingAgentPurposeRepository.delete(agentId: agentId, projectId: projectId, purpose: pending.purpose)
+            pendingPurposeExpired = true
+            return false
+        }
+
+        // 未起動でTTL内 → startを返し、started_atを更新
+        Self.log("[MCP] checkPending: \(pending.purpose) pending exists, marking as started")
+        try pendingAgentPurposeRepository.markAsStarted(agentId: agentId, projectId: projectId, purpose: pending.purpose, startedAt: now)
+        return true
     }
 
     // MARK: Phase 4: Agent API
@@ -4190,6 +4235,28 @@ public final class MCPServer {
             )
 
             logDebug("Task \(taskId) status changed: \(result.previousStatus.rawValue) -> \(result.task.status.rawValue)")
+
+            // Session Spawn Architecture: in_progress への変更時にtask pendingを作成
+            // これによりCoordinatorが変更を検知してエージェントを起動できる
+            // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+            if newStatus == .inProgress, let assigneeId = result.task.assigneeId {
+                // 既存のtask pendingがない場合のみ作成
+                let existingPending = try? pendingAgentPurposeRepository.find(
+                    agentId: assigneeId,
+                    projectId: result.task.projectId,
+                    purpose: .task
+                )
+                if existingPending == nil {
+                    let taskPending = PendingAgentPurpose(
+                        agentId: assigneeId,
+                        projectId: result.task.projectId,
+                        purpose: .task,
+                        createdAt: Date()
+                    )
+                    try pendingAgentPurposeRepository.save(taskPending)
+                    Self.log("[MCP] Created task pending for agent '\(assigneeId.value)' on status change to in_progress")
+                }
+            }
 
             // タスクが done に遷移した場合、対応する実行ログも完了させる
             // これにより、report_completed を呼ばずに update_task_status で完了した場合も

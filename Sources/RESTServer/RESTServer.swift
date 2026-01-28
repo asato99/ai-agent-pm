@@ -837,6 +837,27 @@ final class RESTServer {
             } else {
                 task.blockedReason = nil
             }
+
+            // Session Spawn Architecture: in_progress への変更時にtask pendingを作成
+            // これによりCoordinatorが変更を検知してエージェントを起動できる
+            // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+            if newStatus == .inProgress, let assigneeId = task.assigneeId {
+                let existingPending = try? pendingAgentPurposeRepository.find(
+                    agentId: assigneeId,
+                    projectId: task.projectId,
+                    purpose: .task
+                )
+                if existingPending == nil {
+                    let taskPending = PendingAgentPurpose(
+                        agentId: assigneeId,
+                        projectId: task.projectId,
+                        purpose: .task,
+                        createdAt: Date()
+                    )
+                    try pendingAgentPurposeRepository.save(taskPending)
+                    debugLog("Created task pending for agent '\(assigneeId.value)' on status change to in_progress")
+                }
+            }
         }
 
         if let priorityStr = updateRequest.priority,

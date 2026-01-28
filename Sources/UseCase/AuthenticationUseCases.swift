@@ -114,6 +114,115 @@ public struct AuthenticateUseCase: Sendable {
     }
 }
 
+// MARK: - AuthenticateUseCaseV2
+
+/// 状態ベースの認証ユースケース（Session Spawn Architecture対応）
+/// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+///
+/// 判定ロジック:
+/// 1. タスクセッション判定（優先）: activeTaskSession == nil AND inProgressTask != nil
+/// 2. チャットセッション判定: activeChatSession == nil AND chatPending != nil
+/// 3. どちらにも該当しない場合は失敗
+public struct AuthenticateUseCaseV2: Sendable {
+    private let credentialRepository: any AgentCredentialRepositoryProtocol
+    private let sessionRepository: any AgentSessionRepositoryProtocol
+    private let agentRepository: any AgentRepositoryProtocol
+    private let pendingPurposeRepository: any PendingAgentPurposeRepositoryProtocol
+    private let taskRepository: any TaskRepositoryProtocol
+
+    public init(
+        credentialRepository: any AgentCredentialRepositoryProtocol,
+        sessionRepository: any AgentSessionRepositoryProtocol,
+        agentRepository: any AgentRepositoryProtocol,
+        pendingPurposeRepository: any PendingAgentPurposeRepositoryProtocol,
+        taskRepository: any TaskRepositoryProtocol
+    ) {
+        self.credentialRepository = credentialRepository
+        self.sessionRepository = sessionRepository
+        self.agentRepository = agentRepository
+        self.pendingPurposeRepository = pendingPurposeRepository
+        self.taskRepository = taskRepository
+    }
+
+    public func execute(agentId: String, passkey: String, projectId: String) throws -> AuthenticateResult {
+        let agentID = AgentID(value: agentId)
+        let projID = ProjectID(value: projectId)
+
+        // エージェントの存在確認
+        guard let agent = try agentRepository.findById(agentID) else {
+            return .failure(error: "Invalid agent_id or passkey")
+        }
+
+        // 認証情報の取得と検証
+        guard let credential = try credentialRepository.findByAgentId(agentID) else {
+            return .failure(error: "Invalid agent_id or passkey")
+        }
+
+        guard credential.verify(passkey: passkey) else {
+            return .failure(error: "Invalid agent_id or passkey")
+        }
+
+        // 状態取得
+        let allSessions = try sessionRepository.findByAgentIdAndProjectId(agentID, projectId: projID)
+        let activeTaskSession = allSessions.first { $0.purpose == .task && !$0.isExpired }
+        let activeChatSession = allSessions.first { $0.purpose == .chat && !$0.isExpired }
+
+        let inProgressTask = try taskRepository.findByProject(projID, status: .inProgress)
+            .first { $0.assigneeId == agentID }
+
+        let chatPending = try pendingPurposeRepository.find(agentId: agentID, projectId: projID, purpose: .chat)
+
+        // タスクセッション判定（優先）
+        // 条件: activeTaskSession == nil AND inProgressTask != nil
+        if activeTaskSession == nil && inProgressTask != nil {
+            // タスクセッション作成
+            let session = AgentSession(agentId: agentID, projectId: projID, purpose: .task)
+            try sessionRepository.save(session)
+
+            // task pending削除（あれば）
+            if let _ = try pendingPurposeRepository.find(agentId: agentID, projectId: projID, purpose: .task) {
+                try pendingPurposeRepository.delete(agentId: agentID, projectId: projID, purpose: .task)
+            }
+
+            // 認証情報のlastUsedAtを更新
+            let updatedCredential = credential.withLastUsedAt(Date())
+            try credentialRepository.save(updatedCredential)
+
+            return .success(
+                token: session.token,
+                expiresIn: session.remainingSeconds,
+                agentName: agent.name,
+                systemPrompt: agent.systemPrompt
+            )
+        }
+
+        // チャットセッション判定
+        // 条件: activeChatSession == nil AND chatPending != nil
+        if activeChatSession == nil && chatPending != nil {
+            // チャットセッション作成
+            let session = AgentSession(agentId: agentID, projectId: projID, purpose: .chat)
+            try sessionRepository.save(session)
+
+            // chat pending削除
+            try pendingPurposeRepository.delete(agentId: agentID, projectId: projID, purpose: .chat)
+
+            // 認証情報のlastUsedAtを更新
+            let updatedCredential = credential.withLastUsedAt(Date())
+            try credentialRepository.save(updatedCredential)
+
+            return .success(
+                token: session.token,
+                expiresIn: session.remainingSeconds,
+                agentName: agent.name,
+                systemPrompt: agent.systemPrompt
+            )
+        }
+
+        // どちらにも該当しない
+        return .failure(error: "No valid purpose for authentication")
+    }
+}
+
 // MARK: - LogoutUseCase
 
 /// ログアウト（セッション無効化）ユースケース
