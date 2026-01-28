@@ -17,7 +17,7 @@
 ### 2. 認証時のpurpose判定問題
 
 ```swift
-// AuthenticateUseCase
+// AuthenticateUseCase（現状）
 var purpose: AgentPurpose = .task  // デフォルト
 if let pending = pendingRepo.find(...) {
     purpose = pending.purpose      // pendingがあればそこから取得
@@ -37,21 +37,34 @@ if let pending = pendingRepo.find(...) {
 
 チャットは `started_at` で追跡しているが、タスクにはこの仕組みがない。
 
+### 4. ゾンビpendingによるブロックリスク
+
+現状の `find(agentId, projectId)` は1レコードしか返さない（purpose指定なし）。
+chat と task の両方の pending がある場合、片方しか見えない。
+
+**シナリオ: ゾンビ chat pending がタスクをブロック**
+```
+1. チャット送信 → chat pending 作成
+2. getAgentAction → start + markAsStarted
+3. スポーン失敗（認証まで到達しない）
+4. chat pending がゾンビとして残る（started_at あり）
+5. タスクが in_progress → task pending 作成
+6. getAgentAction → find() → chat pending が返される（started_at優先）
+7. started_at チェック → 120秒以内なら hold
+8. タスクがブロックされる
+```
+
 ## 設計方針
 
 ### pending_agent_purposes の責務
 
-**単一責務**: セッション起動のキュー管理
+| フェーズ | task pending | chat pending |
+|----------|--------------|--------------|
+| getAgentAction | started_at で重複起動防止 | started_at で重複起動防止 |
+| authenticate | 不要（in_progressタスクで判定） | purpose判定に使用 |
 
-```
-起動が必要な処理発生 → pending作成
-         ↓
-Coordinator → getAgentAction → pendingあれば start
-         ↓
-エージェント起動 → authenticate → セッション作成
-         ↓
-pending削除
-```
+**タスク**: in_progressタスクがソースオブトゥルース（堅牢）
+**チャット**: chat pendingがソースオブトゥルース
 
 ### ライフサイクル
 
@@ -85,95 +98,142 @@ pending作成 ─→ start ─→ スポーン ─→ 認証 ─→ セッショ
 
 ### getAgentAction のロジック
 
+**重要**: getAgentAction と authenticate の判断基準を一致させる。
+タスク優先で判定し、該当するpurposeのpendingのみにmarkAsStartedする。
+
 ```swift
-func getAgentAction(agentId, projectId) -> Action {
-    // 1. アクティブセッションのチェック（purpose別）
-    let activeChatSessions = sessions.filter { $0.purpose == .chat && !$0.isExpired }
-    let activeTaskSessions = sessions.filter { $0.purpose == .task && !$0.isExpired }
+func getAgentAction(agentId: String, projectId: String) -> Action {
+    // 状態取得
+    let activeTaskSession = findActiveTaskSession(agentId, projectId)
+    let activeChatSession = findActiveChatSession(agentId, projectId)
+    let inProgressTask = findInProgressTask(assignee: agentId, projectId: projectId)
+    let taskPending = pendingRepo.find(agentId, projectId, purpose: .task)
+    let chatPending = pendingRepo.find(agentId, projectId, purpose: .chat)
 
-    // 2. pendingの確認
-    let pending = pendingRepo.find(agentId, projectId)
+    // ==========================================
+    // タスク判定（認証と同じロジック）
+    // 条件: activeTaskSession == nil AND inProgressTask != nil
+    // ==========================================
+    if activeTaskSession == nil && inProgressTask != nil {
+        // タスクセッションが必要
+        var currentTaskPending = taskPending
 
-    if let pending = pending {
-        // 同じpurposeのセッションが既にあれば hold
-        if pending.purpose == .chat && !activeChatSessions.isEmpty {
-            return .hold(reason: "chat_session_exists")
-        }
-        if pending.purpose == .task && !activeTaskSessions.isEmpty {
-            return .hold(reason: "task_session_exists")
-        }
-
-        // started_at チェック（重複起動防止）
-        if let startedAt = pending.startedAt {
-            if timeSince(startedAt) > 120 {
-                // タイムアウト → 再スポーン許可
-                pendingRepo.clearStartedAt(pending)
-                return .start(purpose: pending.purpose)
-            } else {
-                // スポーン中 → hold
-                return .hold(reason: "spawning")
-            }
-        }
-
-        // 新規起動
-        pendingRepo.markAsStarted(pending, startedAt: now)
-        return .start(purpose: pending.purpose)
-    }
-
-    // 3. フォールバック: in_progressタスクがあればpendingを作成
-    if let task = tasks.first(where: { $0.status == .inProgress }) {
-        if activeTaskSessions.isEmpty {
-            let newPending = PendingAgentPurpose(
+        // フォールバック: task pending がなければ作成
+        if currentTaskPending == nil {
+            currentTaskPending = PendingAgentPurpose(
                 agentId: agentId,
                 projectId: projectId,
                 purpose: .task
             )
-            pendingRepo.save(newPending)
-            pendingRepo.markAsStarted(newPending, startedAt: now)
-            return .start(purpose: .task, taskId: task.id)
+            pendingRepo.save(currentTaskPending)
         }
+
+        // started_at チェック
+        if currentTaskPending.startedAt == nil {
+            // 未起動 → start
+            pendingRepo.markAsStarted(currentTaskPending, startedAt: now)
+            return .start
+        } else if timedOut(currentTaskPending.startedAt, timeout: 120) {
+            // タイムアウト → 再スポーン許可
+            pendingRepo.clearStartedAt(currentTaskPending)
+            pendingRepo.markAsStarted(currentTaskPending, startedAt: now)
+            return .start
+        }
+        // else: タスク用スポーン中、続けてチャットを確認
     }
 
-    // 4. 起動不要
-    return .hold(reason: "no_pending_work")
+    // ==========================================
+    // チャット判定
+    // 条件: activeChatSession == nil AND chatPending != nil
+    // ==========================================
+    if activeChatSession == nil && chatPending != nil {
+        // started_at チェック
+        if chatPending.startedAt == nil {
+            // 未起動 → start
+            pendingRepo.markAsStarted(chatPending, startedAt: now)
+            return .start
+        } else if timedOut(chatPending.startedAt, timeout: 120) {
+            // タイムアウト → 再スポーン許可
+            pendingRepo.clearStartedAt(chatPending)
+            pendingRepo.markAsStarted(chatPending, startedAt: now)
+            return .start
+        }
+        // else: チャット用スポーン中
+    }
+
+    // ==========================================
+    // どちらも起動不要
+    // ==========================================
+    return .hold
 }
 ```
 
 ### authenticate のロジック
 
+**重要**: purpose判定はpendingに依存せず、状態ベースで行う。
+
 ```swift
-func authenticate(agentId, passkey, projectId) -> Result {
-    // ... 認証処理 ...
+func authenticate(agentId: String, passkey: String, projectId: String) -> Result {
+    // ... パスキー検証等 ...
 
-    // pendingからpurposeを取得
-    let pending = pendingRepo.find(agentId, projectId)
-    let purpose = pending?.purpose ?? .task
+    // 状態取得
+    let activeTaskSession = findActiveTaskSession(agentId, projectId)
+    let activeChatSession = findActiveChatSession(agentId, projectId)
+    let inProgressTask = findInProgressTask(assignee: agentId, projectId: projectId)
+    let chatPending = pendingRepo.find(agentId, projectId, purpose: .chat)
 
-    // purpose別の重複チェック
-    let existingSessions = sessionRepo.find(agentId, projectId)
-        .filter { !$0.isExpired && $0.purpose == purpose }
+    // ==========================================
+    // タスクセッション判定（優先）
+    // 条件: activeTaskSession == nil AND inProgressTask != nil
+    // ==========================================
+    if activeTaskSession == nil && inProgressTask != nil {
+        // タスクセッション作成
+        let session = AgentSession(agentId, projectId, purpose: .task)
+        sessionRepo.save(session)
 
-    if !existingSessions.isEmpty {
-        return .failure("Session already exists for this purpose")
+        // task pending 削除（あれば）
+        if let taskPending = pendingRepo.find(agentId, projectId, purpose: .task) {
+            pendingRepo.delete(taskPending)
+        }
+
+        return .success(session)
     }
 
-    // セッション作成
-    let session = AgentSession(agentId, projectId, purpose)
-    sessionRepo.save(session)
+    // ==========================================
+    // チャットセッション判定
+    // 条件: activeChatSession == nil AND chatPending != nil
+    // ==========================================
+    if activeChatSession == nil && chatPending != nil {
+        // チャットセッション作成
+        let session = AgentSession(agentId, projectId, purpose: .chat)
+        sessionRepo.save(session)
 
-    // pending削除
-    if let pending = pending {
-        pendingRepo.delete(pending)
+        // chat pending 削除
+        pendingRepo.delete(chatPending)
+
+        return .success(session)
     }
 
-    return .success(session)
+    // ==========================================
+    // どちらにも該当しない
+    // ==========================================
+    return .failure("No valid purpose for authentication")
 }
 ```
+
+### 判定ロジックの一貫性
+
+| 判定 | getAgentAction | authenticate |
+|------|----------------|--------------|
+| タスク | `activeTaskSession == nil AND inProgressTask != nil` | 同左 |
+| チャット | `activeChatSession == nil AND chatPending != nil` | 同左 |
+
+両方のメソッドで同じ条件を使用することで、getAgentActionでmarkAsStartedしたpurposeと、authenticateで作成するセッションのpurposeが一致する。
 
 ### タスクステータス変更時のpending作成
 
 ```swift
-func updateTaskStatus(taskId, newStatus) {
+func updateTaskStatus(taskId: TaskID, newStatus: TaskStatus) {
     let task = taskRepo.find(taskId)
 
     if newStatus == .inProgress && task.status != .inProgress {
@@ -212,6 +272,38 @@ func updateTaskStatus(taskId, newStatus) {
 - pending作成漏れがあってもタスクは実行される
 - 重複起動防止（started_at）の恩恵を受けられる
 
+## ゾンビpending対策
+
+### 対策1: purpose別にpendingを検索
+
+```swift
+// 旧: 1レコードしか返さない
+let pending = find(agentId, projectId)
+
+// 新: purpose別に検索
+let taskPending = find(agentId, projectId, purpose: .task)
+let chatPending = find(agentId, projectId, purpose: .chat)
+```
+
+### 対策2: 状態ベースのpurpose判定
+
+authenticateでは、pendingからpurposeを取得するのではなく、
+`in_progressタスクの有無`で判定する。
+
+これにより、ゾンビchat pendingがあっても：
+- in_progressタスクがあれば → タスクセッション作成（正しい）
+- in_progressタスクがなければ → チャットセッション作成
+
+### 対策3: TTLによる自然消滅
+
+- デフォルトTTL: 300秒（5分）
+- 期限切れのpendingは自動削除
+
+### 対策4: スポーンタイムアウト
+
+- タイムアウト: 120秒
+- started_atから120秒経過でstarted_atクリア → 再スポーン許可
+
 ## UIステータス表示
 
 pendingの有無ではなく、セッションの状態で判断する：
@@ -232,13 +324,20 @@ pendingの有無ではなく、セッションの状態で判断する：
 2. getAgentAction のフォールバックロジックを追加（後方互換性）
 3. テストで動作確認
 
-### Phase 2: authenticate の purpose別チェック
+### Phase 2: authenticate の状態ベース判定
 
-1. authenticate で purpose 別のセッション重複チェックを実装
+1. authenticate で状態ベースのpurpose判定を実装
 2. 既存の「全セッションブロック」ロジックを削除
-3. UC019（チャット+タスク同時実行）のテストで確認
+3. purpose別にpending削除
+4. UC019（チャット+タスク同時実行）のテストで確認
 
-### Phase 3: UIステータス表示の変更
+### Phase 3: getAgentAction の判定ロジック統一
+
+1. purpose別にpendingを検索するよう変更
+2. タスク優先の判定ロジックに変更
+3. authenticateと同じ判定条件を使用
+
+### Phase 4: UIステータス表示の変更
 
 1. RESTServer の chatStatus 判定を セッション状態ベースに変更
 2. 既存のpending依存ロジックを削除
