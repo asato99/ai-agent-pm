@@ -45,7 +45,9 @@ try {
 const recorder = new ResultRecorder(SCENARIO, VARIATION, BASE_DIR)
 
 test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
-  test.setTimeout(300_000) // 5分
+  // テストタイムアウトをシナリオ設定に合わせる
+  // task_completion (1800s) + バッファ (5分) = 約35分
+  test.setTimeout(scenarioConfig.timeouts.task_completion * 1000 + 300_000)
 
   test.beforeAll(async () => {
     // 結果ディレクトリを初期化

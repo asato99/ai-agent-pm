@@ -2639,7 +2639,7 @@ public final class MCPServer {
         case .worker:
             return try getWorkerNextAction(mainTask: main, phase: phase, allTasks: allTasks)
         case .manager:
-            return try getManagerNextAction(mainTask: main, phase: phase, allTasks: allTasks)
+            return try getManagerNextAction(mainTask: main, phase: phase, allTasks: allTasks, session: session)
         }
     }
 
@@ -3096,7 +3096,7 @@ public final class MCPServer {
     /// Manager のワークフロー制御
     /// 参照: docs/plan/STATE_DRIVEN_WORKFLOW.md - Manager のワークフロー
     /// Manager はサブタスクを作成して Worker に割り当て（自分では実行しない）
-    private func getManagerNextAction(mainTask: Task, phase: String, allTasks: [Task]) throws -> [String: Any] {
+    private func getManagerNextAction(mainTask: Task, phase: String, allTasks: [Task], session: AgentSession) throws -> [String: Any] {
         Self.log("[MCP] getManagerNextAction: task=\(mainTask.id.value), phase=\(phase)")
 
         // サブタスク（parentTaskId = mainTask.id）を取得
@@ -3429,13 +3429,17 @@ public final class MCPServer {
             )
             try contextRepository.save(context)
 
+            // セッション削除（再起動のためにhasTaskWork=trueになるようにする）
+            try agentSessionRepository.delete(session.id)
+            Self.log("[MCP] getManagerNextAction: AgentSession deleted for manager exit")
+
             if !inProgressSubTasks.isEmpty {
                 Self.log("[MCP] No more assignable tasks, waiting for workers (inProgress: \(inProgressSubTasks.count), pending: \(pendingSubTasks.count))")
                 return [
                     "action": "exit",
                     "instruction": """
                         現在実行状態に変更可能なサブタスクがありません。
-                        Worker の完了を待つため、ここでプロセスを終了してください。
+                        Worker の完了を待つため、プロセスを終了してください。
                         Coordinator が Worker 完了後に自動的に再起動します。
                         """,
                     "state": "waiting_for_workers",
@@ -3469,6 +3473,7 @@ public final class MCPServer {
                     "instruction": """
                         現在実行状態に変更可能なサブタスクがありません。
                         保留中のタスクは依存関係の完了を待っています。
+                        プロセスを終了してください。
                         Worker の完了後に自動的に再起動します。
                         """,
                     "state": "waiting_for_dependencies",
