@@ -311,40 +311,14 @@ class Coordinator:
                     logger.debug(f"No passkey configured for {agent_id}, skipping")
                     continue
 
-                # Error protection: Check cooldown before spawning
-                # Reference: docs/design/SPAWN_ERROR_PROTECTION.md
-                if self._cooldown_manager:
-                    cooldown_entry = self._cooldown_manager.check(key)
-                    if cooldown_entry:
-                        remaining = self._cooldown_manager.get_remaining_seconds(key)
-                        logger.debug(
-                            f"Skipping {agent_id}/{project_id}: in cooldown "
-                            f"({cooldown_entry.reason}, {remaining:.0f}s remaining)"
-                        )
-                        continue
-
-                # Check if instance is already running
-                instance_running = key in self._instances
-
-                # UC008: Always check get_agent_action for running instances to detect stop
-                if instance_running:
-                    logger.debug(f"Instance {agent_id}/{project_id} running, checking for stop action")
-                    try:
-                        result = await self.mcp_client.get_agent_action(agent_id, project_id)
-                        logger.debug(f"get_agent_action for running instance: action={result.action}, reason={result.reason}")
-                        if result.action == "stop":
-                            logger.info(f"Stopping instance {agent_id}/{project_id} due to {result.reason}")
-                            await self._stop_instance(key)
-                    except MCPError as e:
-                        logger.error(f"Failed to check stop action for {agent_id}/{project_id}: {e}")
-                    continue
-
                 # Skip if at max concurrent
                 if len(self._instances) >= self.config.max_concurrent:
                     logger.debug(f"At max concurrent ({self.config.max_concurrent}), skipping")
                     break
 
                 # Check what action to take
+                # MCPServer manages spawn deduplication via spawn_started_at
+                # Coordinator simply follows MCPServer's instructions
                 logger.debug(f"Calling get_agent_action({agent_id}, {project_id})")
                 try:
                     result = await self.mcp_client.get_agent_action(agent_id, project_id)
@@ -353,7 +327,25 @@ class Coordinator:
                         f"provider: {result.provider}, model: {result.model}, "
                         f"kick_command: {result.kick_command}, task_id: {result.task_id}"
                     )
-                    if result.action == "start":
+
+                    if result.action == "stop":
+                        # UC008: Stop running instance
+                        if key in self._instances:
+                            logger.info(f"Stopping instance {agent_id}/{project_id} due to {result.reason}")
+                            await self._stop_instance(key)
+                    elif result.action == "start":
+                        # Error protection: Check cooldown before spawning
+                        # Reference: docs/design/SPAWN_ERROR_PROTECTION.md
+                        if self._cooldown_manager:
+                            cooldown_entry = self._cooldown_manager.check(key)
+                            if cooldown_entry:
+                                remaining = self._cooldown_manager.get_remaining_seconds(key)
+                                logger.debug(
+                                    f"Skipping {agent_id}/{project_id}: in cooldown "
+                                    f"({cooldown_entry.reason}, {remaining:.0f}s remaining)"
+                                )
+                                continue
+
                         provider = result.provider or "claude"
                         self._spawn_instance(
                             agent_id=agent_id,
@@ -363,8 +355,7 @@ class Coordinator:
                             provider=provider,
                             model=result.model,
                             kick_command=result.kick_command,
-                            task_id=result.task_id,
-                            reason=result.reason
+                            task_id=result.task_id
                         )
                     else:
                         logger.debug(f"get_agent_action returned action='{result.action}' (reason: {result.reason}) for {agent_id}/{project_id}")
@@ -612,8 +603,7 @@ class Coordinator:
         provider: str,
         model: Optional[str] = None,
         kick_command: Optional[str] = None,
-        task_id: Optional[str] = None,
-        reason: Optional[str] = None
+        task_id: Optional[str] = None
     ) -> None:
         """Spawn an Agent Instance process.
 
@@ -753,20 +743,6 @@ class Coordinator:
             model_flag = "-m" if provider == "gemini" else "--model"
             cmd.extend([model_flag, model])
             logger.debug(f"Using model: {model} (flag: {model_flag})")
-
-        # Add permission restrictions for chat sessions
-        # Chat sessions should not have write/edit permissions
-        # Reference: docs/design/CHAT_SESSION_PERMISSIONS.md
-        if reason == "has_pending_purpose":
-            if provider == "claude":
-                # Claude Code: use --disallowedTools to restrict dangerous tools
-                # Note: Bash is allowed for reading environment variables during authentication
-                cmd.extend(["--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit"])
-                logger.info(f"Chat session: added tool restrictions for {agent_id}/{project_id}")
-            elif provider == "gemini":
-                # Gemini CLI: tool restrictions via settings.json (coreTools/excludeTools)
-                # TODO: Implement Gemini tool restrictions if needed
-                logger.debug(f"Chat session: Gemini tool restrictions not yet implemented for {agent_id}/{project_id}")
 
         # Add verbose flag for debugging if enabled
         if self.config.debug_mode:
