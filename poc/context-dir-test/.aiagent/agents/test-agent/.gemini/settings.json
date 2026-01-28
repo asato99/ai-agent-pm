@@ -1,0 +1,6 @@
+{
+  "includeDirectories": [
+    "/Users/asatokazu/Documents/dev/mine/business/ai-agent-pm/poc/context-dir-test"
+  ],
+  "loadMemoryFromIncludeDirectories": true
+}

@@ -251,15 +251,30 @@ def test_gitignore_includes_agents_directory(tmp_path, coordinator):
 
 **目的:** Gemini CLI も同様にコンテキストディレクトリから起動する
 
-### 4.1 事前調査
+### 4.1 事前調査 ✅ 完了
 
-- [ ] Gemini CLI で `additionalDirectories` 相当の機能があるか調査
-- [ ] Gemini CLI で system_prompt を設定ファイルから渡せるか調査
-- [ ] 調査結果をドキュメント化
+- [x] Gemini CLI で `additionalDirectories` 相当の機能があるか調査
+- [x] Gemini CLI で system_prompt を設定ファイルから渡せるか調査
+- [x] 調査結果をドキュメント化
 
-**調査結果:**
-```
-（調査後に記入）
+**調査結果（2026-01-28 PoC検証済み）:**
+
+| 項目 | 結果 |
+|------|------|
+| 追加ディレクトリ設定 | `includeDirectories` あり（settings.json） |
+| 設定ファイルからの読み込み | ❌ **バグで無視される** |
+| 代替手段 | `--include-directories` **コマンドラインフラグ** |
+| システムプロンプト | `GEMINI.md` ファイルで設定可能 |
+
+**⚠️ 重要な制約:**
+
+`settings.json` の `includeDirectories` 設定は既知のバグにより無視される：
+- [Issue #5512](https://github.com/google-gemini/gemini-cli/issues/5512)
+- [Issue #7365](https://github.com/google-gemini/gemini-cli/issues/7365)
+
+**ワークアラウンド:**
+```bash
+gemini --include-directories {manager_working_dir}
 ```
 
 ### 4.2 テスト作成（RED）
@@ -267,20 +282,99 @@ def test_gitignore_includes_agents_directory(tmp_path, coordinator):
 **ファイル:** `runner/tests/test_coordinator.py`
 
 - [ ] `test_prepare_agent_context_gemini_creates_directory`: Gemini 用ディレクトリ作成
-- [ ] `test_prepare_agent_context_gemini_settings_json`: settings.json の内容
+  ```
+  {working_dir}/.aiagent/agents/{agent_id}/.gemini/
+  ```
+- [ ] `test_prepare_agent_context_gemini_md`: GEMINI.md が作成されること
+- [ ] `test_gemini_md_contains_system_prompt`: system_prompt が含まれること
+- [ ] `test_gemini_md_contains_working_directory`: 作業ディレクトリ指示が含まれること
+- [ ] `test_spawn_instance_gemini_include_directories_flag`: `--include-directories` フラグが追加されること
+
+**テストコード例:**
+```python
+def test_prepare_agent_context_gemini_creates_directory(tmp_path, coordinator):
+    """Gemini用コンテキストディレクトリが正しく作成されること"""
+    working_dir = str(tmp_path / "project")
+    os.makedirs(working_dir)
+
+    context_dir = coordinator._prepare_agent_context(
+        agent_id="worker-01",
+        working_dir=working_dir,
+        provider="gemini"
+    )
+
+    expected = Path(working_dir) / ".aiagent" / "agents" / "worker-01"
+    assert context_dir == str(expected)
+    assert (expected / ".gemini" / "GEMINI.md").exists()
+    assert (expected / ".gemini" / "settings.json").exists()
+
+def test_spawn_instance_gemini_include_directories_flag(tmp_path, coordinator):
+    """Gemini起動時に--include-directoriesフラグが追加されること"""
+    working_dir = str(tmp_path / "project")
+    os.makedirs(working_dir)
+
+    cmd = coordinator._build_spawn_command(
+        agent_id="worker-01",
+        working_dir=working_dir,
+        provider="gemini"
+    )
+
+    assert "--include-directories" in cmd
+    assert working_dir in cmd
+```
 
 ### 4.3 実装（GREEN）
 
 **ファイル:** `runner/src/aiagent_runner/coordinator.py`
 
 - [ ] `_prepare_agent_context` に Gemini 対応追加
-- [ ] `_write_gemini_settings` ヘルパー追加
+- [ ] `_write_gemini_md` ヘルパー追加
+- [ ] `_write_gemini_settings` ヘルパー追加（MCP設定用）
+- [ ] `_spawn_instance` に `--include-directories` フラグ追加
+
+**実装詳細:**
+```python
+async def _prepare_agent_context(
+    self,
+    agent_id: str,
+    working_dir: str,
+    provider: str
+) -> str:
+    """エージェント用コンテキストディレクトリを準備する"""
+    context_dir = Path(working_dir) / ".aiagent" / "agents" / agent_id
+
+    if provider == "gemini":
+        config_dir = context_dir / ".gemini"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        # system_prompt 取得
+        try:
+            profile = await self.mcp_client.get_subordinate_profile(agent_id)
+            system_prompt = profile.system_prompt
+        except Exception as e:
+            logger.warning(f"Failed to get subordinate profile: {e}")
+            system_prompt = ""
+
+        self._write_gemini_md(config_dir, system_prompt, working_dir)
+        self._write_gemini_settings(config_dir)
+
+        return str(context_dir)
+
+    # ... Claude 対応は既存 ...
+
+def _spawn_instance(self, ...):
+    # ... 既存コード ...
+
+    # Gemini の場合は --include-directories フラグを追加
+    if provider == "gemini":
+        cmd.extend(["--include-directories", working_dir])
+```
 
 ### 4.4 進捗ログ
 
 | 日時 | 作業内容 | 担当 |
 |------|---------|------|
-| - | - | - |
+| 2026-01-28 | PoC検証完了: `--include-directories`フラグで動作確認 | - |
 
 ---
 
@@ -327,7 +421,8 @@ def test_gitignore_includes_agents_directory(tmp_path, coordinator):
 |-------|------|------|
 | `get_subordinate_profile` が失敗する | system_prompt が空になる | 空文字でフォールバック、ログ出力 |
 | ディレクトリ作成権限がない | エージェント起動失敗 | フォールバックで従来 cwd を使用 |
-| Gemini が additionalDirectories 未対応 | Gemini は従来動作 | Claude のみコンテキストディレクトリ起動 |
+| Gemini `includeDirectories` 設定が無視される | 設定ファイルでは動作しない | `--include-directories` フラグで回避（PoC検証済み） |
+| Gemini CLI バグが修正される | 将来的にフラグ不要になる | 設定ファイル移行は将来検討、現状はフラグで動作 |
 
 ---
 
@@ -356,3 +451,4 @@ def test_gitignore_includes_agents_directory(tmp_path, coordinator):
 | 日付 | 内容 |
 |------|------|
 | 2026-01-28 | 初版作成 |
+| 2026-01-28 | PoC検証結果を反映: Phase 4 調査完了、Gemini は `--include-directories` フラグ必須 |

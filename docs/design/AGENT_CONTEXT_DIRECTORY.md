@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-各エージェントを専用のコンテキストディレクトリから起動し、`additionalDirectories` で実作業ディレクトリにアクセスさせる機能。
+各エージェントを専用のコンテキストディレクトリから起動し、実作業ディレクトリにアクセスさせる機能。
 
 ## 2. 背景と目的
 
@@ -24,7 +24,7 @@
 
 ### 2.2 目的
 
-各エージェントを **専用コンテキストディレクトリ** から起動し、`additionalDirectories` で実作業ディレクトリにアクセスさせる。
+各エージェントを **専用コンテキストディレクトリ** から起動し、実作業ディレクトリにアクセスさせる。
 
 **メリット:**
 - エージェントごとに異なる CLAUDE.md / system_prompt を適用可能
@@ -33,9 +33,66 @@
 
 ---
 
-## 3. ディレクトリ構造
+## 3. PoC 検証結果
 
-### 3.1 最終構造
+### 3.1 検証概要
+
+コンテキストディレクトリ（`.aiagent/agents/{agent_id}/`）から CLI を起動し、親ディレクトリのファイルを編集できるか検証。
+
+**検証日:** 2026-01-28
+**検証場所:** `poc/context-dir-test/`
+
+### 3.2 Claude Code
+
+| 項目 | 結果 |
+|------|------|
+| 親ディレクトリ読み取り | ✅ 成功 |
+| 親ディレクトリ書き込み | ✅ 成功 |
+| 設定方法 | `.claude/settings.json` の `additionalDirectories` |
+
+**設定ファイル:**
+```json
+{
+  "permissions": {
+    "additionalDirectories": ["{manager_working_dir}"]
+  }
+}
+```
+
+### 3.3 Gemini CLI
+
+| 項目 | 結果 |
+|------|------|
+| 親ディレクトリ読み取り | ✅ 成功（フラグ使用時） |
+| 親ディレクトリ書き込み | ✅ 成功（フラグ使用時） |
+| 設定方法 | `--include-directories` **コマンドラインフラグ** |
+
+**⚠️ 重要な制約:**
+
+`settings.json` の `includeDirectories` 設定は **既知のバグにより無視される**。
+
+- [Issue #5512](https://github.com/google-gemini/gemini-cli/issues/5512)
+- [Issue #7365](https://github.com/google-gemini/gemini-cli/issues/7365)
+
+**ワークアラウンド:**
+```bash
+gemini --include-directories {manager_working_dir}
+```
+
+### 3.4 プロバイダー比較
+
+| 項目 | Claude | Gemini |
+|------|--------|--------|
+| 追加ディレクトリ設定 | `additionalDirectories` | `--include-directories` フラグ |
+| 設定ファイルからの読み込み | ✅ 動作 | ❌ バグで無視 |
+| システムプロンプトファイル | `CLAUDE.md` | `GEMINI.md` |
+| コマンドラインでの指定 | 不要 | **必須** |
+
+---
+
+## 4. ディレクトリ構造
+
+### 4.1 最終構造
 
 ```
 {manager_working_dir}/                 ← 実作業ディレクトリ（マネージャーのワーキングディレクトリ）
@@ -57,10 +114,11 @@
         │   └── settings.json
         │
         └── .gemini/                   ← Gemini CLI 用
+            ├── GEMINI.md
             └── settings.json
 ```
 
-### 3.2 概念の分離
+### 4.2 概念の分離
 
 | ディレクトリ | 目的 | 管理主体 |
 |-------------|------|---------|
@@ -70,9 +128,9 @@
 
 ---
 
-## 4. ファイル生成仕様
+## 5. ファイル生成仕様
 
-### 4.1 CLAUDE.md
+### 5.1 CLAUDE.md
 
 **配置場所:** `.aiagent/agents/{agent_id}/.claude/CLAUDE.md`
 
@@ -83,6 +141,12 @@
 {system_prompt}
 
 ---
+
+## Working Directory
+
+Your working directory is: `{manager_working_dir}`
+
+All file operations should be performed in this directory, NOT in the current context directory.
 
 ## Restrictions
 
@@ -95,7 +159,7 @@
 - `get_subordinate_profile(agent_id)` MCP ツールを呼び出し
 - レスポンスの `system_prompt` フィールドを使用
 
-### 4.2 settings.json (Claude)
+### 5.2 settings.json (Claude)
 
 **配置場所:** `.aiagent/agents/{agent_id}/.claude/settings.json`
 
@@ -110,7 +174,30 @@
 }
 ```
 
-### 4.3 settings.json (Gemini)
+### 5.3 GEMINI.md
+
+**配置場所:** `.aiagent/agents/{agent_id}/.gemini/GEMINI.md`
+
+**テンプレート:**
+```markdown
+# Agent Context
+
+{system_prompt}
+
+---
+
+## Working Directory
+
+Your working directory is: `{manager_working_dir}`
+
+All file operations should be performed in this directory, NOT in the current context directory.
+
+## Restrictions
+
+**DO NOT** modify any files within `.aiagent/`. This directory is managed by AI Agent PM.
+```
+
+### 5.4 settings.json (Gemini)
 
 **配置場所:** `.aiagent/agents/{agent_id}/.gemini/settings.json`
 
@@ -127,44 +214,37 @@
 }
 ```
 
-**注:** Gemini の `additionalDirectories` 相当の機能は要調査。
+**注:** `includeDirectories` は設定ファイルからは機能しないため、コマンドラインフラグで指定。
 
 ---
 
-## 5. 起動パラメータ
+## 6. 起動パラメータ
+
+### 6.1 共通
 
 | 項目 | 値 |
 |------|-----|
 | cwd | `{manager_working_dir}/.aiagent/agents/{agent_id}/` |
 | 実作業ディレクトリ | `{manager_working_dir}` |
-| MCP設定 | 既存の `--mcp-config` フラグを継続使用 |
 
----
-
-## 6. プロバイダー別対応
-
-### 6.1 Claude CLI
+### 6.2 Claude CLI
 
 | 項目 | 設定 |
 |-----|------|
 | cwd | `.aiagent/agents/{agent_id}/` |
 | CLAUDE.md | 自動生成（system_prompt + 制限指示） |
-| settings.json | additionalDirectories で実作業ディレクトリを許可 |
+| settings.json | `additionalDirectories` で実作業ディレクトリを許可 |
 | MCP設定 | `--mcp-config` フラグで一時ファイル指定（既存） |
+| 追加フラグ | なし |
 
-### 6.2 Gemini CLI
+### 6.3 Gemini CLI
 
 | 項目 | 設定 |
 |-----|------|
 | cwd | `.aiagent/agents/{agent_id}/` |
-| 設定ファイル | `.gemini/settings.json` に MCP 設定を配置 |
-| system_prompt | 要調査: GEMINI.md 相当があるか |
-| additionalDirectories | 要調査: 相当機能があるか |
-
-**Gemini 課題:**
-1. Gemini CLI に `additionalDirectories` 相当があるか確認必要
-2. system_prompt を設定ファイルで渡せるか確認必要
-3. 機能がなければ cwd を `manager_working_dir` にして、コンテキストディレクトリ起動は Claude のみとする
+| GEMINI.md | 自動生成（system_prompt + 制限指示） |
+| settings.json | MCP 設定のみ（`includeDirectories` は機能しない） |
+| **追加フラグ** | `--include-directories {manager_working_dir}` **必須** |
 
 ---
 
@@ -196,7 +276,7 @@ async def _prepare_agent_context(
 1. ディレクトリ作成: `{working_dir}/.aiagent/agents/{agent_id}/`
 2. プロバイダー別設定ディレクトリ作成: `.claude/` or `.gemini/`
 3. system_prompt 取得: `get_subordinate_profile(agent_id)`
-4. CLAUDE.md 生成（Claude の場合）
+4. CLAUDE.md / GEMINI.md 生成
 5. settings.json 生成
 6. コンテキストディレクトリパスを返す
 
@@ -212,6 +292,10 @@ def _spawn_instance(self, ...):
         cwd = await self._prepare_agent_context(agent_id, working_dir, provider)
     else:
         cwd = working_dir
+
+    # Gemini の場合は --include-directories フラグを追加
+    if provider == "gemini":
+        cmd.extend(["--include-directories", working_dir])
 ```
 
 ### 7.3 MCPClient への追加
@@ -241,7 +325,7 @@ agents/
 
 | タイミング | 動作 |
 |-----------|------|
-| spawn 時 | ディレクトリ作成、CLAUDE.md / settings.json 上書き |
+| spawn 時 | ディレクトリ作成、CLAUDE.md / GEMINI.md / settings.json 上書き |
 | セッション終了後 | ディレクトリ保持（次回起動時に再利用） |
 | 明示的クリーンアップ | 将来機能として検討 |
 
@@ -255,23 +339,29 @@ agents/
 
 ### 9.3 セキュリティ
 
-- CLAUDE.md で `.aiagent/` 編集禁止を指示
-- ただし、これは指示であり強制ではない（Claude が従わない可能性あり）
+- CLAUDE.md / GEMINI.md で `.aiagent/` 編集禁止を指示
+- ただし、これは指示であり強制ではない（AI が従わない可能性あり）
 - より強制的な制限が必要な場合は `allowedDirectories` の検討が必要
 
 ---
 
-## 10. 未解決事項
+## 10. 解決済み事項
+
+| 項目 | 結果 | 対応 |
+|-----|------|-----|
+| Gemini の additionalDirectories 相当 | `includeDirectories` あり（設定ファイルはバグ） | `--include-directories` フラグ使用 |
+| Gemini の system_prompt 設定方法 | `GEMINI.md` が使用可能 | ファイル生成で対応 |
+
+## 11. 未解決事項
 
 | 項目 | 状態 | 対応方針 |
 |-----|------|---------|
-| Gemini の additionalDirectories 相当 | 要調査 | Phase 4 で調査・実装 |
-| Gemini の system_prompt 設定方法 | 要調査 | Phase 4 で調査・実装 |
 | chat.jsonl との連携（--resume 相当） | スコープ外 | 別フェーズで検討 |
+| Gemini settings.json バグの修正待ち | 外部依存 | フラグで回避、将来的に設定ファイル移行 |
 
 ---
 
-## 11. 実装計画
+## 12. 実装計画
 
 ### Phase 1: MCPClient 拡張
 
@@ -299,7 +389,19 @@ agents/
 
 ---
 
-### Phase 3: .gitignore 更新
+### Phase 3: coordinator.py 変更（Gemini対応）
+
+**対象ファイル:** `runner/src/aiagent_runner/coordinator.py`
+
+**タスク:**
+1. `_write_gemini_md` ヘルパー追加
+2. `_spawn_instance` に `--include-directories` フラグ追加
+
+**見積もり:** 小
+
+---
+
+### Phase 4: .gitignore 更新
 
 **対象:** coordinator.py 内の `.aiagent/.gitignore` 生成ロジック
 
@@ -310,24 +412,12 @@ agents/
 
 ---
 
-### Phase 4: Gemini 対応調査・実装
-
-**タスク:**
-1. Gemini CLI の設定オプション調査
-2. additionalDirectories 相当の有無確認
-3. system_prompt 設定方法確認
-4. 調査結果に基づき実装
-
-**見積もり:** 中〜大（調査結果次第）
-
----
-
 ### Phase 5: 統合テスト
 
 **タスク:**
 1. パイロットテストでエージェント起動を確認
 2. `.aiagent/agents/{agent_id}/.claude/` が作成されることを検証
-3. CLAUDE.md に system_prompt が含まれることを検証
+3. CLAUDE.md / GEMINI.md に system_prompt が含まれることを検証
 4. 実作業ディレクトリのファイル編集が可能なことを検証
 
 **見積もり:** 中
@@ -339,3 +429,4 @@ agents/
 | 日付 | 内容 |
 |------|------|
 | 2026-01-28 | 初版作成 |
+| 2026-01-28 | PoC 検証結果を反映: Claude は設定ファイル、Gemini はフラグで対応 |
