@@ -991,6 +991,13 @@ public final class DatabaseSetup {
             }
         }
 
+        // v43: pending_agent_purposes テーブル削除
+        // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+        // spawn_started_at 列で置き換えられたため不要
+        migrator.registerMigration("v43_drop_pending_agent_purposes") { db in
+            try db.drop(table: "pending_agent_purposes")
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

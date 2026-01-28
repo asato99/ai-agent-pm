@@ -531,17 +531,17 @@ DROP TABLE pending_agent_purposes;
 - [x] MCPServer 統合
 - [x] 既存テスト（GREEN）- 8テスト全てパス
 
-### Phase 5: 削除
-- [ ] pending 関連コード削除
-- [ ] テーブル削除
-- [ ] 既存テスト修正
+### Phase 5: 削除 ✅
+- [x] pending 関連コード削除 (PendingAgentPurpose, PendingAgentPurposeRepository)
+- [x] テーブル削除 (v43_drop_pending_agent_purposes マイグレーション追加)
+- [x] 既存テスト修正 (workingDirectory追加、WALチェックポイント修正)
 
-### Phase 6: 統合テスト
-- [ ] 重複スポーン防止テスト
-- [ ] 認証失敗再試行テスト
-- [ ] chat + task 順次処理テスト
-- [ ] マネージャー待機テスト
-- [ ] 共通ロジック一貫性テスト
+### Phase 6: 統合テスト ✅
+- [x] 重複スポーン防止テスト (testDuplicateSpawnPrevention)
+- [x] 認証失敗再試行テスト (testRetryAfterAuthenticationFailure)
+- [x] chat + task 順次処理テスト (testChatAndTaskSequentialProcessing)
+- [x] マネージャー待機テスト (testManagerWaitsForSubordinates)
+- [x] 共通ロジック一貫性テスト (testConsistentWorkDetection)
 
 ## 完了基準
 
