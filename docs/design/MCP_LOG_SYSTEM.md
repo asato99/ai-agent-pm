@@ -25,6 +25,26 @@ MCPサーバーのログシステム設計書。ログローテーションと�
 - ログレベルの概念がない
 - カテゴリ分類なし
 
+### 現在のログ実装の散在
+
+ログ出力が複数箇所に分散しており、統一的な管理が困難な状態。
+
+| 場所 | 出力方法 | 出力先 | フォーマット |
+|------|----------|--------|--------------|
+| `MCPServer.swift` | `Self.log()` | stderr + ファイル | `[timestamp] [MCP] ...` |
+| `NullTransport` | `log()` | ファイルのみ | `[timestamp] [HTTP] ...` |
+| `StdioTransport` | `log()` | stderrのみ | `[mcp-server-pm] ...` |
+| `UnixSocketTransport` | `log()` | ファイルのみ | `[timestamp] ...` |
+| `RESTServer/main.swift` | グローバル `log()` | stderrのみ | `[rest-server-pm] ...` |
+| `MCPDaemonManager` | `debugLog()` | NSLog + ファイル | `[timestamp] [MCPDaemonManager] ...` |
+
+**問題点**:
+1. **6箇所に散在** - 同じ機能が重複実装
+2. **出力先が不統一** - stderr / ファイル / NSLog の混在
+3. **フォーマットがバラバラ** - 統一的な解析が困難
+4. **ログレベルの概念なし** - 全てが同じ重要度で出力
+5. **テスト困難** - ログ出力をモックできない
+
 ---
 
 ## 設計
@@ -217,7 +237,215 @@ reportAgentError → category: "error", level: "ERROR"
 
 ---
 
-### 4. 実装計画
+### 4. 事前リファクタリング（Phase 0）
+
+構造化ログとローテーションを導入する前に、散在するログ実装を統一する。
+
+#### 4.1 共通Logger基盤の作成
+
+```
+Sources/Infrastructure/Logging/
+├── Logger.swift           # メインのLoggerクラス
+├── LogLevel.swift         # ログレベル定義
+├── LogCategory.swift      # カテゴリ定義
+├── LogEntry.swift         # ログエントリ構造体
+├── LogOutput.swift        # 出力先プロトコル
+├── FileLogOutput.swift    # ファイル出力実装
+├── StderrLogOutput.swift  # stderr出力実装
+└── LogRotator.swift       # ローテーション（Phase 1で実装）
+```
+
+#### 4.2 プロトコル設計
+
+```swift
+// ログ出力先のプロトコル
+protocol LogOutput {
+    func write(_ entry: LogEntry)
+}
+
+// Loggerプロトコル（テスト時にモック可能）
+protocol LoggerProtocol {
+    func log(
+        _ level: LogLevel,
+        category: LogCategory,
+        message: String,
+        operation: String?,
+        agentId: String?,
+        projectId: String?,
+        taskId: String?,
+        details: [String: Any]?
+    )
+}
+
+// 便利メソッド
+extension LoggerProtocol {
+    func trace(_ message: String, category: LogCategory = .system) { ... }
+    func debug(_ message: String, category: LogCategory = .system) { ... }
+    func info(_ message: String, category: LogCategory = .system) { ... }
+    func warn(_ message: String, category: LogCategory = .system) { ... }
+    func error(_ message: String, category: LogCategory = .system) { ... }
+}
+```
+
+#### 4.3 ログレベルとカテゴリの定義
+
+```swift
+// LogLevel.swift
+enum LogLevel: Int, Comparable, Codable {
+    case trace = 0
+    case debug = 1
+    case info = 2
+    case warn = 3
+    case error = 4
+
+    static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+// LogCategory.swift
+enum LogCategory: String, Codable {
+    case system    // 起動、シャットダウン
+    case health    // healthCheck
+    case auth      // 認証・セッション
+    case agent     // エージェント操作
+    case task      // タスク操作
+    case chat      // チャット機能
+    case project   // プロジェクト操作
+    case transport // トランスポート層
+}
+```
+
+#### 4.4 ログエントリ構造体
+
+```swift
+// LogEntry.swift
+struct LogEntry: Codable {
+    let timestamp: Date
+    let level: LogLevel
+    let category: LogCategory
+    let message: String
+    let operation: String?
+    let agentId: String?
+    let projectId: String?
+    let taskId: String?
+    let sessionId: String?
+    let details: [String: AnyCodable]?
+    let durationMs: Int?
+
+    // JSON出力用
+    func toJSON() -> String { ... }
+
+    // レガシーテキスト出力用
+    func toText() -> String { ... }
+}
+```
+
+#### 4.5 Logger実装
+
+```swift
+// Logger.swift
+final class Logger: LoggerProtocol {
+    static let shared = Logger()
+
+    private var outputs: [LogOutput] = []
+    private var minimumLevel: LogLevel = .info
+    private let queue = DispatchQueue(label: "com.aiagentpm.logger")
+
+    func addOutput(_ output: LogOutput) {
+        outputs.append(output)
+    }
+
+    func setMinimumLevel(_ level: LogLevel) {
+        minimumLevel = level
+    }
+
+    func log(
+        _ level: LogLevel,
+        category: LogCategory,
+        message: String,
+        operation: String? = nil,
+        agentId: String? = nil,
+        projectId: String? = nil,
+        taskId: String? = nil,
+        details: [String: Any]? = nil
+    ) {
+        guard level >= minimumLevel else { return }
+
+        let entry = LogEntry(
+            timestamp: Date(),
+            level: level,
+            category: category,
+            message: message,
+            operation: operation,
+            agentId: agentId,
+            projectId: projectId,
+            taskId: taskId,
+            sessionId: nil,
+            details: details?.mapValues { AnyCodable($0) },
+            durationMs: nil
+        )
+
+        queue.async {
+            for output in self.outputs {
+                output.write(entry)
+            }
+        }
+    }
+}
+```
+
+#### 4.6 段階的移行計画
+
+| Step | 対象 | 作業内容 |
+|------|------|----------|
+| **Step 0-1** | 新規作成 | `Infrastructure/Logging/` にLogger基盤を作成 |
+| **Step 0-2** | `MCPServer.swift` | `Self.log()` を `Logger.shared.info()` に置き換え |
+| **Step 0-3** | `Transport/*.swift` | 各トランスポートの `log()` を統一 |
+| **Step 0-4** | `RESTServer/main.swift` | グローバル `log()` を置き換え |
+| **Step 0-5** | `MCPDaemonManager` | `debugLog()` を置き換え |
+| **Step 0-6** | テスト | `MockLogger` を作成し、ログ出力のテストを追加 |
+
+#### 4.7 移行時の互換性
+
+移行中は旧形式のログも出力し、段階的に新形式に切り替える。
+
+```swift
+// 移行期間中の出力（両方出力）
+class TransitionalLogger: LoggerProtocol {
+    private let newLogger: Logger
+    private let legacyEnabled: Bool
+
+    func log(...) {
+        // 新形式
+        newLogger.log(...)
+
+        // 旧形式（互換性のため）
+        if legacyEnabled {
+            let legacyMessage = "[MCP] \(message)"
+            FileHandle.standardError.write(legacyMessage.data(using: .utf8)!)
+        }
+    }
+}
+```
+
+---
+
+### 5. 実装計画
+
+#### Phase 0: リファクタリング（事前準備）
+
+| タスク | 優先度 | 依存 |
+|--------|--------|------|
+| `Infrastructure/Logging/` ディレクトリ作成 | 高 | - |
+| `LogLevel`, `LogCategory`, `LogEntry` 定義 | 高 | - |
+| `LogOutput` プロトコルと実装 | 高 | - |
+| `Logger` クラス実装 | 高 | 上記全て |
+| `MCPServer.swift` の移行 | 高 | Logger |
+| `Transport/*.swift` の移行 | 中 | Logger |
+| `RESTServer` の移行 | 中 | Logger |
+| `MCPDaemonManager` の移行 | 中 | Logger |
+| `MockLogger` とテスト追加 | 中 | Logger |
 
 #### Phase 1: ログローテーション
 
@@ -230,28 +458,28 @@ reportAgentError → category: "error", level: "ERROR"
 
 #### Phase 2: 構造化ログ基盤
 
-| タスク | 優先度 |
-|--------|--------|
-| `StructuredLogger` クラス作成 | 高 |
-| JSON形式での出力 | 高 |
-| ログレベル制御 | 高 |
-| カテゴリ付与 | 高 |
-| 既存の `Self.log()` を置き換え | 中 |
+| タスク | 優先度 | 依存 |
+|--------|--------|------|
+| `LogEntry.toJSON()` 実装 | 高 | Phase 0 |
+| `JsonLogOutput` クラス作成 | 高 | Phase 0 |
+| ログレベル環境変数対応 | 高 | Phase 0 |
+| カテゴリ別ログレベル設定 | 中 | 上記 |
+| healthCheck を TRACE に変更 | 中 | 上記 |
 
 #### Phase 3: MCPLogView改善
 
-| タスク | 優先度 |
-|--------|--------|
-| JSONログのパース対応 | 高 |
-| カテゴリフィルタUI | 高 |
-| ログレベルフィルタUI | 高 |
-| 時間範囲フィルタ | 中 |
-| エージェント/プロジェクトフィルタ | 中 |
-| 詳細表示モード | 低 |
+| タスク | 優先度 | 依存 |
+|--------|--------|------|
+| JSONログのパース対応 | 高 | Phase 2 |
+| カテゴリフィルタUI | 高 | 上記 |
+| ログレベルフィルタUI | 高 | 上記 |
+| 時間範囲フィルタ | 中 | 上記 |
+| エージェント/プロジェクトフィルタ | 中 | 上記 |
+| 詳細表示モード | 低 | 上記 |
 
 ---
 
-### 5. 後方互換性
+### 6. 後方互換性
 
 #### 5.1 移行期間
 
@@ -278,7 +506,7 @@ if line.starts(with: "{") {
 
 ---
 
-### 6. CLIツール（将来）
+### 7. CLIツール（将来）
 
 ```bash
 # ログ検索
