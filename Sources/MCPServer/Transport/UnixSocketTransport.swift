@@ -149,22 +149,9 @@ final class UnixSocketServer {
         log("Server stopped")
     }
 
-    /// ログ出力
+    /// ログ出力（MCPLoggerに委譲）
     private func log(_ message: String) {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let logLine = "[\(timestamp)] [daemon] \(message)\n"
-
-        // stderrに出力
-        FileHandle.standardError.write(logLine.data(using: .utf8)!)
-
-        // ファイルにも出力
-        if let handle = FileHandle(forWritingAtPath: logPath) {
-            handle.seekToEndOfFile()
-            handle.write(logLine.data(using: .utf8)!)
-            handle.closeFile()
-        } else {
-            FileManager.default.createFile(atPath: logPath, contents: logLine.data(using: .utf8))
-        }
+        MCPLogger.shared.info("[daemon] \(message)", category: .transport)
     }
 }
 

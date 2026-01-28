@@ -5,16 +5,15 @@
 import Foundation
 import Infrastructure
 
-// MARK: - Debug Logging for XCUITest (NSLog doesn't work in XCUITest)
+// MARK: - Debug Logging using MCPLogger
 private func debugLog(_ message: String) {
+    // MCPLoggerを使用してログ出力（system カテゴリ）
+    MCPLogger.shared.debug("[MCPDaemonManager] \(message)", category: .system)
+
+    // XCUITest用に/tmpファイルにも出力（デバッグ用）
+    let logFile = "/tmp/aiagentpm_debug.log"
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let logMessage = "[\(timestamp)] [MCPDaemonManager] \(message)\n"
-
-    // Log to NSLog for non-test environment
-    NSLog("[MCPDaemonManager] %@", message)
-
-    // Also write to file for XCUITest
-    let logFile = "/tmp/aiagentpm_debug.log"
     if let data = logMessage.data(using: .utf8) {
         if FileManager.default.fileExists(atPath: logFile) {
             if let handle = FileHandle(forWritingAtPath: logFile) {

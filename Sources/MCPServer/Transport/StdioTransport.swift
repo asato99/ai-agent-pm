@@ -2,6 +2,7 @@
 // 参照: docs/architecture/MCP_SERVER.md - stdio通信
 
 import Foundation
+import Infrastructure
 
 /// stdio経由でのJSON-RPC通信を管理
 /// MCPプロトコルはContent-Lengthヘッダーベースのメッセージ形式を使用
@@ -82,12 +83,9 @@ final class StdioTransport: MCPTransport {
         }
     }
 
-    /// エラーログを出力（stderrへ）
+    /// エラーログを出力（MCPLoggerに委譲）
     func log(_ message: String) {
-        let logMessage = "[mcp-server-pm] \(message)\n"
-        if let data = logMessage.data(using: .utf8) {
-            errorOutput.write(data)
-        }
+        MCPLogger.shared.debug("[stdio] \(message)", category: .transport)
     }
 
     // MARK: - Private

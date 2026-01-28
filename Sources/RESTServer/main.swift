@@ -4,11 +4,19 @@
 import Foundation
 import Infrastructure
 
-// Helper to force-flush output
+// Helper function using MCPLogger
 func log(_ message: String) {
-    let line = "[rest-server-pm] \(message)\n"
-    FileHandle.standardError.write(line.data(using: .utf8)!)
+    MCPLogger.shared.info("[rest-server] \(message)", category: .system)
 }
+
+// Initialize logger outputs for REST server
+private func setupLogger() {
+    let logger = MCPLogger.shared
+    let logPath = AppConfig.appSupportDirectory.appendingPathComponent("rest-server.log").path
+    logger.addOutput(FileLogOutput(filePath: logPath))
+    logger.addOutput(StderrLogOutput())
+}
+setupLogger()
 
 let dbPath = AppConfig.databasePath
 

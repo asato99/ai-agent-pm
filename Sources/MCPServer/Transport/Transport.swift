@@ -62,17 +62,7 @@ final class NullTransport: MCPTransport {
     }
 
     func log(_ message: String) {
-        // ファイルにログ出力
-        let logPath = AppConfig.appSupportDirectory.appendingPathComponent("mcp-server.log").path
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let logLine = "[\(timestamp)] [HTTP] \(message)\n"
-
-        if let handle = FileHandle(forWritingAtPath: logPath) {
-            handle.seekToEndOfFile()
-            handle.write(logLine.data(using: .utf8)!)
-            handle.closeFile()
-        } else {
-            FileManager.default.createFile(atPath: logPath, contents: logLine.data(using: .utf8), attributes: nil)
-        }
+        // MCPLoggerに委譲（transport カテゴリで出力）
+        MCPLogger.shared.debug("[HTTP] \(message)", category: .transport)
     }
 }

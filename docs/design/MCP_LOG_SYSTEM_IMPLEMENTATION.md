@@ -10,7 +10,7 @@
 
 | Phase | 内容 | 状態 | 進捗 |
 |-------|------|------|------|
-| Phase 0 | リファクタリング（Logger基盤） | 進行中 | 5/10 |
+| Phase 0 | リファクタリング（Logger基盤） | ✅ 完了 | 10/10 |
 | Phase 1 | ログローテーション | 未着手 | 0/6 |
 | Phase 2 | 構造化ログ | 未着手 | 0/5 |
 | Phase 3 | MCPLogView改善 | 未着手 | 0/6 |
@@ -21,6 +21,11 @@
 - ✅ 0-3: LogEntry定義
 - ✅ 0-4: LogOutputプロトコルと実装
 - ✅ 0-5: Loggerクラス（MCPLogger）
+- ✅ 0-6: MCPServer.swift の移行（MCPLogger に置き換え）
+- ✅ 0-7: Transport層の移行（StdioTransport, NullTransport, UnixSocketTransport）
+- ✅ 0-8: RESTServer の移行
+- ✅ 0-9: MCPDaemonManager の移行
+- ✅ 0-10: MockLogger とテストユーティリティ
 
 ### 実装済みファイル
 - `Sources/Infrastructure/Logging/LogLevel.swift`
@@ -28,11 +33,21 @@
 - `Sources/Infrastructure/Logging/LogEntry.swift`
 - `Sources/Infrastructure/Logging/LogOutput.swift`
 - `Sources/Infrastructure/Logging/MCPLogger.swift`
+- `Sources/Infrastructure/Logging/MockLogger.swift`
 - `Tests/InfrastructureTests/Logging/LogLevelTests.swift`
 - `Tests/InfrastructureTests/Logging/LogCategoryTests.swift`
 - `Tests/InfrastructureTests/Logging/LogEntryTests.swift`
 - `Tests/InfrastructureTests/Logging/LogOutputTests.swift`
 - `Tests/InfrastructureTests/Logging/LoggerTests.swift`
+- `Tests/InfrastructureTests/Logging/MockLoggerTests.swift`
+
+### 移行済みファイル
+- `Sources/MCPServer/MCPServer.swift` - MCPLogger に移行
+- `Sources/MCPServer/Transport/Transport.swift` - NullTransport を MCPLogger に移行
+- `Sources/MCPServer/Transport/StdioTransport.swift` - MCPLogger に移行
+- `Sources/MCPServer/Transport/UnixSocketTransport.swift` - MCPLogger に移行
+- `Sources/RESTServer/main.swift` - MCPLogger に移行
+- `Sources/App/Core/Services/MCPDaemonManager.swift` - MCPLogger に移行
 
 ---
 

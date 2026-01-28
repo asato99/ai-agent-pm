@@ -127,29 +127,27 @@ public final class MCPServer {
         }
     }
 
-    /// ログ出力（ファイルとstderrの両方）
-    private static func log(_ message: String) {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let logLine = "[\(timestamp)] \(message)\n"
-
-        // stderrに出力
-        FileHandle.standardError.write(logLine.data(using: .utf8)!)
-
-        // ファイルにも出力
+    /// 共有ロガーインスタンス
+    private static let logger: MCPLogger = {
+        let logger = MCPLogger.shared
+        // ファイル出力を設定
         let logPath = AppConfig.appSupportDirectory.appendingPathComponent("mcp-server.log").path
-        if let handle = FileHandle(forWritingAtPath: logPath) {
-            handle.seekToEndOfFile()
-            handle.write(logLine.data(using: .utf8)!)
-            handle.closeFile()
-        } else {
-            FileManager.default.createFile(atPath: logPath, contents: logLine.data(using: .utf8))
-        }
+        let fileOutput = FileLogOutput(filePath: logPath)
+        logger.addOutput(fileOutput)
+        // stderr出力を設定
+        logger.addOutput(StderrLogOutput())
+        return logger
+    }()
+
+    /// ログ出力（MCPLoggerに委譲）
+    private static func log(_ message: String, category: LogCategory = .system) {
+        logger.info(message, category: category)
     }
 
     /// デバッグモード時のみログ出力
     private func logDebug(_ message: String) {
         if debugMode {
-            transport.log(message)
+            Self.logger.debug(message, category: .system)
         }
     }
 
@@ -1449,11 +1447,11 @@ public final class MCPServer {
         guard let session = try agentSessionRepository.findByToken(token) else {
             // findByToken は期限切れセッションを除外するので、
             // トークンが見つからない = 無効または期限切れ
-            Self.log("[MCP] Session validation failed: token not found or expired")
+            Self.log("[MCP] Session validation failed: token not found or expired", category: .auth)
             throw MCPError.sessionTokenInvalid
         }
 
-        Self.log("[MCP] Session validated for agent: \(session.agentId.value), project: \(session.projectId.value)")
+        Self.log("[MCP] Session validated for agent: \(session.agentId.value), project: \(session.projectId.value)", category: .auth)
         return session
     }
 
@@ -1463,7 +1461,7 @@ public final class MCPServer {
 
         // セッションに紐づくエージェントIDと、リクエストのエージェントIDが一致するか確認
         if session.agentId.value != expectedAgentId {
-            Self.log("[MCP] Session agent mismatch: session=\(session.agentId.value), requested=\(expectedAgentId)")
+            Self.log("[MCP] Session agent mismatch: session=\(session.agentId.value), requested=\(expectedAgentId)", category: .auth)
             throw MCPError.sessionAgentMismatch(expected: expectedAgentId, actual: session.agentId.value)
         }
 
@@ -1537,7 +1535,7 @@ public final class MCPServer {
     /// Runnerが最初に呼び出す。サーバーが応答可能かを確認。
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     private func healthCheck() throws -> [String: Any] {
-        Self.log("[MCP] healthCheck called")
+        Self.log("[MCP] healthCheck called", category: .health)
 
         // DBアクセスの疎通確認
         let agentCount = try agentRepository.findAll().count
@@ -3589,14 +3587,14 @@ public final class MCPServer {
     /// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md - 新アーキテクチャ
     /// Phase 4: project_id 必須、instruction フィールドを追加、二重起動防止
     private func authenticate(agentId: String, passkey: String, projectId: String) throws -> [String: Any] {
-        Self.log("[MCP] authenticate called for agent: '\(agentId)', project: '\(projectId)'")
+        Self.log("[MCP] authenticate called for agent: '\(agentId)', project: '\(projectId)'", category: .auth)
 
         let id = AgentID(value: agentId)
         let projId = ProjectID(value: projectId)
 
         // Phase 4: プロジェクト存在確認
         guard try projectRepository.findById(projId) != nil else {
-            Self.log("[MCP] authenticate failed: Project '\(projectId)' not found")
+            Self.log("[MCP] authenticate failed: Project '\(projectId)' not found", category: .auth)
             // 失敗時も spawn_started_at をクリア（長期ブロック防止）
             try? clearSpawnStarted(agentId: id, projectId: projId)
             return [
@@ -3612,7 +3610,7 @@ public final class MCPServer {
             projectId: projId
         )
         if !isAssigned {
-            Self.log("[MCP] authenticate failed: Agent '\(agentId)' not assigned to project '\(projectId)'")
+            Self.log("[MCP] authenticate failed: Agent '\(agentId)' not assigned to project '\(projectId)'", category: .auth)
             // 失敗時も spawn_started_at をクリア（長期ブロック防止）
             try? clearSpawnStarted(agentId: id, projectId: projId)
             return [
@@ -3640,7 +3638,7 @@ public final class MCPServer {
         try clearSpawnStarted(agentId: id, projectId: projId)
 
         if result.success {
-            Self.log("[MCP] Authentication successful for agent: \(result.agentName ?? agentId)")
+            Self.log("[MCP] Authentication successful for agent: \(result.agentName ?? agentId)", category: .auth)
             var response: [String: Any] = [
                 "success": true,
                 "session_token": result.sessionToken ?? "",
@@ -3656,7 +3654,7 @@ public final class MCPServer {
             }
             return response
         } else {
-            Self.log("[MCP] Authentication failed for agent: \(agentId) - \(result.error ?? "Unknown error")")
+            Self.log("[MCP] Authentication failed for agent: \(agentId) - \(result.error ?? "Unknown error")", category: .auth)
             return [
                 "success": false,
                 "error": result.error ?? "Authentication failed",
