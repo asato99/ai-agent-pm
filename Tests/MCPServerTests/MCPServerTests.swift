@@ -1957,6 +1957,7 @@ final class WorkerBlockedStateManagementTests: XCTestCase {
     var projectAgentAssignmentRepository: ProjectAgentAssignmentRepository!
     var sessionRepository: SessionRepository!
     var contextRepository: ContextRepository!
+    var tempDirectory: URL!
 
     // テストデータ
     let managerAgentId = AgentID(value: "agt_manager_blocked_test")
@@ -1966,9 +1967,12 @@ final class WorkerBlockedStateManagementTests: XCTestCase {
     let subTaskId = TaskID(value: "tsk_sub_blocked")
 
     override func setUpWithError() throws {
-        // テスト用インメモリDBを作成
-        let tempDir = FileManager.default.temporaryDirectory
-        let dbPath = tempDir.appendingPathComponent("test_blocked_\(UUID().uuidString).db").path
+        // Create temp directory for working directory
+        tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("blocked_test_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let dbPath = tempDirectory.appendingPathComponent("test.db").path
         db = try DatabaseSetup.createDatabase(at: dbPath)
 
         // リポジトリを初期化
@@ -1989,16 +1993,22 @@ final class WorkerBlockedStateManagementTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        db = nil
         mcpServer = nil
+        db = nil
+        // Clean up temp directory
+        Thread.sleep(forTimeInterval: 0.3)
+        if let tempDir = tempDirectory {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
     }
 
     private func setupTestData() throws {
-        // プロジェクトを作成
+        // プロジェクトを作成（workingDirectory必須）
         let project = Project(
             id: testProjectId,
             name: "Blocked Test Project",
-            description: "Test project for worker blocked state management"
+            description: "Test project for worker blocked state management",
+            workingDirectory: tempDirectory.path
         )
         try projectRepository.save(project)
 
@@ -2592,10 +2602,15 @@ final class NotificationSystemIntegrationTests: XCTestCase {
     let testAgentId = AgentID(value: "agt_notif_test")
     let testProjectId = ProjectID(value: "prj_notif_test")
     var sessionToken: String?
+    var tempDirectory: URL!
 
     override func setUpWithError() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-        let dbPath = tempDir.appendingPathComponent("test_notif_\(UUID().uuidString).db").path
+        // Create temp directory for working directory
+        tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("notif_test_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let dbPath = tempDirectory.appendingPathComponent("test.db").path
         db = try DatabaseSetup.createDatabase(at: dbPath)
 
         notificationRepository = NotificationRepository(database: db)
@@ -2612,17 +2627,23 @@ final class NotificationSystemIntegrationTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        db = nil
         mcpServer = nil
+        db = nil
         sessionToken = nil
+        // Clean up temp directory
+        Thread.sleep(forTimeInterval: 0.3)
+        if let tempDir = tempDirectory {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
     }
 
     private func setupTestData() throws {
-        // プロジェクトを作成
+        // プロジェクトを作成（workingDirectory必須）
         let project = Project(
             id: testProjectId,
             name: "Notification Test Project",
-            description: "Project for notification testing"
+            description: "Project for notification testing",
+            workingDirectory: tempDirectory.path
         )
         try projectRepository.save(project)
 

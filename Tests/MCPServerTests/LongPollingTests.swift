@@ -21,7 +21,6 @@ final class LongPollingTests: XCTestCase {
     var agentCredentialRepository: AgentCredentialRepository!
     var agentSessionRepository: AgentSessionRepository!
     var projectAgentAssignmentRepository: ProjectAgentAssignmentRepository!
-    var pendingAgentPurposeRepository: PendingAgentPurposeRepository!
     var chatRepository: ChatFileRepository!
 
     let testAgentId = AgentID(value: "agt_long_polling_test")
@@ -44,7 +43,6 @@ final class LongPollingTests: XCTestCase {
         agentCredentialRepository = AgentCredentialRepository(database: db)
         agentSessionRepository = AgentSessionRepository(database: db)
         projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: db)
-        pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: db)
 
         // Setup chat repository
         let directoryManager = ProjectDirectoryManager()
@@ -60,11 +58,16 @@ final class LongPollingTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        // MCPServerを先に解放（内部のDB参照をクリア）
+        mcpServer = nil
+        // DBを閉じる
+        db = nil
+        // DB接続が完全に閉じられるのを待つ
+        Thread.sleep(forTimeInterval: 0.3)
+        // その後でtempディレクトリを削除
         if let tempDir = tempDirectory {
             try? FileManager.default.removeItem(at: tempDir)
         }
-        db = nil
-        mcpServer = nil
     }
 
     private func setupTestData() throws {
@@ -102,17 +105,21 @@ final class LongPollingTests: XCTestCase {
     }
 
     /// チャットセッションを作成するヘルパー
+    /// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
     /// - Returns: (セッショントークン, セッション)
     private func createChatSession() throws -> (String, AgentSession) {
-        // PendingAgentPurpose を作成して chat 目的を設定
-        let pendingPurpose = PendingAgentPurpose(
-            agentId: testAgentId,
-            projectId: testProjectId,
-            purpose: .chat
+        // WorkDetectionService が hasChatWork を検知するために未読メッセージを作成
+        // 参照: AuthenticateUseCaseV3 は WorkDetectionService を使用
+        let message = ChatMessage(
+            id: ChatMessageID.generate(),
+            senderId: AgentID(value: "owner"),
+            receiverId: testAgentId,
+            content: "Test message for chat session creation",
+            createdAt: Date()
         )
-        try pendingAgentPurposeRepository.save(pendingPurpose)
+        try chatRepository.saveMessage(message, projectId: testProjectId, agentId: testAgentId)
 
-        // 認証（chat purpose が設定される）
+        // 認証（WorkDetectionService が chat work を検知してセッション作成）
         let result = try mcpServer.executeTool(
             name: "authenticate",
             arguments: [

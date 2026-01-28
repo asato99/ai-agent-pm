@@ -981,6 +981,16 @@ public final class DatabaseSetup {
             try db.create(indexOn: "pending_agent_purposes", columns: ["project_id"])
         }
 
+        // v42: project_agents に spawn_started_at 列を追加
+        // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+        // 重複スポーン防止のための最小限の構成
+        migrator.registerMigration("v42_project_agents_spawn_started_at") { db in
+            try db.alter(table: "project_agents") { t in
+                // nullable列はデフォルトでNULLになるため.defaults()不要
+                t.add(column: "spawn_started_at", .datetime)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

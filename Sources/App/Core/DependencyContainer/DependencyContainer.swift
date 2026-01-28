@@ -45,10 +45,6 @@ public final class DependencyContainer: ObservableObject {
     public let projectDirectoryManager: ProjectDirectoryManager
     public let chatRepository: ChatFileRepository
 
-    // MARK: - Chat Support
-    /// チャット起動理由を管理するリポジトリ
-    public let pendingAgentPurposeRepository: PendingAgentPurposeRepository
-
     // MARK: - App Settings
     /// アプリケーション設定リポジトリ（Coordinator Token等）
     public let appSettingsRepository: AppSettingsRepository
@@ -411,9 +407,6 @@ public final class DependencyContainer: ObservableObject {
             directoryManager: projectDirectoryManager,
             projectRepository: projectRepository
         )
-
-        // Chat Support (チャット起動理由管理)
-        self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
 
         // App Settings (アプリケーション設定)
         self.appSettingsRepository = AppSettingsRepository(database: database)

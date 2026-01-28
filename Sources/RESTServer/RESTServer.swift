@@ -50,8 +50,6 @@ final class RESTServer {
     /// 参照: docs/design/CHAT_WEBUI_IMPLEMENTATION_PLAN.md - Phase 1-2
     private let chatRepository: ChatFileRepository
     private let directoryManager: ProjectDirectoryManager
-    /// 参照: docs/design/CHAT_FEATURE.md - MCP連携設計
-    private let pendingAgentPurposeRepository: PendingAgentPurposeRepository
     /// 参照: docs/design/NOTIFICATION_SYSTEM.md - UC010通知
     private let notificationRepository: NotificationRepository
     /// 参照: docs/design/LOG_TRANSFER_DESIGN.md - ログアップロード
@@ -93,8 +91,6 @@ final class RESTServer {
             directoryManager: directoryManager,
             projectRepository: projectRepository
         )
-        // 参照: docs/design/CHAT_FEATURE.md - MCP連携設計
-        self.pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: database)
         // 参照: docs/design/NOTIFICATION_SYSTEM.md - UC010通知
         self.notificationRepository = NotificationRepository(database: database)
         // 参照: docs/design/LOG_TRANSFER_DESIGN.md - ログアップロード
@@ -838,26 +834,6 @@ final class RESTServer {
                 task.blockedReason = nil
             }
 
-            // Session Spawn Architecture: in_progress への変更時にtask pendingを作成
-            // これによりCoordinatorが変更を検知してエージェントを起動できる
-            // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
-            if newStatus == .inProgress, let assigneeId = task.assigneeId {
-                let existingPending = try? pendingAgentPurposeRepository.find(
-                    agentId: assigneeId,
-                    projectId: task.projectId,
-                    purpose: .task
-                )
-                if existingPending == nil {
-                    let taskPending = PendingAgentPurpose(
-                        agentId: assigneeId,
-                        projectId: task.projectId,
-                        purpose: .task,
-                        createdAt: Date()
-                    )
-                    try pendingAgentPurposeRepository.save(taskPending)
-                    debugLog("Created task pending for agent '\(assigneeId.value)' on status change to in_progress")
-                }
-            }
         }
 
         if let priorityStr = updateRequest.priority,
@@ -1286,19 +1262,25 @@ final class RESTServer {
             let taskCount = counts[.task] ?? 0
 
             // Determine chat status: connected > connecting > disconnected
+            // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
             let chatStatus: String
             if chatCount > 0 {
                 // Active chat session exists
                 chatStatus = "connected"
-            } else if try pendingAgentPurposeRepository.find(
+            } else if let assignment = try projectAgentAssignmentRepository.findAssignment(
                 agentId: agent.id,
-                projectId: projectId,
-                purpose: .chat
-            ) != nil {
-                // Chat pending (agent is starting up)
-                chatStatus = "connecting"
+                projectId: projectId
+            ), let spawnStartedAt = assignment.spawnStartedAt {
+                // Check if spawn is still in progress (within 120 seconds)
+                let spawnTimeout: TimeInterval = 120
+                if Date().timeIntervalSince(spawnStartedAt) < spawnTimeout {
+                    chatStatus = "connecting"
+                } else {
+                    // Spawn timed out
+                    chatStatus = "disconnected"
+                }
             } else {
-                // No session and no pending
+                // No session and no spawn in progress
                 chatStatus = "disconnected"
             }
 
@@ -1857,24 +1839,15 @@ final class RESTServer {
 
         do {
             // Dual write: save to both sender's and receiver's storage
+            // WorkDetectionService will detect this as unread messages
+            // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
             try chatRepository.saveMessageDualWrite(
                 message,
                 projectId: projectId,
                 senderAgentId: currentAgentId,
                 receiverAgentId: targetAgentId
             )
-
-            // Record pending purpose to trigger agent spawn
-            // 参照: docs/design/CHAT_FEATURE.md - 9.3 エージェント起動フロー
-            let pendingPurpose = PendingAgentPurpose(
-                agentId: targetAgentId,
-                projectId: projectId,
-                purpose: .chat,
-                createdAt: Date(),
-                startedAt: nil
-            )
-            try pendingAgentPurposeRepository.save(pendingPurpose)
-            debugLog("Recorded pending purpose for chat: agent=\(targetAgentId.value), project=\(projectId.value)")
+            debugLog("Saved chat message for agent: \(targetAgentId.value), project=\(projectId.value)")
 
             return jsonResponse(ChatMessageDTO(from: message), status: .created)
         } catch {
@@ -2004,28 +1977,22 @@ final class RESTServer {
                 return jsonResponse(["success": true, "alreadyActive": true])
             }
 
-            // Check if there's already a pending purpose for chat specifically
-            // Note: We must check for .chat specifically, not any purpose.
-            // A .task pending purpose should not block chat session creation.
-            // Reference: listProjectAgentSessions checks for .chat pending purpose to show "connecting" status
-            if try pendingAgentPurposeRepository.find(
+            // Check if spawn is already in progress (spawn_started_at set and not expired)
+            // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+            if let assignment = try projectAgentAssignmentRepository.findAssignment(
                 agentId: targetAgentId,
-                projectId: projectId,
-                purpose: .chat
-            ) != nil {
-                debugLog("startChatSession: Chat pending purpose already exists")
-                return jsonResponse(["success": true, "pendingExists": true])
+                projectId: projectId
+            ), let spawnStartedAt = assignment.spawnStartedAt {
+                let spawnTimeout: TimeInterval = 120
+                if Date().timeIntervalSince(spawnStartedAt) < spawnTimeout {
+                    debugLog("startChatSession: Spawn already in progress for agent=\(agentIdStr)")
+                    return jsonResponse(["success": true, "spawnInProgress": true])
+                }
             }
 
-            // Create PendingAgentPurpose with purpose=chat
-            let pendingPurpose = PendingAgentPurpose(
-                agentId: targetAgentId,
-                projectId: projectId,
-                purpose: .chat
-            )
-            try pendingAgentPurposeRepository.save(pendingPurpose)
-
-            debugLog("startChatSession: Created pending purpose for agent=\(agentIdStr), project=\(projectIdStr)")
+            // No active session and no spawn in progress
+            // Coordinator will detect unread messages and spawn the agent via WorkDetectionService
+            debugLog("startChatSession: No active session, Coordinator will spawn agent=\(agentIdStr), project=\(projectIdStr)")
             return jsonResponse(["success": true])
         } catch {
             debugLog("Failed to start chat session: \(error)")
@@ -2068,10 +2035,14 @@ final class RESTServer {
 
             if activeChatSessions.isEmpty {
                 debugLog("endChatSession: No active chat session found for agent=\(agentIdStr)")
-                // Clean up PendingAgentPurpose even if no active session
-                // This handles cases where session was never created but pending purpose exists
-                try pendingAgentPurposeRepository.delete(agentId: targetAgentId, projectId: projectId, purpose: .chat)
-                debugLog("endChatSession: Deleted pending purpose (chat) for agent=\(agentIdStr)")
+                // Clear spawn_started_at to allow fresh spawn next time
+                // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+                try projectAgentAssignmentRepository.updateSpawnStartedAt(
+                    agentId: targetAgentId,
+                    projectId: projectId,
+                    startedAt: nil
+                )
+                debugLog("endChatSession: Cleared spawn_started_at for agent=\(agentIdStr)")
                 // Return success even if no session exists (idempotent)
                 return jsonResponse(["success": true, "noActiveSession": true])
             }
@@ -2086,11 +2057,14 @@ final class RESTServer {
 
             debugLog("endChatSession: Terminated \(terminatedCount) session(s) for agent=\(agentIdStr)")
 
-            // Clean up PendingAgentPurpose for chat
-            // This ensures that when user reopens chat, a fresh pending purpose is created
-            // without stale started_at that could cause "stuck in preparing" issue
-            try pendingAgentPurposeRepository.delete(agentId: targetAgentId, projectId: projectId, purpose: .chat)
-            debugLog("endChatSession: Deleted pending purpose (chat) for agent=\(agentIdStr)")
+            // Clear spawn_started_at to allow fresh spawn when user reopens chat
+            // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+            try projectAgentAssignmentRepository.updateSpawnStartedAt(
+                agentId: targetAgentId,
+                projectId: projectId,
+                startedAt: nil
+            )
+            debugLog("endChatSession: Cleared spawn_started_at for agent=\(agentIdStr)")
 
             return jsonResponse(["success": true])
         } catch {

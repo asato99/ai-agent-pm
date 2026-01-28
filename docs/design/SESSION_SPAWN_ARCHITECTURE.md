@@ -2,345 +2,322 @@
 
 ## 概要
 
-エージェントセッションの起動を `pending_agent_purposes` テーブルで一元管理し、チャットとタスクの両方で統一された仕組みを提供する。
+エージェントセッションの起動における重複スポーン防止を `project_agents.spawn_started_at` で管理する。
+専用テーブルを廃止し、最小限の構成で目的を達成する。
 
-## 現状の問題点
+## 設計原則
 
-### 1. チャットとタスクで異なる起動判定
+### Coordinator と MCPServer の役割分担
 
-| | チャット | タスク |
-|---|---|---|
-| 起動トリガー | pending_agent_purposes | in_progressタスクの有無 |
-| 重複起動防止 | started_at で追跡 | なし（activeTaskSessionsのみ） |
-| purpose判定 | pendingから取得 | デフォルトで task |
+| コンポーネント | 責務 |
+|----------------|------|
+| **Coordinator** | エージェント単位でポーリング・スポーン（purpose 区別なし） |
+| **MCPServer (getAgentAction)** | 起動判定 + 重複スポーン防止 |
+| **MCPServer (authenticate)** | セッション生成（現在の状態に基づいて purpose を決定） |
 
-### 2. 認証時のpurpose判定問題
+**意図的な分散判定**: 両者の判定が厳密に一致する必要はない。順次処理で時間幅を持って見たときに、最終的にセッション生成まで進むことを保証する。
 
-```swift
-// AuthenticateUseCase（現状）
-var purpose: AgentPurpose = .task  // デフォルト
-if let pending = pendingRepo.find(...) {
-    purpose = pending.purpose      // pendingがあればそこから取得
-}
+### pending の責務（最小化）
+
+**唯一の責務**: 起動〜認証の間の重複スポーンを防ぐ
+
+これだけ。セッション自体が生成されれば、その状態で判断可能。
+
+### 共通ロジックの原則
+
+**WorkDetectionService**: `getAgentAction` と `authenticate` で同一の仕事判定ロジックを使用
+
+- チャットの仕事がないのにチャットセッションを作成しない
+- タスクの仕事がないのにタスクセッションを作成しない
+- 両者の判定一貫性を保証
+
+## データ構造
+
+### project_agents テーブル（変更）
+
+```sql
+project_agents:
+  - project_id       -- PK
+  - agent_id         -- PK
+  - assigned_at
+  - spawn_started_at -- NEW: スポーン開始時刻（NULL = スポーン中でない）
 ```
 
-タスクはpendingを経由しないため、認証時にチャットとタスクの区別がつかない。
+**`pending_agent_purposes` テーブルは廃止**
 
-### 3. タスクの重複起動リスク
+### spawn_started_at の役割
 
-```
-1. Coordinator → getAgentAction → start (in_progressタスクあり)
-2. スポーン開始（数秒かかる）
-3. 同じCoordinator → getAgentAction → start (まだセッションなし)
-4. 複数エージェントが起動
-```
+| 状態 | spawn_started_at | 意味 |
+|------|------------------|------|
+| 起動待ち | NULL | スポーン可能 |
+| スポーン中 | 設定済み（120秒以内） | スポーン不可（重複防止） |
+| スポーン失敗 | 設定済み（120秒超過） | タイムアウト、再スポーン可能 |
 
-チャットは `started_at` で追跡しているが、タスクにはこの仕組みがない。
-
-### 4. ゾンビpendingによるブロックリスク
-
-現状の `find(agentId, projectId)` は1レコードしか返さない（purpose指定なし）。
-chat と task の両方の pending がある場合、片方しか見えない。
-
-**シナリオ: ゾンビ chat pending がタスクをブロック**
-```
-1. チャット送信 → chat pending 作成
-2. getAgentAction → start + markAsStarted
-3. スポーン失敗（認証まで到達しない）
-4. chat pending がゾンビとして残る（started_at あり）
-5. タスクが in_progress → task pending 作成
-6. getAgentAction → find() → chat pending が返される（started_at優先）
-7. started_at チェック → 120秒以内なら hold
-8. タスクがブロックされる
-```
-
-## 設計方針
-
-### pending_agent_purposes の責務
-
-| フェーズ | task pending | chat pending |
-|----------|--------------|--------------|
-| getAgentAction | started_at で重複起動防止 | started_at で重複起動防止 |
-| authenticate | 不要（in_progressタスクで判定） | purpose判定に使用 |
-
-**タスク**: in_progressタスクがソースオブトゥルース（堅牢）
-**チャット**: chat pendingがソースオブトゥルース
-
-### ライフサイクル
+## フローの全体像
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    pending_agent_purposes                        │
-├─────────────────────────────────────────────────────────────────┤
-│ 作成: チャットメッセージ送信 / タスクが in_progress になった時   │
-│ 更新: getAgentAction で start を返す時に started_at を設定      │
-│ 削除: セッション作成成功時 / TTL超過時                           │
+│ 1. Coordinator (ポーリング)                                     │
+│    get_agent_action(agent_id, project_id)                       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. getAgentAction (起動判定)                                    │
+│    - hasWork を判定（chat / task 別メソッド）                    │
+│    - spawnInProgress を判定                                     │
+│    - hasWork && !spawnInProgress → spawn_started_at 設定、start │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. Coordinator (スポーン)                                       │
+│    spawn_agent(agent_id, project_id, ...)                       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. authenticate (セッション生成)                                │
+│    - 現在の状態に基づいて適切なセッションを生成                  │
+│    - 成功/失敗に関わらず spawn_started_at をクリア              │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. 次のポーリング                                               │
+│    - まだ仕事があれば再度スポーン（自然な繰り返し）             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### started_at の役割
+## WorkDetectionService（共通ロジック）
 
-`started_at` は「スポーン開始〜セッション作成」の間の不確実性を扱う：
+`getAgentAction` と `authenticate` で使用する共通の仕事判定サービス。
 
-| 状態 | started_at | 動作 |
-|------|------------|------|
-| 起動待ち | NULL | start を返す + started_at を設定 |
-| スポーン中 | 設定済み（120秒以内） | hold を返す |
-| スポーン失敗 | 設定済み（120秒超過） | started_at クリア + start を返す |
+### 設計意図
 
+- **一貫性**: 両者で同じ判定ロジックを使用し、不一致を防止
+- **責務分離**: 仕事判定ロジックを独立したサービスとして切り出し
+- **テスト容易性**: 共通ロジックを単体でテスト可能
+
+### インターフェース
+
+```swift
+// Sources/UseCase/WorkDetectionService.swift
+public struct WorkDetectionService: Sendable {
+    private let chatRepository: any ChatRepositoryProtocol
+    private let sessionRepository: any AgentSessionRepositoryProtocol
+    private let taskRepository: any TaskRepositoryProtocol
+    private let agentRepository: any AgentRepositoryProtocol
+
+    /// チャットの仕事があるか判定
+    public func hasChatWork(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+        let hasUnread = try chatRepository.hasUnreadMessages(projectId: projectId, agentId: agentId)
+        let sessions = try sessionRepository.findByAgentIdAndProjectId(agentId, projectId: projectId)
+        let hasActiveChat = sessions.contains { $0.purpose == .chat && !$0.isExpired }
+        return hasUnread && !hasActiveChat
+    }
+
+    /// タスクの仕事があるか判定（基本条件のみ）
+    public func hasTaskWork(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+        let inProgressTask = try taskRepository.findByProject(projectId, status: .inProgress)
+            .first { $0.assigneeId == agentId }
+        let sessions = try sessionRepository.findByAgentIdAndProjectId(agentId, projectId: projectId)
+        let hasActiveTask = sessions.contains { $0.purpose == .task && !$0.isExpired }
+        return inProgressTask != nil && !hasActiveTask
+    }
+}
 ```
-pending作成 ─→ start ─→ スポーン ─→ 認証 ─→ セッション作成 ─→ pending削除
-              │                              │
-              └── started_at で追跡 ─────────┘
-```
 
-## 統一設計
+### 利用箇所
 
-### getAgentAction のロジック
+| コンポーネント | 使用メソッド | 追加条件 |
+|----------------|--------------|----------|
+| **getAgentAction** | `hasChatWork`, `hasTaskWork` | 階層タイプ別条件（マネージャー待機等） |
+| **authenticate** | `hasChatWork`, `hasTaskWork` | なし（共通ロジックのみ） |
 
-**重要**: getAgentAction と authenticate の判断基準を一致させる。
-タスク優先で判定し、該当するpurposeのpendingのみにmarkAsStartedする。
+## getAgentAction の実装
+
+### メイン構造
 
 ```swift
 func getAgentAction(agentId: String, projectId: String) -> Action {
-    // 状態取得
-    let activeTaskSession = findActiveTaskSession(agentId, projectId)
-    let activeChatSession = findActiveChatSession(agentId, projectId)
-    let inProgressTask = findInProgressTask(assignee: agentId, projectId: projectId)
-    let taskPending = pendingRepo.find(agentId, projectId, purpose: .task)
-    let chatPending = pendingRepo.find(agentId, projectId, purpose: .chat)
+    let workService = WorkDetectionService(...)
 
-    // ==========================================
-    // タスク判定（認証と同じロジック）
-    // 条件: activeTaskSession == nil AND inProgressTask != nil
-    // ==========================================
-    if activeTaskSession == nil && inProgressTask != nil {
-        // タスクセッションが必要
-        var currentTaskPending = taskPending
+    // 共通ロジックで基本判定
+    let hasWorkForChat = workService.hasChatWork(agentId, projectId)
+    let hasWorkForTask = checkTaskWorkWithHierarchy(agentId, projectId, workService)
 
-        // フォールバック: task pending がなければ作成
-        if currentTaskPending == nil {
-            currentTaskPending = PendingAgentPurpose(
-                agentId: agentId,
-                projectId: projectId,
-                purpose: .task
-            )
-            pendingRepo.save(currentTaskPending)
-        }
+    let hasWork = hasWorkForChat || hasWorkForTask
+    let spawnInProgress = checkSpawnInProgress(agentId, projectId)
 
-        // started_at チェック
-        if currentTaskPending.startedAt == nil {
-            // 未起動 → start
-            pendingRepo.markAsStarted(currentTaskPending, startedAt: now)
-            return .start
-        } else if timedOut(currentTaskPending.startedAt, timeout: 120) {
-            // タイムアウト → 再スポーン許可
-            pendingRepo.clearStartedAt(currentTaskPending)
-            pendingRepo.markAsStarted(currentTaskPending, startedAt: now)
-            return .start
-        }
-        // else: タスク用スポーン中、続けてチャットを確認
+    if hasWork && !spawnInProgress {
+        markSpawnStarted(agentId, projectId)
+        return .start
     }
-
-    // ==========================================
-    // チャット判定
-    // 条件: activeChatSession == nil AND chatPending != nil
-    // ==========================================
-    if activeChatSession == nil && chatPending != nil {
-        // started_at チェック
-        if chatPending.startedAt == nil {
-            // 未起動 → start
-            pendingRepo.markAsStarted(chatPending, startedAt: now)
-            return .start
-        } else if timedOut(chatPending.startedAt, timeout: 120) {
-            // タイムアウト → 再スポーン許可
-            pendingRepo.clearStartedAt(chatPending)
-            pendingRepo.markAsStarted(chatPending, startedAt: now)
-            return .start
-        }
-        // else: チャット用スポーン中
-    }
-
-    // ==========================================
-    // どちらも起動不要
-    // ==========================================
     return .hold
 }
 ```
 
-### authenticate のロジック
+### checkSpawnInProgress
 
-**重要**: purpose判定はpendingに依存せず、状態ベースで行う。
+```swift
+func checkSpawnInProgress(agentId: String, projectId: String) -> Bool {
+    let assignment = projectAgentRepo.find(agentId, projectId)
+    guard let startedAt = assignment.spawnStartedAt else {
+        return false  // NULL = スポーン中でない
+    }
+
+    let elapsed = now.timeIntervalSince(startedAt)
+    if elapsed > 120 {
+        return false  // タイムアウト = 再スポーン可能
+    }
+    return true  // スポーン中
+}
+```
+
+### checkTaskWorkWithHierarchy（階層タイプ別条件）
+
+```swift
+func checkTaskWorkWithHierarchy(agentId: String, projectId: String, workService: WorkDetectionService) -> Bool {
+    // 基本条件（共通ロジック）
+    guard workService.hasTaskWork(agentId, projectId) else {
+        return false
+    }
+
+    // 階層タイプ別の追加条件
+    let agent = agentRepo.findById(agentId)
+
+    switch agent.hierarchyType {
+    case .manager:
+        return checkManagerTaskWork(agentId, projectId)
+    case .worker:
+        return true  // 基本条件のみ
+    case .owner:
+        return false  // オーナーはタスク実行しない
+    }
+}
+
+func checkManagerTaskWork(agentId: String, projectId: String) -> Bool {
+    // マネージャー固有: 部下が仕事中なら待機
+    let subordinates = agentRepo.findSubordinates(agentId)
+    let anySubordinateBusy = subordinates.contains { sub in
+        sessionRepo.hasActiveSession(sub.id, projectId, purpose: .task)
+    }
+
+    if anySubordinateBusy {
+        return false  // 部下が仕事中 → マネージャーは仕事なし
+    }
+
+    return true
+
+    // 将来の拡張ポイント:
+    // - 全サブタスクが完了しているか
+    // - 承認待ちのタスクがあるか
+}
+```
+
+## authenticate の実装
+
+`WorkDetectionService` の共通ロジックを使用してセッション目的を決定。
 
 ```swift
 func authenticate(agentId: String, passkey: String, projectId: String) -> Result {
-    // ... パスキー検証等 ...
+    let workService = WorkDetectionService(...)
 
-    // 状態取得
-    let activeTaskSession = findActiveTaskSession(agentId, projectId)
-    let activeChatSession = findActiveChatSession(agentId, projectId)
-    let inProgressTask = findInProgressTask(assignee: agentId, projectId: projectId)
-    let chatPending = pendingRepo.find(agentId, projectId, purpose: .chat)
+    // パスキー検証
+    guard verifyPasskey(agentId, passkey) else {
+        clearSpawnStarted(agentId, projectId)  // 失敗でもクリア
+        return .failure("Invalid credentials")
+    }
 
-    // ==========================================
+    // 共通ロジックで仕事判定
+    let hasTaskWork = workService.hasTaskWork(agentId, projectId)
+    let hasChatWork = workService.hasChatWork(agentId, projectId)
+
     // タスクセッション判定（優先）
-    // 条件: activeTaskSession == nil AND inProgressTask != nil
-    // ==========================================
-    if activeTaskSession == nil && inProgressTask != nil {
-        // タスクセッション作成
-        let session = AgentSession(agentId, projectId, purpose: .task)
-        sessionRepo.save(session)
-
-        // task pending 削除（あれば）
-        if let taskPending = pendingRepo.find(agentId, projectId, purpose: .task) {
-            pendingRepo.delete(taskPending)
-        }
-
+    if hasTaskWork {
+        let session = createSession(agentId, projectId, purpose: .task)
+        clearSpawnStarted(agentId, projectId)
         return .success(session)
     }
 
-    // ==========================================
     // チャットセッション判定
-    // 条件: activeChatSession == nil AND chatPending != nil
-    // ==========================================
-    if activeChatSession == nil && chatPending != nil {
-        // チャットセッション作成
-        let session = AgentSession(agentId, projectId, purpose: .chat)
-        sessionRepo.save(session)
-
-        // chat pending 削除
-        pendingRepo.delete(chatPending)
-
+    if hasChatWork {
+        let session = createSession(agentId, projectId, purpose: .chat)
+        clearSpawnStarted(agentId, projectId)
         return .success(session)
     }
 
-    // ==========================================
     // どちらにも該当しない
-    // ==========================================
+    clearSpawnStarted(agentId, projectId)  // 失敗でもクリア
     return .failure("No valid purpose for authentication")
 }
 ```
 
-### 判定ロジックの一貫性
+**重要**:
+- 成功でも失敗でも `spawn_started_at` をクリア → 長期ブロック防止
+- `WorkDetectionService` を使用 → `getAgentAction` と同一の判定ロジック
 
-| 判定 | getAgentAction | authenticate |
-|------|----------------|--------------|
-| タスク | `activeTaskSession == nil AND inProgressTask != nil` | 同左 |
-| チャット | `activeChatSession == nil AND chatPending != nil` | 同左 |
-
-両方のメソッドで同じ条件を使用することで、getAgentActionでmarkAsStartedしたpurposeと、authenticateで作成するセッションのpurposeが一致する。
-
-### タスクステータス変更時のpending作成
-
-```swift
-func updateTaskStatus(taskId: TaskID, newStatus: TaskStatus) {
-    let task = taskRepo.find(taskId)
-
-    if newStatus == .inProgress && task.status != .inProgress {
-        // in_progressになった時点でpendingを作成
-        let existing = pendingRepo.find(task.assigneeId, task.projectId, purpose: .task)
-        if existing == nil {
-            let pending = PendingAgentPurpose(
-                agentId: task.assigneeId,
-                projectId: task.projectId,
-                purpose: .task
-            )
-            pendingRepo.save(pending)
-        }
-    }
-
-    task.status = newStatus
-    taskRepo.save(task)
-}
-```
-
-## フォールバックによる堅牢性
-
-タスクの場合、`in_progress` 状態がソースオブトゥルースとして機能する：
+## 両方必要な場合の自然な解決
 
 ```
-通常フロー:
-  タスク in_progress → pending作成 → getAgentAction → start
-
-フォールバック（pending作成漏れの場合）:
-  タスク in_progress → getAgentAction → pendingなし
-                                      → in_progressタスク検出
-                                      → pending自動作成 → start
+状態: in_progress タスクあり + 未読チャットあり
+     ↓
+getAgentAction: hasWork=true, spawnInProgress=false → "start"
+     ↓
+spawn → authenticate → TASK セッション生成 → spawn_started_at クリア
+     ↓
+次の getAgentAction:
+  hasWork=true (chat がまだある), spawnInProgress=false
+  → "start"
+     ↓
+spawn → authenticate → CHAT セッション生成 → spawn_started_at クリア
 ```
 
-これにより：
-- pending作成漏れがあってもタスクは実行される
-- 重複起動防止（started_at）の恩恵を受けられる
+purpose を追跡しないことで、**残った仕事に対して自然に再スポーンが発生**する。
 
-## ゾンビpending対策
+## 旧設計との比較
 
-### 対策1: purpose別にpendingを検索
+| 観点 | 旧設計 | 新設計 |
+|------|--------|--------|
+| 専用テーブル | `pending_agent_purposes` | なし |
+| purpose 追跡 | purpose 別に pending レコード | なし（セッションで判断） |
+| started_at の管理 | purpose ごとに独立 | エージェント×プロジェクトで1つ |
+| 認証失敗時 | started_at 残存（120秒ブロック） | 必ずクリア（即再試行可能） |
+| 複雑性 | 高（purpose 交差問題あり） | 低（シンプルなロック機構） |
 
-```swift
-// 旧: 1レコードしか返さない
-let pending = find(agentId, projectId)
+## マイグレーション
 
-// 新: purpose別に検索
-let taskPending = find(agentId, projectId, purpose: .task)
-let chatPending = find(agentId, projectId, purpose: .chat)
+### 1. スキーマ変更
+
+```sql
+-- project_agents に列追加
+ALTER TABLE project_agents ADD COLUMN spawn_started_at TEXT;
+
+-- pending_agent_purposes は後で削除（移行完了後）
 ```
 
-### 対策2: 状態ベースのpurpose判定
+### 2. コード変更
 
-authenticateでは、pendingからpurposeを取得するのではなく、
-`in_progressタスクの有無`で判定する。
+1. `getAgentAction` のリファクタリング
+   - `checkChatWork`, `checkTaskWork` メソッド追加
+   - `checkSpawnInProgress` を `project_agents` 参照に変更
 
-これにより、ゾンビchat pendingがあっても：
-- in_progressタスクがあれば → タスクセッション作成（正しい）
-- in_progressタスクがなければ → チャットセッション作成
+2. `AuthenticateUseCaseV2` の変更
+   - `spawn_started_at` クリアを追加
+   - pending 削除ロジックを削除
 
-### 対策3: TTLによる自然消滅
+3. pending 作成箇所の削除
+   - チャット送信時の pending 作成を削除
+   - タスクステータス変更時の pending 作成を削除
 
-- デフォルトTTL: 300秒（5分）
-- 期限切れのpendingは自動削除
+### 3. テスト
 
-### 対策4: スポーンタイムアウト
+- 重複スポーン防止のテスト
+- 認証失敗後の即再試行テスト
+- chat + task 同時存在時の順次処理テスト
 
-- タイムアウト: 120秒
-- started_atから120秒経過でstarted_atクリア → 再スポーン許可
+### 4. pending_agent_purposes 削除
 
-## UIステータス表示
-
-pendingの有無ではなく、セッションの状態で判断する：
-
-| 表示 | 判定条件 |
-|------|----------|
-| connected | アクティブなセッションあり |
-| connecting | セッションの state が initializing |
-| disconnected | セッションなし |
-
-これにより pending を内部実装の詳細として隠蔽できる。
-
-## 移行計画
-
-### Phase 1: タスクのpending経由化
-
-1. タスクが `in_progress` になった時に pending を作成する処理を追加
-2. getAgentAction のフォールバックロジックを追加（後方互換性）
-3. テストで動作確認
-
-### Phase 2: authenticate の状態ベース判定
-
-1. authenticate で状態ベースのpurpose判定を実装
-2. 既存の「全セッションブロック」ロジックを削除
-3. purpose別にpending削除
-4. UC019（チャット+タスク同時実行）のテストで確認
-
-### Phase 3: getAgentAction の判定ロジック統一
-
-1. purpose別にpendingを検索するよう変更
-2. タスク優先の判定ロジックに変更
-3. authenticateと同じ判定条件を使用
-
-### Phase 4: UIステータス表示の変更
-
-1. RESTServer の chatStatus 判定を セッション状態ベースに変更
-2. 既存のpending依存ロジックを削除
+```sql
+DROP TABLE pending_agent_purposes;
+```
 
 ## 関連ドキュメント
 

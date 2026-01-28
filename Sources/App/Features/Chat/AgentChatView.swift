@@ -285,10 +285,9 @@ struct AgentChatView: View {
                 )
 
                 // メッセージを再読み込み
+                // WorkDetectionService がメッセージを検知してエージェントを起動する
+                // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
                 await loadMessages()
-
-                // チャット用の起動理由を登録（Coordinatorがエージェントを起動する）
-                await triggerAgentForChat()
 
                 await MainActor.run {
                     isWaitingForResponse = true
@@ -303,33 +302,6 @@ struct AgentChatView: View {
             await MainActor.run {
                 isSending = false
             }
-        }
-    }
-
-    /// エージェントをチャット応答用に起動するためのpending purposeを登録
-    /// Coordinatorがこれを検知してエージェントを起動し、
-    /// エージェントが get_pending_messages → respond_chat を実行する
-    private func triggerAgentForChat() async {
-        chatDebugLog("triggerAgentForChat: agentId=\(agentId.value), projectId=\(projectId.value)")
-        do {
-            let pendingPurpose = PendingAgentPurpose(
-                agentId: agentId,
-                projectId: projectId,
-                purpose: .chat,
-                createdAt: Date()
-            )
-            try container.pendingAgentPurposeRepository.save(pendingPurpose)
-            chatDebugLog("triggerAgentForChat: PendingAgentPurpose saved successfully")
-
-            // Verify it was saved by reading it back
-            if let found = try? container.pendingAgentPurposeRepository.find(agentId: agentId, projectId: projectId) {
-                chatDebugLog("triggerAgentForChat: Verified - found pending purpose: \(found.purpose)")
-            } else {
-                chatDebugLog("triggerAgentForChat: WARNING - pending purpose NOT found after save!")
-            }
-        } catch {
-            chatDebugLog("triggerAgentForChat: FAILED - \(error)")
-            // エラーでもUIには表示しない（ポーリングで応答を待つ）
         }
     }
 

@@ -15,18 +15,21 @@ struct ProjectAgentAssignmentRecord: Codable, FetchableRecord, PersistableRecord
     var projectId: String
     var agentId: String
     var assignedAt: Date
+    var spawnStartedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case projectId = "project_id"
         case agentId = "agent_id"
         case assignedAt = "assigned_at"
+        case spawnStartedAt = "spawn_started_at"
     }
 
     func toDomain() -> ProjectAgentAssignment {
         ProjectAgentAssignment(
             projectId: ProjectID(value: projectId),
             agentId: AgentID(value: agentId),
-            assignedAt: assignedAt
+            assignedAt: assignedAt,
+            spawnStartedAt: spawnStartedAt
         )
     }
 
@@ -34,7 +37,8 @@ struct ProjectAgentAssignmentRecord: Codable, FetchableRecord, PersistableRecord
         ProjectAgentAssignmentRecord(
             projectId: assignment.projectId.value,
             agentId: assignment.agentId.value,
-            assignedAt: assignment.assignedAt
+            assignedAt: assignment.assignedAt,
+            spawnStartedAt: assignment.spawnStartedAt
         )
     }
 }
@@ -122,6 +126,33 @@ public final class ProjectAgentAssignmentRepository: ProjectAgentAssignmentRepos
                 .order(Column("assigned_at").desc)
                 .fetchAll(db)
                 .map { $0.toDomain() }
+        }
+    }
+
+    /// 特定のエージェント×プロジェクト割り当てを取得
+    /// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+    public func findAssignment(agentId: AgentID, projectId: ProjectID) throws -> ProjectAgentAssignment? {
+        try db.read { db in
+            try ProjectAgentAssignmentRecord
+                .filter(Column("project_id") == projectId.value && Column("agent_id") == agentId.value)
+                .fetchOne(db)?
+                .toDomain()
+        }
+    }
+
+    /// スポーン開始時刻を更新（nil でクリア）
+    /// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+    public func updateSpawnStartedAt(agentId: AgentID, projectId: ProjectID, startedAt: Date?) throws {
+        try db.write { db in
+            try db.execute(
+                sql: "UPDATE project_agents SET spawn_started_at = ? WHERE agent_id = ? AND project_id = ?",
+                arguments: [startedAt, agentId.value, projectId.value]
+            )
+        }
+        // WAL checkpoint for cross-process visibility (App + MCPServer accessing same DB)
+        // PASSIVE mode is best-effort: ignore errors if checkpoint can't proceed (e.g., active readers)
+        try? db.write { db in
+            try db.execute(sql: "PRAGMA wal_checkpoint(PASSIVE)")
         }
     }
 }

@@ -1,5 +1,5 @@
 // Tests/UseCaseTests/AuthenticateUseCaseTests.swift
-// Session Spawn Architecture: authenticate の状態ベース判定テスト
+// Session Spawn Architecture: AuthenticateUseCaseV3 のテスト
 // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
 
 import XCTest
@@ -7,76 +7,6 @@ import XCTest
 @testable import Domain
 
 // MARK: - Mock Repositories
-
-final class MockPendingAgentPurposeRepository: PendingAgentPurposeRepositoryProtocol {
-    var purposes: [String: PendingAgentPurpose] = [:]  // key: "agentId:projectId:purpose"
-
-    private func key(_ agentId: AgentID, _ projectId: ProjectID, _ purpose: AgentPurpose) -> String {
-        "\(agentId.value):\(projectId.value):\(purpose.rawValue)"
-    }
-
-    private func keyPrefix(_ agentId: AgentID, _ projectId: ProjectID) -> String {
-        "\(agentId.value):\(projectId.value):"
-    }
-
-    func find(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws -> PendingAgentPurpose? {
-        purposes[key(agentId, projectId, purpose)]
-    }
-
-    func find(agentId: AgentID, projectId: ProjectID) throws -> PendingAgentPurpose? {
-        let prefix = keyPrefix(agentId, projectId)
-        return purposes.values.first { key(agentId, projectId, $0.purpose).hasPrefix(prefix) }
-    }
-
-    func save(_ purpose: PendingAgentPurpose) throws {
-        purposes[key(purpose.agentId, purpose.projectId, purpose.purpose)] = purpose
-    }
-
-    func delete(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws {
-        purposes.removeValue(forKey: key(agentId, projectId, purpose))
-    }
-
-    func delete(agentId: AgentID, projectId: ProjectID) throws {
-        let prefix = keyPrefix(agentId, projectId)
-        for k in purposes.keys where k.hasPrefix(prefix) {
-            purposes.removeValue(forKey: k)
-        }
-    }
-
-    func deleteExpired(olderThan: Date) throws {
-        purposes = purposes.filter { !$0.value.isExpired(now: olderThan, ttlSeconds: 0) }
-    }
-
-    func markAsStarted(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose, startedAt: Date) throws {
-        let k = key(agentId, projectId, purpose)
-        if var p = purposes[k] {
-            p = PendingAgentPurpose(
-                agentId: p.agentId,
-                projectId: p.projectId,
-                purpose: p.purpose,
-                createdAt: p.createdAt,
-                startedAt: startedAt,
-                conversationId: p.conversationId
-            )
-            purposes[k] = p
-        }
-    }
-
-    func clearStartedAt(agentId: AgentID, projectId: ProjectID, purpose: AgentPurpose) throws {
-        let k = key(agentId, projectId, purpose)
-        if var p = purposes[k] {
-            p = PendingAgentPurpose(
-                agentId: p.agentId,
-                projectId: p.projectId,
-                purpose: p.purpose,
-                createdAt: p.createdAt,
-                startedAt: nil,
-                conversationId: p.conversationId
-            )
-            purposes[k] = p
-        }
-    }
-}
 
 final class MockAgentSessionRepositoryForAuth: AgentSessionRepositoryProtocol {
     var sessions: [AgentSessionID: AgentSession] = [:]
@@ -155,13 +85,20 @@ final class MockAgentSessionRepositoryForAuth: AgentSessionRepositoryProtocol {
     }
 
     // Helper for tests
-    func findActiveByPurpose(_ agentId: AgentID, _ projectId: ProjectID, _ purpose: AgentPurpose) -> AgentSession? {
-        sessions.values.first {
-            $0.agentId == agentId &&
-            $0.projectId == projectId &&
-            $0.purpose == purpose &&
-            !$0.isExpired
-        }
+    func addActiveSession(_ agentId: AgentID, _ projectId: ProjectID, _ purpose: AgentPurpose) {
+        let now = Date()
+        let session = AgentSession(
+            id: AgentSessionID(value: UUID().uuidString),
+            token: UUID().uuidString,
+            agentId: agentId,
+            projectId: projectId,
+            purpose: purpose,
+            state: .active,
+            expiresAt: now.addingTimeInterval(3600),
+            createdAt: now,
+            lastActivityAt: now
+        )
+        sessions[session.id] = session
     }
 }
 
@@ -267,25 +204,83 @@ final class MockTaskRepositoryForAuth: TaskRepositoryProtocol {
     func delete(_ id: TaskID) throws {
         tasks.removeValue(forKey: id)
     }
+}
+
+final class MockChatRepositoryForAuth: ChatRepositoryProtocol {
+    var messages: [String: [ChatMessage]] = [:]  // key: "projectId:agentId"
+
+    private func key(_ projectId: ProjectID, _ agentId: AgentID) -> String {
+        "\(projectId.value):\(agentId.value)"
+    }
+
+    func findMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage] {
+        messages[key(projectId, agentId)] ?? []
+    }
+
+    func saveMessage(_ message: ChatMessage, projectId: ProjectID, agentId: AgentID) throws {
+        let k = key(projectId, agentId)
+        var list = messages[k] ?? []
+        list.append(message)
+        messages[k] = list
+    }
+
+    func getLastMessages(projectId: ProjectID, agentId: AgentID, limit: Int) throws -> [ChatMessage] {
+        let all = messages[key(projectId, agentId)] ?? []
+        return Array(all.suffix(limit))
+    }
+
+    func findUnreadMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage] {
+        messages[key(projectId, agentId)] ?? []
+    }
+
+    func saveMessageDualWrite(
+        _ message: ChatMessage,
+        projectId: ProjectID,
+        senderAgentId: AgentID,
+        receiverAgentId: AgentID
+    ) throws {
+        // Not needed for these tests
+    }
+
+    func findMessagesWithCursor(
+        projectId: ProjectID,
+        agentId: AgentID,
+        limit: Int,
+        after: ChatMessageID?,
+        before: ChatMessageID?
+    ) throws -> ChatMessagePage {
+        ChatMessagePage(messages: [], hasMore: false, totalCount: 0)
+    }
+
+    func countMessages(projectId: ProjectID, agentId: AgentID) throws -> Int {
+        messages[key(projectId, agentId)]?.count ?? 0
+    }
 
     // Helper for tests
-    func findInProgressTaskForAgent(_ agentId: AgentID, _ projectId: ProjectID) -> Task? {
-        tasks.values.first {
-            $0.assigneeId == agentId &&
-            $0.projectId == projectId &&
-            $0.status == .inProgress
-        }
+    func addUnreadMessage(_ projectId: ProjectID, _ agentId: AgentID) {
+        let message = ChatMessage(
+            id: ChatMessageID(value: UUID().uuidString),
+            senderId: AgentID(value: "other-agent"),
+            receiverId: agentId,
+            content: "Hello",
+            createdAt: Date()
+        )
+        let k = key(projectId, agentId)
+        var list = messages[k] ?? []
+        list.append(message)
+        messages[k] = list
     }
 }
 
-// MARK: - AuthenticateUseCaseTests
+// MARK: - AuthenticateUseCaseV3Tests
 
 final class AuthenticateUseCaseTests: XCTestCase {
     var credentialRepo: MockAgentCredentialRepositoryForAuth!
     var sessionRepo: MockAgentSessionRepositoryForAuth!
     var agentRepo: MockAgentRepositoryForAuth!
-    var pendingRepo: MockPendingAgentPurposeRepository!
     var taskRepo: MockTaskRepositoryForAuth!
+    var chatRepo: MockChatRepositoryForAuth!
+    var workService: WorkDetectionService!
 
     let testAgentId = AgentID(value: "test-agent")
     let testProjectId = ProjectID(value: "test-project")
@@ -296,8 +291,13 @@ final class AuthenticateUseCaseTests: XCTestCase {
         credentialRepo = MockAgentCredentialRepositoryForAuth()
         sessionRepo = MockAgentSessionRepositoryForAuth()
         agentRepo = MockAgentRepositoryForAuth()
-        pendingRepo = MockPendingAgentPurposeRepository()
         taskRepo = MockTaskRepositoryForAuth()
+        chatRepo = MockChatRepositoryForAuth()
+        workService = WorkDetectionService(
+            chatRepository: chatRepo,
+            sessionRepository: sessionRepo,
+            taskRepository: taskRepo
+        )
 
         // Setup test agent
         let agent = Agent(
@@ -314,24 +314,25 @@ final class AuthenticateUseCaseTests: XCTestCase {
         credentialRepo.credentials[testAgentId] = credential
     }
 
+    override func tearDown() {
+        credentialRepo = nil
+        sessionRepo = nil
+        agentRepo = nil
+        taskRepo = nil
+        chatRepo = nil
+        workService = nil
+        super.tearDown()
+    }
+
     // MARK: - Helper
 
-    private func createUseCase() -> AuthenticateUseCaseV2 {
-        AuthenticateUseCaseV2(
+    private func createUseCase() -> AuthenticateUseCaseV3 {
+        AuthenticateUseCaseV3(
             credentialRepository: credentialRepo,
             sessionRepository: sessionRepo,
             agentRepository: agentRepo,
-            pendingPurposeRepository: pendingRepo,
-            taskRepository: taskRepo
+            workDetectionService: workService
         )
-    }
-
-    private func createTaskSession() -> AgentSession {
-        AgentSession(agentId: testAgentId, projectId: testProjectId, purpose: .task)
-    }
-
-    private func createChatSession() -> AgentSession {
-        AgentSession(agentId: testAgentId, projectId: testProjectId, purpose: .chat)
     }
 
     private func createInProgressTask() -> Task {
@@ -342,24 +343,6 @@ final class AuthenticateUseCaseTests: XCTestCase {
             status: .inProgress,
             assigneeId: testAgentId,
             createdByAgentId: testAgentId
-        )
-    }
-
-    private func createChatPending() -> PendingAgentPurpose {
-        PendingAgentPurpose(
-            agentId: testAgentId,
-            projectId: testProjectId,
-            purpose: .chat,
-            createdAt: Date()
-        )
-    }
-
-    private func createTaskPending() -> PendingAgentPurpose {
-        PendingAgentPurpose(
-            agentId: testAgentId,
-            projectId: testProjectId,
-            purpose: .task,
-            createdAt: Date()
         )
     }
 
@@ -388,11 +371,10 @@ final class AuthenticateUseCaseTests: XCTestCase {
         XCTAssertNotNil(taskSession, "Task session should be created")
     }
 
-    /// テスト2: chatPendingがあればチャットセッション作成
-    func testAuthenticate_WithChatPending_CreatesChatSession() throws {
+    /// テスト2: 未読メッセージがあればチャットセッション作成
+    func testAuthenticate_WithUnreadMessages_CreatesChatSession() throws {
         // Given
-        let chatPending = createChatPending()
-        try pendingRepo.save(chatPending)
+        chatRepo.addUnreadMessage(testProjectId, testAgentId)
 
         // When
         let useCase = createUseCase()
@@ -416,9 +398,7 @@ final class AuthenticateUseCaseTests: XCTestCase {
         // Given
         let task = createInProgressTask()
         taskRepo.tasks[task.id] = task
-
-        let chatPending = createChatPending()
-        try pendingRepo.save(chatPending)
+        chatRepo.addUnreadMessage(testProjectId, testAgentId)
 
         // When
         let useCase = createUseCase()
@@ -445,12 +425,8 @@ final class AuthenticateUseCaseTests: XCTestCase {
         // Given
         let task = createInProgressTask()
         taskRepo.tasks[task.id] = task
-
-        let existingTaskSession = createTaskSession()
-        sessionRepo.sessions[existingTaskSession.id] = existingTaskSession
-
-        let chatPending = createChatPending()
-        try pendingRepo.save(chatPending)
+        sessionRepo.addActiveSession(testAgentId, testProjectId, .task)
+        chatRepo.addUnreadMessage(testProjectId, testAgentId)
 
         // When
         let useCase = createUseCase()
@@ -473,11 +449,8 @@ final class AuthenticateUseCaseTests: XCTestCase {
     /// テスト5: 両セッション既存時は失敗
     func testAuthenticate_WithBothSessionsExisting_Fails() throws {
         // Given
-        let existingTaskSession = createTaskSession()
-        sessionRepo.sessions[existingTaskSession.id] = existingTaskSession
-
-        let existingChatSession = createChatSession()
-        sessionRepo.sessions[existingChatSession.id] = existingChatSession
+        sessionRepo.addActiveSession(testAgentId, testProjectId, .task)
+        sessionRepo.addActiveSession(testAgentId, testProjectId, .chat)
 
         // When
         let useCase = createUseCase()
@@ -492,9 +465,9 @@ final class AuthenticateUseCaseTests: XCTestCase {
     }
 
     /// テスト6: 何も該当しない場合は失敗
-    func testAuthenticate_WithNoPurpose_Fails() throws {
+    func testAuthenticate_WithNoWork_Fails() throws {
         // Given
-        // No in-progress task, no chat pending
+        // No in-progress task, no unread messages
 
         // When
         let useCase = createUseCase()
@@ -505,47 +478,38 @@ final class AuthenticateUseCaseTests: XCTestCase {
         )
 
         // Then
-        XCTAssertFalse(result.success, "Authentication should fail with no valid purpose")
+        XCTAssertFalse(result.success, "Authentication should fail with no valid work")
     }
 
-    /// テスト7: タスクセッション作成時にtask pending削除
-    func testAuthenticate_CreatingTaskSession_DeletesTaskPending() throws {
+    /// テスト7: 無効なパスキーで失敗
+    func testAuthenticate_WithInvalidPasskey_Fails() throws {
         // Given
         let task = createInProgressTask()
         taskRepo.tasks[task.id] = task
 
-        let taskPending = createTaskPending()
-        try pendingRepo.save(taskPending)
-
         // When
         let useCase = createUseCase()
-        _ = try useCase.execute(
+        let result = try useCase.execute(
             agentId: testAgentId.value,
-            passkey: testPasskey,
+            passkey: "wrong-passkey",
             projectId: testProjectId.value
         )
 
         // Then
-        let remainingPending = try pendingRepo.find(agentId: testAgentId, projectId: testProjectId, purpose: .task)
-        XCTAssertNil(remainingPending, "Task pending should be deleted after task session creation")
+        XCTAssertFalse(result.success, "Authentication should fail with invalid passkey")
     }
 
-    /// テスト8: チャットセッション作成時にchat pending削除
-    func testAuthenticate_CreatingChatSession_DeletesChatPending() throws {
-        // Given
-        let chatPending = createChatPending()
-        try pendingRepo.save(chatPending)
-
+    /// テスト8: 存在しないエージェントで失敗
+    func testAuthenticate_WithNonExistentAgent_Fails() throws {
         // When
         let useCase = createUseCase()
-        _ = try useCase.execute(
-            agentId: testAgentId.value,
+        let result = try useCase.execute(
+            agentId: "non-existent-agent",
             passkey: testPasskey,
             projectId: testProjectId.value
         )
 
         // Then
-        let remainingPending = try pendingRepo.find(agentId: testAgentId, projectId: testProjectId, purpose: .chat)
-        XCTAssertNil(remainingPending, "Chat pending should be deleted after chat session creation")
+        XCTAssertFalse(result.success, "Authentication should fail with non-existent agent")
     }
 }
