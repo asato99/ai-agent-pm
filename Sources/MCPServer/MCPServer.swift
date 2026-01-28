@@ -3671,24 +3671,16 @@ public final class MCPServer {
             ]
         }
 
-        // Phase 4: 二重起動防止 - (agent_id, project_id)単位でアクティブセッションがあればエラー
-        let allSessions = try agentSessionRepository.findByAgentIdAndProjectId(id, projectId: projId)
-        let activeSessions = allSessions.filter { $0.expiresAt > Date() }
-        if !activeSessions.isEmpty {
-            Self.log("[MCP] authenticate failed for agent: '\(agentId)' on project '\(projectId)' - Agent already running")
-            return [
-                "success": false,
-                "error": "Agent already running on this project",
-                "action": "exit"  // 案A: 認証失敗時は即終了
-            ]
-        }
-
-        // AuthenticateUseCaseを使用して認証（Chat機能: pendingAgentPurposeRepository を渡す）
-        let useCase = AuthenticateUseCase(
+        // Session Spawn Architecture: purpose-aware duplicate prevention
+        // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+        // chat と task セッションは独立して存在可能
+        // AuthenticateUseCaseV2 が purpose-aware なセッション作成を行う
+        let useCase = AuthenticateUseCaseV2(
             credentialRepository: agentCredentialRepository,
             sessionRepository: agentSessionRepository,
             agentRepository: agentRepository,
-            pendingPurposeRepository: pendingAgentPurposeRepository
+            pendingPurposeRepository: pendingAgentPurposeRepository,
+            taskRepository: taskRepository
         )
 
         let result = try useCase.execute(agentId: agentId, passkey: passkey, projectId: projectId)

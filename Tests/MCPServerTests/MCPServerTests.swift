@@ -2649,6 +2649,16 @@ final class NotificationSystemIntegrationTests: XCTestCase {
         )
         try agentCredentialRepository.save(credential)
 
+        // Session Spawn Architecture: Create in_progress task for task session authentication
+        let task = Domain.Task(
+            id: TaskID(value: "tsk_test_notif"),
+            projectId: testProjectId,
+            title: "Test Task for Notification",
+            status: .inProgress,
+            assigneeId: testAgentId
+        )
+        try taskRepository.save(task)
+
         // 認証してセッショントークンを取得
         let result = try mcpServer.executeTool(
             name: "authenticate",
@@ -2974,6 +2984,7 @@ final class SendMessageIntegrationTests: XCTestCase {
     var agentCredentialRepository: AgentCredentialRepository!
     var agentSessionRepository: AgentSessionRepository!
     var projectAgentAssignmentRepository: ProjectAgentAssignmentRepository!
+    var taskRepository: TaskRepository!
 
     let senderAgentId = AgentID(value: "agt_sender")
     let receiverAgentId = AgentID(value: "agt_receiver")
@@ -2997,6 +3008,7 @@ final class SendMessageIntegrationTests: XCTestCase {
         agentCredentialRepository = AgentCredentialRepository(database: db)
         agentSessionRepository = AgentSessionRepository(database: db)
         projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: db)
+        taskRepository = TaskRepository(database: db)
 
         // Setup chat repository with directory manager
         let directoryManager = ProjectDirectoryManager()
@@ -3059,6 +3071,16 @@ final class SendMessageIntegrationTests: XCTestCase {
         // Create credential for sender
         let credential = AgentCredential(agentId: senderAgentId, rawPasskey: "test_passkey_sender")
         try agentCredentialRepository.save(credential)
+
+        // Session Spawn Architecture: Create in_progress task for sender to enable task session creation
+        let task = Domain.Task(
+            id: TaskID(value: "tsk_test_sender"),
+            projectId: testProjectId,
+            title: "Test Task for SendMessage",
+            status: .inProgress,
+            assigneeId: senderAgentId
+        )
+        try taskRepository.save(task)
 
         // Authenticate sender (task session)
         let result = try mcpServer.executeTool(
@@ -3310,6 +3332,16 @@ final class SendMessageIntegrationTests: XCTestCase {
         // Create credential and authenticate AI sender
         let credential = AgentCredential(agentId: aiSenderId, rawPasskey: "ai_sender_passkey")
         try agentCredentialRepository.save(credential)
+
+        // Session Spawn Architecture: Create in_progress task for AI sender
+        let aiTask = Domain.Task(
+            id: TaskID(value: "tsk_ai_sender"),
+            projectId: testProjectId,
+            title: "Test Task for AI Sender",
+            status: .inProgress,
+            assigneeId: aiSenderId
+        )
+        try taskRepository.save(aiTask)
 
         let authResult = try mcpServer.executeTool(
             name: "authenticate",
