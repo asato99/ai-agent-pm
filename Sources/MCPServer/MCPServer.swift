@@ -4956,11 +4956,24 @@ public final class MCPServer {
         Self.log("[MCP] Found \(allMessages.count) total message(s)")
 
         // PendingMessageIdentifier を使用してコンテキストと未読を分離
-        let result = PendingMessageIdentifier.separateContextAndPending(
+        let rawResult = PendingMessageIdentifier.separateContextAndPending(
             allMessages,
             agentId: session.agentId,
             contextLimit: PendingMessageIdentifier.defaultContextLimit,  // 20
             pendingLimit: PendingMessageIdentifier.defaultPendingLimit   // 10
+        )
+
+        // Filter out system messages (senderId starts with "system")
+        // These are used to trigger chat session spawn but should not be shown to agents
+        // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 2.2
+        let filteredPending = rawResult.pendingMessages.filter { !$0.senderId.value.hasPrefix("system") }
+        let filteredContext = rawResult.contextMessages.filter { !$0.senderId.value.hasPrefix("system") }
+
+        let result = ContextAndPendingResult(
+            contextMessages: filteredContext,
+            pendingMessages: filteredPending,
+            totalHistoryCount: rawResult.totalHistoryCount,
+            contextTruncated: rawResult.contextTruncated
         )
 
         Self.log("[MCP] Context: \(result.contextMessages.count), Pending: \(result.pendingMessages.count), Truncated: \(result.contextTruncated)")

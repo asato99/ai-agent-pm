@@ -3,7 +3,6 @@
 
 -- Clean existing test data
 DELETE FROM agent_sessions WHERE agent_id LIKE 'session-%';
-DELETE FROM pending_agent_purposes WHERE agent_id LIKE 'session-%';
 DELETE FROM tasks WHERE project_id = 'session-project';
 DELETE FROM project_agents WHERE project_id = 'session-project';
 DELETE FROM agent_credentials WHERE agent_id LIKE 'session-%';

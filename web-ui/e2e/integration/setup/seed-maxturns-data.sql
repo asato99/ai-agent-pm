@@ -14,7 +14,6 @@
 
 -- Clear existing maxturns test data
 DELETE FROM conversations WHERE project_id = 'maxturns-project';
-DELETE FROM pending_agent_purposes WHERE project_id = 'maxturns-project';
 DELETE FROM agent_sessions WHERE agent_id LIKE 'maxturns-%';
 DELETE FROM tasks WHERE id LIKE 'maxturns-%';
 DELETE FROM agent_credentials WHERE agent_id LIKE 'maxturns-%';

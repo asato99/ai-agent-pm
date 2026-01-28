@@ -20,7 +20,6 @@
 
 -- Clear existing UC018B test data
 -- Note: chat_messages don't exist in DB (stored in files), cleared by test script
-DELETE FROM pending_agent_purposes WHERE project_id = 'uc018b-project';
 DELETE FROM agent_sessions WHERE agent_id IN ('uc018b-sato', 'uc018b-worker-01');
 DELETE FROM tasks WHERE id LIKE 'uc018b-%' OR project_id = 'uc018b-project';
 DELETE FROM agent_credentials WHERE agent_id IN ('uc018b-sato', 'uc018b-worker-01');

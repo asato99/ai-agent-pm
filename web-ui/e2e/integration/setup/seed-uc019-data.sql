@@ -21,7 +21,6 @@
 
 -- Clear existing UC019 test data
 -- Note: Some tables may not exist in all environments, so we use conditional deletes
-DELETE FROM pending_agent_purposes WHERE agent_id LIKE 'uc019-%';
 DELETE FROM agent_sessions WHERE agent_id LIKE 'uc019-%';
 DELETE FROM tasks WHERE id LIKE 'uc019-%' OR project_id = 'uc019-project';
 DELETE FROM agent_credentials WHERE agent_id LIKE 'uc019-%';

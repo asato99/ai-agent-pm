@@ -15,7 +15,6 @@
 
 -- Clear existing UC016 test data
 DELETE FROM conversations WHERE project_id = 'uc016-project';
-DELETE FROM pending_agent_purposes WHERE project_id = 'uc016-project';
 DELETE FROM agent_sessions WHERE agent_id LIKE 'uc016-%';
 DELETE FROM tasks WHERE id LIKE 'uc016-%';
 DELETE FROM agent_credentials WHERE agent_id LIKE 'uc016-%';

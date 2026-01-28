@@ -1991,8 +1991,18 @@ final class RESTServer {
             }
 
             // No active session and no spawn in progress
-            // Coordinator will detect unread messages and spawn the agent via WorkDetectionService
-            debugLog("startChatSession: No active session, Coordinator will spawn agent=\(agentIdStr), project=\(projectIdStr)")
+            // Create a system message to trigger WorkDetectionService.hasChatWork
+            // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 2.2
+            let systemMessage = ChatMessage(
+                id: ChatMessageID.generate(),
+                senderId: AgentID(value: "system"),
+                receiverId: nil,
+                content: "セッション開始",
+                createdAt: Date()
+            )
+            try chatRepository.saveMessage(systemMessage, projectId: projectId, agentId: targetAgentId)
+
+            debugLog("startChatSession: Created system message, Coordinator will spawn agent=\(agentIdStr), project=\(projectIdStr)")
             return jsonResponse(["success": true])
         } catch {
             debugLog("Failed to start chat session: \(error)")
