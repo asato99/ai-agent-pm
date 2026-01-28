@@ -8,16 +8,21 @@
 
 パイロットテスト実行時に生成されるログファイル:
 
+**結果ディレクトリ**: `pilot/results/{scenario}/{timestamp}_{variation}/`
+
 | ファイル | コンポーネント | 内容 |
 |----------|---------------|------|
-| `/tmp/pilot_coordinator.log` | Coordinator | エージェントポーリング、アクション取得 |
-| `/tmp/pilot_mcp.log` | MCP Server | API呼び出し、DB操作、チャット/タスク処理 |
-| `/tmp/pilot_mcp_init.log` | MCP Server | 初期化、スキーマ適用 |
-| `/tmp/pilot_rest.log` | REST Server | HTTPリクエスト、サーバー起動 |
-| `/tmp/pilot_vite.log` | Vite Dev Server | フロントエンドビルド、HMR |
-| `/tmp/pilot_playwright.log` | Playwright | テスト実行、アサーション結果 |
-| `/tmp/coordinator_logs_pilot/` | Per-agent logs | 各エージェントの実行ログ（実行時のみ生成） |
-| `pilot/results/{scenario}/{run-id}/events.jsonl` | ResultRecorder | テストイベントの時系列記録 |
+| `logs/combined.log` | 全コンポーネント | 統合ログ（タイムスタンプソート） |
+| `logs/mcp-server.log` | MCP Server | API呼び出し、DB操作、チャット/タスク処理 |
+| `logs/rest-server.log` | REST Server | HTTPリクエスト、サーバー起動 |
+| `logs/coordinator.log` | Coordinator | エージェントポーリング、アクション取得 |
+| `logs/playwright.log` | Playwright | テスト実行、アサーション結果 |
+| `logs/vite.log` | Vite Dev Server | フロントエンドビルド、HMR |
+| `logs/db-snapshot.sql` | Database | テスト終了時のDBダンプ |
+| `agent-logs/{agent-id}/` | Per-agent logs | 各エージェントの実行ログ |
+| `events.jsonl` | ResultRecorder | テストイベントの時系列記録 |
+
+**クイックアクセス**: `pilot/results/{scenario}/latest/` → 最新の結果ディレクトリへのシンボリックリンク
 
 ---
 
@@ -26,7 +31,11 @@
 ### Step 1: Playwrightログで全体像を把握
 
 ```bash
-cat /tmp/pilot_playwright.log
+# 最新のテスト結果を確認
+cat web-ui/e2e/pilot/results/hello-world/latest/logs/playwright.log
+
+# または統合ログで全体の流れを確認
+cat web-ui/e2e/pilot/results/hello-world/latest/logs/combined.log
 ```
 
 確認ポイント:
@@ -50,7 +59,8 @@ head -n {エラー行+5} pilot/tests/pilot.spec.ts | tail -n 10
 → **MCP ログでpending_agent_purposes を確認**
 
 ```bash
-grep -E "pending_agent_purposes|chat|message" /tmp/pilot_mcp.log | head -50
+grep -E "pending_agent_purposes|chat|message" \
+  web-ui/e2e/pilot/results/hello-world/latest/logs/mcp-server.log | head -50
 ```
 
 確認ポイント:
@@ -63,7 +73,8 @@ grep -E "pending_agent_purposes|chat|message" /tmp/pilot_mcp.log | head -50
 → **Coordinator ログでエージェントアクションを確認**
 
 ```bash
-grep -E "getAgentAction|action_type|no_actionable" /tmp/pilot_coordinator.log | tail -50
+grep -E "getAgentAction|action_type|no_actionable" \
+  web-ui/e2e/pilot/results/hello-world/latest/logs/coordinator.log | tail -50
 ```
 
 確認ポイント:
@@ -73,27 +84,26 @@ grep -E "getAgentAction|action_type|no_actionable" /tmp/pilot_coordinator.log | 
 
 #### D. エージェントが実行されない
 
-→ **Coordinator logs ディレクトリを確認**
+→ **エージェントログディレクトリを確認**
 
 ```bash
-ls -la /tmp/coordinator_logs_pilot/
+ls -la web-ui/e2e/pilot/results/hello-world/latest/agent-logs/
 ```
 
 空の場合、エージェントは一度も起動していない。
 
 ### Step 3: DBの状態を直接確認
 
+テスト終了時のDBスナップショットを確認:
+
 ```bash
-# チャットセッション
+# DBスナップショットをロード
+sqlite3 :memory: < web-ui/e2e/pilot/results/hello-world/latest/logs/db-snapshot.sql
+
+# またはテスト実行中のDBを直接確認（テスト失敗時のみ残る）
 sqlite3 /tmp/AIAgentPM_Pilot.db "SELECT * FROM chat_sessions"
-
-# チャットメッセージ
 sqlite3 /tmp/AIAgentPM_Pilot.db "SELECT * FROM chat_messages"
-
-# pending_agent_purposes
 sqlite3 /tmp/AIAgentPM_Pilot.db "SELECT * FROM pending_agent_purposes"
-
-# タスク
 sqlite3 /tmp/AIAgentPM_Pilot.db "SELECT id, title, status FROM tasks"
 ```
 
@@ -190,28 +200,34 @@ console.log('[Chat] Response:', response)
 ### ログ確認ワンライナー
 
 ```bash
-# 全ログの最新行を確認
-tail /tmp/pilot_*.log
+# 最新の結果ディレクトリへの短縮パス
+LATEST="web-ui/e2e/pilot/results/hello-world/latest"
+
+# 統合ログを確認
+cat $LATEST/logs/combined.log
 
 # エラーを含む行を検索
-grep -i error /tmp/pilot_*.log
+grep -i error $LATEST/logs/*.log
 
 # チャット関連を検索
-grep -iE "chat|message|pending" /tmp/pilot_mcp.log
+grep -iE "chat|message|pending" $LATEST/logs/mcp-server.log
 
 # エージェントアクションを検索
-grep -E "action_type|hold|work" /tmp/pilot_coordinator.log
+grep -E "action_type|hold|work" $LATEST/logs/coordinator.log
 
-# DBの状態をダンプ
-sqlite3 /tmp/AIAgentPM_Pilot.db ".dump" > /tmp/pilot_db_dump.sql
+# DBスナップショットを確認
+sqlite3 :memory: < $LATEST/logs/db-snapshot.sql
 ```
 
 ### テスト再実行前のクリーンアップ
 
 ```bash
-rm -f /tmp/pilot_*.log
-rm -rf /tmp/coordinator_logs_pilot/*
+# 古い結果を削除（オプション）
+rm -rf web-ui/e2e/pilot/results/hello-world/2026-*
+
+# 手動でテスト環境をクリア（通常は不要）
 rm -f /tmp/AIAgentPM_Pilot.db
+rm -f /tmp/aiagentpm_pilot.sock
 ```
 
 ---
@@ -273,3 +289,4 @@ seed-generator.ts でチャット関連テーブルのクリーンアップが�
 |------|------|
 | 2026-01-25 | 初版作成 |
 | 2026-01-25 | チャットデータ残存問題の実例を追加 |
+| 2026-01-28 | ログアーキテクチャ改善: 結果ディレクトリへの集約、統合ログ生成、latestリンク追加 |

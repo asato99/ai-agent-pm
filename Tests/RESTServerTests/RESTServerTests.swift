@@ -890,7 +890,6 @@ final class ChatSessionStatusTests: XCTestCase {
     var agentSessionRepository: AgentSessionRepository!
     var agentCredentialRepository: AgentCredentialRepository!
     var projectAgentAssignmentRepository: ProjectAgentAssignmentRepository!
-    var pendingAgentPurposeRepository: PendingAgentPurposeRepository!
     var server: RESTServer!
     fileprivate var serverTask: ConcurrencyTask<Void, Error>?
 
@@ -912,23 +911,26 @@ final class ChatSessionStatusTests: XCTestCase {
         agentSessionRepository = AgentSessionRepository(database: db)
         agentCredentialRepository = AgentCredentialRepository(database: db)
         projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: db)
-        pendingAgentPurposeRepository = PendingAgentPurposeRepository(database: db)
 
-        // Setup test data
+        // Setup test data (server NOT started yet - allows tests to modify DB first)
         try setupTestData()
+    }
 
-        // Create and start server
+    /// サーバーを起動するヘルパー
+    /// テスト固有のDB設定後に呼び出す（WALチェックポイント競合を回避）
+    private func startServer() {
         server = RESTServer(database: db, port: testPort, webUIPath: nil)
         serverTask = ConcurrencyTask {
             try await self.server.run()
         }
-
         // Wait for server to start
         Thread.sleep(forTimeInterval: 0.5)
     }
 
     override func tearDownWithError() throws {
         serverTask?.cancel()
+        // サーバー停止を待つ（DB接続が閉じられるまで）
+        Thread.sleep(forTimeInterval: 0.5)
         db = nil
         server = nil
     }
@@ -1042,6 +1044,9 @@ final class ChatSessionStatusTests: XCTestCase {
         )
         try agentSessionRepository.save(session)
 
+        // Start server AFTER DB setup (avoids WAL checkpoint conflict)
+        startServer()
+
         // Act: Login and call agent-sessions API
         let token = try await login()
         let (data, response) = try await makeRequest(
@@ -1062,17 +1067,21 @@ final class ChatSessionStatusTests: XCTestCase {
         XCTAssertEqual(chatData["status"] as? String, "connected", "Chat status should be 'connected' when session exists")
     }
 
-    // MARK: - Test 1.2: connecting 状態 (PendingAgentPurposeあり、セッションなし)
+    // MARK: - Test 1.2: connecting 状態 (spawn_started_at設定済み、セッションなし)
+    // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
 
     func testAgentSessionsAPI_ReturnsChatStatusConnecting() async throws {
-        // Arrange: Create PendingAgentPurpose with chat purpose, but NO session
-        let pendingPurpose = PendingAgentPurpose(
+        // Arrange: Set spawn_started_at to recent time (within 120s timeout), but NO session
+        let recentTime = Date().addingTimeInterval(-30) // 30 seconds ago (within timeout)
+        try projectAgentAssignmentRepository.updateSpawnStartedAt(
             agentId: testAgentId,
             projectId: testProjectId,
-            purpose: .chat
+            startedAt: recentTime
         )
-        try pendingAgentPurposeRepository.save(pendingPurpose)
         // Note: No AgentSession created
+
+        // Start server AFTER DB setup (avoids WAL checkpoint conflict)
+        startServer()
 
         // Act: Login and call agent-sessions API
         let token = try await login()
@@ -1091,14 +1100,17 @@ final class ChatSessionStatusTests: XCTestCase {
         let chatData = agentData["chat"] as! [String: Any]
 
         XCTAssertEqual(chatData["count"] as? Int, 0, "Chat count should be 0")
-        XCTAssertEqual(chatData["status"] as? String, "connecting", "Chat status should be 'connecting' when pending purpose exists")
+        XCTAssertEqual(chatData["status"] as? String, "connecting", "Chat status should be 'connecting' when spawn_started_at is within timeout")
     }
 
-    // MARK: - Test 1.3: disconnected 状態 (PendingAgentPurposeもセッションもなし)
+    // MARK: - Test 1.3: disconnected 状態 (spawn_started_atもセッションもなし)
 
     func testAgentSessionsAPI_ReturnsChatStatusDisconnected() async throws {
-        // Arrange: No PendingAgentPurpose and no AgentSession
+        // Arrange: No spawn_started_at and no AgentSession
         // (nothing to create, just ensure clean state)
+
+        // Start server AFTER DB setup (avoids WAL checkpoint conflict)
+        startServer()
 
         // Act: Login and call agent-sessions API
         let token = try await login()
@@ -1131,6 +1143,9 @@ final class ChatSessionStatusTests: XCTestCase {
         )
         try agentSessionRepository.save(session)
 
+        // Start server AFTER DB setup (avoids WAL checkpoint conflict)
+        startServer()
+
         // Act: Login and call agent-sessions API
         let token = try await login()
         let (data, response) = try await makeRequest(
@@ -1151,16 +1166,20 @@ final class ChatSessionStatusTests: XCTestCase {
         XCTAssertNil(taskData["status"], "Task should NOT have status field")
     }
 
-    // MARK: - Test 1.5: PendingAgentPurpose が task の場合、chat status は disconnected
+    // MARK: - Test 1.5: spawn_started_at がタイムアウト（120秒超過）の場合は disconnected
+    // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
 
-    func testAgentSessionsAPI_TaskPendingDoesNotAffectChatStatus() async throws {
-        // Arrange: Create PendingAgentPurpose with TASK purpose (not chat)
-        let pendingPurpose = PendingAgentPurpose(
+    func testAgentSessionsAPI_ExpiredSpawnStartedAtReturnsDisconnected() async throws {
+        // Arrange: Set spawn_started_at to old time (beyond 120s timeout)
+        let oldTime = Date().addingTimeInterval(-150) // 150 seconds ago (beyond timeout)
+        try projectAgentAssignmentRepository.updateSpawnStartedAt(
             agentId: testAgentId,
             projectId: testProjectId,
-            purpose: .task  // Task, not chat
+            startedAt: oldTime
         )
-        try pendingAgentPurposeRepository.save(pendingPurpose)
+
+        // Start server AFTER DB setup (avoids WAL checkpoint conflict)
+        startServer()
 
         // Act: Login and call agent-sessions API
         let token = try await login()
@@ -1178,8 +1197,8 @@ final class ChatSessionStatusTests: XCTestCase {
         let agentData = agentSessions[testAgentId.value] as! [String: Any]
         let chatData = agentData["chat"] as! [String: Any]
 
-        // Chat status should be disconnected (task pending doesn't affect chat)
+        // Chat status should be disconnected when spawn_started_at is expired
         XCTAssertEqual(chatData["status"] as? String, "disconnected",
-                       "Chat status should be 'disconnected' even when task pending exists")
+                       "Chat status should be 'disconnected' when spawn_started_at is beyond timeout")
     }
 }

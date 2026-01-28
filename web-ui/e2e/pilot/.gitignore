@@ -4,6 +4,9 @@ generated/*.sql
 # Test results (large, machine-specific)
 results/*/
 
+# Latest symlinks
+results/*/latest
+
 # Reports (regeneratable)
 reports/*.yaml
 reports/*.md

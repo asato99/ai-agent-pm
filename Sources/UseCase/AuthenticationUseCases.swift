@@ -40,108 +40,31 @@ public struct AuthenticateResult: Sendable {
     }
 }
 
-// MARK: - AuthenticateUseCase
+// MARK: - AuthenticateUseCaseV3
 
-/// エージェント認証ユースケース
-/// Chat機能対応: pending_agent_purposesから起動理由を取得してセッションに設定
-public struct AuthenticateUseCase: Sendable {
-    private let credentialRepository: any AgentCredentialRepositoryProtocol
-    private let sessionRepository: any AgentSessionRepositoryProtocol
-    private let agentRepository: any AgentRepositoryProtocol
-    private let pendingPurposeRepository: (any PendingAgentPurposeRepositoryProtocol)?
-
-    public init(
-        credentialRepository: any AgentCredentialRepositoryProtocol,
-        sessionRepository: any AgentSessionRepositoryProtocol,
-        agentRepository: any AgentRepositoryProtocol,
-        pendingPurposeRepository: (any PendingAgentPurposeRepositoryProtocol)? = nil
-    ) {
-        self.credentialRepository = credentialRepository
-        self.sessionRepository = sessionRepository
-        self.agentRepository = agentRepository
-        self.pendingPurposeRepository = pendingPurposeRepository
-    }
-
-    /// Phase 4: projectId は必須
-    /// Chat機能: pending purposeがあればそれをセッションに設定
-    public func execute(agentId: String, passkey: String, projectId: String) throws -> AuthenticateResult {
-        let agentID = AgentID(value: agentId)
-        let projID = ProjectID(value: projectId)
-
-        // エージェントの存在確認
-        guard let agent = try agentRepository.findById(agentID) else {
-            // セキュリティのため、エージェントが存在しない場合も同じエラーを返す
-            return .failure(error: "Invalid agent_id or passkey")
-        }
-
-        // 認証情報の取得
-        guard let credential = try credentialRepository.findByAgentId(agentID) else {
-            // 認証情報がない場合も同じエラーを返す
-            return .failure(error: "Invalid agent_id or passkey")
-        }
-
-        // パスキーの検証
-        guard credential.verify(passkey: passkey) else {
-            return .failure(error: "Invalid agent_id or passkey")
-        }
-
-        // 既存のセッションを無効化（オプション：同時ログインを許可しない場合）
-        // try sessionRepository.deleteByAgentId(agentID)
-
-        // Chat機能: pending purposeを確認
-        var purpose: AgentPurpose = .task
-        if let pendingRepo = pendingPurposeRepository,
-           let pendingPurpose = try pendingRepo.find(agentId: agentID, projectId: projID) {
-            purpose = pendingPurpose.purpose
-            // 使用済みのpending purposeを削除（purpose指定で特定のpurposeのみ削除）
-            try pendingRepo.delete(agentId: agentID, projectId: projID, purpose: purpose)
-        }
-
-        // Phase 4: 新しいセッションを作成（projectId, purpose を含む）
-        let session = AgentSession(agentId: agentID, projectId: projID, purpose: purpose)
-        try sessionRepository.save(session)
-
-        // 認証情報のlastUsedAtを更新
-        let updatedCredential = credential.withLastUsedAt(Date())
-        try credentialRepository.save(updatedCredential)
-
-        return .success(
-            token: session.token,
-            expiresIn: session.remainingSeconds,
-            agentName: agent.name,
-            systemPrompt: agent.systemPrompt
-        )
-    }
-}
-
-// MARK: - AuthenticateUseCaseV2
-
-/// 状態ベースの認証ユースケース（Session Spawn Architecture対応）
+/// WorkDetectionService ベースの認証ユースケース（新 Session Spawn Architecture対応）
 /// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
 ///
-/// 判定ロジック:
-/// 1. タスクセッション判定（優先）: activeTaskSession == nil AND inProgressTask != nil
-/// 2. チャットセッション判定: activeChatSession == nil AND chatPending != nil
-/// 3. どちらにも該当しない場合は失敗
-public struct AuthenticateUseCaseV2: Sendable {
+/// 特徴:
+/// - WorkDetectionService を使用して getAgentAction と同一の判定ロジック
+/// - pending_agent_purposes テーブルを使用しない
+/// - タスク優先でセッション作成
+public struct AuthenticateUseCaseV3: Sendable {
     private let credentialRepository: any AgentCredentialRepositoryProtocol
     private let sessionRepository: any AgentSessionRepositoryProtocol
     private let agentRepository: any AgentRepositoryProtocol
-    private let pendingPurposeRepository: any PendingAgentPurposeRepositoryProtocol
-    private let taskRepository: any TaskRepositoryProtocol
+    private let workDetectionService: WorkDetectionService
 
     public init(
         credentialRepository: any AgentCredentialRepositoryProtocol,
         sessionRepository: any AgentSessionRepositoryProtocol,
         agentRepository: any AgentRepositoryProtocol,
-        pendingPurposeRepository: any PendingAgentPurposeRepositoryProtocol,
-        taskRepository: any TaskRepositoryProtocol
+        workDetectionService: WorkDetectionService
     ) {
         self.credentialRepository = credentialRepository
         self.sessionRepository = sessionRepository
         self.agentRepository = agentRepository
-        self.pendingPurposeRepository = pendingPurposeRepository
-        self.taskRepository = taskRepository
+        self.workDetectionService = workDetectionService
     }
 
     public func execute(agentId: String, passkey: String, projectId: String) throws -> AuthenticateResult {
@@ -162,27 +85,14 @@ public struct AuthenticateUseCaseV2: Sendable {
             return .failure(error: "Invalid agent_id or passkey")
         }
 
-        // 状態取得
-        let allSessions = try sessionRepository.findByAgentIdAndProjectId(agentID, projectId: projID)
-        let activeTaskSession = allSessions.first { $0.purpose == .task && !$0.isExpired }
-        let activeChatSession = allSessions.first { $0.purpose == .chat && !$0.isExpired }
-
-        let inProgressTask = try taskRepository.findByProject(projID, status: .inProgress)
-            .first { $0.assigneeId == agentID }
-
-        let chatPending = try pendingPurposeRepository.find(agentId: agentID, projectId: projID, purpose: .chat)
+        // WorkDetectionService で仕事判定（getAgentAction と同一ロジック）
+        let hasTaskWork = try workDetectionService.hasTaskWork(agentId: agentID, projectId: projID)
+        let hasChatWork = try workDetectionService.hasChatWork(agentId: agentID, projectId: projID)
 
         // タスクセッション判定（優先）
-        // 条件: activeTaskSession == nil AND inProgressTask != nil
-        if activeTaskSession == nil && inProgressTask != nil {
-            // タスクセッション作成
+        if hasTaskWork {
             let session = AgentSession(agentId: agentID, projectId: projID, purpose: .task)
             try sessionRepository.save(session)
-
-            // task pending削除（あれば）
-            if let _ = try pendingPurposeRepository.find(agentId: agentID, projectId: projID, purpose: .task) {
-                try pendingPurposeRepository.delete(agentId: agentID, projectId: projID, purpose: .task)
-            }
 
             // 認証情報のlastUsedAtを更新
             let updatedCredential = credential.withLastUsedAt(Date())
@@ -197,14 +107,9 @@ public struct AuthenticateUseCaseV2: Sendable {
         }
 
         // チャットセッション判定
-        // 条件: activeChatSession == nil AND chatPending != nil
-        if activeChatSession == nil && chatPending != nil {
-            // チャットセッション作成
+        if hasChatWork {
             let session = AgentSession(agentId: agentID, projectId: projID, purpose: .chat)
             try sessionRepository.save(session)
-
-            // chat pending削除
-            try pendingPurposeRepository.delete(agentId: agentID, projectId: projID, purpose: .chat)
 
             // 認証情報のlastUsedAtを更新
             let updatedCredential = credential.withLastUsedAt(Date())

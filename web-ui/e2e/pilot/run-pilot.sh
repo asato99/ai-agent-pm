@@ -42,6 +42,10 @@ REST_PID=""
 WEB_UI_PID=""
 TEST_PASSED=false
 
+# 結果・ログディレクトリ（テスト開始時に設定）
+RESULT_DIR=""
+LOG_DIR=""
+
 # 使用方法
 usage() {
   cat <<EOF
@@ -63,9 +67,43 @@ EOF
   exit 0
 }
 
+collect_logs() {
+  if [ -z "$LOG_DIR" ] || [ ! -d "$LOG_DIR" ]; then
+    return
+  fi
+
+  echo -e "${BLUE}Collecting logs to: $RESULT_DIR${NC}"
+
+  # DBスナップショット
+  if [ -f "$TEST_DB_PATH" ]; then
+    sqlite3 "$TEST_DB_PATH" ".dump" > "$LOG_DIR/db-snapshot.sql" 2>/dev/null || true
+  fi
+
+  # 統合ログ生成（プレフィックス付き）
+  {
+    [ -f "$LOG_DIR/mcp-server.log" ] && sed 's/^/[MCP] /' "$LOG_DIR/mcp-server.log"
+    [ -f "$LOG_DIR/rest-server.log" ] && sed 's/^/[REST] /' "$LOG_DIR/rest-server.log"
+    [ -f "$LOG_DIR/coordinator.log" ] && sed 's/^/[COORD] /' "$LOG_DIR/coordinator.log"
+    [ -f "$LOG_DIR/playwright.log" ] && sed 's/^/[PLAY] /' "$LOG_DIR/playwright.log"
+    [ -f "$LOG_DIR/vite.log" ] && sed 's/^/[VITE] /' "$LOG_DIR/vite.log"
+  } | sort > "$LOG_DIR/combined.log" 2>/dev/null || true
+
+  # latest シンボリックリンク更新
+  LATEST_LINK="$SCRIPT_DIR/results/$SCENARIO/latest"
+  rm -f "$LATEST_LINK"
+  ln -s "$(basename "$RESULT_DIR")" "$LATEST_LINK"
+
+  echo -e "${GREEN}✓ Logs saved${NC}"
+  echo "  Combined log: $LOG_DIR/combined.log"
+  echo "  Latest link:  $LATEST_LINK"
+}
+
 cleanup() {
   echo ""
   echo -e "${YELLOW}Cleanup${NC}"
+
+  # ログ収集（サーバー停止前に実行）
+  collect_logs
 
   [ -n "$WEB_UI_PID" ] && kill -0 "$WEB_UI_PID" 2>/dev/null && kill "$WEB_UI_PID" 2>/dev/null
   [ -n "$COORDINATOR_PID" ] && kill -0 "$COORDINATOR_PID" 2>/dev/null && kill "$COORDINATOR_PID" 2>/dev/null
@@ -74,14 +112,13 @@ cleanup() {
 
   rm -f "$MCP_SOCKET_PATH"
 
+  # 一時ファイルは常にクリーンアップ（ログは結果ディレクトリに保存済み）
+  rm -f /tmp/coordinator_pilot_config.yaml
+  rm -rf /tmp/coordinator_logs_pilot
+  rm -rf /tmp/pilot_work/.aiagent
+
   if [ "$TEST_PASSED" == "true" ]; then
-    rm -f /tmp/pilot_*.log
-    rm -f /tmp/coordinator_pilot_config.yaml
-    rm -rf /tmp/coordinator_logs_pilot
-    rm -rf /tmp/pilot_work/.aiagent
     rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal"
-  else
-    echo "Logs preserved: /tmp/pilot_*.log"
   fi
 }
 
@@ -156,6 +193,14 @@ echo -e "${YELLOW}Step 1: Preparing environment${NC}"
 ps aux | grep -E "(mcp-server-pm|rest-server-pm)" | grep -v grep | awk '{print $2}' | xargs -I {} kill -9 {} 2>/dev/null || true
 rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal" "$MCP_SOCKET_PATH"
 mkdir -p /tmp/pilot_work
+
+# 結果ディレクトリ作成
+RESULT_TIMESTAMP=$(date '+%Y-%m-%dT%H-%M-%S')
+RESULT_DIR="$SCRIPT_DIR/results/$SCENARIO/${RESULT_TIMESTAMP}_${VARIATION}"
+LOG_DIR="$RESULT_DIR/logs"
+mkdir -p "$LOG_DIR"
+mkdir -p "$RESULT_DIR/agent-logs"
+echo "Results: $RESULT_DIR"
 
 # 作業ディレクトリのチャットファイルをクリーンアップ
 PILOT_WORKING_DIR=$(cd "$SCRIPT_DIR" && npx tsx -e "
@@ -242,14 +287,14 @@ fi
 echo -e "${YELLOW}Step 5: Starting servers${NC}"
 
 AIAGENTPM_DB_PATH="$TEST_DB_PATH" "$MCP_SERVER_BIN" daemon \
-  --socket-path "$MCP_SOCKET_PATH" --foreground > /tmp/pilot_mcp.log 2>&1 &
+  --socket-path "$MCP_SOCKET_PATH" --foreground > "$LOG_DIR/mcp-server.log" 2>&1 &
 MCP_PID=$!
 
 for i in {1..10}; do [ -S "$MCP_SOCKET_PATH" ] && break; sleep 0.5; done
 echo -e "${GREEN}✓ MCP server running${NC}"
 
 AIAGENTPM_DB_PATH="$TEST_DB_PATH" AIAGENTPM_WEBSERVER_PORT="$REST_PORT" \
-  "$REST_SERVER_BIN" > /tmp/pilot_rest.log 2>&1 &
+  "$REST_SERVER_BIN" > "$LOG_DIR/rest-server.log" 2>&1 &
 REST_PID=$!
 
 for i in {1..10}; do curl -s "http://localhost:$REST_PORT/health" > /dev/null 2>&1 && break; sleep 0.5; done
@@ -294,13 +339,12 @@ EOF
 done
 
 cat >> /tmp/coordinator_pilot_config.yaml << EOF
-log_directory: /tmp/coordinator_logs_pilot
+log_directory: $RESULT_DIR/agent-logs
 log_upload:
   enabled: true
 EOF
 
-mkdir -p /tmp/coordinator_logs_pilot
-AIAGENTPM_WEBSERVER_PORT="$REST_PORT" $PYTHON -m aiagent_runner --coordinator -c /tmp/coordinator_pilot_config.yaml -v > /tmp/pilot_coordinator.log 2>&1 &
+AIAGENTPM_WEBSERVER_PORT="$REST_PORT" $PYTHON -m aiagent_runner --coordinator -c /tmp/coordinator_pilot_config.yaml -v > "$LOG_DIR/coordinator.log" 2>&1 &
 COORDINATOR_PID=$!
 sleep 2
 echo -e "${GREEN}✓ Coordinator running${NC}"
@@ -310,7 +354,7 @@ echo ""
 echo -e "${YELLOW}Step 7: Starting Web UI${NC}"
 cd "$WEB_UI_DIR"
 
-AIAGENTPM_WEBSERVER_PORT="$REST_PORT" npm run dev -- --port "$WEB_UI_PORT" > /tmp/pilot_vite.log 2>&1 &
+AIAGENTPM_WEBSERVER_PORT="$REST_PORT" npm run dev -- --port "$WEB_UI_PORT" > "$LOG_DIR/vite.log" 2>&1 &
 WEB_UI_PID=$!
 
 for i in {1..20}; do curl -s "http://localhost:$WEB_UI_PORT" > /dev/null 2>&1 && break; sleep 1; done
@@ -329,11 +373,14 @@ export INTEGRATION_WEB_URL="http://localhost:$WEB_UI_PORT"
 export INTEGRATION_WITH_COORDINATOR="true"
 export AIAGENTPM_WEBSERVER_PORT="$REST_PORT"
 
+# 結果ディレクトリを環境変数で渡す
+export PILOT_RESULT_DIR="$RESULT_DIR"
+
 set -o pipefail
 npx playwright test pilot/tests/pilot.spec.ts \
   --reporter=list \
   --timeout=300000 \
-  2>&1 | tee /tmp/pilot_playwright.log
+  2>&1 | tee "$LOG_DIR/playwright.log"
 
 PLAYWRIGHT_EXIT=${PIPESTATUS[0]}
 set +o pipefail
@@ -373,11 +420,18 @@ if [ $PLAYWRIGHT_EXIT -eq 0 ]; then
   echo -e "${GREEN}========================================${NC}"
   echo -e "${GREEN}Pilot Test PASSED: $SCENARIO / $VARIATION${NC}"
   echo -e "${GREEN}========================================${NC}"
+  echo "Logs: $LOG_DIR"
   exit 0
 else
   echo -e "${RED}========================================${NC}"
   echo -e "${RED}Pilot Test FAILED: $SCENARIO / $VARIATION${NC}"
   echo -e "${RED}========================================${NC}"
-  echo "Check logs: /tmp/pilot_*.log"
+  echo ""
+  echo "Logs: $LOG_DIR"
+  echo "Quick access:"
+  echo "  cat $LOG_DIR/combined.log           # 統合ログ"
+  echo "  cat $LOG_DIR/mcp-server.log         # MCPサーバー"
+  echo "  cat $LOG_DIR/coordinator.log        # コーディネーター"
+  echo "  sqlite3 $LOG_DIR/db-snapshot.sql    # DBスナップショット"
   exit 1
 fi

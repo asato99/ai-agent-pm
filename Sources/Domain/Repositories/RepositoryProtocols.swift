@@ -211,6 +211,7 @@ public protocol ExecutionLogRepositoryProtocol: Sendable {
 /// プロジェクト×エージェント割り当てリポジトリのプロトコル
 /// 参照: docs/requirements/PROJECTS.md - エージェント割り当て
 /// 参照: docs/usecase/UC004_MultiProjectSameAgent.md
+/// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md - スポーン管理
 public protocol ProjectAgentAssignmentRepositoryProtocol: Sendable {
     /// エージェントをプロジェクトに割り当てる（既に割り当て済みの場合は既存を返す）
     func assign(projectId: ProjectID, agentId: AgentID) throws -> ProjectAgentAssignment
@@ -224,6 +225,12 @@ public protocol ProjectAgentAssignmentRepositoryProtocol: Sendable {
     func isAgentAssignedToProject(agentId: AgentID, projectId: ProjectID) throws -> Bool
     /// 全割り当て一覧を取得
     func findAll() throws -> [ProjectAgentAssignment]
+    /// 特定のエージェント×プロジェクト割り当てを取得
+    /// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+    func findAssignment(agentId: AgentID, projectId: ProjectID) throws -> ProjectAgentAssignment?
+    /// スポーン開始時刻を更新（nil でクリア）
+    /// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
+    func updateSpawnStartedAt(agentId: AgentID, projectId: ProjectID, startedAt: Date?) throws
 }
 
 // MARK: - ChatRepositoryProtocol
