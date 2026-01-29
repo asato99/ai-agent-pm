@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from aiagent_runner.cooldown import CooldownEntry, CooldownManager
-from aiagent_runner.types import AgentInstanceKey
+from aiagent_runner.models import AgentInstanceKey
 
 
 class TestCooldownManager:

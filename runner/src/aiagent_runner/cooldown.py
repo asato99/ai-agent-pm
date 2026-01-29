@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-from aiagent_runner.types import AgentInstanceKey
+from aiagent_runner.models import AgentInstanceKey
 
 
 @dataclass
