@@ -102,11 +102,25 @@ class ExecutionStartResult:
 
 
 @dataclass
+class SkillDefinition:
+    """Skill definition for agent capabilities.
+
+    Reference: docs/design/AGENT_SKILLS.md
+    """
+    id: str
+    name: str
+    description: str
+    directory_name: str
+    content: str
+
+
+@dataclass
 class SubordinateProfile:
     """Profile of a subordinate agent.
 
     Used by Coordinator to get agent's system_prompt for context directory setup.
     Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
+    Reference: docs/design/AGENT_SKILLS.md
     """
     agent_id: str
     name: str
@@ -119,6 +133,7 @@ class SubordinateProfile:
     ai_type: Optional[str] = None
     kick_method: str = ""
     max_parallel_tasks: int = 1
+    skills: list[SkillDefinition] = field(default_factory=list)
 
 
 class MCPClient:
@@ -532,6 +547,19 @@ class MCPClient:
         if isinstance(result, dict) and "error" in result:
             raise MCPError(result["error"])
 
+        # Parse skills if present
+        skills_data = result.get("skills", [])
+        skills = [
+            SkillDefinition(
+                id=skill.get("id", ""),
+                name=skill.get("name", ""),
+                description=skill.get("description", ""),
+                directory_name=skill.get("directory_name", ""),
+                content=skill.get("content", "")
+            )
+            for skill in skills_data
+        ]
+
         return SubordinateProfile(
             agent_id=result.get("id", agent_id),
             name=result.get("name", ""),
@@ -543,7 +571,8 @@ class MCPClient:
             parent_agent_id=result.get("parent_agent_id") if result.get("parent_agent_id") else None,
             ai_type=result.get("ai_type") if result.get("ai_type") else None,
             kick_method=result.get("kick_method", ""),
-            max_parallel_tasks=result.get("max_parallel_tasks", 1)
+            max_parallel_tasks=result.get("max_parallel_tasks", 1),
+            skills=skills
         )
 
     # ==========================================================================

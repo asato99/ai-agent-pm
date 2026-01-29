@@ -17,7 +17,7 @@ from typing import Optional, TextIO
 from aiagent_runner.cooldown import CooldownManager
 from aiagent_runner.coordinator_config import CoordinatorConfig
 from aiagent_runner.log_uploader import LogUploader, LogUploadConfig
-from aiagent_runner.mcp_client import MCPClient, MCPError
+from aiagent_runner.mcp_client import MCPClient, MCPError, SkillDefinition
 from aiagent_runner.platform import get_data_directory, is_windows
 from aiagent_runner.quota_detector import QuotaErrorDetector
 from aiagent_runner.models import AgentInstanceKey
@@ -657,17 +657,21 @@ class Coordinator:
                 config_dir = context_dir / ".claude"
                 config_dir.mkdir(parents=True, exist_ok=True)
 
-                # Get system_prompt from MCP server
+                # Get system_prompt and skills from MCP server
                 system_prompt = ""
+                skills: list[SkillDefinition] = []
                 try:
                     profile = await self.mcp_client.get_subordinate_profile(agent_id)
                     system_prompt = profile.system_prompt
+                    skills = profile.skills
                     logger.debug(f"Got system_prompt for {agent_id}: {len(system_prompt)} chars")
+                    logger.debug(f"Got {len(skills)} skills for {agent_id}")
                 except Exception as e:
                     logger.warning(f"Failed to get subordinate profile for {agent_id}: {e}")
 
                 self._write_claude_md(config_dir, system_prompt, working_dir)
                 self._write_claude_settings(config_dir, working_dir)
+                self._write_skills(config_dir, skills)
 
                 logger.info(f"Prepared Claude context directory: {context_dir}")
                 return str(context_dir)
@@ -676,16 +680,20 @@ class Coordinator:
                 config_dir = context_dir / ".gemini"
                 config_dir.mkdir(parents=True, exist_ok=True)
 
-                # Get system_prompt from MCP server
+                # Get system_prompt and skills from MCP server
                 system_prompt = ""
+                skills: list[SkillDefinition] = []
                 try:
                     profile = await self.mcp_client.get_subordinate_profile(agent_id)
                     system_prompt = profile.system_prompt
+                    skills = profile.skills
                     logger.debug(f"Got system_prompt for {agent_id}: {len(system_prompt)} chars")
+                    logger.debug(f"Got {len(skills)} skills for {agent_id}")
                 except Exception as e:
                     logger.warning(f"Failed to get subordinate profile for {agent_id}: {e}")
 
                 self._write_gemini_md(config_dir, system_prompt, working_dir)
+                self._write_skills(config_dir, skills)
 
                 logger.info(f"Prepared Gemini context directory: {context_dir}")
                 return str(context_dir)
@@ -824,6 +832,40 @@ Always prefix your file paths with `{real_working_dir}/`.
 """
         gemini_md.write_text(content)
         logger.debug(f"Wrote GEMINI.md: {gemini_md}")
+
+    def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]) -> None:
+        """Write skill files to agent context directory.
+
+        Creates a skills/ directory under the config dir and writes each skill's
+        content as SKILL.md in a subdirectory named after the skill's directory_name.
+
+        Reference: docs/design/AGENT_SKILLS.md
+
+        Args:
+            config_dir: Path to .claude/ or .gemini/ directory
+            skills: List of skill definitions to write
+        """
+        skills_dir = config_dir / "skills"
+
+        # Clear existing skills directory (full regeneration each time)
+        if skills_dir.exists():
+            shutil.rmtree(skills_dir)
+
+        if not skills:
+            logger.debug("No skills to write")
+            return
+
+        # Create skills directory and write each skill
+        for skill in skills:
+            skill_dir = skills_dir / skill.directory_name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+
+            skill_file = skill_dir / "SKILL.md"
+            skill_file.write_text(skill.content)
+
+            logger.debug(f"Wrote skill: {skill_file}")
+
+        logger.info(f"Wrote {len(skills)} skills to {skills_dir}")
 
     def _update_aiagent_gitignore(self, aiagent_dir: Path) -> None:
         """Ensure .aiagent/.gitignore includes agents/ directory.

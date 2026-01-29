@@ -52,6 +52,11 @@ public final class MCPServer {
     // 参照: docs/design/NOTIFICATION_SYSTEM.md
     private let notificationRepository: NotificationRepository
 
+    // スキルリポジトリ
+    // 参照: docs/design/AGENT_SKILLS.md
+    private let skillDefinitionRepository: SkillDefinitionRepository
+    private let agentSkillAssignmentRepository: AgentSkillAssignmentRepository
+
     // WorkDetectionService: 共通の仕事判定ロジック
     // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
     private let workDetectionService: WorkDetectionService
@@ -106,6 +111,9 @@ public final class MCPServer {
         self.agentWorkingDirectoryRepository = AgentWorkingDirectoryRepository(database: database)
         // 通知リポジトリ
         self.notificationRepository = NotificationRepository(database: database)
+        // スキルリポジトリ
+        self.skillDefinitionRepository = SkillDefinitionRepository(database: database)
+        self.agentSkillAssignmentRepository = AgentSkillAssignmentRepository(database: database)
         // WorkDetectionService: 共通の仕事判定ロジック
         self.workDetectionService = WorkDetectionService(
             chatRepository: self.chatRepository,
@@ -3946,6 +3954,7 @@ public final class MCPServer {
 
     /// get_subordinate_profile - 下位エージェントの詳細情報を取得
     /// 参照: Sources/MCPServer/Authorization/ToolAuthorization.swift
+    /// 参照: docs/design/AGENT_SKILLS.md
     private func getSubordinateProfile(managerId: String, targetAgentId: String) throws -> [String: Any] {
         Self.log("[MCP] getSubordinateProfile called by manager: '\(managerId)' for target: '\(targetAgentId)'")
 
@@ -3961,7 +3970,11 @@ public final class MCPServer {
 
         Self.log("[MCP] Found subordinate: \(agent.name)")
 
-        // 詳細情報（システムプロンプト含む）を返す
+        // スキル情報を取得
+        let assignedSkills = try agentSkillAssignmentRepository.findByAgentId(targetId)
+        Self.log("[MCP] Subordinate has \(assignedSkills.count) assigned skills")
+
+        // 詳細情報（システムプロンプト・スキル含む）を返す
         return [
             "id": agent.id.value,
             "name": agent.name,
@@ -3973,13 +3986,23 @@ public final class MCPServer {
             "parent_agent_id": agent.parentAgentId?.value ?? NSNull(),
             "ai_type": agent.aiType?.rawValue ?? NSNull(),
             "kick_method": agent.kickMethod.rawValue,
-            "max_parallel_tasks": agent.maxParallelTasks
+            "max_parallel_tasks": agent.maxParallelTasks,
+            "skills": assignedSkills.map { skill in
+                [
+                    "id": skill.id.value,
+                    "name": skill.name,
+                    "description": skill.description,
+                    "directory_name": skill.directoryName,
+                    "content": skill.content
+                ]
+            }
         ]
     }
 
     /// get_agent_profile (Coordinator用) - エージェントの詳細情報を取得
     /// 参照: docs/design/AGENT_CONTEXT_DIRECTORY.md
-    /// Coordinatorがエージェント起動時にsystem_promptを取得するために使用
+    /// 参照: docs/design/AGENT_SKILLS.md
+    /// Coordinatorがエージェント起動時にsystem_promptとskillsを取得するために使用
     private func getAgentProfileForCoordinator(agentId: String) throws -> [String: Any] {
         Self.log("[MCP] getAgentProfileForCoordinator called for agent: '\(agentId)'")
 
@@ -3990,7 +4013,11 @@ public final class MCPServer {
 
         Self.log("[MCP] Found agent: \(agent.name)")
 
-        // 詳細情報（システムプロンプト含む）を返す
+        // スキル情報を取得
+        let assignedSkills = try agentSkillAssignmentRepository.findByAgentId(targetId)
+        Self.log("[MCP] Agent has \(assignedSkills.count) assigned skills")
+
+        // 詳細情報（システムプロンプト・スキル含む）を返す
         return [
             "id": agent.id.value,
             "name": agent.name,
@@ -4002,7 +4029,16 @@ public final class MCPServer {
             "parent_agent_id": agent.parentAgentId?.value ?? NSNull(),
             "ai_type": agent.aiType?.rawValue ?? NSNull(),
             "kick_method": agent.kickMethod.rawValue,
-            "max_parallel_tasks": agent.maxParallelTasks
+            "max_parallel_tasks": agent.maxParallelTasks,
+            "skills": assignedSkills.map { skill in
+                [
+                    "id": skill.id.value,
+                    "name": skill.name,
+                    "description": skill.description,
+                    "directory_name": skill.directoryName,
+                    "content": skill.content
+                ]
+            }
         ]
     }
 
