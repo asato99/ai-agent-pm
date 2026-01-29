@@ -1,0 +1,89 @@
+# Bug Fix Scenario - シナリオ定義
+#
+# 複数のバグを含む既存コードを修正するシナリオ。
+# AIエージェントがバグを発見し、修正する能力を検証する。
+
+name: bug-fix
+description: "バグ修正 - 既存コードの問題発見・修正フロー検証"
+version: "1.0"
+
+# プロジェクト設定
+project:
+  id: pilot-bugfix
+  name: "バグ修正パイロット"
+  working_directory: /tmp/pilot_bugfix_workspace
+
+# 初期ファイル（テスト開始前に作業ディレクトリに配置）
+initial_files:
+  - name: text_stats.py
+    content: |
+      # text_stats.py - テキスト統計ツール
+      """テキストの統計情報を分析するモジュール"""
+
+
+      def analyze_text(text):
+          """
+          テキストの統計情報を返す
+
+          Args:
+              text: 分析対象のテキスト
+
+          Returns:
+              dict: words（単語数）, characters（文字数）, lines（行数）
+          """
+          words = text.split(" ")
+          word_count = len(words)
+          char_count = len(text)
+          line_count = text.count("\n")
+
+          return {
+              "words": word_count,
+              "characters": char_count,
+              "lines": line_count
+          }
+
+
+      def main():
+          sample = """Hello World
+      This is  a test
+      End"""
+          result = analyze_text(sample)
+          print(f"Words: {result['words']}")
+          print(f"Characters: {result['characters']}")
+          print(f"Lines: {result['lines']}")
+
+
+      if __name__ == "__main__":
+          main()
+
+# 期待する成果物と検証
+expected_artifacts:
+  - path: text_stats.py
+    description: "修正済みのtext_stats.py"
+    tests:
+      - name: "連続スペースの単語カウント"
+        command: "python3 -c \"from text_stats import analyze_text; r = analyze_text('Hello  World'); exit(0 if r['words'] == 2 else 1)\""
+        expected_exit_code: 0
+
+      - name: "行数カウント（3行）"
+        command: "python3 -c \"from text_stats import analyze_text; r = analyze_text('Line1\\nLine2\\nLine3'); exit(0 if r['lines'] == 3 else 1)\""
+        expected_exit_code: 0
+
+      - name: "空文字列の処理"
+        command: "python3 -c \"from text_stats import analyze_text; r = analyze_text(''); exit(0 if r['words'] == 0 and r['lines'] == 0 else 1)\""
+        expected_exit_code: 0
+
+# タイムアウト設定（秒）
+timeouts:
+  task_creation: 600     # タスク作成待ち
+  task_completion: 900   # 全タスク完了待ち（15分）
+
+# 初期アクション（テストスクリプトが実行）
+initial_action:
+  type: chat
+  from: pilot-owner
+  to: pilot-manager
+  message: |
+    text_stats.py にいくつかのバグがあるようです。
+    コードをレビューして問題を特定し、修正してください。
+    修正後は動作確認も行ってください。

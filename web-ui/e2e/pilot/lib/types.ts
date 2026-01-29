@@ -6,6 +6,32 @@
 // Scenario Configuration
 // ============================================================================
 
+/**
+ * 成果物のテスト定義
+ */
+export interface ArtifactTest {
+  name: string // テスト名
+  command: string // 実行コマンド
+  expected_exit_code: number // 期待する終了コード
+  expected_output?: string // 期待する出力（オプション）
+}
+
+/**
+ * 期待する成果物の定義
+ */
+export interface ExpectedArtifact {
+  path: string
+  description?: string
+  validation?: string // Shell command template with {path}
+  // 複数テストをサポート
+  tests?: ArtifactTest[]
+  // 後方互換性のため単一テストもサポート
+  test?: {
+    command: string
+    expected_output: string
+  }
+}
+
 export interface ScenarioConfig {
   name: string
   description: string
@@ -17,14 +43,13 @@ export interface ScenarioConfig {
     working_directory: string
   }
 
-  expected_artifacts: Array<{
-    path: string
-    validation?: string // Shell command template with {path}
-    test?: {
-      command: string // Execution command template with {path}
-      expected_output: string // Expected output string to match
-    }
+  // 初期ファイル（テスト開始前に配置）
+  initial_files?: Array<{
+    name: string
+    content: string
   }>
+
+  expected_artifacts: ExpectedArtifact[]
 
   timeouts: {
     task_creation: number // seconds
@@ -92,12 +117,14 @@ export interface AgentResult {
 }
 
 export interface ArtifactTestResult {
+  name: string // テスト名
   command: string
   exit_code: number
+  expected_exit_code: number
   stdout: string
   stderr: string
   expected_output?: string
-  output_matched: boolean
+  passed: boolean // exit_code一致 かつ output一致（指定時）
 }
 
 export interface ArtifactResult {
@@ -105,7 +132,8 @@ export interface ArtifactResult {
   exists: boolean
   validation_passed: boolean
   content_hash?: string
-  test_result?: ArtifactTestResult
+  test_results?: ArtifactTestResult[] // 複数テスト結果
+  all_tests_passed?: boolean
 }
 
 export interface PilotResult {
@@ -150,8 +178,18 @@ export type PilotEventType =
   | 'tool_called'
   | 'artifact_created'
   | 'artifacts_tested'
+  | 'artifacts_verified'
   | 'performance_report'
   | 'error'
+  // Pilot test specific events
+  | 'test_started'
+  | 'prerequisites_verified'
+  | 'initial_action_sent'
+  | 'tasks_created'
+  | 'task_status_updated'
+  | 'task_status_check'
+  | 'all_tasks_completed'
+  | 'task_completion_timeout'
 
 export interface PilotEvent {
   timestamp: string

@@ -16,7 +16,7 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { VariationLoader } from '../lib/variation-loader.js'
 import { ResultRecorder, aggregateAgentStats } from '../lib/result-recorder.js'
-import { ScenarioConfig, VariationConfig, TaskResult } from '../lib/types.js'
+import { ScenarioConfig, VariationConfig, TaskResult, ArtifactTest, ArtifactResult } from '../lib/types.js'
 
 // ES module で __dirname を取得
 const __filename = fileURLToPath(import.meta.url)
@@ -64,6 +64,8 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
   })
 
   test.afterAll(async () => {
+    // MCPログをデバッグ用にコピー
+    copyMCPLogsForDebug()
     console.log(`Results saved to: ${recorder.getResultsDir()}`)
   })
 
@@ -279,7 +281,7 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
       if (tasks.length > 0) {
         recorder.recordEvent('tasks_created', {
           count: tasks.length,
-          tasks: tasks.map((t) => ({ id: t.task_id, title: t.title, status: t.status })),
+          tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status })),
         })
         console.log(`Tasks created: ${tasks.length}`)
         return
@@ -347,7 +349,7 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
       // ステータス変化をイベントとして記録
       for (const task of tasks) {
         recorder.recordEvent('task_status_check', {
-          task_id: task.task_id,
+          task_id: task.id,
           title: task.title,
           status: task.status,
         })
@@ -355,7 +357,7 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
 
       if (pendingTasks.length === 0 && tasks.length > 0) {
         recorder.recordEvent('all_tasks_completed', {
-          tasks: tasks.map((t) => ({ id: t.task_id, title: t.title, status: t.status })),
+          tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status })),
         })
         console.log('All tasks completed!')
         return
@@ -400,7 +402,7 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
   async function testArtifacts() {
     const artifacts = scenarioConfig.expected_artifacts
     const workingDir = scenarioConfig.project.working_directory
-    const testResults: { path: string; passed: boolean; details: unknown }[] = []
+    const allResults: ArtifactResult[] = []
 
     console.log('\n' + '='.repeat(60))
     console.log('🧪 成果物テスト実行')
@@ -409,41 +411,123 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     for (const artifact of artifacts) {
       const fullPath = path.join(workingDir, artifact.path)
 
-      if (!artifact.test) {
+      // 新形式 (tests 配列) または旧形式 (test オブジェクト) を処理
+      if (artifact.tests && artifact.tests.length > 0) {
+        // 新形式: 複数テスト
+        console.log(`\n📄 ${artifact.path}: (${artifact.tests.length} テスト)`)
+
+        const testResults = recorder.runArtifactTests(fullPath, artifact.tests)
+        const allTestsPassed = testResults.every((r) => r.passed)
+
+        for (const result of testResults) {
+          const statusIcon = result.passed ? '✅' : '❌'
+          console.log(`   ${statusIcon} ${result.name}`)
+          console.log(`      コマンド: ${result.command}`)
+          console.log(`      終了コード: ${result.exit_code} (期待: ${result.expected_exit_code})`)
+          if (result.stdout) {
+            console.log(`      stdout: "${result.stdout.slice(0, 100)}${result.stdout.length > 100 ? '...' : ''}"`)
+          }
+          if (result.stderr) {
+            console.log(`      stderr: "${result.stderr.slice(0, 100)}${result.stderr.length > 100 ? '...' : ''}"`)
+          }
+        }
+
+        allResults.push({
+          path: artifact.path,
+          exists: fs.existsSync(fullPath),
+          validation_passed: true,
+          test_results: testResults,
+          all_tests_passed: allTestsPassed,
+        })
+      } else if (artifact.test) {
+        // 旧形式: 単一テスト (後方互換)
+        console.log(`\n📄 ${artifact.path}:`)
+        console.log(`   コマンド: ${artifact.test.command.replace('{path}', fullPath)}`)
+
+        const testResult = recorder.testArtifact(
+          fullPath,
+          artifact.test.command,
+          artifact.test.expected_output
+        )
+
+        const passed = testResult.passed
+        console.log(`   終了コード: ${testResult.exit_code}`)
+        console.log(`   標準出力: "${testResult.stdout}"`)
+        if (testResult.stderr) {
+          console.log(`   標準エラー: "${testResult.stderr}"`)
+        }
+        if (testResult.expected_output) {
+          console.log(`   期待出力: "${testResult.expected_output}"`)
+        }
+        console.log(`   結果: ${passed ? '✅ PASS' : '❌ FAIL'}`)
+
+        allResults.push({
+          path: artifact.path,
+          exists: fs.existsSync(fullPath),
+          validation_passed: true,
+          test_results: [testResult],
+          all_tests_passed: passed,
+        })
+      } else {
         console.log(`\n📄 ${artifact.path}: テスト設定なし（スキップ）`)
-        continue
+        allResults.push({
+          path: artifact.path,
+          exists: fs.existsSync(fullPath),
+          validation_passed: true,
+          all_tests_passed: true, // テストなしは成功扱い
+        })
       }
-
-      console.log(`\n📄 ${artifact.path}:`)
-      console.log(`   コマンド: ${artifact.test.command.replace('{path}', fullPath)}`)
-
-      const testResult = recorder.testArtifact(
-        fullPath,
-        artifact.test.command,
-        artifact.test.expected_output
-      )
-
-      const passed = testResult.exit_code === 0 && testResult.output_matched
-      testResults.push({ path: artifact.path, passed, details: testResult })
-
-      console.log(`   終了コード: ${testResult.exit_code}`)
-      console.log(`   標準出力: "${testResult.stdout}"`)
-      if (testResult.stderr) {
-        console.log(`   標準エラー: "${testResult.stderr}"`)
-      }
-      console.log(`   期待出力: "${testResult.expected_output}"`)
-      console.log(`   出力一致: ${testResult.output_matched ? '✅' : '❌'}`)
-      console.log(`   結果: ${passed ? '✅ PASS' : '❌ FAIL'}`)
     }
 
     console.log('\n' + '='.repeat(60))
-    const allPassed = testResults.every((r) => r.passed)
+    const allPassed = allResults.every((r) => r.all_tests_passed)
     console.log(`🧪 成果物テスト結果: ${allPassed ? '✅ ALL PASSED' : '❌ SOME FAILED'}`)
     console.log('='.repeat(60) + '\n')
 
-    recorder.recordEvent('artifacts_tested', { results: testResults, all_passed: allPassed })
+    recorder.recordEvent('artifacts_tested', { results: allResults, all_passed: allPassed })
 
-    return { testResults, allPassed }
+    return { testResults: allResults, allPassed }
+  }
+
+  /**
+   * MCPログをデバッグ用に結果ディレクトリにコピー
+   */
+  function copyMCPLogsForDebug() {
+    const appSupportDir = path.join(
+      process.env.HOME || '',
+      'Library/Application Support/AIAgentPM'
+    )
+    const resultsDir = recorder.getResultsDir()
+    const debugLogsDir = path.join(resultsDir, 'debug-logs')
+
+    try {
+      fs.mkdirSync(debugLogsDir, { recursive: true })
+
+      // MCPログファイルをコピー
+      const logFiles = ['mcp-daemon.log', 'mcp.log', 'rest-server.log']
+      for (const logFile of logFiles) {
+        const srcPath = path.join(appSupportDir, logFile)
+        if (fs.existsSync(srcPath)) {
+          const destPath = path.join(debugLogsDir, logFile)
+          fs.copyFileSync(srcPath, destPath)
+          console.log(`📋 Copied ${logFile} to debug-logs/`)
+        }
+      }
+
+      // 最新のMCP構造化ログもコピー（存在する場合）
+      const logDir = path.join(appSupportDir, 'logs')
+      if (fs.existsSync(logDir)) {
+        const files = fs.readdirSync(logDir).filter(f => f.endsWith('.log'))
+        for (const file of files.slice(-5)) { // 最新5ファイルまで
+          const srcPath = path.join(logDir, file)
+          const destPath = path.join(debugLogsDir, file)
+          fs.copyFileSync(srcPath, destPath)
+        }
+        console.log(`📋 Copied ${Math.min(files.length, 5)} structured log files to debug-logs/`)
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to copy MCP logs: ${error}`)
+    }
   }
 
   /**
@@ -457,7 +541,7 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     // sqlite3コマンドで直接クエリ
     try {
       const result = execSync(
-        `sqlite3 -json "${dbPath}" "SELECT id, title, status, assignee_id FROM tasks WHERE project_id = '${projectId}'"`,
+        `sqlite3 -json "${dbPath}" "SELECT id, title, status, assignee_id, created_at FROM tasks WHERE project_id = '${projectId}'"`,
         { encoding: 'utf8' }
       )
 
@@ -466,10 +550,11 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
       }
 
       const rows = JSON.parse(result)
-      return rows.map((row: { id: string; title: string; status: string; assignee_id: string }) => ({
-        task_id: row.id,
+      return rows.map((row: { id: string; title: string; status: string; assignee_id: string; created_at: string }) => ({
+        id: row.id,
         title: row.title,
-        status: row.status as 'backlog' | 'todo' | 'in_progress' | 'done' | 'cancelled',
+        status: row.status,
+        created_at: row.created_at,
         assignee_id: row.assignee_id,
       }))
     } catch {

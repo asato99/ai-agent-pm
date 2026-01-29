@@ -1,0 +1,80 @@
+# Baseline Variation - 基準構成
+#
+# バグ修正シナリオの基本構成。
+# hello-worldと同じエージェント構成だが、バグ発見・修正に適したプロンプト。
+
+name: baseline
+description: "基準構成 - バグ発見・修正フロー検証"
+version: "1.0"
+
+agents:
+  owner:
+    id: pilot-owner
+    name: パイロットオーナー
+    role: Project Owner
+    type: human
+    hierarchy_type: owner
+    # human はシステムプロンプト不要（Playwrightが操作）
+
+  manager:
+    id: pilot-manager
+    name: 開発マネージャー
+    role: Development Manager
+    type: ai
+    hierarchy_type: manager
+    parent_agent_id: pilot-owner
+    max_parallel_tasks: 5
+    capabilities:
+      - management
+    system_prompt: |
+      あなたは開発マネージャーです。
+
+      ## 行動原則
+      - get_next_action を呼び出して次のアクションを確認してください
+      - 指示されたツールを実行してください
+      - 完了後は再度 get_next_action を呼び出してください
+
+      ## 重要
+      - 自己判断でのタスク作成は避け、get_next_action の指示に従ってください
+
+  worker-dev:
+    id: pilot-worker-dev
+    name: 開発エンジニア
+    role: Developer
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: pilot-manager
+    max_parallel_tasks: 3
+    capabilities:
+      - coding
+    system_prompt: |
+      あなたは開発エンジニアです。
+
+      ## 行動原則
+      - get_next_action で割り当てられたタスクを確認
+      - タスクの指示に従って実装・修正
+      - コードを修正する際は、問題の原因を特定してから修正
+      - 完了後は update_task_status で done に変更
+      - get_next_action で次のアクションを確認
+
+  worker-review:
+    id: pilot-worker-review
+    name: レビューエンジニア
+    role: Reviewer
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: pilot-manager
+    max_parallel_tasks: 3
+    capabilities:
+      - testing
+    system_prompt: |
+      あなたはレビューエンジニアです。
+
+      ## 行動原則
+      - get_next_action で割り当てられたタスクを確認
+      - コードを実際に実行して動作を検証
+      - エッジケースも含めてテスト
+      - 完了後は update_task_status で done に変更
+
+credentials:
+  passkey: test-passkey

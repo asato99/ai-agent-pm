@@ -97,20 +97,40 @@ export class ResultRecorder {
   }
 
   /**
-   * 成果物を実行してテスト
+   * 成果物を実行してテスト（単一テスト - 後方互換用）
    */
   testArtifact(
     artifactPath: string,
     testCommand: string,
     expectedOutput?: string
   ): ArtifactTestResult {
-    const cmd = testCommand.replace('{path}', artifactPath)
+    return this.runSingleTest(artifactPath, {
+      name: 'test',
+      command: testCommand,
+      expected_exit_code: 0,
+      expected_output: expectedOutput,
+    })
+  }
+
+  /**
+   * 単一テストを実行
+   */
+  runSingleTest(
+    artifactPath: string,
+    test: { name: string; command: string; expected_exit_code: number; expected_output?: string }
+  ): ArtifactTestResult {
+    const workingDir = path.dirname(artifactPath)
+    const cmd = test.command.replace('{path}', artifactPath)
     let stdout = ''
     let stderr = ''
     let exitCode = 0
 
     try {
-      stdout = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+      stdout = execSync(cmd, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: workingDir,
+      })
     } catch (error: unknown) {
       const execError = error as { status?: number; stdout?: string; stderr?: string }
       exitCode = execError.status ?? 1
@@ -119,18 +139,33 @@ export class ResultRecorder {
     }
 
     let outputMatched = true
+    const expectedOutput = test.expected_output
     if (expectedOutput) {
       outputMatched = stdout.includes(expectedOutput)
     }
 
+    const passed = exitCode === test.expected_exit_code && outputMatched
+
     return {
+      name: test.name,
       command: cmd,
       exit_code: exitCode,
+      expected_exit_code: test.expected_exit_code,
       stdout: stdout.trim(),
       stderr: stderr.trim(),
       expected_output: expectedOutput,
-      output_matched: outputMatched,
+      passed,
     }
+  }
+
+  /**
+   * 成果物の複数テストを実行
+   */
+  runArtifactTests(
+    artifactPath: string,
+    tests: Array<{ name: string; command: string; expected_exit_code: number; expected_output?: string }>
+  ): ArtifactTestResult[] {
+    return tests.map((test) => this.runSingleTest(artifactPath, test))
   }
 
   /**
