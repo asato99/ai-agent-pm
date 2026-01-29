@@ -3730,6 +3730,57 @@ public final class MCPServer {
 
     // MARK: Authentication (Phase 4)
 
+    /// エージェント階層を遡って人間エージェントのワーキングディレクトリを取得
+    /// 優先順位: 1. 上位の人間エージェントのワーキングディレクトリ 2. プロジェクトデフォルト
+    private func findHumanAgentWorkingDirectory(
+        startAgentId: AgentID,
+        projectId: ProjectID,
+        fallbackProjectWorkingDir: String?
+    ) throws -> String? {
+        var currentAgentId: AgentID? = startAgentId
+        var visitedIds = Set<String>()  // 循環参照防止
+
+        while let agentId = currentAgentId {
+            // 循環参照チェック
+            if visitedIds.contains(agentId.value) {
+                Self.log("[MCP] Circular reference detected in agent hierarchy at: \(agentId.value)", category: .auth)
+                break
+            }
+            visitedIds.insert(agentId.value)
+
+            // エージェントを取得
+            guard let agent = try agentRepository.findById(agentId) else {
+                Self.log("[MCP] Agent not found in hierarchy: \(agentId.value)", category: .auth)
+                break
+            }
+
+            // 人間エージェントかチェック
+            if agent.type == .human {
+                // 人間エージェントのワーキングディレクトリを確認
+                if let agentWorkingDir = try? agentWorkingDirectoryRepository.findByAgentAndProject(
+                    agentId: agentId,
+                    projectId: projectId
+                ) {
+                    Self.log("[MCP] Found human agent working directory: \(agentWorkingDir.workingDirectory) for agent: \(agent.name)", category: .auth)
+                    return agentWorkingDir.workingDirectory
+                }
+                Self.log("[MCP] Human agent \(agent.name) has no working directory for this project", category: .auth)
+            }
+
+            // 親エージェントに移動
+            if let parentId = agent.parentAgentId {
+                currentAgentId = parentId
+            } else {
+                // 親がない場合は終了
+                break
+            }
+        }
+
+        // 見つからない場合はプロジェクトデフォルトにフォールバック
+        Self.log("[MCP] No human agent working directory found, using project default: \(fallbackProjectWorkingDir ?? "nil")", category: .auth)
+        return fallbackProjectWorkingDir
+    }
+
     /// authenticate - エージェント認証
     /// 参照: docs/plan/PHASE3_PULL_ARCHITECTURE.md, PHASE4_COORDINATOR_ARCHITECTURE.md
     /// 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md - 新アーキテクチャ
@@ -3741,14 +3792,15 @@ public final class MCPServer {
         let projId = ProjectID(value: projectId)
 
         // Phase 4: プロジェクト存在確認
-        guard try projectRepository.findById(projId) != nil else {
+        guard let project = try projectRepository.findById(projId) else {
             Self.log("[MCP] authenticate failed: Project '\(projectId)' not found", category: .auth)
             // 失敗時も spawn_started_at をクリア（長期ブロック防止）
             try? clearSpawnStarted(agentId: id, projectId: projId)
             return [
                 "success": false,
                 "error": "Project not found",
-                "action": "exit"  // 案A: 認証失敗時は即終了
+                "action": "exit",
+                "instruction": "プロジェクトが見つかりません。プロセスを終了してください。"
             ]
         }
 
@@ -3764,7 +3816,8 @@ public final class MCPServer {
             return [
                 "success": false,
                 "error": "Agent not assigned to project",
-                "action": "exit"  // 案A: 認証失敗時は即終了
+                "action": "exit",
+                "instruction": "このプロジェクトに割り当てられていません。プロセスを終了してください。"
             ]
         }
 
@@ -3787,14 +3840,44 @@ public final class MCPServer {
 
         if result.success {
             Self.log("[MCP] Authentication successful for agent: \(result.agentName ?? agentId)", category: .auth)
+
+            // エージェント階層を遡って人間エージェントのワーキングディレクトリを取得
+            // 優先順位: 上位の人間エージェント固有 > プロジェクトデフォルト
+            let effectiveWorkingDir = try findHumanAgentWorkingDirectory(
+                startAgentId: id,
+                projectId: projId,
+                fallbackProjectWorkingDir: project.workingDirectory
+            )
+
+            // 作業ディレクトリの指示を構築
+            let instruction: String
+            if let workingDir = effectiveWorkingDir {
+                instruction = """
+                    get_next_action を呼び出して次の指示を確認してください。
+
+                    【重要】作業ディレクトリ: \(workingDir)
+                    - すべてのファイル操作には絶対パスを使用してください
+                    - 例: \(workingDir)/document.txt (正しい)
+                    - 例: document.txt (間違い - 相対パスは使用不可)
+                    - .aiagent/ ディレクトリ内のファイルを変更しないでください
+                    """
+            } else {
+                instruction = "get_next_action を呼び出して次の指示を確認してください"
+            }
+
             var response: [String: Any] = [
                 "success": true,
                 "session_token": result.sessionToken ?? "",
                 "expires_in": result.expiresIn ?? 0,
                 "agent_name": result.agentName ?? "",
-                // Phase 4: 次のアクション指示（get_next_actionがchat/taskを判別）
-                "instruction": "get_next_action を呼び出して次の指示を確認してください"
+                "instruction": instruction
             ]
+
+            // working_directory を明示的に追加（エージェントが参照できるように）
+            if let workingDir = effectiveWorkingDir {
+                response["working_directory"] = workingDir
+            }
+
             // system_prompt があれば追加（エージェントの役割を定義）
             // 参照: docs/plan/MULTI_AGENT_USE_CASES.md
             if let systemPrompt = result.systemPrompt {
@@ -3806,7 +3889,8 @@ public final class MCPServer {
             return [
                 "success": false,
                 "error": result.error ?? "Authentication failed",
-                "action": "exit"  // 案A: 認証失敗時は即終了
+                "action": "exit",
+                "instruction": "認証に失敗しました。現在あなたに割り当てられた作業はありません。プロセスを終了してください。"
             ]
         }
     }
