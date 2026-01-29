@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aiagent-runner"
-version = "0.1.9"
+version = "0.1.10"
 description = "Runner for AI Agent PM - executes tasks via MCP and CLI"
 readme = "README.md"
 requires-python = ">=3.9"
