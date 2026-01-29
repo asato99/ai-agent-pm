@@ -1,4 +1,4 @@
-# src/aiagent_runner/types.py
+# src/aiagent_runner/models.py
 # Shared type definitions for aiagent_runner
 # Reference: docs/design/SPAWN_ERROR_PROTECTION.md
 
