@@ -29,12 +29,13 @@ function generateAgentInsert(agent: AgentConfig): string {
     : 'NULL'
   const parentAgentId = agent.parent_agent_id ? `'${agent.parent_agent_id}'` : 'NULL'
   const maxParallelTasks = agent.max_parallel_tasks ?? 1
+  const aiType = agent.ai_type ? `'${agent.ai_type}'` : 'NULL'
 
-  return `INSERT INTO agents (id, name, role, type, status, hierarchy_type, parent_agent_id, role_type, max_parallel_tasks, capabilities, system_prompt, kick_method, created_at, updated_at)
+  return `INSERT INTO agents (id, name, role, type, status, hierarchy_type, parent_agent_id, role_type, max_parallel_tasks, capabilities, system_prompt, kick_method, ai_type, created_at, updated_at)
 VALUES (
     '${agent.id}', '${agent.name}', '${agent.role}', '${agent.type}', 'active', '${agent.hierarchy_type}', ${parentAgentId}, 'general', ${maxParallelTasks}, ${capabilities === 'NULL' ? 'NULL' : `'${capabilities}'`},
     ${systemPrompt},
-    '${agent.type === 'ai' ? 'mcp' : 'cli'}', datetime('now'), datetime('now')
+    '${agent.type === 'ai' ? 'mcp' : 'cli'}', ${aiType}, datetime('now'), datetime('now')
 );`
 }
 

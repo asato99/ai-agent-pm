@@ -338,6 +338,9 @@ ai_providers:
   claude:
     cli_command: claude
     cli_args: ["--dangerously-skip-permissions", "--max-turns", "50"]
+  gemini:
+    cli_command: gemini
+    cli_args: ["-y"]
 agents:
 EOF
 
@@ -388,7 +391,7 @@ export PILOT_RESULT_DIR="$RESULT_DIR"
 
 set -o pipefail
 npx playwright test pilot/tests/pilot.spec.ts \
-  --config=e2e/pilot/playwright.pilot.config.ts \
+  --config=pilot/playwright.pilot.config.ts \
   --reporter=list \
   --timeout=300000 \
   2>&1 | tee "$LOG_DIR/playwright.log"

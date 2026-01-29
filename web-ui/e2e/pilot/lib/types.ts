@@ -78,6 +78,7 @@ export interface AgentConfig {
   capabilities?: string[]
   system_prompt?: string
   max_parallel_tasks?: number
+  ai_type?: string  // e.g., 'gemini-2.5-pro', 'claude-sonnet-4-5'
 }
 
 export interface VariationConfig {
