@@ -20,7 +20,7 @@ from aiagent_runner.log_uploader import LogUploader, LogUploadConfig
 from aiagent_runner.mcp_client import MCPClient, MCPError
 from aiagent_runner.platform import get_data_directory, is_windows
 from aiagent_runner.quota_detector import QuotaErrorDetector
-from aiagent_runner.types import AgentInstanceKey
+from aiagent_runner.models import AgentInstanceKey
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,7 @@ class Coordinator:
         )
 
         self._running = False
+        self._shutdown_event: Optional[asyncio.Event] = None
         self._instances: dict[AgentInstanceKey, AgentInstanceInfo] = {}
 
         # Phase 6: Log upload configuration
@@ -171,6 +172,7 @@ class Coordinator:
             logger.info(f"Multi-device mode: root_agent_id={self.config.root_agent_id}")
 
         self._running = True
+        self._shutdown_event = asyncio.Event()
 
         while self._running:
             try:
@@ -181,12 +183,26 @@ class Coordinator:
                 logger.exception(f"Unexpected error: {e}")
 
             if self._running:
-                await asyncio.sleep(self.config.polling_interval)
+                # Use wait_for with timeout to allow interruption via shutdown_event
+                try:
+                    await asyncio.wait_for(
+                        self._shutdown_event.wait(),
+                        timeout=self.config.polling_interval
+                    )
+                    # Event was set, exit loop
+                    break
+                except asyncio.TimeoutError:
+                    # Normal timeout, continue polling
+                    pass
 
     def stop(self) -> None:
         """Stop the Coordinator loop."""
         logger.info("Stopping Coordinator")
         self._running = False
+
+        # Set shutdown event to interrupt sleep
+        if self._shutdown_event:
+            self._shutdown_event.set()
 
         # Terminate all running instances
         for key, info in list(self._instances.items()):
@@ -726,6 +742,50 @@ All file operations should be performed in this directory, NOT in the current co
         settings_file.write_text(json.dumps(settings, indent=2))
         logger.debug(f"Wrote settings.json: {settings_file}")
 
+    def _update_claude_settings_with_mcp(self, context_dir: str, connection_path: str) -> None:
+        """Update Claude settings.json with MCP server configuration.
+
+        Reads existing settings.json and adds mcpServers configuration.
+
+        Args:
+            context_dir: Agent context directory (contains .claude/)
+            connection_path: Unix socket path or HTTP URL for MCP connection
+        """
+        settings_file = Path(context_dir) / ".claude" / "settings.json"
+        if not settings_file.exists():
+            logger.warning(f"Claude settings.json not found: {settings_file}")
+            return
+
+        # Read existing settings
+        try:
+            settings = json.loads(settings_file.read_text())
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse settings.json: {e}")
+            return
+
+        # Build MCP server config
+        if connection_path.startswith("http://") or connection_path.startswith("https://"):
+            mcp_server_config: dict = {
+                "url": connection_path,
+            }
+            if self.config.coordinator_token:
+                mcp_server_config["headers"] = {
+                    "Authorization": f"Bearer {self.config.coordinator_token}"
+                }
+        else:
+            mcp_server_config = {
+                "command": "nc",
+                "args": ["-U", connection_path],
+            }
+
+        # Add mcpServers to settings
+        settings["mcpServers"] = {
+            "agent-pm": mcp_server_config
+        }
+
+        settings_file.write_text(json.dumps(settings, indent=2))
+        logger.debug(f"Updated settings.json with MCP config: {settings_file}")
+
     def _write_gemini_md(self, config_dir: Path, system_prompt: str, working_dir: str) -> None:
         """Write GEMINI.md file with system_prompt and restrictions.
 
@@ -734,6 +794,9 @@ All file operations should be performed in this directory, NOT in the current co
             system_prompt: Agent's system prompt
             working_dir: Manager's working directory
         """
+        # Resolve symlinks for consistency with --include-directories
+        # (e.g., /tmp -> /private/tmp on macOS)
+        real_working_dir = os.path.realpath(working_dir)
         gemini_md = config_dir / "GEMINI.md"
         content = f"""# Agent Context
 
@@ -741,11 +804,19 @@ All file operations should be performed in this directory, NOT in the current co
 
 ---
 
-## Working Directory
+## Working Directory (CRITICAL - READ CAREFULLY)
 
-Your working directory is: `{working_dir}`
+Your working directory is: `{real_working_dir}`
 
-All file operations should be performed in this directory, NOT in the current context directory.
+**IMPORTANT**: You MUST use ABSOLUTE PATHS for ALL file operations.
+The `cd` command does NOT affect `write_file`, `read_file`, or other file tools.
+
+Examples:
+- CORRECT: `write_file` with path `{real_working_dir}/document.txt`
+- WRONG: `write_file` with path `document.txt` (relative path will fail)
+- WRONG: `write_file` with path `./document.txt` (relative path will fail)
+
+Always prefix your file paths with `{real_working_dir}/`.
 
 ## Restrictions
 
@@ -833,7 +904,7 @@ All file operations should be performed in this directory, NOT in the current co
             cli_args = provider_config.cli_args
 
         # Build prompt for the Agent Instance
-        prompt = self._build_agent_prompt(agent_id, project_id, passkey)
+        prompt = self._build_agent_prompt(agent_id, project_id, passkey, working_dir)
 
         # Generate log file path (use working_dir-based path for project context)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -906,10 +977,10 @@ All file operations should be performed in this directory, NOT in the current co
         # Claude CLI requires a file path for --mcp-config flag
         mcp_config_file_path: Optional[str] = None
         if provider == "gemini":
-            self._prepare_gemini_mcp_config(working_dir, connection_path)
+            self._prepare_gemini_mcp_config(context_dir, connection_path, working_dir)
             logger.debug("Prepared Gemini MCP config file")
         else:
-            # Write MCP config to a temp file for Claude CLI
+            # Write MCP config to a temp file for Claude CLI (--mcp-config flag)
             # Note: delete=False so the file persists during process lifetime
             with tempfile.NamedTemporaryFile(
                 mode='w',
@@ -920,6 +991,11 @@ All file operations should be performed in this directory, NOT in the current co
                 f.write(mcp_config_json)
                 mcp_config_file_path = f.name
             logger.debug(f"Wrote MCP config to temp file: {mcp_config_file_path}")
+
+            # Also add MCP config to Claude's settings.json in context_dir
+            if provider == "claude":
+                self._update_claude_settings_with_mcp(context_dir, connection_path)
+                logger.debug("Updated Claude settings.json with MCP config")
 
         # Build command
         cmd = [
@@ -942,9 +1018,20 @@ All file operations should be performed in this directory, NOT in the current co
         # Gemini: Add --include-directories flag for working directory access
         # Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
         # Note: settings.json includeDirectories is ignored due to Gemini CLI bug
+        # Note: Use realpath to resolve symlinks (e.g., /tmp -> /private/tmp on macOS)
+        #       Gemini CLI normalizes paths internally and requires exact match
         if provider == "gemini":
-            cmd.extend(["--include-directories", working_dir])
-            logger.debug(f"Added --include-directories {working_dir} for Gemini")
+            real_working_dir = os.path.realpath(working_dir)
+            cmd.extend(["--include-directories", real_working_dir])
+            logger.debug(f"Added --include-directories {real_working_dir} for Gemini")
+
+        # Claude: Add --add-dir flag for working directory access
+        # Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
+        # Note: Use realpath to resolve symlinks for consistency with Gemini
+        if provider == "claude":
+            real_working_dir = os.path.realpath(working_dir)
+            cmd.extend(["--add-dir", real_working_dir])
+            logger.debug(f"Added --add-dir {real_working_dir} for Claude")
 
         # Add verbose flag for debugging if enabled
         if self.config.debug_mode:
@@ -997,7 +1084,7 @@ All file operations should be performed in this directory, NOT in the current co
             f"Spawning {model_desc} instance for {agent_id}/{project_id} "
             f"at {spawn_cwd} (working_dir={working_dir})"
         )
-        logger.debug(f"Command: {' '.join(cmd[:5])}...")
+        logger.debug(f"Command: {' '.join(cmd)}")
 
         # Ensure both directories exist
         Path(working_dir).mkdir(parents=True, exist_ok=True)
@@ -1060,18 +1147,27 @@ All file operations should be performed in this directory, NOT in the current co
 
         logger.info(f"Spawned instance {agent_id}/{project_id} (PID: {process.pid})")
 
-    def _prepare_gemini_mcp_config(self, working_dir: str, connection_path: str) -> None:
+    def _prepare_gemini_mcp_config(
+        self, context_dir: str, connection_path: str, actual_working_dir: str
+    ) -> None:
         """Prepare MCP config file for Gemini CLI.
 
         Gemini CLI reads MCP configuration from .gemini/settings.json in the
-        working directory, unlike Claude CLI which accepts --mcp-config flag.
+        context directory, unlike Claude CLI which accepts --mcp-config flag.
 
         Args:
-            working_dir: Working directory where .gemini/settings.json will be created
+            context_dir: Context directory where .gemini/settings.json will be created
             connection_path: Unix socket path or HTTP URL for MCP connection
+            actual_working_dir: The actual working directory for file operations
+                               (added to includeDirectories as workaround for
+                               --include-directories bug, see GitHub Issue #13669)
         """
-        gemini_dir = Path(working_dir) / ".gemini"
+        gemini_dir = Path(context_dir) / ".gemini"
         gemini_dir.mkdir(parents=True, exist_ok=True)
+
+        # Resolve symlinks for includeDirectories
+        # (e.g., /tmp -> /private/tmp on macOS)
+        real_working_dir = os.path.realpath(actual_working_dir)
 
         # Determine transport type based on connection path
         if connection_path.startswith("http://") or connection_path.startswith("https://"):
@@ -1088,6 +1184,13 @@ All file operations should be performed in this directory, NOT in the current co
             config = {
                 "mcpServers": {
                     "agent-pm": mcp_server_config
+                },
+                # Workaround for --include-directories bug (GitHub Issue #13669)
+                # Use old flat format instead of nested "context" format
+                "includeDirectories": [real_working_dir],
+                "loadMemoryFromIncludeDirectories": True,
+                "experimental": {
+                    "skills": True
                 }
             }
         else:
@@ -1099,6 +1202,13 @@ All file operations should be performed in this directory, NOT in the current co
                         "args": ["-U", connection_path],
                         "trust": True  # Auto-approve tool calls
                     }
+                },
+                # Workaround for --include-directories bug (GitHub Issue #13669)
+                # Use old flat format instead of nested "context" format
+                "includeDirectories": [real_working_dir],
+                "loadMemoryFromIncludeDirectories": True,
+                "experimental": {
+                    "skills": True
                 }
             }
 
@@ -1107,8 +1217,9 @@ All file operations should be performed in this directory, NOT in the current co
             json.dump(config, f, indent=2)
 
         logger.debug(f"Created Gemini MCP config at {config_file}")
+        logger.debug(f"Added includeDirectories: {real_working_dir}")
 
-    def _build_agent_prompt(self, agent_id: str, project_id: str, passkey: str) -> str:
+    def _build_agent_prompt(self, agent_id: str, project_id: str, passkey: str, working_dir: str) -> str:
         """Build the prompt for an Agent Instance.
 
         The Agent Instance will use this prompt to know how to authenticate
@@ -1121,11 +1232,18 @@ All file operations should be performed in this directory, NOT in the current co
             agent_id: Agent ID (for logging, actual value passed via env)
             project_id: Project ID (for logging, actual value passed via env)
             passkey: Agent passkey (for logging, actual value passed via env)
+            working_dir: Working directory for file operations
 
         Returns:
             Prompt string for the Agent Instance
         """
-        return """You are an AI Agent Instance managed by the AI Agent PM system.
+        return f"""You are an AI Agent Instance managed by the AI Agent PM system.
+
+## Working Directory (CRITICAL)
+Your working directory is: `{working_dir}`
+
+All file operations (read, write, create, edit) MUST be performed in this directory.
+**DO NOT** create or modify any files within `.aiagent/` directory. This directory is managed by the system.
 
 ## Authentication (CRITICAL: First Step)
 Your credentials are stored in environment variables. To authenticate:
@@ -1161,7 +1279,7 @@ Before executing any actual work, you MUST decompose the task into sub-tasks:
 - Task description is for context/understanding only, not for direct execution
 - The system controls the workflow; you execute the steps
 - If you receive a system_prompt from authenticate, adopt that role
-- You are working in the project directory
+- All file operations in `{working_dir}`, NOT in `.aiagent/`
 
 Begin by reading environment variables with Bash, then call `authenticate`.
 """
@@ -1192,10 +1310,16 @@ async def run_coordinator_async(config: CoordinatorConfig) -> None:
         logger.error(str(e))
         raise SystemExit(1)
 
+    coordinator: Optional[Coordinator] = None
+
     try:
         coordinator = Coordinator(config)
         await coordinator.start()
+    except asyncio.CancelledError:
+        logger.info("Coordinator cancelled")
     finally:
+        if coordinator:
+            coordinator.stop()
         lock.release()
         logger.info("Released coordinator lock")
 
@@ -1209,4 +1333,29 @@ def run_coordinator(config: CoordinatorConfig) -> None:
     Args:
         config: Coordinator configuration
     """
-    asyncio.run(run_coordinator_async(config))
+    import signal
+
+    # Create event loop manually (asyncio.run() overwrites signal handlers)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    main_task: Optional[asyncio.Task] = None
+
+    def handle_signal():
+        """Signal handler that cancels the main task."""
+        if main_task and not main_task.done():
+            main_task.cancel()
+
+    # Install signal handlers on the event loop
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, handle_signal)
+
+    try:
+        main_task = loop.create_task(run_coordinator_async(config))
+        loop.run_until_complete(main_task)
+    except asyncio.CancelledError:
+        logger.info("Coordinator interrupted")
+    finally:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.remove_signal_handler(sig)
+        loop.close()
