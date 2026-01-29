@@ -66,6 +66,7 @@ async def test_get_subordinate_profile_success(mock_transport):
       agent_id: str
       name: str
       system_prompt: str
+      skills: list[SkillDefinition]  # AGENT_SKILLS.md 参照
   ```
 - [ ] `get_subordinate_profile` メソッド追加
 
@@ -98,6 +99,7 @@ async def test_get_subordinate_profile_success(mock_transport):
   ```
 - [ ] `test_prepare_agent_context_creates_claude_md`: CLAUDE.md が作成されること
 - [ ] `test_prepare_agent_context_creates_settings_json`: settings.json が作成されること
+- [ ] `test_prepare_agent_context_creates_skills_directory`: skills/ ディレクトリが作成されること
 
 #### 2.1.2 CLAUDE.md 内容テスト
 
@@ -109,7 +111,45 @@ async def test_get_subordinate_profile_success(mock_transport):
 
 - [ ] `test_settings_json_has_additional_directories`: additionalDirectories が正しいこと
 
-#### 2.1.4 spawn テスト
+#### 2.1.4 スキル配置テスト
+
+- [ ] `test_write_skills_creates_skill_directories`: エージェントに割り当てられたスキルのディレクトリが作成されること
+- [ ] `test_write_skills_creates_skill_md_files`: 各スキルの SKILL.md が正しく配置されること
+- [ ] `test_write_skills_clears_existing_skills`: 再起動時に既存スキルがクリアされ再生成されること
+- [ ] `test_write_skills_empty_skills_list`: スキル割り当てが空の場合も正常動作すること
+
+**テストコード例:**
+```python
+def test_write_skills_creates_skill_directories(tmp_path, coordinator):
+    """割り当てられたスキルのディレクトリが作成されること"""
+    working_dir = str(tmp_path / "project")
+    os.makedirs(working_dir)
+
+    # Mock get_subordinate_profile with skills
+    coordinator.mcp_client.get_subordinate_profile = AsyncMock(
+        return_value=SubordinateProfile(
+            agent_id="worker-01",
+            name="Worker 01",
+            system_prompt="You are a coding assistant.",
+            skills=[
+                SkillDefinition(
+                    id="skill_001",
+                    directory_name="code-review",
+                    content="---\nname: code-review\n---\n## Review steps"
+                )
+            ]
+        )
+    )
+
+    coordinator._prepare_agent_context("worker-01", working_dir, "claude")
+
+    skill_dir = Path(working_dir) / ".aiagent" / "agents" / "worker-01" / ".claude" / "skills" / "code-review"
+    assert skill_dir.exists()
+    assert (skill_dir / "SKILL.md").exists()
+    assert "Review steps" in (skill_dir / "SKILL.md").read_text()
+```
+
+#### 2.1.5 spawn テスト
 
 - [ ] `test_spawn_instance_uses_context_directory_as_cwd`: cwd がコンテキストディレクトリになること
 
@@ -161,6 +201,7 @@ def test_claude_md_contains_system_prompt(tmp_path, coordinator):
 - [ ] `_prepare_agent_context` メソッド追加
 - [ ] `_write_claude_md` ヘルパー追加
 - [ ] `_write_claude_settings` ヘルパー追加
+- [ ] `_write_skills` ヘルパー追加（Claude/Gemini共通）
 - [ ] `_spawn_instance` の cwd 変更ロジック追加
 
 **実装詳細:**
@@ -186,13 +227,29 @@ async def _prepare_agent_context(
             logger.warning(f"Failed to get subordinate profile: {e}")
             system_prompt = ""
 
-        self._write_claude_md(config_dir, system_prompt)
+        self._write_claude_md(config_dir, system_prompt, working_dir)
         self._write_claude_settings(config_dir, working_dir)
+        self._write_skills(config_dir, profile.skills)
 
         return str(context_dir)
 
     # 他のプロバイダーは従来通り
     return working_dir
+
+def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]):
+    """スキルファイルを配置する（Claude/Gemini共通）"""
+    skills_dir = config_dir / "skills"
+
+    # 既存スキルをクリア（毎回再生成）
+    if skills_dir.exists():
+        shutil.rmtree(skills_dir)
+
+    for skill in skills:
+        skill_dir = skills_dir / skill.directory_name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text(skill.content)
 ```
 
 ### 2.3 リファクタリング
@@ -288,6 +345,7 @@ gemini --include-directories {manager_working_dir}
 - [ ] `test_prepare_agent_context_gemini_md`: GEMINI.md が作成されること
 - [ ] `test_gemini_md_contains_system_prompt`: system_prompt が含まれること
 - [ ] `test_gemini_md_contains_working_directory`: 作業ディレクトリ指示が含まれること
+- [ ] `test_gemini_skills_directory_created`: skills/ ディレクトリが作成されること（Claude と同一構造）
 - [ ] `test_spawn_instance_gemini_include_directories_flag`: `--include-directories` フラグが追加されること
 
 **テストコード例:**
@@ -330,6 +388,7 @@ def test_spawn_instance_gemini_include_directories_flag(tmp_path, coordinator):
 - [ ] `_prepare_agent_context` に Gemini 対応追加
 - [ ] `_write_gemini_md` ヘルパー追加
 - [ ] `_write_gemini_settings` ヘルパー追加（MCP設定用）
+- [ ] `_write_skills` を Gemini でも使用（Claude と同一実装を共有）
 - [ ] `_spawn_instance` に `--include-directories` フラグ追加
 
 **実装詳細:**
@@ -357,6 +416,7 @@ async def _prepare_agent_context(
 
         self._write_gemini_md(config_dir, system_prompt, working_dir)
         self._write_gemini_settings(config_dir)
+        self._write_skills(config_dir, profile.skills)  # Claude と同一実装を共有
 
         return str(context_dir)
 
@@ -390,6 +450,7 @@ def _spawn_instance(self, ...):
 - [ ] `.aiagent/agents/{agent_id}/.claude/` が作成されることを確認
 - [ ] CLAUDE.md に system_prompt が含まれることを確認
 - [ ] settings.json に additionalDirectories が含まれることを確認
+- [ ] skills/ ディレクトリにエージェントのスキルが配置されることを確認
 
 #### 5.1.2 実作業ディレクトリアクセス確認
 
@@ -439,9 +500,10 @@ def _spawn_instance(self, ...):
 
 ## 完了条件
 
-- [ ] Phase 1〜3 の全テストが GREEN
+- [ ] Phase 1〜4 の全テストが GREEN
 - [ ] Phase 5 の統合テストが成功
-- [ ] 設計書のレビュー完了
+- [ ] skills/ ディレクトリが Claude/Gemini 両方で正しく生成されること
+- [ ] 設計書のレビュー完了（AGENT_CONTEXT_DIRECTORY.md, AGENT_SKILLS.md）
 - [ ] CHANGELOG への追記
 
 ---
@@ -452,3 +514,4 @@ def _spawn_instance(self, ...):
 |------|------|
 | 2026-01-28 | 初版作成 |
 | 2026-01-28 | PoC検証結果を反映: Phase 4 調査完了、Gemini は `--include-directories` フラグ必須 |
+| 2026-01-29 | skills/ ディレクトリ対応追加: AGENT_SKILLS.md との整合性確保、Claude/Gemini 共通の `_write_skills` メソッド |
