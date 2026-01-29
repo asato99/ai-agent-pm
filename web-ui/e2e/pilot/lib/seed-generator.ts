@@ -120,6 +120,36 @@ VALUES (
 }
 
 /**
+ * 初期ファイルを作業ディレクトリに作成
+ */
+export function createInitialFiles(scenario: ScenarioConfig): void {
+  if (!scenario.initial_files || scenario.initial_files.length === 0) {
+    return
+  }
+
+  const workingDir = scenario.project.working_directory
+
+  // 作業ディレクトリを作成
+  if (!fs.existsSync(workingDir)) {
+    fs.mkdirSync(workingDir, { recursive: true })
+  }
+
+  for (const file of scenario.initial_files) {
+    const filePath = path.join(workingDir, file.name)
+    const fileDir = path.dirname(filePath)
+
+    // サブディレクトリを作成
+    if (!fs.existsSync(fileDir)) {
+      fs.mkdirSync(fileDir, { recursive: true })
+    }
+
+    fs.writeFileSync(filePath, file.content, 'utf8')
+    // stderr に出力（stdout は SQL 用）
+    console.error(`Created: ${filePath}`)
+  }
+}
+
+/**
  * CLI実行時のエントリーポイント
  */
 const __filename_cli = fileURLToPath(import.meta.url)
@@ -137,6 +167,10 @@ if (process.argv[1] === __filename_cli) {
   const scenario = yaml.load(fs.readFileSync(scenarioPath, 'utf8')) as ScenarioConfig
   const variation = yaml.load(fs.readFileSync(variationPath, 'utf8')) as VariationConfig
 
+  // SQL を stdout に出力
   const sql = generateSeedSQL(scenario, variation)
   console.log(sql)
+
+  // 初期ファイルを作成（ログは stderr）
+  createInitialFiles(scenario)
 }
