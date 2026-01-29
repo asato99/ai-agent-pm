@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -347,11 +348,21 @@ class Coordinator:
                                 continue
 
                         provider = result.provider or "claude"
+
+                        # Prepare agent context directory
+                        # Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
+                        context_dir = await self._prepare_agent_context(
+                            agent_id=agent_id,
+                            working_dir=working_dir,
+                            provider=provider
+                        )
+
                         self._spawn_instance(
                             agent_id=agent_id,
                             project_id=project_id,
                             passkey=passkey,
                             working_dir=working_dir,
+                            context_dir=context_dir,
                             provider=provider,
                             model=result.model,
                             kick_command=result.kick_command,
@@ -594,12 +605,195 @@ class Coordinator:
             logger.warning(f"Failed to read log file {log_file_path}: {e}")
             return None
 
+    # ==========================================================================
+    # Agent Context Directory
+    # Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
+    # ==========================================================================
+
+    async def _prepare_agent_context(
+        self,
+        agent_id: str,
+        working_dir: str,
+        provider: str
+    ) -> str:
+        """Prepare agent-specific context directory.
+
+        Creates a context directory with provider-specific configuration files
+        (CLAUDE.md/GEMINI.md, settings.json) that contain the agent's system_prompt.
+
+        Args:
+            agent_id: Agent ID
+            working_dir: Manager's working directory (実作業ディレクトリ)
+            provider: AI provider ("claude", "gemini", etc.)
+
+        Returns:
+            Path to context directory (to be used as cwd for spawn)
+            Falls back to working_dir on error.
+        """
+        try:
+            aiagent_dir = Path(working_dir) / ".aiagent"
+            context_dir = aiagent_dir / "agents" / agent_id
+
+            # Ensure .gitignore includes agents/ directory
+            self._update_aiagent_gitignore(aiagent_dir)
+
+            if provider == "claude":
+                config_dir = context_dir / ".claude"
+                config_dir.mkdir(parents=True, exist_ok=True)
+
+                # Get system_prompt from MCP server
+                system_prompt = ""
+                try:
+                    profile = await self.mcp_client.get_subordinate_profile(agent_id)
+                    system_prompt = profile.system_prompt
+                    logger.debug(f"Got system_prompt for {agent_id}: {len(system_prompt)} chars")
+                except Exception as e:
+                    logger.warning(f"Failed to get subordinate profile for {agent_id}: {e}")
+
+                self._write_claude_md(config_dir, system_prompt, working_dir)
+                self._write_claude_settings(config_dir, working_dir)
+
+                logger.info(f"Prepared Claude context directory: {context_dir}")
+                return str(context_dir)
+
+            elif provider == "gemini":
+                config_dir = context_dir / ".gemini"
+                config_dir.mkdir(parents=True, exist_ok=True)
+
+                # Get system_prompt from MCP server
+                system_prompt = ""
+                try:
+                    profile = await self.mcp_client.get_subordinate_profile(agent_id)
+                    system_prompt = profile.system_prompt
+                    logger.debug(f"Got system_prompt for {agent_id}: {len(system_prompt)} chars")
+                except Exception as e:
+                    logger.warning(f"Failed to get subordinate profile for {agent_id}: {e}")
+
+                self._write_gemini_md(config_dir, system_prompt, working_dir)
+
+                logger.info(f"Prepared Gemini context directory: {context_dir}")
+                return str(context_dir)
+
+            else:
+                # Other providers: use working_dir as-is
+                return working_dir
+
+        except Exception as e:
+            logger.error(f"Failed to prepare agent context for {agent_id}: {e}")
+            return working_dir  # Fallback
+
+    def _write_claude_md(self, config_dir: Path, system_prompt: str, working_dir: str) -> None:
+        """Write CLAUDE.md file with system_prompt and restrictions.
+
+        Args:
+            config_dir: Path to .claude/ directory
+            system_prompt: Agent's system prompt
+            working_dir: Manager's working directory
+        """
+        claude_md = config_dir / "CLAUDE.md"
+        content = f"""# Agent Context
+
+{system_prompt}
+
+---
+
+## Working Directory
+
+Your working directory is: `{working_dir}`
+
+All file operations should be performed in this directory, NOT in the current context directory.
+
+## Restrictions
+
+**DO NOT** modify any files within `.aiagent/`. This directory is managed by AI Agent PM.
+"""
+        claude_md.write_text(content)
+        logger.debug(f"Wrote CLAUDE.md: {claude_md}")
+
+    def _write_claude_settings(self, config_dir: Path, working_dir: str) -> None:
+        """Write Claude CLI settings.json with additionalDirectories.
+
+        Args:
+            config_dir: Path to .claude/ directory
+            working_dir: Manager's working directory to add as additional directory
+        """
+        settings_file = config_dir / "settings.json"
+        settings = {
+            "permissions": {
+                "additionalDirectories": [working_dir]
+            }
+        }
+        settings_file.write_text(json.dumps(settings, indent=2))
+        logger.debug(f"Wrote settings.json: {settings_file}")
+
+    def _write_gemini_md(self, config_dir: Path, system_prompt: str, working_dir: str) -> None:
+        """Write GEMINI.md file with system_prompt and restrictions.
+
+        Args:
+            config_dir: Path to .gemini/ directory
+            system_prompt: Agent's system prompt
+            working_dir: Manager's working directory
+        """
+        gemini_md = config_dir / "GEMINI.md"
+        content = f"""# Agent Context
+
+{system_prompt}
+
+---
+
+## Working Directory
+
+Your working directory is: `{working_dir}`
+
+All file operations should be performed in this directory, NOT in the current context directory.
+
+## Restrictions
+
+**DO NOT** modify any files within `.aiagent/`. This directory is managed by AI Agent PM.
+"""
+        gemini_md.write_text(content)
+        logger.debug(f"Wrote GEMINI.md: {gemini_md}")
+
+    def _update_aiagent_gitignore(self, aiagent_dir: Path) -> None:
+        """Ensure .aiagent/.gitignore includes agents/ directory.
+
+        Creates or updates .gitignore to exclude agent context directories.
+
+        Args:
+            aiagent_dir: Path to .aiagent/ directory
+        """
+        gitignore_path = aiagent_dir / ".gitignore"
+        required_entries = ["logs/", "agents/"]
+
+        # Read existing content if file exists
+        existing_content = ""
+        if gitignore_path.exists():
+            existing_content = gitignore_path.read_text()
+
+        # Check which entries are missing
+        missing_entries = []
+        for entry in required_entries:
+            if entry not in existing_content:
+                missing_entries.append(entry)
+
+        # Add missing entries
+        if missing_entries:
+            aiagent_dir.mkdir(parents=True, exist_ok=True)
+            with open(gitignore_path, "a") as f:
+                if existing_content and not existing_content.endswith("\n"):
+                    f.write("\n")
+                f.write("# AI Agent PM - auto-generated\n")
+                for entry in missing_entries:
+                    f.write(f"{entry}\n")
+            logger.debug(f"Updated .gitignore with: {missing_entries}")
+
     def _spawn_instance(
         self,
         agent_id: str,
         project_id: str,
         passkey: str,
         working_dir: str,
+        context_dir: str,
         provider: str,
         model: Optional[str] = None,
         kick_command: Optional[str] = None,
@@ -618,7 +812,8 @@ class Coordinator:
             agent_id: Agent ID
             project_id: Project ID
             passkey: Agent passkey
-            working_dir: Working directory for the task
+            working_dir: Working directory for the task (実作業ディレクトリ)
+            context_dir: Context directory to use as cwd (contains CLAUDE.md etc.)
             provider: AI provider (claude, gemini, openai, other)
             model: Specific model (claude-sonnet-4-5, gemini-2.0-flash, etc.)
             kick_command: Custom CLI command (takes priority if set)
@@ -744,6 +939,13 @@ class Coordinator:
             cmd.extend([model_flag, model])
             logger.debug(f"Using model: {model} (flag: {model_flag})")
 
+        # Gemini: Add --include-directories flag for working directory access
+        # Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
+        # Note: settings.json includeDirectories is ignored due to Gemini CLI bug
+        if provider == "gemini":
+            cmd.extend(["--include-directories", working_dir])
+            logger.debug(f"Added --include-directories {working_dir} for Gemini")
+
         # Add verbose flag for debugging if enabled
         if self.config.debug_mode:
             if provider == "gemini":
@@ -784,16 +986,22 @@ class Coordinator:
         # Use current directory as fallback if working_dir is empty
         if not working_dir:
             working_dir = os.getcwd()
+            context_dir = working_dir  # Also update context_dir
             logger.debug(f"Using fallback working_dir: {working_dir}")
+
+        # Use context_dir as cwd (contains CLAUDE.md/GEMINI.md)
+        # Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
+        spawn_cwd = context_dir
 
         logger.info(
             f"Spawning {model_desc} instance for {agent_id}/{project_id} "
-            f"at {working_dir}"
+            f"at {spawn_cwd} (working_dir={working_dir})"
         )
         logger.debug(f"Command: {' '.join(cmd[:5])}...")
 
-        # Ensure working directory exists
+        # Ensure both directories exist
         Path(working_dir).mkdir(parents=True, exist_ok=True)
+        Path(spawn_cwd).mkdir(parents=True, exist_ok=True)
 
         # Open log file (keep handle open during process lifetime)
         log_f = open(log_file, "w")
@@ -819,7 +1027,7 @@ class Coordinator:
             logger.debug(f"Windows {provider} shell command: type ... | {cmd_str}")
             process = subprocess.Popen(
                 shell_cmd,
-                cwd=working_dir,
+                cwd=spawn_cwd,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
                 shell=True,
@@ -828,7 +1036,7 @@ class Coordinator:
         else:
             process = subprocess.Popen(
                 cmd,
-                cwd=working_dir,
+                cwd=spawn_cwd,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
                 shell=is_windows(),

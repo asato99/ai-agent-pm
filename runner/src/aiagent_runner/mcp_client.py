@@ -101,6 +101,26 @@ class ExecutionStartResult:
     started_at: datetime
 
 
+@dataclass
+class SubordinateProfile:
+    """Profile of a subordinate agent.
+
+    Used by Coordinator to get agent's system_prompt for context directory setup.
+    Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
+    """
+    agent_id: str
+    name: str
+    role: str
+    system_prompt: str
+    agent_type: str = ""
+    hierarchy_type: str = ""
+    status: str = ""
+    parent_agent_id: Optional[str] = None
+    ai_type: Optional[str] = None
+    kick_method: str = ""
+    max_parallel_tasks: int = 1
+
+
 class MCPClient:
     """Client for MCP server communication.
 
@@ -486,6 +506,45 @@ class MCPClient:
         result = await self._call_tool("report_agent_error", args)
 
         return result.get("success", False)
+
+    async def get_subordinate_profile(self, agent_id: str) -> SubordinateProfile:
+        """Get profile of a subordinate agent.
+
+        Called by Coordinator to get agent's system_prompt for context directory setup.
+        Reference: docs/design/AGENT_CONTEXT_DIRECTORY.md
+
+        Args:
+            agent_id: Agent ID to get profile for
+
+        Returns:
+            SubordinateProfile with agent details including system_prompt
+
+        Raises:
+            MCPError: If request fails or agent not found
+        """
+        args = {"agent_id": agent_id}
+        if self._coordinator_token:
+            args["coordinator_token"] = self._coordinator_token
+
+        result = await self._call_tool("get_subordinate_profile", args)
+
+        # Handle error response
+        if isinstance(result, dict) and "error" in result:
+            raise MCPError(result["error"])
+
+        return SubordinateProfile(
+            agent_id=result.get("id", agent_id),
+            name=result.get("name", ""),
+            role=result.get("role", ""),
+            system_prompt=result.get("system_prompt", ""),
+            agent_type=result.get("type", ""),
+            hierarchy_type=result.get("hierarchy_type", ""),
+            status=result.get("status", ""),
+            parent_agent_id=result.get("parent_agent_id") if result.get("parent_agent_id") else None,
+            ai_type=result.get("ai_type") if result.get("ai_type") else None,
+            kick_method=result.get("kick_method", ""),
+            max_parallel_tasks=result.get("max_parallel_tasks", 1)
+        )
 
     # ==========================================================================
     # Phase 3/4: Agent Instance API
