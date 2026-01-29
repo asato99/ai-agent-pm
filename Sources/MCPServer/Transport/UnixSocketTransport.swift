@@ -154,7 +154,7 @@ final class UnixSocketServer {
 
     /// ログ出力（MCPLoggerに委譲）
     private func log(_ message: String) {
-        MCPLogger.shared.info("[daemon] \(message)", category: .transport)
+        MCPLogger.shared.debug("[daemon] \(message)", category: .transport)
     }
 
     /// ログローテーション実行

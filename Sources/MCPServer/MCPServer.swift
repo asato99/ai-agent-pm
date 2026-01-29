@@ -349,7 +349,34 @@ public final class MCPServer {
             let caller = try identifyCaller(tool: name, arguments: arguments)
             try ToolAuthorization.authorize(tool: name, caller: caller)
 
+            // ツール呼び出しログ
+            let agentAndProject = extractAgentAndProject(from: caller)
+            let agentIdStr = agentAndProject?.0.description
+            let projectIdStr = agentAndProject?.1.description
+            Self.logger.info(
+                "Tool called: \(name)",
+                category: .mcp,
+                operation: name,
+                agentId: agentIdStr,
+                projectId: projectIdStr,
+                details: LogUtils.formatArguments(arguments)
+            )
+
+            let startTime = Date()
             let result = try executeTool(name: name, arguments: arguments, caller: caller)
+            let duration = Date().timeIntervalSince(startTime)
+
+            // ツール完了ログ
+            var resultDetails = LogUtils.formatResult(result)
+            resultDetails["duration_ms"] = Int(duration * 1000)
+            Self.logger.info(
+                "Tool completed: \(name)",
+                category: .mcp,
+                operation: name,
+                agentId: agentIdStr,
+                projectId: projectIdStr,
+                details: resultDetails
+            )
 
             // 通知ミドルウェア: 認証済みエージェントに未読通知の有無を通知
             // 参照: docs/design/NOTIFICATION_SYSTEM.md
@@ -389,6 +416,13 @@ public final class MCPServer {
 
             return JSONRPCResponse(id: request.id, result: responseContent)
         } catch let error as ToolAuthorizationError {
+            // 認可エラーログ
+            Self.logger.warn(
+                "Tool authorization failed: \(name)",
+                category: .mcp,
+                operation: name,
+                details: ["error": error.errorDescription ?? error.localizedDescription]
+            )
             // 認可エラーは専用のエラーメッセージで返す
             return JSONRPCResponse(id: request.id, result: [
                 "content": [
@@ -397,6 +431,13 @@ public final class MCPServer {
                 "isError": true
             ])
         } catch {
+            // ツールエラーログ
+            Self.logger.error(
+                "Tool failed: \(name)",
+                category: .mcp,
+                operation: name,
+                details: ["error": String(describing: error)]
+            )
             return JSONRPCResponse(id: request.id, result: [
                 "content": [
                     ["type": "text", "text": "Error: \(error)"]
@@ -426,8 +467,35 @@ public final class MCPServer {
             let caller = try identifyCaller(tool: name, arguments: arguments)
             try ToolAuthorization.authorize(tool: name, caller: caller)
 
+            // ツール呼び出しログ
+            let agentAndProject = extractAgentAndProject(from: caller)
+            let agentIdStr = agentAndProject?.0.description
+            let projectIdStr = agentAndProject?.1.description
+            Self.logger.info(
+                "Tool called: \(name)",
+                category: .mcp,
+                operation: name,
+                agentId: agentIdStr,
+                projectId: projectIdStr,
+                details: LogUtils.formatArguments(arguments)
+            )
+
+            let startTime = Date()
             // 非同期版のツール実行（Long Polling対応）
             let result = try await executeToolAsync(name: name, arguments: arguments, caller: caller)
+            let duration = Date().timeIntervalSince(startTime)
+
+            // ツール完了ログ
+            var resultDetails = LogUtils.formatResult(result)
+            resultDetails["duration_ms"] = Int(duration * 1000)
+            Self.logger.info(
+                "Tool completed: \(name)",
+                category: .mcp,
+                operation: name,
+                agentId: agentIdStr,
+                projectId: projectIdStr,
+                details: resultDetails
+            )
 
             // 通知ミドルウェア: 認証済みエージェントに未読通知の有無を通知
             // 参照: docs/design/NOTIFICATION_SYSTEM.md
@@ -467,6 +535,13 @@ public final class MCPServer {
 
             return JSONRPCResponse(id: request.id, result: responseContent)
         } catch let error as ToolAuthorizationError {
+            // 認可エラーログ
+            Self.logger.warn(
+                "Tool authorization failed: \(name)",
+                category: .mcp,
+                operation: name,
+                details: ["error": error.errorDescription ?? error.localizedDescription]
+            )
             // 認可エラーは専用のエラーメッセージで返す
             return JSONRPCResponse(id: request.id, result: [
                 "content": [
@@ -475,6 +550,13 @@ public final class MCPServer {
                 "isError": true
             ])
         } catch {
+            // ツールエラーログ
+            Self.logger.error(
+                "Tool failed: \(name)",
+                category: .mcp,
+                operation: name,
+                details: ["error": String(describing: error)]
+            )
             return JSONRPCResponse(id: request.id, result: [
                 "content": [
                     ["type": "text", "text": "Error: \(error)"]
