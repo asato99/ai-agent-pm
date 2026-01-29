@@ -62,3 +62,4 @@ PyPI-Recovery-Codes*
 *-Recovery-Codes*
 .pypirc
 default.profraw
+build/
