@@ -242,7 +242,7 @@ struct SkillEditorView: View {
         !name.trimmingCharacters(in: .whitespaces).isEmpty &&
         SkillDefinition.isValidDirectoryName(directoryName) &&
         description.count <= SkillDefinition.maxDescriptionLength &&
-        content.utf8.count <= SkillDefinition.maxContentSize
+        content.utf8.count <= SkillDefinition.maxArchiveSize  // Archive size includes ZIP overhead
     }
 
     private var directoryNameValidationError: String? {
@@ -317,10 +317,10 @@ struct SkillEditorView: View {
                         .frame(minHeight: 200)
                         .accessibilityIdentifier("SkillContentEditor")
 
-                    if content.utf8.count > 60_000 {
-                        Text("\(content.utf8.count / 1024)KB / 64KB")
+                    if content.utf8.count > 900_000 {
+                        Text("\(content.utf8.count / 1024)KB / 1MB")
                             .font(.caption)
-                            .foregroundStyle(content.utf8.count > SkillDefinition.maxContentSize ? .red : .secondary)
+                            .foregroundStyle(content.utf8.count > SkillDefinition.maxArchiveSize ? .red : .secondary)
                     }
                 }
 
@@ -359,7 +359,8 @@ struct SkillEditorView: View {
                 name = skill.name
                 description = skill.description
                 directoryName = skill.directoryName
-                content = skill.content
+                // ZIPアーカイブからSKILL.md内容を抽出
+                content = container.skillArchiveService.getSkillMdContent(from: skill.archiveData) ?? ""
             } else {
                 // デフォルトテンプレート
                 content = """
@@ -391,21 +392,31 @@ struct SkillEditorView: View {
         do {
             let savedSkill: SkillDefinition
             if let existingSkill = skill {
-                // 更新
-                savedSkill = try container.skillDefinitionUseCases.update(
+                // 更新（名前・説明のみ変更可能）
+                var updatedSkill = try container.skillDefinitionUseCases.update(
                     id: existingSkill.id,
                     name: name,
-                    description: description,
-                    directoryName: directoryName,
-                    content: content
+                    description: description
                 )
+
+                // コンテンツが変更された場合はreimport
+                let currentContent = container.skillArchiveService.getSkillMdContent(from: existingSkill.archiveData) ?? ""
+                if content != currentContent {
+                    let archiveData = container.skillArchiveService.createArchiveFromContent(content)
+                    updatedSkill = try container.skillDefinitionUseCases.reimport(
+                        id: existingSkill.id,
+                        archiveData: archiveData
+                    )
+                }
+                savedSkill = updatedSkill
             } else {
-                // 新規作成
+                // 新規作成（SKILL.mdからZIPアーカイブを生成）
+                let archiveData = container.skillArchiveService.createArchiveFromContent(content)
                 savedSkill = try container.skillDefinitionUseCases.create(
                     name: name,
                     description: description,
                     directoryName: directoryName,
-                    content: content
+                    archiveData: archiveData
                 )
             }
             onSave(savedSkill)

@@ -15,7 +15,7 @@ struct SkillDefinitionRecord: Codable, FetchableRecord, PersistableRecord {
     var name: String
     var description: String
     var directoryName: String
-    var content: String
+    var archiveData: Data
     var createdAt: Date
     var updatedAt: Date
 
@@ -24,7 +24,7 @@ struct SkillDefinitionRecord: Codable, FetchableRecord, PersistableRecord {
         case name
         case description
         case directoryName = "directory_name"
-        case content
+        case archiveData = "archive_data"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -35,7 +35,7 @@ struct SkillDefinitionRecord: Codable, FetchableRecord, PersistableRecord {
             name: name,
             description: description,
             directoryName: directoryName,
-            content: content,
+            archiveData: archiveData,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -47,7 +47,7 @@ struct SkillDefinitionRecord: Codable, FetchableRecord, PersistableRecord {
             name: skill.name,
             description: skill.description,
             directoryName: skill.directoryName,
-            content: skill.content,
+            archiveData: skill.archiveData,
             createdAt: skill.createdAt,
             updatedAt: skill.updatedAt
         )

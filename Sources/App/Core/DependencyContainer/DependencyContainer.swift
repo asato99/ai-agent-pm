@@ -59,6 +59,7 @@ public final class DependencyContainer: ObservableObject {
 
     public let mcpDaemonManager: MCPDaemonManager
     public let webServerManager: WebServerManager
+    public let skillArchiveService: SkillArchiveService
 
     // MARK: - Use Cases (Project)
 
@@ -417,6 +418,7 @@ public final class DependencyContainer: ObservableObject {
         self.eventRecorder = EventRecorder(database: database)
         self.mcpDaemonManager = MCPDaemonManager()
         self.webServerManager = WebServerManager()
+        self.skillArchiveService = SkillArchiveService()
 
         // File Storage (ファイルベースストレージ)
         self.projectDirectoryManager = ProjectDirectoryManager()

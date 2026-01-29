@@ -1,13 +1,35 @@
 # tests/test_coordinator.py
 # Tests for Coordinator log directory functionality
 
+import base64
+import io
 import os
+import zipfile
 from pathlib import Path
 
 import pytest
 
 from aiagent_runner.coordinator import Coordinator
 from aiagent_runner.coordinator_config import CoordinatorConfig
+
+
+def create_test_zip_archive(skill_md_content: str, extra_files: dict[str, str] | None = None) -> str:
+    """Create a Base64-encoded ZIP archive for testing.
+
+    Args:
+        skill_md_content: Content for SKILL.md
+        extra_files: Optional dict of {filename: content} for additional files
+
+    Returns:
+        Base64-encoded ZIP archive string
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('SKILL.md', skill_md_content)
+        if extra_files:
+            for filename, content in extra_files.items():
+                zf.writestr(filename, content)
+    return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
 
 class TestCoordinatorConfig:
@@ -116,19 +138,21 @@ class TestCoordinatorWriteSkills:
         return Coordinator(config)
 
     def test_write_skills_creates_directory_and_file(self, coordinator, tmp_path):
-        """Should create skills directory and SKILL.md file."""
+        """Should create skills directory and extract ZIP contents."""
         from aiagent_runner.mcp_client import SkillDefinition
 
         config_dir = tmp_path / ".claude"
         config_dir.mkdir()
 
+        skill_content = "---\nname: code-review\n---\n\n# Code Review Steps\n\n1. Check style\n2. Check logic"
+        archive_base64 = create_test_zip_archive(skill_content)
+
         skills = [
             SkillDefinition(
                 id="skill_001",
                 name="Code Review",
-                description="Review code quality and best practices",
                 directory_name="code-review",
-                content="---\nname: code-review\n---\n\n# Code Review Steps\n\n1. Check style\n2. Check logic"
+                archive_base64=archive_base64
             )
         ]
 
@@ -141,7 +165,7 @@ class TestCoordinatorWriteSkills:
         assert "name: code-review" in content
 
     def test_write_skills_creates_multiple_skills(self, coordinator, tmp_path):
-        """Should create multiple skill directories."""
+        """Should create multiple skill directories and extract ZIP contents."""
         from aiagent_runner.mcp_client import SkillDefinition
 
         config_dir = tmp_path / ".gemini"
@@ -151,23 +175,20 @@ class TestCoordinatorWriteSkills:
             SkillDefinition(
                 id="skill_001",
                 name="Code Review",
-                description="Review code",
                 directory_name="code-review",
-                content="# Code Review"
+                archive_base64=create_test_zip_archive("# Code Review")
             ),
             SkillDefinition(
                 id="skill_002",
                 name="Testing",
-                description="Write tests",
                 directory_name="testing",
-                content="# Testing Guidelines"
+                archive_base64=create_test_zip_archive("# Testing Guidelines")
             ),
             SkillDefinition(
                 id="skill_003",
                 name="Documentation",
-                description="Write docs",
                 directory_name="documentation",
-                content="# Documentation Style"
+                archive_base64=create_test_zip_archive("# Documentation Style")
             )
         ]
 
@@ -201,9 +222,8 @@ class TestCoordinatorWriteSkills:
             SkillDefinition(
                 id="skill_new",
                 name="New Skill",
-                description="New skill description",
                 directory_name="new-skill",
-                content="# New Skill Content"
+                archive_base64=create_test_zip_archive("# New Skill Content")
             )
         ]
 
@@ -237,9 +257,8 @@ class TestCoordinatorWriteSkills:
             SkillDefinition(
                 id="skill_001",
                 name="Skill",
-                description="desc",
                 directory_name="test-skill",
-                content="content"
+                archive_base64=create_test_zip_archive("content")
             )
         ]
         coordinator._write_skills(config_dir, initial_skills)
@@ -268,9 +287,8 @@ class TestCoordinatorWriteSkills:
             SkillDefinition(
                 id="skill_001",
                 name="Test",
-                description="test",
                 directory_name="test-skill",
-                content="# Test"
+                archive_base64=create_test_zip_archive("# Test")
             )
         ]
 
@@ -284,3 +302,43 @@ class TestCoordinatorWriteSkills:
 
         # Skill should also exist
         assert (config_dir / "skills" / "test-skill" / "SKILL.md").exists()
+
+    def test_write_skills_extracts_zip_with_extra_files(self, coordinator, tmp_path):
+        """Should extract all files from ZIP archive including scripts and templates."""
+        from aiagent_runner.mcp_client import SkillDefinition
+
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+
+        # Create ZIP with extra files (scripts and templates)
+        extra_files = {
+            "scripts/build.sh": "#!/bin/bash\necho 'Building...'",
+            "templates/report.md": "# Report Template\n\n## Summary",
+        }
+        archive_base64 = create_test_zip_archive(
+            "# Complex Skill\n\nThis skill has extra files.",
+            extra_files=extra_files
+        )
+
+        skills = [
+            SkillDefinition(
+                id="skill_complex",
+                name="Complex Skill",
+                directory_name="complex-skill",
+                archive_base64=archive_base64
+            )
+        ]
+
+        coordinator._write_skills(config_dir, skills)
+
+        skill_dir = config_dir / "skills" / "complex-skill"
+        # Verify SKILL.md
+        assert (skill_dir / "SKILL.md").exists()
+        assert "# Complex Skill" in (skill_dir / "SKILL.md").read_text()
+
+        # Verify extra files were extracted
+        assert (skill_dir / "scripts" / "build.sh").exists()
+        assert "Building" in (skill_dir / "scripts" / "build.sh").read_text()
+
+        assert (skill_dir / "templates" / "report.md").exists()
+        assert "Report Template" in (skill_dir / "templates" / "report.md").read_text()

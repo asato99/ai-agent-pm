@@ -7,6 +7,80 @@ import GRDB
 @testable import Domain
 @testable import Infrastructure
 
+/// テスト用のZIPアーカイブを作成
+private func createTestArchive(content: String = "") -> Data {
+    let contentData = content.data(using: .utf8) ?? Data()
+    let fileName = "SKILL.md"
+    let fileNameData = fileName.data(using: .utf8)!
+
+    // CRC-32計算
+    var crc: UInt32 = 0xFFFFFFFF
+    let table: [UInt32] = (0..<256).map { i -> UInt32 in
+        var c = UInt32(i)
+        for _ in 0..<8 {
+            c = (c & 1) != 0 ? (0xEDB88320 ^ (c >> 1)) : (c >> 1)
+        }
+        return c
+    }
+    for byte in contentData {
+        crc = table[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8)
+    }
+    crc = crc ^ 0xFFFFFFFF
+
+    var data = Data()
+
+    // Local File Header
+    data.append(contentsOf: [0x50, 0x4b, 0x03, 0x04])
+    data.append(contentsOf: [0x0a, 0x00])
+    data.append(contentsOf: [0x00, 0x00])
+    data.append(contentsOf: [0x00, 0x00])
+    data.append(contentsOf: [0x00, 0x00])
+    data.append(contentsOf: [0x00, 0x00])
+    data.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: [0x00, 0x00])
+    data.append(fileNameData)
+    data.append(contentData)
+
+    // Central Directory Entry
+    var centralDirectory = Data()
+    centralDirectory.append(contentsOf: [0x50, 0x4b, 0x01, 0x02])
+    centralDirectory.append(contentsOf: [0x14, 0x00])
+    centralDirectory.append(contentsOf: [0x0a, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00])
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: [0x00, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00, 0x00, 0x00])
+    centralDirectory.append(contentsOf: [0x00, 0x00, 0x00, 0x00])
+    centralDirectory.append(fileNameData)
+
+    let centralDirOffset = data.count
+    data.append(centralDirectory)
+
+    // End of Central Directory
+    data.append(contentsOf: [0x50, 0x4b, 0x05, 0x06])
+    data.append(contentsOf: [0x00, 0x00])
+    data.append(contentsOf: [0x00, 0x00])
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirectory.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirOffset).littleEndian) { Array($0) })
+    data.append(contentsOf: [0x00, 0x00])
+
+    return data
+}
+
 final class SkillDefinitionRepositoryTests: XCTestCase {
     private var dbQueue: DatabaseQueue!
     private var repository: SkillDefinitionRepository!
@@ -39,7 +113,7 @@ final class SkillDefinitionRepositoryTests: XCTestCase {
             name: name,
             description: description,
             directoryName: directoryName,
-            content: content,
+            archiveData: createTestArchive(content: content),
             createdAt: Date(),
             updatedAt: Date()
         )
@@ -58,7 +132,7 @@ final class SkillDefinitionRepositoryTests: XCTestCase {
         XCTAssertEqual(found?.name, "コードレビュー")
         XCTAssertEqual(found?.description, "コードの品質をレビューする")
         XCTAssertEqual(found?.directoryName, "code-review")
-        XCTAssertTrue(found?.content.contains("レビュー手順") ?? false)
+        XCTAssertFalse(found?.archiveData.isEmpty ?? true)
     }
 
     func testFindByIdNotFound() throws {

@@ -7,6 +7,52 @@ import GRDB
 @testable import Domain
 @testable import Infrastructure
 
+/// テスト用のZIPアーカイブを作成
+private func createTestArchive(content: String = "") -> Data {
+    let contentData = content.data(using: .utf8) ?? Data()
+    let fileName = "SKILL.md"
+    let fileNameData = fileName.data(using: .utf8)!
+
+    var crc: UInt32 = 0xFFFFFFFF
+    let table: [UInt32] = (0..<256).map { i -> UInt32 in
+        var c = UInt32(i)
+        for _ in 0..<8 { c = (c & 1) != 0 ? (0xEDB88320 ^ (c >> 1)) : (c >> 1) }
+        return c
+    }
+    for byte in contentData { crc = table[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8) }
+    crc = crc ^ 0xFFFFFFFF
+
+    var data = Data()
+    data.append(contentsOf: [0x50, 0x4b, 0x03, 0x04, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+    data.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: [0x00, 0x00])
+    data.append(fileNameData)
+    data.append(contentData)
+
+    var centralDirectory = Data()
+    centralDirectory.append(contentsOf: [0x50, 0x4b, 0x01, 0x02, 0x14, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+    centralDirectory.append(fileNameData)
+
+    let centralDirOffset = data.count
+    data.append(centralDirectory)
+    data.append(contentsOf: [0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00])
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirectory.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirOffset).littleEndian) { Array($0) })
+    data.append(contentsOf: [0x00, 0x00])
+
+    return data
+}
+
 final class AgentSkillAssignmentRepositoryTests: XCTestCase {
     private var dbQueue: DatabaseQueue!
     private var skillRepository: SkillDefinitionRepository!
@@ -65,7 +111,7 @@ final class AgentSkillAssignmentRepositoryTests: XCTestCase {
             name: name,
             description: "テスト用スキル",
             directoryName: directoryName,
-            content: "---\nname: \(directoryName)\n---\n## 手順",
+            archiveData: createTestArchive(content: "---\nname: \(directoryName)\n---\n## 手順"),
             createdAt: Date(),
             updatedAt: Date()
         )

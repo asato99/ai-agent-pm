@@ -1,7 +1,10 @@
 # tests/test_mcp_client.py
 # Tests for MCPClient
 
+import base64
+import io
 import json
+import zipfile
 import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,6 +18,25 @@ from aiagent_runner.mcp_client import (
     SessionExpiredError,
     TaskInfo,
 )
+
+
+def create_test_zip_archive(skill_md_content: str, extra_files: dict[str, str] | None = None) -> str:
+    """Create a Base64-encoded ZIP archive for testing.
+
+    Args:
+        skill_md_content: Content for SKILL.md
+        extra_files: Optional dict of {filename: content} for additional files
+
+    Returns:
+        Base64-encoded ZIP archive string
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('SKILL.md', skill_md_content)
+        if extra_files:
+            for filename, content in extra_files.items():
+                zf.writestr(filename, content)
+    return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
 
 class TestTaskInfo:
@@ -425,14 +447,22 @@ class TestMCPClientCoordinatorAPI:
 
 
 class TestSubordinateProfileWithSkills:
-    """Tests for SubordinateProfile skills parsing - Phase 6 integration tests."""
+    """Tests for SubordinateProfile skills parsing - Phase 6/7 integration tests."""
 
     @pytest.mark.asyncio
     async def test_get_subordinate_profile_with_skills(self):
-        """Should parse skills from get_subordinate_profile response."""
+        """Should parse skills with archive_base64 from get_subordinate_profile response."""
         from aiagent_runner.mcp_client import SkillDefinition
 
         client = MCPClient("/tmp/test.sock", coordinator_token="coord-token")
+
+        # Create test ZIP archives for mock response
+        code_review_archive = create_test_zip_archive(
+            "---\nname: code-review\n---\n\n# Code Review\n\nSteps to review code."
+        )
+        testing_archive = create_test_zip_archive(
+            "# Testing Guidelines\n\nHow to test code."
+        )
 
         mock_response = {
             "success": True,
@@ -443,16 +473,14 @@ class TestSubordinateProfileWithSkills:
                 {
                     "id": "skill_001",
                     "name": "Code Review",
-                    "description": "Review code quality and best practices",
                     "directory_name": "code-review",
-                    "content": "---\nname: code-review\n---\n\n# Code Review\n\nSteps to review code."
+                    "archive_base64": code_review_archive
                 },
                 {
                     "id": "skill_002",
                     "name": "Testing",
-                    "description": "Write and run tests",
                     "directory_name": "testing",
-                    "content": "# Testing Guidelines\n\nHow to test code."
+                    "archive_base64": testing_archive
                 }
             ]
         }
@@ -470,14 +498,14 @@ class TestSubordinateProfileWithSkills:
             # Verify first skill
             assert profile.skills[0].id == "skill_001"
             assert profile.skills[0].name == "Code Review"
-            assert profile.skills[0].description == "Review code quality and best practices"
             assert profile.skills[0].directory_name == "code-review"
-            assert "# Code Review" in profile.skills[0].content
+            assert profile.skills[0].archive_base64 == code_review_archive
 
             # Verify second skill
             assert profile.skills[1].id == "skill_002"
             assert profile.skills[1].name == "Testing"
             assert profile.skills[1].directory_name == "testing"
+            assert profile.skills[1].archive_base64 == testing_archive
 
     @pytest.mark.asyncio
     async def test_get_subordinate_profile_without_skills(self):
@@ -523,50 +551,47 @@ class TestSubordinateProfileWithSkills:
 
 
 class TestSkillDefinitionDataclass:
-    """Tests for SkillDefinition dataclass."""
+    """Tests for SkillDefinition dataclass - Phase 7 archive format."""
 
     def test_skill_definition_creation(self):
-        """Should create SkillDefinition with all fields."""
+        """Should create SkillDefinition with archive_base64 field."""
         from aiagent_runner.mcp_client import SkillDefinition
 
+        archive = create_test_zip_archive("# Code Review Steps")
         skill = SkillDefinition(
             id="skill_001",
             name="Code Review",
-            description="Review code quality",
             directory_name="code-review",
-            content="# Code Review Steps"
+            archive_base64=archive
         )
 
         assert skill.id == "skill_001"
         assert skill.name == "Code Review"
-        assert skill.description == "Review code quality"
         assert skill.directory_name == "code-review"
-        assert skill.content == "# Code Review Steps"
+        assert skill.archive_base64 == archive
 
     def test_skill_definition_equality(self):
         """Should compare SkillDefinitions by value."""
         from aiagent_runner.mcp_client import SkillDefinition
 
+        archive = create_test_zip_archive("content")
         skill1 = SkillDefinition(
             id="skill_001",
             name="Test",
-            description="desc",
             directory_name="test",
-            content="content"
+            archive_base64=archive
         )
         skill2 = SkillDefinition(
             id="skill_001",
             name="Test",
-            description="desc",
             directory_name="test",
-            content="content"
+            archive_base64=archive
         )
         skill3 = SkillDefinition(
             id="skill_002",
             name="Test",
-            description="desc",
             directory_name="test",
-            content="content"
+            archive_base64=archive
         )
 
         assert skill1 == skill2

@@ -1030,6 +1030,135 @@ public final class DatabaseSetup {
             try db.create(indexOn: "agent_skill_assignments", columns: ["skill_id"])
         }
 
+        // v45: スキル定義をアーカイブ形式に移行
+        // 参照: docs/design/AGENT_SKILLS.md - アーカイブ形式
+        // content TEXT → archive_data BLOB に変更
+        // スクリプト・テンプレート等を含む完全なスキルパッケージをサポート
+        migrator.registerMigration("v45_skill_archive_format") { db in
+            // 1. 新しいテーブルを作成（archive_data BLOB）
+            try db.create(table: "skill_definitions_new") { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("description", .text).notNull().defaults(to: "")
+                t.column("directory_name", .text).notNull().unique()
+                t.column("archive_data", .blob).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+
+            // 2. 既存データを移行（content をZIPアーカイブに変換）
+            // 既存データがある場合、SKILL.md のみを含むZIPを作成
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, name, description, directory_name, content, created_at, updated_at
+                FROM skill_definitions
+            """)
+
+            for row in rows {
+                let id: String = row["id"]
+                let name: String = row["name"]
+                let description: String = row["description"]
+                let directoryName: String = row["directory_name"]
+                let content: String = row["content"]
+                let createdAt: String = row["created_at"]
+                let updatedAt: String = row["updated_at"]
+
+                // content を SKILL.md のみを含む ZIP に変換
+                let archiveData = Self.createZipArchive(skillMdContent: content)
+
+                try db.execute(sql: """
+                    INSERT INTO skill_definitions_new
+                    (id, name, description, directory_name, archive_data, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, arguments: [id, name, description, directoryName, archiveData, createdAt, updatedAt])
+            }
+
+            // 3. 古いテーブルを削除
+            try db.drop(table: "skill_definitions")
+
+            // 4. 新テーブルをリネーム
+            try db.rename(table: "skill_definitions_new", to: "skill_definitions")
+
+            // 5. インデックス再作成
+            try db.create(indexOn: "skill_definitions", columns: ["directory_name"])
+        }
+
         try migrator.migrate(dbQueue)
+    }
+
+    /// content文字列からSKILL.mdのみを含むZIPアーカイブを作成
+    private static func createZipArchive(skillMdContent: String) -> Data {
+        // 簡易的なZIP作成（SKILL.mdのみ、非圧縮）
+        // ZIPフォーマット: https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
+        var data = Data()
+        let fileName = "SKILL.md"
+        let fileNameData = fileName.data(using: .utf8)!
+        let contentData = skillMdContent.data(using: .utf8)!
+
+        // Local file header
+        data.append(contentsOf: [0x50, 0x4b, 0x03, 0x04]) // signature
+        data.append(contentsOf: [0x0a, 0x00]) // version needed (1.0)
+        data.append(contentsOf: [0x00, 0x00]) // flags
+        data.append(contentsOf: [0x00, 0x00]) // compression (stored)
+        data.append(contentsOf: [0x00, 0x00]) // mod time
+        data.append(contentsOf: [0x00, 0x00]) // mod date
+        let crc = crc32(contentData)
+        data.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) }) // compressed size
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) }) // uncompressed size
+        data.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) }) // file name length
+        data.append(contentsOf: [0x00, 0x00]) // extra field length
+        data.append(fileNameData)
+        let localHeaderOffset = 0
+        data.append(contentData)
+
+        // Central directory header
+        let centralDirOffset = data.count
+        data.append(contentsOf: [0x50, 0x4b, 0x01, 0x02]) // signature
+        data.append(contentsOf: [0x14, 0x00]) // version made by
+        data.append(contentsOf: [0x0a, 0x00]) // version needed
+        data.append(contentsOf: [0x00, 0x00]) // flags
+        data.append(contentsOf: [0x00, 0x00]) // compression
+        data.append(contentsOf: [0x00, 0x00]) // mod time
+        data.append(contentsOf: [0x00, 0x00]) // mod date
+        data.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+        data.append(contentsOf: [0x00, 0x00]) // extra field length
+        data.append(contentsOf: [0x00, 0x00]) // file comment length
+        data.append(contentsOf: [0x00, 0x00]) // disk number
+        data.append(contentsOf: [0x00, 0x00]) // internal file attributes
+        data.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // external file attributes
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(localHeaderOffset).littleEndian) { Array($0) })
+        data.append(fileNameData)
+        let centralDirSize = data.count - centralDirOffset
+
+        // End of central directory
+        data.append(contentsOf: [0x50, 0x4b, 0x05, 0x06]) // signature
+        data.append(contentsOf: [0x00, 0x00]) // disk number
+        data.append(contentsOf: [0x00, 0x00]) // disk with central dir
+        data.append(contentsOf: [0x01, 0x00]) // entries on disk
+        data.append(contentsOf: [0x01, 0x00]) // total entries
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirSize).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirOffset).littleEndian) { Array($0) })
+        data.append(contentsOf: [0x00, 0x00]) // comment length
+
+        return data
+    }
+
+    /// CRC-32を計算
+    private static func crc32(_ data: Data) -> UInt32 {
+        var crc: UInt32 = 0xFFFFFFFF
+        let table: [UInt32] = (0..<256).map { i -> UInt32 in
+            var c = UInt32(i)
+            for _ in 0..<8 {
+                c = (c & 1) != 0 ? (0xEDB88320 ^ (c >> 1)) : (c >> 1)
+            }
+            return c
+        }
+        for byte in data {
+            crc = table[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8)
+        }
+        return crc ^ 0xFFFFFFFF
     }
 }

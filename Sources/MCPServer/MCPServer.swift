@@ -3991,9 +3991,8 @@ public final class MCPServer {
                 [
                     "id": skill.id.value,
                     "name": skill.name,
-                    "description": skill.description,
                     "directory_name": skill.directoryName,
-                    "content": skill.content
+                    "archive_base64": skill.archiveData.base64EncodedString()
                 ]
             }
         ]
@@ -4034,9 +4033,8 @@ public final class MCPServer {
                 [
                     "id": skill.id.value,
                     "name": skill.name,
-                    "description": skill.description,
                     "directory_name": skill.directoryName,
-                    "content": skill.content
+                    "archive_base64": skill.archiveData.base64EncodedString()
                 ]
             }
         ]

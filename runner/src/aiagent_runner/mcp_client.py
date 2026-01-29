@@ -106,12 +106,14 @@ class SkillDefinition:
     """Skill definition for agent capabilities.
 
     Reference: docs/design/AGENT_SKILLS.md
+
+    Note: Skills are now stored as ZIP archives (archive_base64) instead of
+    plain text content. The archive contains SKILL.md and optional scripts/templates.
     """
     id: str
     name: str
-    description: str
     directory_name: str
-    content: str
+    archive_base64: str  # Base64 encoded ZIP archive
 
 
 @dataclass
@@ -547,15 +549,14 @@ class MCPClient:
         if isinstance(result, dict) and "error" in result:
             raise MCPError(result["error"])
 
-        # Parse skills if present
+        # Parse skills if present (archive format with Base64 ZIP)
         skills_data = result.get("skills", [])
         skills = [
             SkillDefinition(
                 id=skill.get("id", ""),
                 name=skill.get("name", ""),
-                description=skill.get("description", ""),
                 directory_name=skill.get("directory_name", ""),
-                content=skill.get("content", "")
+                archive_base64=skill.get("archive_base64", "")
             )
             for skill in skills_data
         ]

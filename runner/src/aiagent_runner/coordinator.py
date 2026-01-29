@@ -3,12 +3,15 @@
 # Reference: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
 
 import asyncio
+import base64
+import io
 import json
 import logging
 import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -834,16 +837,16 @@ Always prefix your file paths with `{real_working_dir}/`.
         logger.debug(f"Wrote GEMINI.md: {gemini_md}")
 
     def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]) -> None:
-        """Write skill files to agent context directory.
+        """Extract skill archives to agent context directory.
 
-        Creates a skills/ directory under the config dir and writes each skill's
-        content as SKILL.md in a subdirectory named after the skill's directory_name.
+        Creates a skills/ directory under the config dir and extracts each skill's
+        ZIP archive into a subdirectory named after the skill's directory_name.
 
         Reference: docs/design/AGENT_SKILLS.md
 
         Args:
             config_dir: Path to .claude/ or .gemini/ directory
-            skills: List of skill definitions to write
+            skills: List of skill definitions to extract
         """
         skills_dir = config_dir / "skills"
 
@@ -855,15 +858,28 @@ Always prefix your file paths with `{real_working_dir}/`.
             logger.debug("No skills to write")
             return
 
-        # Create skills directory and write each skill
+        # Create skills directory and extract each skill's archive
         for skill in skills:
-            skill_dir = skills_dir / skill.directory_name
-            skill_dir.mkdir(parents=True, exist_ok=True)
+            skill_path = skills_dir / skill.directory_name
 
-            skill_file = skill_dir / "SKILL.md"
-            skill_file.write_text(skill.content)
+            try:
+                # Base64 decode -> ZIP extraction
+                archive_bytes = base64.b64decode(skill.archive_base64)
+                with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
+                    # Security: Validate paths to prevent directory traversal
+                    for member in zf.namelist():
+                        if member.startswith('/') or '..' in member:
+                            logger.warning(f"Skipping unsafe path in skill archive: {member}")
+                            continue
+                    zf.extractall(skill_path)
 
-            logger.debug(f"Wrote skill: {skill_file}")
+                logger.debug(f"Extracted skill: {skill_path}")
+            except Exception as e:
+                logger.error(f"Failed to extract skill {skill.directory_name}: {e}")
+                # Create fallback directory with error info
+                skill_path.mkdir(parents=True, exist_ok=True)
+                error_file = skill_path / "EXTRACTION_ERROR.txt"
+                error_file.write_text(f"Failed to extract skill archive: {e}")
 
         logger.info(f"Wrote {len(skills)} skills to {skills_dir}")
 

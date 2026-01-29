@@ -23,18 +23,19 @@ public struct SkillID: Hashable, Codable, Sendable {
 
 /// スキル定義エンティティ
 /// アプリ側でマスタ管理するスキルの定義
-/// 参照: docs/design/AGENT_SKILLS.md - Section 3.1
+/// 参照: docs/design/AGENT_SKILLS.md - Section 3 & 4
 public struct SkillDefinition: Identifiable, Equatable, Sendable {
     public let id: SkillID
-    /// 表示名（例：「コードレビュー」）
+    /// 表示名（例：「コードレビュー」）- アプリで編集可能
     public var name: String
-    /// 概要説明（人間向け、例：「コードの品質をレビューする」）
+    /// 概要説明（人間向け、例：「コードの品質をレビューする」）- アプリで編集可能
     public var description: String
-    /// ディレクトリ名（例：「code-review」）
+    /// ディレクトリ名（例：「code-review」）- インポート時に決定、変更不可
     /// 制約: 英小文字、数字、ハイフンのみ、最大64文字
-    public var directoryName: String
-    /// SKILL.md の全内容（frontmatter含む）
-    public var content: String
+    public let directoryName: String
+    /// ZIPアーカイブのバイナリデータ
+    /// SKILL.md + scripts/ + templates/ + examples/ を含むスキルパッケージ
+    public var archiveData: Data
     public let createdAt: Date
     public var updatedAt: Date
 
@@ -43,7 +44,7 @@ public struct SkillDefinition: Identifiable, Equatable, Sendable {
         name: String,
         description: String,
         directoryName: String,
-        content: String,
+        archiveData: Data,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -51,9 +52,27 @@ public struct SkillDefinition: Identifiable, Equatable, Sendable {
         self.name = name
         self.description = description
         self.directoryName = directoryName
-        self.content = content
+        self.archiveData = archiveData
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+}
+
+// MARK: - SkillFileEntry
+
+/// スキルアーカイブ内のファイルエントリ
+public struct SkillFileEntry: Equatable, Sendable {
+    /// 相対パス（例: "scripts/extract.py"）
+    public let path: String
+    /// ディレクトリかどうか
+    public let isDirectory: Bool
+    /// ファイルサイズ（バイト）
+    public let size: Int64
+
+    public init(path: String, isDirectory: Bool, size: Int64) {
+        self.path = path
+        self.isDirectory = isDirectory
+        self.size = size
     }
 }
 
@@ -72,18 +91,31 @@ extension SkillDefinition {
     /// description の最大文字数
     public static let maxDescriptionLength = 256
 
-    /// content の最大サイズ（バイト）
-    public static let maxContentSize = 64 * 1024  // 64KB
+    /// アーカイブの最大サイズ（バイト）
+    public static let maxArchiveSize = 1024 * 1024  // 1MB
+
+    /// 禁止ファイル/ディレクトリパターン
+    public static let forbiddenPatterns = [
+        ".git/",
+        ".git",
+        "node_modules/",
+        "__pycache__/",
+        ".DS_Store",
+        "*.pyc",
+    ]
 
     /// バリデーション結果
     public enum ValidationError: Error, Equatable {
         case emptyName
         case invalidDirectoryName(String)
         case descriptionTooLong(Int)
-        case contentTooLarge(Int)
+        case archiveTooLarge(Int)
+        case missingSkillMd
+        case forbiddenFile(String)
     }
 
-    /// エンティティのバリデーション
+    /// エンティティのバリデーション（基本項目のみ）
+    /// アーカイブ内容の詳細検証は SkillArchiveService で行う
     public func validate() -> [ValidationError] {
         var errors: [ValidationError] = []
 
@@ -99,8 +131,8 @@ extension SkillDefinition {
             errors.append(.descriptionTooLong(description.count))
         }
 
-        if content.utf8.count > Self.maxContentSize {
-            errors.append(.contentTooLarge(content.utf8.count))
+        if archiveData.count > Self.maxArchiveSize {
+            errors.append(.archiveTooLarge(archiveData.count))
         }
 
         return errors

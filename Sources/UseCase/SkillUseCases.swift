@@ -30,16 +30,21 @@ public struct SkillDefinitionUseCases: Sendable {
         try skillRepository.findByDirectoryName(directoryName)
     }
 
-    /// スキル定義を作成
+    /// スキル定義を作成（アーカイブ形式）
+    /// - Parameters:
+    ///   - name: スキル名
+    ///   - description: 概要説明
+    ///   - directoryName: ディレクトリ名
+    ///   - archiveData: ZIPアーカイブデータ
     /// - Throws: `SkillError` バリデーションエラー時
     public func create(
         name: String,
         description: String,
         directoryName: String,
-        content: String
+        archiveData: Data
     ) throws -> SkillDefinition {
         // バリデーション
-        try validateSkillInput(name: name, description: description, directoryName: directoryName, content: content)
+        try validateSkillInput(name: name, description: description, directoryName: directoryName, archiveData: archiveData)
 
         // ディレクトリ名の重複チェック
         if let existing = try skillRepository.findByDirectoryName(directoryName) {
@@ -51,7 +56,7 @@ public struct SkillDefinitionUseCases: Sendable {
             name: name,
             description: description,
             directoryName: directoryName,
-            content: content,
+            archiveData: archiveData,
             createdAt: Date(),
             updatedAt: Date()
         )
@@ -60,40 +65,54 @@ public struct SkillDefinitionUseCases: Sendable {
         return skill
     }
 
-    /// スキル定義を更新
+    /// スキル定義を更新（名前・概要のみ変更可能）
+    /// - Parameters:
+    ///   - id: スキルID
+    ///   - name: 新しいスキル名（nilの場合は変更なし）
+    ///   - description: 新しい概要説明（nilの場合は変更なし）
     /// - Throws: `SkillError` バリデーションエラー時
     public func update(
         id: SkillID,
         name: String? = nil,
-        description: String? = nil,
-        directoryName: String? = nil,
-        content: String? = nil
+        description: String? = nil
     ) throws -> SkillDefinition {
         guard var skill = try skillRepository.findById(id) else {
             throw SkillError.skillNotFound(id.value)
         }
 
-        // 更新対象のフィールドを反映
+        // 更新対象のフィールドを反映（directoryNameとarchiveDataは変更不可）
         if let name = name { skill.name = name }
         if let description = description { skill.description = description }
-        if let content = content { skill.content = content }
-
-        // ディレクトリ名変更時は重複チェック
-        if let newDirectoryName = directoryName, newDirectoryName != skill.directoryName {
-            if let existing = try skillRepository.findByDirectoryName(newDirectoryName) {
-                throw SkillError.directoryNameAlreadyExists(newDirectoryName, existingId: existing.id.value)
-            }
-            skill.directoryName = newDirectoryName
-        }
 
         // バリデーション
         try validateSkillInput(
             name: skill.name,
             description: skill.description,
             directoryName: skill.directoryName,
-            content: skill.content
+            archiveData: skill.archiveData
         )
 
+        skill.updatedAt = Date()
+        try skillRepository.save(skill)
+        return skill
+    }
+
+    /// スキルのアーカイブを再インポート
+    /// - Parameters:
+    ///   - id: スキルID
+    ///   - archiveData: 新しいZIPアーカイブデータ
+    /// - Throws: `SkillError` バリデーションエラー時
+    public func reimport(id: SkillID, archiveData: Data) throws -> SkillDefinition {
+        guard var skill = try skillRepository.findById(id) else {
+            throw SkillError.skillNotFound(id.value)
+        }
+
+        // アーカイブサイズのバリデーション
+        if archiveData.count > SkillDefinition.maxArchiveSize {
+            throw SkillError.archiveTooLarge(archiveData.count)
+        }
+
+        skill.archiveData = archiveData
         skill.updatedAt = Date()
         try skillRepository.save(skill)
         return skill
@@ -124,7 +143,7 @@ public struct SkillDefinitionUseCases: Sendable {
         name: String,
         description: String,
         directoryName: String,
-        content: String
+        archiveData: Data
     ) throws {
         if name.trimmingCharacters(in: .whitespaces).isEmpty {
             throw SkillError.emptyName
@@ -138,8 +157,8 @@ public struct SkillDefinitionUseCases: Sendable {
             throw SkillError.descriptionTooLong(description.count)
         }
 
-        if content.utf8.count > SkillDefinition.maxContentSize {
-            throw SkillError.contentTooLarge(content.utf8.count)
+        if archiveData.count > SkillDefinition.maxArchiveSize {
+            throw SkillError.archiveTooLarge(archiveData.count)
         }
     }
 }
@@ -206,7 +225,7 @@ public enum SkillError: Error, Equatable {
     case emptyName
     case invalidDirectoryName(String)
     case descriptionTooLong(Int)
-    case contentTooLarge(Int)
+    case archiveTooLarge(Int)
 }
 
 extension SkillError: LocalizedError {
@@ -224,8 +243,8 @@ extension SkillError: LocalizedError {
             return "ディレクトリ名 '\(name)' は無効です（英小文字、数字、ハイフンのみ、2-64文字）"
         case .descriptionTooLong(let count):
             return "説明が長すぎます（\(count)文字、最大256文字）"
-        case .contentTooLarge(let bytes):
-            return "コンテンツが大きすぎます（\(bytes)バイト、最大64KB）"
+        case .archiveTooLarge(let bytes):
+            return "アーカイブが大きすぎます（\(bytes)バイト、最大1MB）"
         }
     }
 }

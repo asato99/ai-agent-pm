@@ -6,6 +6,83 @@ import XCTest
 @testable import Domain
 @testable import UseCase
 
+// MARK: - Test Helpers
+
+/// テスト用のZIPアーカイブを作成
+/// SKILL.mdのみを含む最小限のZIPアーカイブを生成
+private func createTestArchive(content: String = "") -> Data {
+    let contentData = content.data(using: .utf8) ?? Data()
+    let fileName = "SKILL.md"
+    let fileNameData = fileName.data(using: .utf8)!
+
+    // CRC-32計算
+    var crc: UInt32 = 0xFFFFFFFF
+    let table: [UInt32] = (0..<256).map { i -> UInt32 in
+        var c = UInt32(i)
+        for _ in 0..<8 {
+            c = (c & 1) != 0 ? (0xEDB88320 ^ (c >> 1)) : (c >> 1)
+        }
+        return c
+    }
+    for byte in contentData {
+        crc = table[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8)
+    }
+    crc = crc ^ 0xFFFFFFFF
+
+    var data = Data()
+
+    // Local File Header
+    data.append(contentsOf: [0x50, 0x4b, 0x03, 0x04])
+    data.append(contentsOf: [0x0a, 0x00]) // version
+    data.append(contentsOf: [0x00, 0x00]) // flags
+    data.append(contentsOf: [0x00, 0x00]) // compression (stored)
+    data.append(contentsOf: [0x00, 0x00]) // mod time
+    data.append(contentsOf: [0x00, 0x00]) // mod date
+    data.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+    data.append(contentsOf: [0x00, 0x00]) // extra field length
+    data.append(fileNameData)
+    data.append(contentData)
+
+    // Central Directory Entry
+    var centralDirectory = Data()
+    centralDirectory.append(contentsOf: [0x50, 0x4b, 0x01, 0x02])
+    centralDirectory.append(contentsOf: [0x14, 0x00]) // version made by
+    centralDirectory.append(contentsOf: [0x0a, 0x00]) // version needed
+    centralDirectory.append(contentsOf: [0x00, 0x00]) // flags
+    centralDirectory.append(contentsOf: [0x00, 0x00]) // compression
+    centralDirectory.append(contentsOf: [0x00, 0x00]) // mod time
+    centralDirectory.append(contentsOf: [0x00, 0x00]) // mod date
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+    centralDirectory.append(contentsOf: [0x00, 0x00]) // extra field length
+    centralDirectory.append(contentsOf: [0x00, 0x00]) // file comment length
+    centralDirectory.append(contentsOf: [0x00, 0x00]) // disk number
+    centralDirectory.append(contentsOf: [0x00, 0x00]) // internal attrs
+    centralDirectory.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // external attrs
+    centralDirectory.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // local header offset
+    centralDirectory.append(fileNameData)
+
+    let centralDirOffset = data.count
+    data.append(centralDirectory)
+
+    // End of Central Directory
+    data.append(contentsOf: [0x50, 0x4b, 0x05, 0x06])
+    data.append(contentsOf: [0x00, 0x00]) // disk number
+    data.append(contentsOf: [0x00, 0x00]) // disk with central dir
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) }) // entry count
+    data.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) }) // total entries
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirectory.count).littleEndian) { Array($0) })
+    data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirOffset).littleEndian) { Array($0) })
+    data.append(contentsOf: [0x00, 0x00]) // comment length
+
+    return data
+}
+
 // MARK: - Mock Repositories
 
 final class MockSkillDefinitionRepository: SkillDefinitionRepositoryProtocol, @unchecked Sendable {
@@ -102,11 +179,12 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
     // MARK: - Create Tests
 
     func testCreateSkill() throws {
+        let archiveData = createTestArchive(content: "---\nname: code-review\n---\n## 手順")
         let skill = try useCases.create(
             name: "コードレビュー",
             description: "コードの品質をレビューする",
             directoryName: "code-review",
-            content: "---\nname: code-review\n---\n## 手順"
+            archiveData: archiveData
         )
 
         XCTAssertFalse(skill.id.value.isEmpty)
@@ -124,7 +202,7 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
             name: "  ",
             description: "",
             directoryName: "test",
-            content: "content"
+            archiveData: createTestArchive()
         )) { error in
             XCTAssertEqual(error as? SkillError, .emptyName)
         }
@@ -135,7 +213,7 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
             name: "Test",
             description: "",
             directoryName: "Invalid Name",
-            content: "content"
+            archiveData: createTestArchive()
         )) { error in
             XCTAssertEqual(error as? SkillError, .invalidDirectoryName("Invalid Name"))
         }
@@ -146,14 +224,14 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
             name: "Skill 1",
             description: "",
             directoryName: "duplicate-name",
-            content: "content"
+            archiveData: createTestArchive()
         )
 
         XCTAssertThrowsError(try useCases.create(
             name: "Skill 2",
             description: "",
             directoryName: "duplicate-name",
-            content: "content"
+            archiveData: createTestArchive()
         )) { error in
             if case .directoryNameAlreadyExists(let name, _) = error as? SkillError {
                 XCTAssertEqual(name, "duplicate-name")
@@ -170,7 +248,7 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
             name: "Test",
             description: longDescription,
             directoryName: "test",
-            content: "content"
+            archiveData: createTestArchive()
         )) { error in
             if case .descriptionTooLong(let count) = error as? SkillError {
                 XCTAssertEqual(count, 300)
@@ -187,7 +265,7 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
             name: "Original",
             description: "Original description",
             directoryName: "original",
-            content: "content"
+            archiveData: createTestArchive()
         )
 
         let updated = try useCases.update(
@@ -210,31 +288,19 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
         }
     }
 
-    func testUpdateSkillWithDuplicateDirectoryNameThrows() throws {
-        _ = try useCases.create(
-            name: "Skill 1",
-            description: "",
-            directoryName: "skill-1",
-            content: "content"
+    func testReimportSkill() throws {
+        let skill = try useCases.create(
+            name: "Original",
+            description: "Original description",
+            directoryName: "original",
+            archiveData: createTestArchive(content: "Original content")
         )
 
-        let skill2 = try useCases.create(
-            name: "Skill 2",
-            description: "",
-            directoryName: "skill-2",
-            content: "content"
-        )
+        let newArchive = createTestArchive(content: "Updated content")
+        let reimported = try useCases.reimport(id: skill.id, archiveData: newArchive)
 
-        XCTAssertThrowsError(try useCases.update(
-            id: skill2.id,
-            directoryName: "skill-1"
-        )) { error in
-            if case .directoryNameAlreadyExists(let name, _) = error as? SkillError {
-                XCTAssertEqual(name, "skill-1")
-            } else {
-                XCTFail("Expected directoryNameAlreadyExists error")
-            }
-        }
+        XCTAssertEqual(reimported.name, "Original")
+        XCTAssertEqual(reimported.archiveData, newArchive)
     }
 
     // MARK: - Delete Tests
@@ -244,7 +310,7 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
             name: "To Delete",
             description: "",
             directoryName: "to-delete",
-            content: "content"
+            archiveData: createTestArchive()
         )
 
         try useCases.delete(skill.id)
@@ -264,7 +330,7 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
             name: "In Use",
             description: "",
             directoryName: "in-use",
-            content: "content"
+            archiveData: createTestArchive()
         )
         mockRepository.assignedSkillIds.insert(skill.id)
 
@@ -280,8 +346,8 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
     // MARK: - Find Tests
 
     func testFindAll() throws {
-        _ = try useCases.create(name: "Skill A", description: "", directoryName: "skill-a", content: "")
-        _ = try useCases.create(name: "Skill B", description: "", directoryName: "skill-b", content: "")
+        _ = try useCases.create(name: "Skill A", description: "", directoryName: "skill-a", archiveData: createTestArchive())
+        _ = try useCases.create(name: "Skill B", description: "", directoryName: "skill-b", archiveData: createTestArchive())
 
         let all = try useCases.findAll()
         XCTAssertEqual(all.count, 2)
@@ -292,7 +358,7 @@ final class SkillDefinitionUseCasesTests: XCTestCase {
             name: "Test",
             description: "",
             directoryName: "test-skill",
-            content: ""
+            archiveData: createTestArchive()
         )
 
         let found = try useCases.findByDirectoryName("test-skill")
@@ -332,7 +398,7 @@ final class AgentSkillUseCasesTests: XCTestCase {
             name: "Test Skill",
             description: "",
             directoryName: directoryName,
-            content: "",
+            archiveData: createTestArchive(),
             createdAt: Date(),
             updatedAt: Date()
         )
