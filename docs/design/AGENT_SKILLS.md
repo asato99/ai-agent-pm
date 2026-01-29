@@ -2,7 +2,9 @@
 
 ## 1. 概要
 
-エージェントにスキル（Claude Codeのカスタムコマンド）を割り当て、起動時に自動配置する機能。
+エージェントにスキル（カスタムコマンド）を割り当て、起動時に自動配置する機能。
+
+Claude Code / Gemini CLI 両対応。同一ディレクトリ構成（`skills/`）でスキルを管理。
 
 ## 2. 背景と目的
 
@@ -10,6 +12,7 @@
 
 - エージェントは system_prompt のみでカスタマイズ
 - Claude Code のスキル機能（`.claude/skills/`）を活用できていない
+- Gemini CLI も同様にスキル機能を活用できていない
 
 ### 2.2 目的
 
@@ -171,10 +174,19 @@ struct AgentSkillAssignment {
 {manager_working_dir}/
 └── .aiagent/
     └── agents/{agent_id}/
-        └── .claude/
-            ├── CLAUDE.md
+        ├── .claude/                       ← Claude CLI 用
+        │   ├── CLAUDE.md
+        │   ├── settings.json
+        │   └── skills/
+        │       ├── code-review/
+        │       │   └── SKILL.md
+        │       └── test-creation/
+        │           └── SKILL.md
+        │
+        └── .gemini/                       ← Gemini CLI 用（同一構造）
+            ├── GEMINI.md
             ├── settings.json
-            └── skills/                    ← 新規
+            └── skills/
                 ├── code-review/
                 │   └── SKILL.md
                 └── test-creation/
@@ -256,26 +268,34 @@ async def _prepare_agent_context(
 ) -> str:
     context_dir = Path(working_dir) / ".aiagent" / "agents" / agent_id
 
+    # プロバイダー別の設定ディレクトリ
     if provider == "claude":
         config_dir = context_dir / ".claude"
-        config_dir.mkdir(parents=True, exist_ok=True)
-
-        # 1. プロファイル取得（スキル含む）
-        profile = await self.mcp_client.get_subordinate_profile(agent_id)
-
-        # 2. CLAUDE.md 生成
-        self._write_claude_md(config_dir, profile.system_prompt, working_dir)
-
-        # 3. settings.json 生成
-        self._write_claude_settings(config_dir, working_dir)
-
-        # 4. スキル配置（新規）
-        self._write_skills(config_dir, profile.skills)
-
+    elif provider == "gemini":
+        config_dir = context_dir / ".gemini"
+    else:
         return str(context_dir)
 
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. プロファイル取得（スキル含む）
+    profile = await self.mcp_client.get_subordinate_profile(agent_id)
+
+    # 2. システムプロンプトファイル生成
+    if provider == "claude":
+        self._write_claude_md(config_dir, profile.system_prompt, working_dir)
+        self._write_claude_settings(config_dir, working_dir)
+    elif provider == "gemini":
+        self._write_gemini_md(config_dir, profile.system_prompt, working_dir)
+        self._write_gemini_settings(config_dir)
+
+    # 3. スキル配置（両プロバイダー共通）
+    self._write_skills(config_dir, profile.skills)
+
+    return str(context_dir)
+
 def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]):
-    """スキルファイルを配置する"""
+    """スキルファイルを配置する（Claude/Gemini共通）"""
     skills_dir = config_dir / "skills"
 
     # 既存スキルをクリア（毎回再生成）
@@ -294,12 +314,12 @@ def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]):
 
 ## 8. 制約事項
 
-### 8.1 プロバイダー制限
+### 8.1 プロバイダー対応
 
-| プロバイダー | スキル対応 |
-|-------------|-----------|
-| Claude | ✅ 対応 |
-| Gemini | ❌ 非対応（将来検討） |
+| プロバイダー | スキル対応 | ディレクトリ | 備考 |
+|-------------|-----------|-------------|------|
+| Claude | ✅ 対応 | `.claude/skills/` | ネイティブサポート |
+| Gemini | ✅ 対応 | `.gemini/skills/` | 同一構造で配置 |
 
 ### 8.2 directoryName 制約
 
@@ -342,8 +362,8 @@ def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]):
 
 ### Phase 5: Coordinator
 
-- [ ] `_write_skills` メソッド追加
-- [ ] `_prepare_agent_context` 拡張
+- [ ] `_write_skills` メソッド追加（Claude/Gemini共通）
+- [ ] `_prepare_agent_context` 拡張（両プロバイダー対応）
 
 ### Phase 6: 統合テスト
 
@@ -364,7 +384,6 @@ def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]):
 | 項目 | 状態 | 対応方針 |
 |-----|------|---------|
 | スキルのインポート/エクスポート | スコープ外 | 将来機能として検討 |
-| Gemini対応 | スコープ外 | Geminiに同等機能があるか要調査 |
 
 ---
 
@@ -373,3 +392,4 @@ def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]):
 | 日付 | 内容 |
 |------|------|
 | 2026-01-28 | 初版作成 |
+| 2026-01-29 | Gemini対応追加: 同一ディレクトリ構成（`.gemini/skills/`）で両プロバイダー対応 |
