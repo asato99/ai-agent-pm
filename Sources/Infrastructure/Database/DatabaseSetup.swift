@@ -998,6 +998,38 @@ public final class DatabaseSetup {
             try db.drop(table: "pending_agent_purposes")
         }
 
+        // v44: スキル定義とエージェントスキル割り当て
+        // 参照: docs/design/AGENT_SKILLS.md
+        // エージェントにスキル（カスタムコマンド）を割り当てる機能
+        migrator.registerMigration("v44_skill_definitions") { db in
+            // スキル定義テーブル
+            try db.create(table: "skill_definitions", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("description", .text).notNull().defaults(to: "")
+                t.column("directory_name", .text).notNull().unique()
+                t.column("content", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            // ディレクトリ名で検索用
+            try db.create(indexOn: "skill_definitions", columns: ["directory_name"])
+
+            // エージェントスキル割り当てテーブル（多対多）
+            try db.create(table: "agent_skill_assignments", ifNotExists: true) { t in
+                t.column("agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("skill_id", .text).notNull()
+                    .references("skill_definitions", onDelete: .cascade)
+                t.column("assigned_at", .datetime).notNull()
+                t.primaryKey(["agent_id", "skill_id"])
+            }
+            // エージェント別のスキル検索用
+            try db.create(indexOn: "agent_skill_assignments", columns: ["agent_id"])
+            // スキル別のエージェント検索用
+            try db.create(indexOn: "agent_skill_assignments", columns: ["skill_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }
