@@ -99,9 +99,9 @@ public enum LogUtils {
         var formatted: [String: Any] = [:]
 
         for (key, value) in arguments {
-            // 機密情報をマスク
-            if key.lowercased().contains("token") ||
-               key.lowercased().contains("passkey") ||
+            // 機密情報をマスク（パスワード・シークレットのみ）
+            // セッショントークンはデバッグ用途でマスクしない
+            if key.lowercased().contains("passkey") ||
                key.lowercased().contains("password") ||
                key.lowercased().contains("secret") {
                 if let stringValue = value as? String, stringValue.count > 8 {
