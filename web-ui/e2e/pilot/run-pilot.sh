@@ -191,6 +191,9 @@ echo ""
 # Step 1: 環境準備
 echo -e "${YELLOW}Step 1: Preparing environment${NC}"
 ps aux | grep -E "(mcp-server-pm|rest-server-pm)" | grep -v grep | awk '{print $2}' | xargs -I {} kill -9 {} 2>/dev/null || true
+# コーディネーターの強制終了とロックファイル削除
+ps aux | grep "aiagent_runner.*coordinator" | grep -v grep | awk '{print $2}' | xargs -I {} kill -9 {} 2>/dev/null || true
+rm -f /tmp/aiagent-runner-*/coordinator-*.lock 2>/dev/null || true
 rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal" "$MCP_SOCKET_PATH"
 mkdir -p /tmp/pilot_work
 
