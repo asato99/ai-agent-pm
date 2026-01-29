@@ -99,3 +99,188 @@ class TestCoordinatorGetLogDirectory:
             / "agent_logs" / agent_id
         )
         assert log_dir == expected
+
+
+class TestCoordinatorWriteSkills:
+    """Tests for Coordinator._write_skills() - Phase 6 integration tests."""
+
+    @pytest.fixture
+    def coordinator(self):
+        """Create a Coordinator instance for testing."""
+        config = CoordinatorConfig(
+            agents={},
+            mcp_socket_path="/tmp/test.sock",
+            polling_interval=5,
+            max_concurrent=1
+        )
+        return Coordinator(config)
+
+    def test_write_skills_creates_directory_and_file(self, coordinator, tmp_path):
+        """Should create skills directory and SKILL.md file."""
+        from aiagent_runner.mcp_client import SkillDefinition
+
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+
+        skills = [
+            SkillDefinition(
+                id="skill_001",
+                name="Code Review",
+                description="Review code quality and best practices",
+                directory_name="code-review",
+                content="---\nname: code-review\n---\n\n# Code Review Steps\n\n1. Check style\n2. Check logic"
+            )
+        ]
+
+        coordinator._write_skills(config_dir, skills)
+
+        skill_file = config_dir / "skills" / "code-review" / "SKILL.md"
+        assert skill_file.exists()
+        content = skill_file.read_text()
+        assert "# Code Review Steps" in content
+        assert "name: code-review" in content
+
+    def test_write_skills_creates_multiple_skills(self, coordinator, tmp_path):
+        """Should create multiple skill directories."""
+        from aiagent_runner.mcp_client import SkillDefinition
+
+        config_dir = tmp_path / ".gemini"
+        config_dir.mkdir()
+
+        skills = [
+            SkillDefinition(
+                id="skill_001",
+                name="Code Review",
+                description="Review code",
+                directory_name="code-review",
+                content="# Code Review"
+            ),
+            SkillDefinition(
+                id="skill_002",
+                name="Testing",
+                description="Write tests",
+                directory_name="testing",
+                content="# Testing Guidelines"
+            ),
+            SkillDefinition(
+                id="skill_003",
+                name="Documentation",
+                description="Write docs",
+                directory_name="documentation",
+                content="# Documentation Style"
+            )
+        ]
+
+        coordinator._write_skills(config_dir, skills)
+
+        skills_dir = config_dir / "skills"
+        assert (skills_dir / "code-review" / "SKILL.md").exists()
+        assert (skills_dir / "testing" / "SKILL.md").exists()
+        assert (skills_dir / "documentation" / "SKILL.md").exists()
+
+        # Verify content
+        assert "# Code Review" in (skills_dir / "code-review" / "SKILL.md").read_text()
+        assert "# Testing Guidelines" in (skills_dir / "testing" / "SKILL.md").read_text()
+        assert "# Documentation Style" in (skills_dir / "documentation" / "SKILL.md").read_text()
+
+    def test_write_skills_clears_existing_skills(self, coordinator, tmp_path):
+        """Should clear existing skills directory before writing new skills."""
+        from aiagent_runner.mcp_client import SkillDefinition
+
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+
+        # Create existing skill directory
+        old_skill_dir = config_dir / "skills" / "old-skill"
+        old_skill_dir.mkdir(parents=True)
+        old_skill_file = old_skill_dir / "SKILL.md"
+        old_skill_file.write_text("# Old Skill Content")
+
+        # Write new skills
+        new_skills = [
+            SkillDefinition(
+                id="skill_new",
+                name="New Skill",
+                description="New skill description",
+                directory_name="new-skill",
+                content="# New Skill Content"
+            )
+        ]
+
+        coordinator._write_skills(config_dir, new_skills)
+
+        # Old skill should be removed
+        assert not (config_dir / "skills" / "old-skill").exists()
+        # New skill should exist
+        assert (config_dir / "skills" / "new-skill" / "SKILL.md").exists()
+        assert "# New Skill Content" in (config_dir / "skills" / "new-skill" / "SKILL.md").read_text()
+
+    def test_write_skills_empty_list_does_not_create_directory(self, coordinator, tmp_path):
+        """Should not create skills directory when skills list is empty."""
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+
+        coordinator._write_skills(config_dir, [])
+
+        # Skills directory should not exist
+        assert not (config_dir / "skills").exists()
+
+    def test_write_skills_empty_list_clears_existing(self, coordinator, tmp_path):
+        """Should clear existing skills when new skills list is empty."""
+        from aiagent_runner.mcp_client import SkillDefinition
+
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+
+        # First, write some skills
+        initial_skills = [
+            SkillDefinition(
+                id="skill_001",
+                name="Skill",
+                description="desc",
+                directory_name="test-skill",
+                content="content"
+            )
+        ]
+        coordinator._write_skills(config_dir, initial_skills)
+        assert (config_dir / "skills" / "test-skill" / "SKILL.md").exists()
+
+        # Now write empty list
+        coordinator._write_skills(config_dir, [])
+
+        # Skills directory should be cleared
+        assert not (config_dir / "skills").exists()
+
+    def test_write_skills_preserves_other_config_files(self, coordinator, tmp_path):
+        """Should not affect other files in config directory."""
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+
+        # Create other config file
+        claude_md = config_dir / "CLAUDE.md"
+        claude_md.write_text("# Agent Instructions")
+
+        settings_json = config_dir / "settings.json"
+        settings_json.write_text('{"key": "value"}')
+
+        from aiagent_runner.mcp_client import SkillDefinition
+        skills = [
+            SkillDefinition(
+                id="skill_001",
+                name="Test",
+                description="test",
+                directory_name="test-skill",
+                content="# Test"
+            )
+        ]
+
+        coordinator._write_skills(config_dir, skills)
+
+        # Other files should be preserved
+        assert claude_md.exists()
+        assert "# Agent Instructions" in claude_md.read_text()
+        assert settings_json.exists()
+        assert '{"key": "value"}' in settings_json.read_text()
+
+        # Skill should also exist
+        assert (config_dir / "skills" / "test-skill" / "SKILL.md").exists()

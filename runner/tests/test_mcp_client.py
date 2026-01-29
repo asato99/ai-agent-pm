@@ -422,3 +422,152 @@ class TestMCPClientCoordinatorAPI:
                 "project_id": "project-001",
                 "coordinator_token": "coord-token-abc"
             })
+
+
+class TestSubordinateProfileWithSkills:
+    """Tests for SubordinateProfile skills parsing - Phase 6 integration tests."""
+
+    @pytest.mark.asyncio
+    async def test_get_subordinate_profile_with_skills(self):
+        """Should parse skills from get_subordinate_profile response."""
+        from aiagent_runner.mcp_client import SkillDefinition
+
+        client = MCPClient("/tmp/test.sock", coordinator_token="coord-token")
+
+        mock_response = {
+            "success": True,
+            "id": "worker-01",
+            "name": "Worker 01",
+            "system_prompt": "You are a helpful assistant.",
+            "skills": [
+                {
+                    "id": "skill_001",
+                    "name": "Code Review",
+                    "description": "Review code quality and best practices",
+                    "directory_name": "code-review",
+                    "content": "---\nname: code-review\n---\n\n# Code Review\n\nSteps to review code."
+                },
+                {
+                    "id": "skill_002",
+                    "name": "Testing",
+                    "description": "Write and run tests",
+                    "directory_name": "testing",
+                    "content": "# Testing Guidelines\n\nHow to test code."
+                }
+            ]
+        }
+
+        with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = mock_response
+
+            profile = await client.get_subordinate_profile("worker-01")
+
+            assert profile.agent_id == "worker-01"
+            assert profile.name == "Worker 01"
+            assert profile.system_prompt == "You are a helpful assistant."
+            assert len(profile.skills) == 2
+
+            # Verify first skill
+            assert profile.skills[0].id == "skill_001"
+            assert profile.skills[0].name == "Code Review"
+            assert profile.skills[0].description == "Review code quality and best practices"
+            assert profile.skills[0].directory_name == "code-review"
+            assert "# Code Review" in profile.skills[0].content
+
+            # Verify second skill
+            assert profile.skills[1].id == "skill_002"
+            assert profile.skills[1].name == "Testing"
+            assert profile.skills[1].directory_name == "testing"
+
+    @pytest.mark.asyncio
+    async def test_get_subordinate_profile_without_skills(self):
+        """Should handle profile with no skills (empty list)."""
+        client = MCPClient("/tmp/test.sock", coordinator_token="coord-token")
+
+        mock_response = {
+            "success": True,
+            "id": "worker-02",
+            "name": "Worker 02",
+            "system_prompt": "You are a worker.",
+            "skills": []
+        }
+
+        with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = mock_response
+
+            profile = await client.get_subordinate_profile("worker-02")
+
+            assert profile.agent_id == "worker-02"
+            assert profile.skills == []
+
+    @pytest.mark.asyncio
+    async def test_get_subordinate_profile_skills_missing_in_response(self):
+        """Should handle profile without skills field (backward compatibility)."""
+        client = MCPClient("/tmp/test.sock", coordinator_token="coord-token")
+
+        mock_response = {
+            "success": True,
+            "id": "worker-03",
+            "name": "Worker 03",
+            "system_prompt": "You are a worker."
+            # No skills field - legacy response
+        }
+
+        with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = mock_response
+
+            profile = await client.get_subordinate_profile("worker-03")
+
+            assert profile.agent_id == "worker-03"
+            assert profile.skills == []  # Default to empty list
+
+
+class TestSkillDefinitionDataclass:
+    """Tests for SkillDefinition dataclass."""
+
+    def test_skill_definition_creation(self):
+        """Should create SkillDefinition with all fields."""
+        from aiagent_runner.mcp_client import SkillDefinition
+
+        skill = SkillDefinition(
+            id="skill_001",
+            name="Code Review",
+            description="Review code quality",
+            directory_name="code-review",
+            content="# Code Review Steps"
+        )
+
+        assert skill.id == "skill_001"
+        assert skill.name == "Code Review"
+        assert skill.description == "Review code quality"
+        assert skill.directory_name == "code-review"
+        assert skill.content == "# Code Review Steps"
+
+    def test_skill_definition_equality(self):
+        """Should compare SkillDefinitions by value."""
+        from aiagent_runner.mcp_client import SkillDefinition
+
+        skill1 = SkillDefinition(
+            id="skill_001",
+            name="Test",
+            description="desc",
+            directory_name="test",
+            content="content"
+        )
+        skill2 = SkillDefinition(
+            id="skill_001",
+            name="Test",
+            description="desc",
+            directory_name="test",
+            content="content"
+        )
+        skill3 = SkillDefinition(
+            id="skill_002",
+            name="Test",
+            description="desc",
+            directory_name="test",
+            content="content"
+        )
+
+        assert skill1 == skill2
+        assert skill1 != skill3

@@ -15,8 +15,8 @@
 | 2 | UseCase | ✅ 完了 | 2026-01-29 |
 | 3 | UI（スキル管理） | ✅ 完了 | 2026-01-29 |
 | 4 | UI（スキル割り当て） | ✅ 完了 | 2026-01-29 |
-| 5 | Coordinator | ⬜ 未着手 | - |
-| 6 | 統合テスト | ⬜ 未着手 | - |
+| 5 | Coordinator | ✅ 完了 | 2026-01-29 |
+| 6 | 統合テスト | 🔄 進行中 | - |
 
 **凡例:** ⬜ 未着手 / 🔄 進行中 / ✅ 完了 / ⏸️ 保留
 
@@ -617,7 +617,10 @@ self._write_skills(config_dir, skills)
 
 | 日時 | 作業内容 | 担当 |
 |------|---------|------|
-| - | - | - |
+| 2026-01-29 | MCPServer.swift: get_subordinate_profileにスキル情報追加 | Claude |
+| 2026-01-29 | mcp_client.py: SkillDefinitionデータクラス追加、skillsパース実装 | Claude |
+| 2026-01-29 | coordinator.py: _write_skillsメソッド追加、_prepare_agent_context統合 | Claude |
+| 2026-01-29 | Pythonテスト全パス確認 | Claude |
 
 ---
 
@@ -653,7 +656,9 @@ self._write_skills(config_dir, skills)
 
 | 日時 | 作業内容 | 担当 |
 |------|---------|------|
-| - | - | - |
+| 2026-01-29 | test_coordinator.py: TestCoordinatorWriteSkillsクラス追加（6テスト） | Claude |
+| 2026-01-29 | test_mcp_client.py: TestSubordinateProfileWithSkills・TestSkillDefinitionDataclass追加（5テスト） | Claude |
+| 2026-01-29 | 全テストパス確認（40テスト） | Claude |
 
 ---
 
