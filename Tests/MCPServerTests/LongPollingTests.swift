@@ -153,6 +153,9 @@ final class LongPollingTests: XCTestCase {
     func testGetNextAction_WaitsForMessageWhenNoneAvailable() async throws {
         let (token, session) = try createChatSession()
 
+        // セッション作成時のメッセージを消費して「メッセージがない状態」を作る
+        try consumePendingMessages(token: token, session: session)
+
         // Act: 短いタイムアウトでget_next_actionを呼び出し
         let startTime = Date()
         let result = try await mcpServer.executeToolAsync(
@@ -184,6 +187,9 @@ final class LongPollingTests: XCTestCase {
     /// 待機中にメッセージが到着した場合、即座に応答を返す
     func testGetNextAction_ReturnsImmediatelyWhenMessageArrives() async throws {
         let (token, session) = try createChatSession()
+
+        // セッション作成時のメッセージを消費して「メッセージがない状態」を作る
+        try consumePendingMessages(token: token, session: session)
 
         // 1秒後にメッセージを送信するタスクをスケジュール
         _Concurrency.Task {
@@ -221,6 +227,9 @@ final class LongPollingTests: XCTestCase {
     /// セッションがterminatingになった場合、待機を中断して即座にexitを返す
     func testGetNextAction_ReturnsImmediatelyWhenSessionEnds() async throws {
         let (token, session) = try createChatSession()
+
+        // セッション作成時のメッセージを消費して「メッセージがない状態」を作る
+        try consumePendingMessages(token: token, session: session)
 
         // 1秒後にセッションをterminatingに設定
         _Concurrency.Task {
@@ -285,6 +294,9 @@ final class LongPollingTests: XCTestCase {
     func testGetNextAction_RespectsCustomTimeout() async throws {
         let (token, session) = try createChatSession()
 
+        // セッション作成時のメッセージを消費して「メッセージがない状態」を作る
+        try consumePendingMessages(token: token, session: session)
+
         // カスタムタイムアウト（5秒）
         let startTime = Date()
         let result = try await mcpServer.executeToolAsync(
@@ -309,6 +321,36 @@ final class LongPollingTests: XCTestCase {
     }
 
     // MARK: - Helper Methods
+
+    /// セッション作成時に追加された保留中のメッセージを消費する
+    /// Long Polling待機テストの前に呼び出して「メッセージがない状態」を作る
+    private func consumePendingMessages(token: String, session: AgentSession) throws {
+        // get_pending_messages を呼び出してセッション作成時のメッセージを消費
+        let result = try mcpServer.executeTool(
+            name: "get_pending_messages",
+            arguments: ["session_token": token],
+            caller: .worker(agentId: testAgentId, session: session)
+        )
+
+        // メッセージが取得されたことを確認
+        guard let dict = result as? [String: Any],
+              let messages = dict["pending_messages"] as? [[String: Any]],
+              !messages.isEmpty else {
+            // メッセージがない場合も正常
+            return
+        }
+
+        // respond_chat ツールを使用してエージェントからの応答を送信
+        // これにより未読メッセージが解消される（最後の自分の応答より前のメッセージは未読ではなくなる）
+        _ = try mcpServer.executeTool(
+            name: "respond_chat",
+            arguments: [
+                "session_token": token,
+                "content": "Acknowledged all pending messages"
+            ],
+            caller: .worker(agentId: testAgentId, session: session)
+        )
+    }
 
     /// テスト用メッセージを送信（ユーザーからエージェントへ）
     private func sendTestMessage(content: String) throws {
