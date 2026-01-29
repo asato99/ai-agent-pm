@@ -79,6 +79,13 @@ collect_logs() {
     sqlite3 "$TEST_DB_PATH" ".dump" > "$LOG_DIR/db-snapshot.sql" 2>/dev/null || true
   fi
 
+  # 画面録画ファイル収集（test-results/pilotから最新の動画を1本コピー）
+  VIDEO_FILE=$(find "$WEB_UI_DIR/test-results/pilot" -name "*.webm" -type f 2>/dev/null | head -1)
+  if [ -n "$VIDEO_FILE" ]; then
+    cp "$VIDEO_FILE" "$LOG_DIR/recording.webm"
+    echo -e "${GREEN}✓ Video saved: recording.webm${NC}"
+  fi
+
   # 統合ログ生成（プレフィックス付き）
   {
     [ -f "$LOG_DIR/mcp-server.log" ] && sed 's/^/[MCP] /' "$LOG_DIR/mcp-server.log"
@@ -381,6 +388,7 @@ export PILOT_RESULT_DIR="$RESULT_DIR"
 
 set -o pipefail
 npx playwright test pilot/tests/pilot.spec.ts \
+  --config=e2e/pilot/playwright.pilot.config.ts \
   --reporter=list \
   --timeout=300000 \
   2>&1 | tee "$LOG_DIR/playwright.log"

@@ -24,6 +24,7 @@ import { defineConfig, devices } from '@playwright/test'
  */
 export default defineConfig({
   testDir: './tests',
+  outputDir: '../../test-results/pilot', // Video and trace output
   fullyParallel: false, // Pilot tests must run sequentially
   forbidOnly: !!process.env.CI,
   retries: 0, // No retries - pilot tests should pass or fail definitively
