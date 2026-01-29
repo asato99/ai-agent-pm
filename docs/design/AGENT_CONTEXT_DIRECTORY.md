@@ -111,11 +111,17 @@ gemini --include-directories {manager_working_dir}
     └── agents/{agent_id}/             ← 新規: コンテキストディレクトリ
         ├── .claude/                   ← Claude CLI 用
         │   ├── CLAUDE.md
-        │   └── settings.json
+        │   ├── settings.json
+        │   └── skills/                ← スキル配置（AGENT_SKILLS.md 参照）
+        │       └── {skill_name}/
+        │           └── SKILL.md
         │
         └── .gemini/                   ← Gemini CLI 用
             ├── GEMINI.md
-            └── settings.json
+            ├── settings.json
+            └── skills/                ← スキル配置（AGENT_SKILLS.md 参照）
+                └── {skill_name}/
+                    └── SKILL.md
 ```
 
 ### 4.2 概念の分離
@@ -430,3 +436,4 @@ agents/
 |------|------|
 | 2026-01-28 | 初版作成 |
 | 2026-01-28 | PoC 検証結果を反映: Claude は設定ファイル、Gemini はフラグで対応 |
+| 2026-01-29 | skills/ ディレクトリ追加（AGENT_SKILLS.md との整合性） |
