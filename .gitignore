@@ -38,6 +38,9 @@ dist/
 DerivedData/
 bin/
 
+# Python uv lock files
+uv.lock
+
 # AI/IDE tools
 .gemini/
 .cursor/
