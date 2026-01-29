@@ -39,6 +39,8 @@ public final class DependencyContainer: ObservableObject {
     public let agentCredentialRepository: AgentCredentialRepository
     public let projectAgentAssignmentRepository: ProjectAgentAssignmentRepository
     public let agentSessionRepository: AgentSessionRepository
+    public let skillDefinitionRepository: SkillDefinitionRepository
+    public let agentSkillAssignmentRepository: AgentSkillAssignmentRepository
 
     // MARK: - File Storage
 
@@ -358,6 +360,19 @@ public final class DependencyContainer: ObservableObject {
         GetExecutionLogsUseCase(executionLogRepository: executionLogRepository)
     }()
 
+    // MARK: - Use Cases (Skills)
+
+    public lazy var skillDefinitionUseCases: SkillDefinitionUseCases = {
+        SkillDefinitionUseCases(skillRepository: skillDefinitionRepository)
+    }()
+
+    public lazy var agentSkillUseCases: AgentSkillUseCases = {
+        AgentSkillUseCases(
+            assignmentRepository: agentSkillAssignmentRepository,
+            skillRepository: skillDefinitionRepository
+        )
+    }()
+
     // MARK: - Use Cases (Audit Triggers)
 
     public lazy var fireAuditRuleUseCase: FireAuditRuleUseCase = {
@@ -397,6 +412,8 @@ public final class DependencyContainer: ObservableObject {
         self.agentCredentialRepository = AgentCredentialRepository(database: database)
         self.projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: database)
         self.agentSessionRepository = AgentSessionRepository(database: database)
+        self.skillDefinitionRepository = SkillDefinitionRepository(database: database)
+        self.agentSkillAssignmentRepository = AgentSkillAssignmentRepository(database: database)
         self.eventRecorder = EventRecorder(database: database)
         self.mcpDaemonManager = MCPDaemonManager()
         self.webServerManager = WebServerManager()

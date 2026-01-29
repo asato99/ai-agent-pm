@@ -44,12 +44,17 @@ struct SettingsView: View {
                 Label("MCP Server", systemImage: "server.rack")
             }
 
+            SkillManagementView()
+            .tabItem {
+                Label("Skills", systemImage: "wand.and.stars")
+            }
+
             AboutView()
             .tabItem {
                 Label("About", systemImage: "info.circle")
             }
         }
-        .frame(width: 500, height: 450)
+        .frame(width: 550, height: 500)
     }
 }
 

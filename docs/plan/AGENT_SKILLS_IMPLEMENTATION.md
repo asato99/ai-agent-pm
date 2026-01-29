@@ -13,7 +13,7 @@
 |-------|------|-----------|--------|
 | 1 | データモデル・永続化 | ✅ 完了 | 2026-01-29 |
 | 2 | UseCase | ✅ 完了 | 2026-01-29 |
-| 3 | UI（スキル管理） | ⬜ 未着手 | - |
+| 3 | UI（スキル管理） | ✅ 完了 | 2026-01-29 |
 | 4 | UI（スキル割り当て） | ⬜ 未着手 | - |
 | 5 | Coordinator | ⬜ 未着手 | - |
 | 6 | 統合テスト | ⬜ 未着手 | - |
@@ -431,7 +431,11 @@ func test_createSkill_success() throws {
 
 | 日時 | 作業内容 | 担当 |
 |------|---------|------|
-| - | - | - |
+| 2026-01-29 | DependencyContainerにスキルリポジトリ・ユースケース追加 | Claude |
+| 2026-01-29 | SkillManagementView.swift作成（一覧・作成・編集・削除） | Claude |
+| 2026-01-29 | SettingsViewにSkillsタブ追加 | Claude |
+| 2026-01-29 | Feature15_SkillManagementTests.swift作成 | Claude |
+| 2026-01-29 | ビルド確認・xcodegen再生成 | Claude |
 
 ---
 
