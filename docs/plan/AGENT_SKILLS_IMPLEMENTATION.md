@@ -14,7 +14,7 @@
 | 1 | データモデル・永続化 | ✅ 完了 | 2026-01-29 |
 | 2 | UseCase | ✅ 完了 | 2026-01-29 |
 | 3 | UI（スキル管理） | ✅ 完了 | 2026-01-29 |
-| 4 | UI（スキル割り当て） | ⬜ 未着手 | - |
+| 4 | UI（スキル割り当て） | ✅ 完了 | 2026-01-29 |
 | 5 | Coordinator | ⬜ 未着手 | - |
 | 6 | 統合テスト | ⬜ 未着手 | - |
 
@@ -497,7 +497,12 @@ func test_skillAssignment_saveUpdatesAgent() throws {
 
 | 日時 | 作業内容 | 担当 |
 |------|---------|------|
-| - | - | - |
+| 2026-01-29 | AgentSkillAssignmentView.swift作成（スキル割り当てシート） | Claude |
+| 2026-01-29 | AgentSkillsSection作成（エージェント詳細のスキルセクション） | Claude |
+| 2026-01-29 | SkillBadge・FlowLayout作成（スキルバッジ表示） | Claude |
+| 2026-01-29 | AgentDetailViewにスキルセクション統合 | Claude |
+| 2026-01-29 | Feature15_SkillManagementTestsにPhase 4テスト追加 | Claude |
+| 2026-01-29 | ビルド確認 | Claude |
 
 ---
 

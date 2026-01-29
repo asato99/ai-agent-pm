@@ -29,6 +29,8 @@ struct AgentDetailView: View {
     @State private var showRegenerateConfirmation = false
     @State private var selectedTab: AgentDetailTab = .profile
     @State private var selectedLogForViewer: ExecutionLog?
+    @State private var assignedSkills: [SkillDefinition] = []
+    @State private var showSkillAssignment = false
 
     var body: some View {
         Group {
@@ -99,6 +101,21 @@ struct AgentDetailView: View {
                 agent: agent
             )
         }
+        .sheet(isPresented: $showSkillAssignment) {
+            if let agent = agent {
+                AgentSkillAssignmentView(
+                    agent: agent,
+                    onSave: { skillIds in
+                        showSkillAssignment = false
+                        saveSkillAssignment(skillIds)
+                    },
+                    onCancel: {
+                        showSkillAssignment = false
+                    }
+                )
+                .environmentObject(container)
+            }
+        }
     }
 
     // MARK: - Profile Tab Content
@@ -114,6 +131,16 @@ struct AgentDetailView: View {
 
                 // Passkey (Phase 3-4)
                 passkeySection(agent)
+
+                Divider()
+
+                // Skills
+                AgentSkillsSection(
+                    assignedSkills: assignedSkills,
+                    onManageSkills: {
+                        showSkillAssignment = true
+                    }
+                )
 
                 Divider()
 
@@ -347,6 +374,18 @@ struct AgentDetailView: View {
         }
     }
 
+    private func saveSkillAssignment(_ skillIds: [SkillID]) {
+        AsyncTask {
+            do {
+                try container.agentSkillUseCases.assignSkills(agentId: agentId, skillIds: skillIds)
+                // スキルを再読み込み
+                assignedSkills = try container.agentSkillUseCases.getAgentSkills(agentId)
+            } catch {
+                router.showAlert(.error(message: error.localizedDescription))
+            }
+        }
+    }
+
     private func loadData() async {
         isLoading = true
         defer { isLoading = false }
@@ -356,6 +395,7 @@ struct AgentDetailView: View {
             tasks = try container.getTasksByAssigneeUseCase.execute(assigneeId: agentId)
             sessions = try container.getAgentSessionsUseCase.execute(agentId: agentId)
             executionLogs = try container.getExecutionLogsUseCase.executeByAgentId(agentId)
+            assignedSkills = try container.agentSkillUseCases.getAgentSkills(agentId)
 
             // 実行ログに関連するタスクとプロジェクトをキャッシュに読み込む
             var newTaskCache: [TaskID: Task] = [:]

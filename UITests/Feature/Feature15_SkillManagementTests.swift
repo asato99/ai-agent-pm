@@ -1,6 +1,6 @@
 // UITests/Feature/Feature15_SkillManagementTests.swift
 // スキル管理機能のUIテスト
-// 参照: docs/design/AGENT_SKILLS.md, docs/plan/AGENT_SKILLS_IMPLEMENTATION.md - Phase 3
+// 参照: docs/design/AGENT_SKILLS.md, docs/plan/AGENT_SKILLS_IMPLEMENTATION.md - Phase 3, 4
 
 import XCTest
 
@@ -132,6 +132,133 @@ final class SkillManagementTests: BasicDataUITestCase {
     private func openSettings() {
         // メニューから設定を開く
         app.menuItems["Settings…"].click()
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+}
+
+// MARK: - Phase 4: スキル割り当てテスト
+
+/// スキル割り当て機能のテスト
+/// Phase 4: UI（スキル割り当て）
+final class SkillAssignmentTests: BasicDataUITestCase {
+
+    // MARK: - Test: エージェント詳細のスキルセクション
+
+    /// エージェント詳細画面にスキルセクションが表示されることを確認
+    func test_agentDetail_showsSkillsSection() throws {
+        // エージェント一覧を開く
+        openAgentList()
+
+        // 最初のエージェントをクリック
+        let agentRow = app.staticTexts["Worker-01"]
+        XCTAssertTrue(agentRow.waitForExistence(timeout: 3), "Agent should exist")
+        agentRow.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // スキルセクションが表示されることを確認
+        let skillsSection = app.groups["AgentSkillsSection"]
+        XCTAssertTrue(skillsSection.waitForExistence(timeout: 3), "Skills section should exist")
+
+        // Manageボタンが存在することを確認
+        let manageButton = app.buttons["ManageSkillsButton"]
+        XCTAssertTrue(manageButton.exists, "Manage Skills button should exist")
+    }
+
+    /// スキル割り当てシートが開けることを確認
+    func test_skillAssignmentSheet_opens() throws {
+        // エージェント詳細を開く
+        openAgentList()
+        app.staticTexts["Worker-01"].click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Manageボタンをクリック
+        let manageButton = app.buttons["ManageSkillsButton"]
+        XCTAssertTrue(manageButton.waitForExistence(timeout: 3))
+        manageButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // スキル割り当てシートが開くことを確認
+        let saveButton = app.buttons["SaveSkillAssignmentButton"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 3), "Skill assignment sheet should open")
+    }
+
+    /// スキルをエージェントに割り当てできることを確認
+    func test_assignSkillToAgent_success() throws {
+        // まずスキルを作成
+        createTestSkill()
+
+        // エージェント詳細を開く
+        openAgentList()
+        app.staticTexts["Worker-01"].click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Manageボタンをクリック
+        app.buttons["ManageSkillsButton"].click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // スキルのチェックボックスをクリック
+        let skillCheckbox = app.groups["SkillCheckbox-test-skill"]
+        if skillCheckbox.waitForExistence(timeout: 3) {
+            skillCheckbox.click()
+            Thread.sleep(forTimeInterval: 0.3)
+
+            // 保存
+            app.buttons["SaveSkillAssignmentButton"].click()
+            Thread.sleep(forTimeInterval: 1.0)
+
+            // スキルバッジが表示されることを確認
+            let skillBadge = app.groups["SkillBadge-test-skill"]
+            XCTAssertTrue(skillBadge.waitForExistence(timeout: 3), "Skill badge should appear after assignment")
+        } else {
+            // スキルがない場合はスキップ（空状態の確認）
+            let emptyMessage = app.staticTexts["No Skills Available"]
+            XCTAssertTrue(emptyMessage.exists || skillCheckbox.exists, "Either skill checkbox or empty message should exist")
+        }
+    }
+
+    // MARK: - Helper Methods
+
+    private func openAgentList() {
+        // サイドバーからエージェント一覧を開く
+        let agentsItem = app.outlines.buttons["Agents"]
+        if agentsItem.waitForExistence(timeout: 3) {
+            agentsItem.click()
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
+    private func createTestSkill() {
+        // 設定を開く
+        app.menuItems["Settings…"].click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Skillsタブをクリック
+        app.buttons["Skills"].click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // 追加ボタンをクリック
+        if app.buttons["AddSkillButton"].waitForExistence(timeout: 3) {
+            app.buttons["AddSkillButton"].click()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            // フォーム入力
+            let nameField = app.textFields["SkillNameField"]
+            if nameField.waitForExistence(timeout: 3) {
+                nameField.click()
+                nameField.typeText("Test Skill")
+
+                let directoryField = app.textFields["SkillDirectoryNameField"]
+                directoryField.click()
+                directoryField.typeText("test-skill")
+
+                // 保存
+                app.buttons["SaveSkillButton"].click()
+                Thread.sleep(forTimeInterval: 1.0)
+            }
+        }
+
+        // 設定を閉じる
+        app.typeKey("w", modifierFlags: .command)
         Thread.sleep(forTimeInterval: 0.5)
     }
 }
