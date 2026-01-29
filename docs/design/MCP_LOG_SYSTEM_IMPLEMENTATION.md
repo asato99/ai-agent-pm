@@ -11,8 +11,9 @@
 | Phase | 内容 | 状態 | 進捗 |
 |-------|------|------|------|
 | Phase 0 | リファクタリング（Logger基盤） | ✅ 完了 | 10/10 |
-| Phase 1 | ログローテーション | 未着手 | 0/6 |
-| Phase 2 | 構造化ログ | 未着手 | 0/5 |
+| Phase 0.5 | MCPツール呼び出しログ | ✅ 完了 | 4/4 |
+| Phase 1 | ログローテーション | ✅ 完了 | 6/6 |
+| Phase 2 | 構造化ログ | ✅ 完了 | 5/5 |
 | Phase 3 | MCPLogView改善 | 未着手 | 0/6 |
 
 ### 完了済み（2026-01-28）
@@ -27,19 +28,42 @@
 - ✅ 0-9: MCPDaemonManager の移行
 - ✅ 0-10: MockLogger とテストユーティリティ
 
+### 完了済み（2026-01-29）
+- ✅ 0.5-1: LogCategoryに`mcp`追加
+- ✅ 0.5-2: LogOutputに出力先別最小レベル追加
+- ✅ 0.5-3: MCPServer.executeToolにログ追加
+- ✅ 0.5-4: truncateユーティリティ（LogUtils）
+- ✅ 1-1: LogRotator基本機能（古いファイル削除）
+- ✅ 1-2: 日付別ファイル出力（RotatingFileLogOutput）
+- ✅ 1-3: デーモン起動時のローテーション実行（UnixSocketServer.start()）
+- ✅ 1-4: 環境変数による設定（MCP_LOG_RETENTION_DAYS）
+- ✅ 1-5: FileLogOutputをRotatingFileLogOutputに置き換え
+- ✅ 1-6: 既存ログファイルの移行（LogMigrator）
+- ✅ 2-1: JSON形式出力（既存のFileLogOutput/RotatingFileLogOutputで対応済み）
+- ✅ 2-2: ログレベル環境変数対応（MCP_LOG_LEVEL）
+- ✅ 2-3: カテゴリ別ログレベル設定（setCategoryLevel/clearCategoryLevel）
+- ✅ 2-4: healthCheckをTRACEレベルに変更
+- ✅ 2-5: フォーマット切り替え環境変数（MCP_LOG_FORMAT）
+
 ### 実装済みファイル
 - `Sources/Infrastructure/Logging/LogLevel.swift`
 - `Sources/Infrastructure/Logging/LogCategory.swift`
 - `Sources/Infrastructure/Logging/LogEntry.swift`
 - `Sources/Infrastructure/Logging/LogOutput.swift`
+- `Sources/Infrastructure/Logging/LogUtils.swift`
 - `Sources/Infrastructure/Logging/MCPLogger.swift`
 - `Sources/Infrastructure/Logging/MockLogger.swift`
+- `Sources/Infrastructure/Logging/LogRotator.swift` ← NEW
+- `Sources/Infrastructure/Logging/RotatingFileLogOutput.swift` ← NEW
 - `Tests/InfrastructureTests/Logging/LogLevelTests.swift`
 - `Tests/InfrastructureTests/Logging/LogCategoryTests.swift`
 - `Tests/InfrastructureTests/Logging/LogEntryTests.swift`
 - `Tests/InfrastructureTests/Logging/LogOutputTests.swift`
+- `Tests/InfrastructureTests/Logging/LogUtilsTests.swift`
 - `Tests/InfrastructureTests/Logging/LoggerTests.swift`
 - `Tests/InfrastructureTests/Logging/MockLoggerTests.swift`
+- `Tests/InfrastructureTests/Logging/LogRotatorTests.swift` ← NEW
+- `Tests/InfrastructureTests/Logging/RotatingFileLogOutputTests.swift` ← NEW
 
 ### 移行済みファイル
 - `Sources/MCPServer/MCPServer.swift` - MCPLogger に移行
@@ -92,7 +116,7 @@ func testLogCategoryRawValue() {
 func testAllCategories() {
     // 全カテゴリが定義されていることを確認
     let expected: Set<LogCategory> = [
-        .system, .health, .auth, .agent, .task, .chat, .project, .transport
+        .system, .health, .auth, .agent, .task, .chat, .project, .mcp, .transport
     ]
     XCTAssertEqual(Set(LogCategory.allCases), expected)
 }
@@ -353,6 +377,152 @@ func testMockLoggerFiltersByLevel() {
 
 **実装（GREEN）**:
 - [ ] `Sources/Infrastructure/Logging/MockLogger.swift` 作成（テスト用）
+- [ ] テスト実行・成功確認
+
+---
+
+## Phase 0.5: MCPツール呼び出しログ
+
+MCPツールの呼び出しと戻り値を記録する機能を追加。
+
+### 0.5-1. LogCategoryに`mcp`追加
+
+**テスト（RED）**:
+```swift
+// Tests/InfrastructureTests/Logging/LogCategoryTests.swift
+func testMCPCategoryExists() {
+    XCTAssertEqual(LogCategory.mcp.rawValue, "mcp")
+}
+
+func testAllCategoriesIncludesMCP() {
+    XCTAssertTrue(LogCategory.allCases.contains(.mcp))
+}
+```
+
+**実装（GREEN）**:
+- [ ] `Sources/Infrastructure/Logging/LogCategory.swift` に `.mcp` 追加
+- [ ] テスト実行・成功確認
+
+---
+
+### 0.5-2. LogOutputに出力先別最小レベル追加
+
+**テスト（RED）**:
+```swift
+// Tests/InfrastructureTests/Logging/LogOutputTests.swift
+func testStderrLogOutputRespectsMinimumLevel() {
+    let output = StderrLogOutput(minimumLevel: .warn)
+
+    // INFO レベルはスキップされる
+    let infoEntry = LogEntry(timestamp: Date(), level: .info, category: .system, message: "Info")
+    XCTAssertFalse(output.shouldWrite(infoEntry))
+
+    // WARN レベルは出力される
+    let warnEntry = LogEntry(timestamp: Date(), level: .warn, category: .system, message: "Warn")
+    XCTAssertTrue(output.shouldWrite(warnEntry))
+}
+
+func testFileLogOutputWritesAllLevels() {
+    let output = FileLogOutput(filePath: tempPath)  // minimumLevel = nil
+
+    let traceEntry = LogEntry(timestamp: Date(), level: .trace, category: .system, message: "Trace")
+    XCTAssertTrue(output.shouldWrite(traceEntry))
+}
+```
+
+**実装（GREEN）**:
+- [ ] `LogOutput` プロトコルに `minimumLevel` プロパティ追加
+- [ ] `StderrLogOutput` に `minimumLevel` パラメータ追加（デフォルト: `.info`）
+- [ ] `FileLogOutput` は `minimumLevel = nil`（全レベル記録）
+- [ ] テスト実行・成功確認
+
+---
+
+### 0.5-3. MCPServer.executeToolにログ追加
+
+**テスト（RED）**:
+```swift
+// Tests/MCPServerTests/MCPServerLoggingTests.swift
+func testExecuteToolLogsAtDebugLevel() {
+    let mockLogger = MockLogger()
+    // MCPServerにloggerを注入
+    let mcpServer = MCPServer(database: db, logger: mockLogger)
+
+    _ = try mcpServer.executeTool(name: "health_check", arguments: [:], caller: .coordinator)
+
+    // DEBUGレベルでツール呼び出しがログされている
+    XCTAssertTrue(mockLogger.hasLog(level: .debug, category: .mcp, containing: "health_check"))
+}
+
+func testExecuteToolLogsArgumentsAtTraceLevel() {
+    let mockLogger = MockLogger()
+    let mcpServer = MCPServer(database: db, logger: mockLogger)
+
+    _ = try mcpServer.executeTool(
+        name: "get_agent_action",
+        arguments: ["agent_id": "agt_123", "project_id": "prj_456"],
+        caller: .coordinator
+    )
+
+    // TRACEレベルで引数がログされている
+    XCTAssertTrue(mockLogger.hasLog(level: .trace, category: .mcp, containing: "arguments"))
+}
+
+func testExecuteToolLogsErrorOnFailure() {
+    let mockLogger = MockLogger()
+    let mcpServer = MCPServer(database: db, logger: mockLogger)
+
+    XCTAssertThrowsError(try mcpServer.executeTool(
+        name: "invalid_tool",
+        arguments: [:],
+        caller: .coordinator
+    ))
+
+    // ERRORレベルでエラーがログされている
+    XCTAssertTrue(mockLogger.hasLog(level: .error, category: .mcp))
+}
+```
+
+**実装（GREEN）**:
+- [ ] `MCPServer` に `logger` プロパティ追加（DIまたはデフォルトで `MCPLogger.shared`）
+- [ ] `executeTool` の開始時に DEBUG ログ
+- [ ] 引数を TRACE ログ（truncate付き）
+- [ ] 成功時に DEBUG ログ（実行時間含む）
+- [ ] 戻り値を TRACE ログ（truncate付き）
+- [ ] エラー時に ERROR ログ
+- [ ] テスト実行・成功確認
+
+---
+
+### 0.5-4. truncateユーティリティ
+
+**テスト（RED）**:
+```swift
+// Tests/InfrastructureTests/Logging/LogUtilsTests.swift
+func testTruncateShortString() {
+    let result = LogUtils.truncate("short", maxLength: 100)
+    XCTAssertEqual(result, "short")
+    XCTAssertFalse(result.contains("truncated"))
+}
+
+func testTruncateLongString() {
+    let longString = String(repeating: "a", count: 3000)
+    let result = LogUtils.truncate(longString, maxLength: 2000)
+    XCTAssertLessThanOrEqual(result.count, 2100)  // maxLength + マーカー
+    XCTAssertTrue(result.contains("...[truncated]"))
+}
+
+func testTruncateDictionary() {
+    let dict: [String: Any] = ["key": String(repeating: "x", count: 3000)]
+    let result = LogUtils.truncate(dict, maxLength: 2000)
+    // JSON文字列として切り詰められている
+    XCTAssertTrue(result.contains("truncated"))
+}
+```
+
+**実装（GREEN）**:
+- [ ] `Sources/Infrastructure/Logging/LogUtils.swift` 作成
+- [ ] `truncate(_:maxLength:)` 関数実装
 - [ ] テスト実行・成功確認
 
 ---
@@ -758,9 +928,16 @@ func testFilterByTimeRange() {
 ## 完了基準
 
 ### Phase 0 完了基準
-- [ ] 全テストが成功
-- [ ] 既存の機能が破壊されていない
-- [ ] 全てのログ出力がLogger経由になっている
+- [x] 全テストが成功
+- [x] 既存の機能が破壊されていない
+- [x] 全てのログ出力がLogger経由になっている
+
+### Phase 0.5 完了基準
+- [x] `mcp` カテゴリが追加されている
+- [x] 出力先ごとの最小レベル設定が機能する
+- [x] `executeTool` がツール呼び出しをログする
+- [x] 引数・戻り値がTRACEレベルでログされる
+- [x] 大きなデータは切り詰められる
 
 ### Phase 1 完了基準
 - [ ] 全テストが成功
@@ -785,3 +962,5 @@ func testFilterByTimeRange() {
 | 日付 | 内容 |
 |------|------|
 | 2026-01-28 | 初版作成 |
+| 2026-01-29 | Phase 0.5（MCPツール呼び出しログ）追加、`mcp`カテゴリ追加、出力先別フィルタリング設計追加 |
+| 2026-01-29 | Phase 0.5 実装完了: LogUtils, LogOutput minimumLevel, executeTool ログ追加 |

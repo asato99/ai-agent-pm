@@ -130,9 +130,14 @@ public final class MCPServer {
     /// 共有ロガーインスタンス
     private static let logger: MCPLogger = {
         let logger = MCPLogger.shared
-        // ファイル出力を設定
-        let logPath = AppConfig.appSupportDirectory.appendingPathComponent("mcp-server.log").path
-        let fileOutput = FileLogOutput(filePath: logPath)
+        let logDirectory = AppConfig.appSupportDirectory.path
+
+        // 既存ログファイルの移行（日付なしファイル → 日付付きファイル）
+        let migrator = LogMigrator(directory: logDirectory)
+        migrator.migrateIfNeeded(prefix: "mcp-server")
+
+        // ファイル出力を設定（日付別ローテーション）
+        let fileOutput = RotatingFileLogOutput(directory: logDirectory, prefix: "mcp-server")
         logger.addOutput(fileOutput)
         // stderr出力を設定
         logger.addOutput(StderrLogOutput())
@@ -536,6 +541,58 @@ public final class MCPServer {
     /// Phase 5: caller で認可済みの呼び出し元情報を受け取る
     /// Note: internal for @testable access in tests
     func executeTool(name: String, arguments: [String: Any], caller: CallerType) throws -> Any {
+        // MCP Tool Call Logging: 呼び出し開始
+        let startTime = Date()
+        let formattedArgs = LogUtils.formatArguments(arguments)
+        let callerDesc = callerTypeDescription(caller)
+        Self.logger.debug(
+            "MCP tool call: \(name)",
+            category: .mcp,
+            operation: name,
+            details: ["caller": callerDesc, "arguments": formattedArgs]
+        )
+        Self.logger.trace(
+            "MCP tool arguments detail",
+            category: .mcp,
+            operation: name,
+            details: ["arguments": formattedArgs]
+        )
+
+        do {
+            let result = try executeToolImpl(name: name, arguments: arguments, caller: caller)
+
+            // MCP Tool Call Logging: 呼び出し成功
+            let durationMs = Int(Date().timeIntervalSince(startTime) * 1000)
+            let resultInfo = LogUtils.formatResult(result)
+            Self.logger.debug(
+                "MCP tool completed: \(name)",
+                category: .mcp,
+                operation: name,
+                details: ["duration_ms": durationMs, "result_size_bytes": resultInfo["result_size_bytes"] ?? 0]
+            )
+            Self.logger.trace(
+                "MCP tool result detail",
+                category: .mcp,
+                operation: name,
+                details: resultInfo
+            )
+
+            return result
+        } catch {
+            // MCP Tool Call Logging: 呼び出しエラー
+            let durationMs = Int(Date().timeIntervalSince(startTime) * 1000)
+            Self.logger.error(
+                "MCP tool failed: \(name) - \(error.localizedDescription)",
+                category: .mcp,
+                operation: name,
+                details: ["duration_ms": durationMs, "error": String(describing: error)]
+            )
+            throw error
+        }
+    }
+
+    /// 実際のツール実行（ログなし）
+    private func executeToolImpl(name: String, arguments: [String: Any], caller: CallerType) throws -> Any {
         switch name {
         // ========================================
         // 未認証でも呼び出し可能
@@ -1535,7 +1592,8 @@ public final class MCPServer {
     /// Runnerが最初に呼び出す。サーバーが応答可能かを確認。
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     private func healthCheck() throws -> [String: Any] {
-        Self.log("[MCP] healthCheck called", category: .health)
+        // TRACEレベル: 頻繁に呼ばれるため、通常は出力しない
+        Self.logger.trace("[MCP] healthCheck called", category: .health)
 
         // DBアクセスの疎通確認
         let agentCount = try agentRepository.findAll().count

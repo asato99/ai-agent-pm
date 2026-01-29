@@ -10,8 +10,31 @@ import Foundation
 /// 異なる出力先（stderr、ファイル等）を抽象化する。
 /// クラス型に制限（identityベースの比較をサポートするため）。
 public protocol LogOutput: AnyObject, Sendable {
+    /// この出力先の最小ログレベル（オプション）
+    ///
+    /// nilの場合は全てのログを出力する。
+    /// 設定されている場合、このレベル未満のログは出力されない。
+    var minimumLevel: LogLevel? { get }
+
     /// ログエントリを出力する
     func write(_ entry: LogEntry)
+
+    /// このエントリを出力すべきかどうかを判定
+    ///
+    /// minimumLevelに基づいてフィルタリングする。
+    func shouldWrite(_ entry: LogEntry) -> Bool
+}
+
+// MARK: - LogOutput Default Implementation
+
+public extension LogOutput {
+    /// デフォルト実装: minimumLevelがnilまたはエントリのレベルが最小レベル以上なら出力
+    func shouldWrite(_ entry: LogEntry) -> Bool {
+        guard let minLevel = minimumLevel else {
+            return true  // フィルタなし
+        }
+        return entry.level >= minLevel
+    }
 }
 
 // MARK: - Log Format
@@ -31,11 +54,19 @@ public enum LogFormat: Sendable {
 /// コンソールやターミナルでのデバッグ用。
 /// テキスト形式で出力する。
 public final class StderrLogOutput: LogOutput, @unchecked Sendable {
+    public let minimumLevel: LogLevel?
     private let lock = NSLock()
 
-    public init() {}
+    /// 初期化
+    ///
+    /// - Parameter minimumLevel: 最小ログレベル（nilの場合は全レベル出力）
+    public init(minimumLevel: LogLevel? = nil) {
+        self.minimumLevel = minimumLevel
+    }
 
     public func write(_ entry: LogEntry) {
+        guard shouldWrite(entry) else { return }
+
         let text = entry.toText()
         lock.lock()
         defer { lock.unlock() }
@@ -49,7 +80,11 @@ public final class StderrLogOutput: LogOutput, @unchecked Sendable {
 ///
 /// ログファイルへの永続化用。
 /// JSON形式またはテキスト形式を選択可能。
+/// デフォルトでは全レベルのログを記録する（minimumLevel = nil）。
 public final class FileLogOutput: LogOutput, @unchecked Sendable {
+    /// ファイル出力は常に全レベルを記録（フィルタなし）
+    public let minimumLevel: LogLevel? = nil
+
     private let filePath: String
     private let format: LogFormat
     private let lock = NSLock()
@@ -113,7 +148,11 @@ public final class FileLogOutput: LogOutput, @unchecked Sendable {
 /// 複数の出力先への同時出力
 ///
 /// stderr + ファイルなど、複数の出力先に同時にログを書き込む。
+/// 各出力先が独自のminimumLevelを持つため、CompositeLogOutput自体はフィルタしない。
 public final class CompositeLogOutput: LogOutput, @unchecked Sendable {
+    /// Compositeはフィルタしない（各出力先が個別にフィルタ）
+    public let minimumLevel: LogLevel? = nil
+
     private let outputs: [LogOutput]
 
     /// 初期化

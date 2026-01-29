@@ -6,6 +6,9 @@ import XCTest
 // MARK: - Mock LogOutput for Testing
 
 final class MockLogOutput: LogOutput, @unchecked Sendable {
+    /// Mockはフィルタなし（全て記録）
+    let minimumLevel: LogLevel? = nil
+
     private let lock = NSLock()
     private var _entries: [LogEntry] = []
 
@@ -201,5 +204,148 @@ final class LoggerTests: XCTestCase {
 
         XCTAssertEqual(output1.entries.count, 1)
         XCTAssertEqual(output2.entries.count, 2)
+    }
+
+    // MARK: - Category Level Tests
+
+    func testLoggerCategorySpecificLevel() {
+        let mockOutput = MockLogOutput()
+        let logger = MCPLogger()
+        logger.addOutput(mockOutput)
+        logger.setMinimumLevel(.info)
+        logger.setCategoryLevel(.health, level: .warn)  // healthカテゴリはWARN以上のみ
+
+        logger.log(.info, category: .health, message: "Should not appear")
+        logger.log(.warn, category: .health, message: "Should appear")
+        logger.log(.info, category: .agent, message: "Should appear")
+
+        XCTAssertEqual(mockOutput.entries.count, 2)
+        XCTAssertTrue(mockOutput.entries.allSatisfy { $0.message != "Should not appear" })
+    }
+
+    func testLoggerCategoryLevelOverridesGlobalLevel() {
+        let mockOutput = MockLogOutput()
+        let logger = MCPLogger()
+        logger.addOutput(mockOutput)
+        logger.setMinimumLevel(.warn)
+        logger.setCategoryLevel(.mcp, level: .trace)  // mcpカテゴリはTRACE以上
+
+        logger.log(.info, category: .system, message: "Should not appear")
+        logger.log(.trace, category: .mcp, message: "Should appear")
+
+        XCTAssertEqual(mockOutput.entries.count, 1)
+        XCTAssertEqual(mockOutput.entries[0].category, .mcp)
+    }
+
+    func testLoggerClearCategoryLevel() {
+        let mockOutput = MockLogOutput()
+        let logger = MCPLogger()
+        logger.addOutput(mockOutput)
+        logger.setMinimumLevel(.info)
+        logger.setCategoryLevel(.health, level: .error)
+
+        logger.log(.warn, category: .health, message: "Should not appear")
+
+        logger.clearCategoryLevel(.health)
+
+        logger.log(.warn, category: .health, message: "Should appear")
+
+        XCTAssertEqual(mockOutput.entries.count, 1)
+        XCTAssertEqual(mockOutput.entries[0].message, "Should appear")
+    }
+}
+
+// MARK: - LogConfig Tests
+
+final class LogConfigTests: XCTestCase {
+
+    override func tearDown() {
+        unsetenv("MCP_LOG_LEVEL")
+        unsetenv("MCP_LOG_FORMAT")
+        super.tearDown()
+    }
+
+    // MARK: - Log Level Environment Tests
+
+    func testLogConfigReadsLevelFromEnvironment() {
+        setenv("MCP_LOG_LEVEL", "DEBUG", 1)
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.level, .debug)
+    }
+
+    func testLogConfigReadsTraceLevelFromEnvironment() {
+        setenv("MCP_LOG_LEVEL", "TRACE", 1)
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.level, .trace)
+    }
+
+    func testLogConfigUsesDefaultLevelWhenNotSet() {
+        unsetenv("MCP_LOG_LEVEL")
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.level, .info)  // デフォルトはINFO
+    }
+
+    func testLogConfigUsesDefaultLevelForInvalidValue() {
+        setenv("MCP_LOG_LEVEL", "INVALID", 1)
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.level, .info)  // 無効な値はデフォルトを使用
+    }
+
+    func testLogConfigIsCaseInsensitive() {
+        setenv("MCP_LOG_LEVEL", "debug", 1)
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.level, .debug)
+    }
+
+    // MARK: - Log Format Environment Tests
+
+    func testLogConfigReadsFormatFromEnvironment() {
+        setenv("MCP_LOG_FORMAT", "json", 1)
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.format, .json)
+    }
+
+    func testLogConfigReadsTextFormatFromEnvironment() {
+        setenv("MCP_LOG_FORMAT", "text", 1)
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.format, .text)
+    }
+
+    func testLogConfigUsesDefaultFormatWhenNotSet() {
+        unsetenv("MCP_LOG_FORMAT")
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.format, .json)  // デフォルトはJSON
+    }
+
+    func testLogConfigUsesDefaultFormatForInvalidValue() {
+        setenv("MCP_LOG_FORMAT", "invalid", 1)
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.format, .json)  // 無効な値はデフォルトを使用
+    }
+
+    func testLogConfigFormatIsCaseInsensitive() {
+        setenv("MCP_LOG_FORMAT", "JSON", 1)
+
+        let config = LogConfig.fromEnvironment()
+
+        XCTAssertEqual(config.format, .json)
     }
 }

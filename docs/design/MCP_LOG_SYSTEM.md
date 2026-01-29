@@ -165,24 +165,131 @@ struct LogRotationConfig {
 | `task` | タスク操作 | requestTask, completeTask |
 | `chat` | チャット機能 | sendMessage, getMessages |
 | `project` | プロジェクト操作 | getProject, listProjects |
-| `error` | エラー | reportAgentError |
+| `mcp` | MCPツール呼び出し | executeTool, ツール引数・戻り値 |
+| `transport` | トランスポート層 | stdio, socket通信 |
 
 #### 2.5 ログレベルとカテゴリの関係
 
 ```
 healthCheck → category: "health", level: "TRACE"
-              （デフォルトでは出力されない）
+              （UI表示時にフィルタで除外可能）
 
 getAgentAction → category: "agent", level: "INFO"
                  （通常操作として出力）
 
 reportAgentError → category: "error", level: "ERROR"
                    （常に出力）
+
+executeTool → category: "mcp", level: "DEBUG"
+              （ツール呼び出しの基本情報）
+
+executeTool args/result → category: "mcp", level: "TRACE"
+                          （引数・戻り値の詳細）
 ```
+
+#### 2.6 フィルタリング方針
+
+**基本原則**: ファイルには全て記録し、表示時にフィルタリングする。
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ファイル出力: 全レベル記録（TRACE〜ERROR）                    │
+│               → 後から詳細を確認可能                         │
+│               → 7日ローテーションでディスク管理               │
+│                                                             │
+│ stderr出力: デバッグ用（開発時）                             │
+│             → INFO以上をデフォルト                           │
+│             → 環境変数で変更可能                             │
+│                                                             │
+│ UI表示: ユーザーがレベル・カテゴリで絞り込み                  │
+│         → デフォルトはINFO以上                               │
+│         → フィルタ設定で自由に変更可能                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**利点**:
+- 問題発生時に過去の詳細ログを確認可能
+- 通常運用時はUIでノイズをフィルタ
+- 書き込み時に情報を失わない
 
 ---
 
-### 3. MCPLogView UI改善
+### 3. MCPツール呼び出しログ
+
+#### 3.1 目的
+
+MCPツールの呼び出しと戻り値を記録し、デバッグ・問題調査を容易にする。
+
+#### 3.2 ログ出力内容
+
+| レベル | 内容 | 用途 |
+|--------|------|------|
+| DEBUG | ツール名、主要パラメータ、実行時間 | 呼び出しフローの確認 |
+| TRACE | 引数の完全なJSON | パラメータの詳細確認 |
+| TRACE | 戻り値の完全なJSON（truncate付き） | レスポンスの詳細確認 |
+| ERROR | エラー情報、引数 | 障害調査 |
+
+#### 3.3 出力例
+
+```json
+// DEBUG: ツール呼び出し開始
+{
+  "timestamp": "2026-01-28T09:21:35.123Z",
+  "level": "DEBUG",
+  "category": "mcp",
+  "operation": "get_pending_messages",
+  "agent_id": "agt_801b2cc6-c7f",
+  "message": "Tool call started",
+  "details": { "arg_count": 1 }
+}
+
+// TRACE: 引数詳細
+{
+  "timestamp": "2026-01-28T09:21:35.124Z",
+  "level": "TRACE",
+  "category": "mcp",
+  "operation": "get_pending_messages",
+  "message": "Tool arguments",
+  "details": { "arguments": {"session_token": "xxx..."} }
+}
+
+// DEBUG: 成功
+{
+  "timestamp": "2026-01-28T09:21:35.139Z",
+  "level": "DEBUG",
+  "category": "mcp",
+  "operation": "get_pending_messages",
+  "message": "Tool completed",
+  "details": { "duration_ms": 15 }
+}
+
+// TRACE: 戻り値詳細
+{
+  "timestamp": "2026-01-28T09:21:35.139Z",
+  "level": "TRACE",
+  "category": "mcp",
+  "operation": "get_pending_messages",
+  "message": "Tool result",
+  "details": {
+    "result": {"pending_messages": [...]},
+    "result_size_bytes": 1234,
+    "truncated": false
+  }
+}
+```
+
+#### 3.4 トランケーション
+
+大きな引数・戻り値は切り詰めて記録する。
+
+| 項目 | 最大サイズ | 超過時の動作 |
+|------|-----------|--------------|
+| 引数 | 2KB | 切り詰め + `truncated: true` |
+| 戻り値 | 2KB | 切り詰め + `truncated: true` |
+
+---
+
+### 4. MCPLogView UI改善
 
 #### 3.1 フィルタリング機能
 
@@ -237,7 +344,7 @@ reportAgentError → category: "error", level: "ERROR"
 
 ---
 
-### 4. 事前リファクタリング（Phase 0）
+### 5. 事前リファクタリング（Phase 0）
 
 構造化ログとローテーションを導入する前に、散在するログ実装を統一する。
 
@@ -260,7 +367,20 @@ Sources/Infrastructure/Logging/
 ```swift
 // ログ出力先のプロトコル
 protocol LogOutput {
+    /// この出力先の最小ログレベル（オプション）
+    /// nilの場合は全てのログを出力
+    var minimumLevel: LogLevel? { get }
+
     func write(_ entry: LogEntry)
+}
+
+// 出力先ごとの最小レベル設定例
+class FileLogOutput: LogOutput {
+    let minimumLevel: LogLevel? = nil  // 全レベル記録（フィルタなし）
+}
+
+class StderrLogOutput: LogOutput {
+    var minimumLevel: LogLevel? = .info  // デバッグ用、デフォルトINFO
 }
 
 // Loggerプロトコル（テスト時にモック可能）
@@ -312,6 +432,7 @@ enum LogCategory: String, Codable {
     case task      // タスク操作
     case chat      // チャット機能
     case project   // プロジェクト操作
+    case mcp       // MCPツール呼び出し
     case transport // トランスポート層
 }
 ```
@@ -349,15 +470,10 @@ final class Logger: LoggerProtocol {
     static let shared = Logger()
 
     private var outputs: [LogOutput] = []
-    private var minimumLevel: LogLevel = .info
     private let queue = DispatchQueue(label: "com.aiagentpm.logger")
 
     func addOutput(_ output: LogOutput) {
         outputs.append(output)
-    }
-
-    func setMinimumLevel(_ level: LogLevel) {
-        minimumLevel = level
     }
 
     func log(
@@ -370,8 +486,6 @@ final class Logger: LoggerProtocol {
         taskId: String? = nil,
         details: [String: Any]? = nil
     ) {
-        guard level >= minimumLevel else { return }
-
         let entry = LogEntry(
             timestamp: Date(),
             level: level,
@@ -388,11 +502,21 @@ final class Logger: LoggerProtocol {
 
         queue.async {
             for output in self.outputs {
+                // 出力先ごとのフィルタリング
+                if let minLevel = output.minimumLevel, level < minLevel {
+                    continue  // この出力先はスキップ
+                }
                 output.write(entry)
             }
         }
     }
 }
+
+// 使用例: ファイルは全て、stderrはINFO以上
+let logger = Logger.shared
+logger.addOutput(FileLogOutput(path: logPath))           // 全レベル記録
+logger.addOutput(StderrLogOutput(minimumLevel: .info))   // INFO以上のみ
+
 ```
 
 #### 4.6 段階的移行計画
@@ -431,7 +555,7 @@ class TransitionalLogger: LoggerProtocol {
 
 ---
 
-### 5. 実装計画
+### 6. 実装計画
 
 #### Phase 0: リファクタリング（事前準備）
 
@@ -479,9 +603,9 @@ class TransitionalLogger: LoggerProtocol {
 
 ---
 
-### 6. 後方互換性
+### 7. 後方互換性
 
-#### 5.1 移行期間
+#### 7.1 移行期間
 
 構造化ログ導入後も、既存のプレーンテキストログを一定期間サポートする。
 
@@ -496,17 +620,19 @@ if line.starts(with: "{") {
 }
 ```
 
-#### 5.2 環境変数
+#### 7.2 環境変数
 
 | 変数 | 説明 | デフォルト |
 |------|------|------------|
 | `MCP_LOG_FORMAT` | `json` または `text` | `json` |
-| `MCP_LOG_LEVEL` | ログレベル | `INFO` |
+| `MCP_LOG_LEVEL` | stderrのログレベル | `INFO` |
 | `MCP_LOG_RETENTION_DAYS` | 保持日数 | `7` |
+
+**注**: ファイル出力は常に全レベル（TRACE以上）を記録する。`MCP_LOG_LEVEL`はstderr出力のフィルタリングにのみ影響する。
 
 ---
 
-### 7. CLIツール（将来）
+### 8. CLIツール（将来）
 
 ```bash
 # ログ検索

@@ -33,6 +33,7 @@ public final class MCPLogger: LoggerProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private var outputs: [LogOutput] = []
     private var minimumLevel: LogLevel = .info
+    private var categoryLevels: [LogCategory: LogLevel] = [:]
 
     // MARK: - Initialization
 
@@ -56,6 +57,31 @@ public final class MCPLogger: LoggerProtocol, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return minimumLevel
+    }
+
+    /// カテゴリ別の最小ログレベルを設定
+    ///
+    /// 特定カテゴリのログレベルを個別に設定する。
+    /// グローバルレベルより優先される。
+    ///
+    /// - Parameters:
+    ///   - category: 対象カテゴリ
+    ///   - level: 最小ログレベル
+    public func setCategoryLevel(_ category: LogCategory, level: LogLevel) {
+        lock.lock()
+        defer { lock.unlock() }
+        categoryLevels[category] = level
+    }
+
+    /// カテゴリ別の最小ログレベルを削除
+    ///
+    /// 個別設定を削除し、グローバルレベルに戻す。
+    ///
+    /// - Parameter category: 対象カテゴリ
+    public func clearCategoryLevel(_ category: LogCategory) {
+        lock.lock()
+        defer { lock.unlock() }
+        categoryLevels.removeValue(forKey: category)
     }
 
     /// 出力先を追加
@@ -107,10 +133,12 @@ public final class MCPLogger: LoggerProtocol, @unchecked Sendable {
         lock.lock()
         let currentMin = minimumLevel
         let currentOutputs = outputs
+        let currentCategoryLevels = categoryLevels
         lock.unlock()
 
-        // レベルフィルタリング
-        guard level >= currentMin else { return }
+        // レベルフィルタリング（カテゴリ別設定を優先）
+        let effectiveMinLevel = currentCategoryLevels[category] ?? currentMin
+        guard level >= effectiveMinLevel else { return }
 
         let entry = LogEntry(
             timestamp: Date(),
@@ -193,5 +221,60 @@ public final class MCPLogger: LoggerProtocol, @unchecked Sendable {
     ) {
         log(.error, category: category, message: message,
             operation: operation, agentId: agentId, projectId: projectId, details: details)
+    }
+}
+
+// MARK: - LogConfig
+
+/// ログ設定
+///
+/// 環境変数からログレベルやフォーマットを読み取る。
+public struct LogConfig: Sendable {
+
+    /// ログレベル
+    public let level: LogLevel
+
+    /// 出力フォーマット
+    public let format: LogFormat
+
+    /// デフォルト設定
+    public static let `default` = LogConfig(level: .info, format: .json)
+
+    /// 初期化
+    public init(level: LogLevel, format: LogFormat) {
+        self.level = level
+        self.format = format
+    }
+
+    /// 環境変数から設定を読み込む
+    ///
+    /// - `MCP_LOG_LEVEL`: ログレベル（TRACE, DEBUG, INFO, WARN, ERROR）
+    /// - `MCP_LOG_FORMAT`: 出力フォーマット（json, text）
+    public static func fromEnvironment() -> LogConfig {
+        // ログレベル
+        let level: LogLevel
+        if let envValue = ProcessInfo.processInfo.environment["MCP_LOG_LEVEL"],
+           let parsedLevel = LogLevel(rawString: envValue) {
+            level = parsedLevel
+        } else {
+            level = .info
+        }
+
+        // 出力フォーマット
+        let format: LogFormat
+        if let envValue = ProcessInfo.processInfo.environment["MCP_LOG_FORMAT"]?.lowercased() {
+            switch envValue {
+            case "json":
+                format = .json
+            case "text":
+                format = .text
+            default:
+                format = .json
+            }
+        } else {
+            format = .json
+        }
+
+        return LogConfig(level: level, format: format)
     }
 }

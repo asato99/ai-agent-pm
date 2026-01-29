@@ -12,8 +12,14 @@ func log(_ message: String) {
 // Initialize logger outputs for REST server
 private func setupLogger() {
     let logger = MCPLogger.shared
-    let logPath = AppConfig.appSupportDirectory.appendingPathComponent("rest-server.log").path
-    logger.addOutput(FileLogOutput(filePath: logPath))
+    let logDirectory = AppConfig.appSupportDirectory.path
+
+    // 既存ログファイルの移行（日付なしファイル → 日付付きファイル）
+    let migrator = LogMigrator(directory: logDirectory)
+    migrator.migrateIfNeeded(prefix: "rest-server")
+
+    // ファイル出力を設定（日付別ローテーション）
+    logger.addOutput(RotatingFileLogOutput(directory: logDirectory, prefix: "rest-server"))
     logger.addOutput(StderrLogOutput())
 }
 setupLogger()

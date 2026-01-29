@@ -29,6 +29,9 @@ public enum LogCategory: String, Codable, Sendable, CaseIterable {
     /// プロジェクト関連
     case project = "project"
 
+    /// MCPツール呼び出し
+    case mcp = "mcp"
+
     /// トランスポート層（stdio, socket等）
     case transport = "transport"
 

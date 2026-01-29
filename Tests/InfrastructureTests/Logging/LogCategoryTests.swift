@@ -15,6 +15,7 @@ final class LogCategoryTests: XCTestCase {
         XCTAssertEqual(LogCategory.task.rawValue, "task")
         XCTAssertEqual(LogCategory.chat.rawValue, "chat")
         XCTAssertEqual(LogCategory.project.rawValue, "project")
+        XCTAssertEqual(LogCategory.mcp.rawValue, "mcp")
         XCTAssertEqual(LogCategory.transport.rawValue, "transport")
     }
 
@@ -23,13 +24,13 @@ final class LogCategoryTests: XCTestCase {
     func testAllCategories() {
         // 全カテゴリが定義されていることを確認
         let expected: Set<LogCategory> = [
-            .system, .health, .auth, .agent, .task, .chat, .project, .transport
+            .system, .health, .auth, .agent, .task, .chat, .project, .mcp, .transport
         ]
         XCTAssertEqual(Set(LogCategory.allCases), expected)
     }
 
     func testAllCasesCount() {
-        XCTAssertEqual(LogCategory.allCases.count, 8)
+        XCTAssertEqual(LogCategory.allCases.count, 9)
     }
 
     // MARK: - Codable Tests
@@ -55,6 +56,7 @@ final class LogCategoryTests: XCTestCase {
         XCTAssertEqual(LogCategory(rawValue: "task"), .task)
         XCTAssertEqual(LogCategory(rawValue: "chat"), .chat)
         XCTAssertEqual(LogCategory(rawValue: "project"), .project)
+        XCTAssertEqual(LogCategory(rawValue: "mcp"), .mcp)
         XCTAssertEqual(LogCategory(rawValue: "transport"), .transport)
     }
 
@@ -74,6 +76,7 @@ final class LogCategoryTests: XCTestCase {
         XCTAssertEqual(LogCategory.task.displayString, "TASK")
         XCTAssertEqual(LogCategory.chat.displayString, "CHAT")
         XCTAssertEqual(LogCategory.project.displayString, "PROJECT")
+        XCTAssertEqual(LogCategory.mcp.displayString, "MCP")
         XCTAssertEqual(LogCategory.transport.displayString, "TRANSPORT")
     }
 }

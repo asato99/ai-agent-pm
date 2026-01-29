@@ -28,6 +28,9 @@ final class UnixSocketServer {
     func start() throws {
         log("Starting Unix socket server at: \(socketPath)")
 
+        // ログローテーション実行（古いログファイルを削除）
+        rotateLogsIfNeeded()
+
         // 既存のソケットファイルを削除
         if FileManager.default.fileExists(atPath: socketPath) {
             try FileManager.default.removeItem(atPath: socketPath)
@@ -152,6 +155,25 @@ final class UnixSocketServer {
     /// ログ出力（MCPLoggerに委譲）
     private func log(_ message: String) {
         MCPLogger.shared.info("[daemon] \(message)", category: .transport)
+    }
+
+    /// ログローテーション実行
+    ///
+    /// デーモン起動時に古いログファイルを削除する。
+    /// 環境変数 MCP_LOG_RETENTION_DAYS で保持日数を設定可能（デフォルト: 7日）。
+    private func rotateLogsIfNeeded() {
+        let logDirectory = AppConfig.appSupportDirectory.path
+        let config = LogRotationConfig.fromEnvironment()
+        let rotator = LogRotator(
+            directory: logDirectory,
+            retentionDays: config.retentionDays,
+            filePattern: config.filePattern
+        )
+
+        let deletedCount = rotator.rotate()
+        if deletedCount > 0 {
+            log("Log rotation: deleted \(deletedCount) old log file(s)")
+        }
     }
 }
 

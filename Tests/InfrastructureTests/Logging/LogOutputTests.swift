@@ -110,6 +110,58 @@ final class LogOutputTests: XCTestCase {
         XCTAssertTrue(content.contains("Text test"))
     }
 
+    // MARK: - Minimum Level Filtering Tests
+
+    func testStderrLogOutputDefaultMinimumLevel() {
+        // デフォルトではminimumLevelはnil（フィルタなし）
+        let output = StderrLogOutput()
+        XCTAssertNil(output.minimumLevel)
+    }
+
+    func testStderrLogOutputWithMinimumLevel() {
+        let output = StderrLogOutput(minimumLevel: .warn)
+        XCTAssertEqual(output.minimumLevel, .warn)
+    }
+
+    func testStderrLogOutputShouldWrite() {
+        let output = StderrLogOutput(minimumLevel: .warn)
+
+        // INFOレベルはスキップされる
+        let infoEntry = LogEntry(timestamp: Date(), level: .info, category: .system, message: "Info")
+        XCTAssertFalse(output.shouldWrite(infoEntry))
+
+        // WARNレベルは出力される
+        let warnEntry = LogEntry(timestamp: Date(), level: .warn, category: .system, message: "Warn")
+        XCTAssertTrue(output.shouldWrite(warnEntry))
+
+        // ERRORレベルも出力される
+        let errorEntry = LogEntry(timestamp: Date(), level: .error, category: .system, message: "Error")
+        XCTAssertTrue(output.shouldWrite(errorEntry))
+    }
+
+    func testFileLogOutputWritesAllLevels() throws {
+        let tempPath = NSTemporaryDirectory() + "test_log_\(UUID().uuidString).log"
+        defer { try? FileManager.default.removeItem(atPath: tempPath) }
+
+        // FileLogOutputはminimumLevel = nil（全レベル記録）
+        let output = FileLogOutput(filePath: tempPath)
+        XCTAssertNil(output.minimumLevel)
+
+        // TRACEレベルも出力される
+        let traceEntry = LogEntry(timestamp: Date(), level: .trace, category: .system, message: "Trace")
+        XCTAssertTrue(output.shouldWrite(traceEntry))
+    }
+
+    func testLogOutputShouldWriteWithNoMinimumLevel() {
+        // minimumLevelがnilの場合は全てのログを出力
+        let output = StderrLogOutput()  // minimumLevel = nil
+
+        for level in LogLevel.allCases {
+            let entry = LogEntry(timestamp: Date(), level: level, category: .system, message: "Test")
+            XCTAssertTrue(output.shouldWrite(entry), "Should write \(level) when no minimum level set")
+        }
+    }
+
     // MARK: - CompositeLogOutput Tests
 
     func testCompositeLogOutput() throws {
