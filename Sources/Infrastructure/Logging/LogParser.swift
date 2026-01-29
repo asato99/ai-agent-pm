@@ -97,18 +97,26 @@ public enum LogParser {
     // MARK: - Text Parsing
 
     private static func parseText(_ text: String) -> LogEntry? {
-        // 新しいテキスト形式: [timestamp] [LEVEL] [category] message
+        // 新しいテキスト形式: 2026-01-29 13:26:16.836 [LEVEL] [category] [operation] message
         // レガシー形式: [timestamp] message
-        let timestamp = Date()
+        var timestamp = Date()
         var level: LogLevel = .info
         var category: LogCategory = .system
+        var operation: String?
         var message = text
 
-        // パターン: [2026-01-28T09:21:35Z] [LEVEL] [category] message
-        let pattern = #"^\[([^\]]+)\]\s+\[(\w+)\]\s+\[(\w+)\]\s+(.+)$"#
+        // パターン: 2026-01-29 13:26:16.836 [LEVEL] [category] [operation]? message
+        // operation部分はオプショナル
+        let pattern = #"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+\[(\w+)\]\s+\[(\w+)\](?:\s+\[([^\]]+)\])?\s+(.+)$"#
         if let regex = try? NSRegularExpression(pattern: pattern),
            let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
-            // タイムスタンプ（パースするが使用しない - 現在時刻を使用）
+            // タイムスタンプ
+            if let timestampRange = Range(match.range(at: 1), in: text) {
+                let timestampStr = String(text[timestampRange])
+                if let parsedTimestamp = parseTextTimestamp(timestampStr) {
+                    timestamp = parsedTimestamp
+                }
+            }
 
             // レベル
             if let levelRange = Range(match.range(at: 2), in: text) {
@@ -126,17 +134,44 @@ public enum LogParser {
                 }
             }
 
+            // オペレーション（オプショナル）
+            if match.range(at: 4).location != NSNotFound,
+               let operationRange = Range(match.range(at: 4), in: text) {
+                operation = String(text[operationRange])
+            }
+
             // メッセージ
-            if let messageRange = Range(match.range(at: 4), in: text) {
+            if let messageRange = Range(match.range(at: 5), in: text) {
                 message = String(text[messageRange])
             }
         } else {
-            // レガシー形式: [timestamp] message
-            let legacyPattern = #"^\[([^\]]+)\]\s+(.+)$"#
+            // レガシー形式: [timestamp] [LEVEL] [category] message
+            let legacyPattern = #"^\[([^\]]+)\]\s+\[(\w+)\]\s+\[(\w+)\]\s+(.+)$"#
             if let regex = try? NSRegularExpression(pattern: legacyPattern),
                let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
-                if let messageRange = Range(match.range(at: 2), in: text) {
+                if let levelRange = Range(match.range(at: 2), in: text) {
+                    let levelStr = String(text[levelRange])
+                    if let parsedLevel = LogLevel(rawString: levelStr) {
+                        level = parsedLevel
+                    }
+                }
+                if let categoryRange = Range(match.range(at: 3), in: text) {
+                    let categoryStr = String(text[categoryRange])
+                    if let parsedCategory = LogCategory(rawValue: categoryStr) {
+                        category = parsedCategory
+                    }
+                }
+                if let messageRange = Range(match.range(at: 4), in: text) {
                     message = String(text[messageRange])
+                }
+            } else {
+                // 最もシンプルなレガシー形式: [timestamp] message
+                let simpleLegacyPattern = #"^\[([^\]]+)\]\s+(.+)$"#
+                if let regex = try? NSRegularExpression(pattern: simpleLegacyPattern),
+                   let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    if let messageRange = Range(match.range(at: 2), in: text) {
+                        message = String(text[messageRange])
+                    }
                 }
             }
         }
@@ -145,8 +180,19 @@ public enum LogParser {
             timestamp: timestamp,
             level: level,
             category: category,
-            message: message
+            message: message,
+            operation: operation
         )
+    }
+
+    /// テキスト形式のタイムスタンプをパース
+    ///
+    /// フォーマット: "yyyy-MM-dd HH:mm:ss.SSS"
+    private static func parseTextTimestamp(_ str: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        formatter.timeZone = TimeZone.current
+        return formatter.date(from: str)
     }
 
     // MARK: - Helpers
