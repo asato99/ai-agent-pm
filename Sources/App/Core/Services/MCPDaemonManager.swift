@@ -111,9 +111,12 @@ public final class MCPDaemonManager: ObservableObject {
         AppConfig.appSupportDirectory.appendingPathComponent("daemon.pid").path
     }
 
-    /// Log file path
+    /// Log file path (日付ベースのローテーティングログファイル)
     public var logPath: String {
-        AppConfig.appSupportDirectory.appendingPathComponent("mcp-daemon.log").path
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateString = dateFormatter.string(from: Date())
+        return AppConfig.appSupportDirectory.appendingPathComponent("mcp-server-\(dateString).log").path
     }
 
     /// Path to mcp-server-pm executable
