@@ -1033,12 +1033,19 @@ Always prefix your file paths with `{real_working_dir}/`.
             cmd.extend(["--add-dir", real_working_dir])
             logger.debug(f"Added --add-dir {real_working_dir} for Claude")
 
-        # Add verbose flag for debugging if enabled
+        # Add debug flag for debugging if enabled
         if self.config.debug_mode:
-            if provider == "gemini":
-                cmd.append("--debug")
+            if provider == "claude":
+                # Claude: Use --debug-file to write debug logs to a separate file
+                # --debug alone doesn't output detailed logs to stdout
+                # Note: The debug file is separate from the main log file to avoid
+                # file handle conflicts (main log is written by subprocess stdout)
+                debug_log_file = log_dir / f"{timestamp}.debug.log"
+                cmd.extend(["--debug-file", str(debug_log_file)])
+                logger.debug(f"Claude debug logs will be written to: {debug_log_file}")
             else:
-                cmd.append("--verbose")
+                # Gemini: --debug outputs to stdout which is captured to log_file
+                cmd.append("--debug")
 
         # Add prompt
         # Credentials are now passed via environment variables (AGENT_ID, PROJECT_ID, AGENT_PASSKEY)
