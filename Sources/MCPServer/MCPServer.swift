@@ -746,13 +746,21 @@ public final class MCPServer {
             return try listSubordinates(managerId: agentId.value)
 
         case "get_subordinate_profile":
-            guard case .manager(let managerId, _) = caller else {
-                throw ToolAuthorizationError.managerRequired("get_subordinate_profile")
-            }
             guard let targetAgentId = arguments["agent_id"] as? String else {
                 throw MCPError.missingArguments(["agent_id"])
             }
-            return try getSubordinateProfile(managerId: managerId.value, targetAgentId: targetAgentId)
+            // Coordinator または Manager から呼び出し可能
+            // 参照: docs/design/AGENT_CONTEXT_DIRECTORY.md
+            switch caller {
+            case .coordinator:
+                // Coordinator経由: 任意のエージェントのプロファイルを取得可能
+                return try getAgentProfileForCoordinator(agentId: targetAgentId)
+            case .manager(let managerId, _):
+                // Manager経由: 下位エージェントのみ取得可能
+                return try getSubordinateProfile(managerId: managerId.value, targetAgentId: targetAgentId)
+            default:
+                throw ToolAuthorizationError.managerRequired("get_subordinate_profile")
+            }
 
         case "create_task":
             guard let session = caller.session else {
@@ -3868,6 +3876,35 @@ public final class MCPServer {
         }
 
         Self.log("[MCP] Found subordinate: \(agent.name)")
+
+        // 詳細情報（システムプロンプト含む）を返す
+        return [
+            "id": agent.id.value,
+            "name": agent.name,
+            "role": agent.role,
+            "type": agent.type.rawValue,
+            "hierarchy_type": agent.hierarchyType.rawValue,
+            "status": agent.status.rawValue,
+            "system_prompt": agent.systemPrompt ?? "",
+            "parent_agent_id": agent.parentAgentId?.value ?? NSNull(),
+            "ai_type": agent.aiType?.rawValue ?? NSNull(),
+            "kick_method": agent.kickMethod.rawValue,
+            "max_parallel_tasks": agent.maxParallelTasks
+        ]
+    }
+
+    /// get_agent_profile (Coordinator用) - エージェントの詳細情報を取得
+    /// 参照: docs/design/AGENT_CONTEXT_DIRECTORY.md
+    /// Coordinatorがエージェント起動時にsystem_promptを取得するために使用
+    private func getAgentProfileForCoordinator(agentId: String) throws -> [String: Any] {
+        Self.log("[MCP] getAgentProfileForCoordinator called for agent: '\(agentId)'")
+
+        let targetId = AgentID(value: agentId)
+        guard let agent = try agentRepository.findById(targetId) else {
+            throw MCPError.agentNotFound(agentId)
+        }
+
+        Self.log("[MCP] Found agent: \(agent.name)")
 
         // 詳細情報（システムプロンプト含む）を返す
         return [
