@@ -161,11 +161,10 @@ struct ToolAuthorization {
         case (.coordinatorOnly, _):
             throw ToolAuthorizationError.coordinatorRequired(tool)
 
-        // Manager専用
-        case (.managerOnly, .manager):
+        // Manager専用（Coordinatorも可）
+        // Note: Coordinatorはシステム管理者としてManager権限を包含する
+        case (.managerOnly, .manager), (.managerOnly, .coordinator):
             return
-        case (.managerOnly, .coordinator):
-            throw ToolAuthorizationError.managerRequired(tool)
         case (.managerOnly, .worker):
             throw ToolAuthorizationError.managerRequired(tool)
         case (.managerOnly, .unauthenticated):
