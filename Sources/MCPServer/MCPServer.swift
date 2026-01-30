@@ -3927,9 +3927,19 @@ public final class MCPServer {
                     - 例: \(workingDir)/document.txt (正しい)
                     - 例: document.txt (間違い - 相対パスは使用不可)
                     - .aiagent/ ディレクトリ内のファイルを変更しないでください
+
+                    【重要】セッション終了時
+                    - プロセスを終了する前に必ず `logout` ツールを呼び出してください
+                    - これによりセッションが正しくクリーンアップされます
                     """
             } else {
-                instruction = "get_next_action を呼び出して次の指示を確認してください"
+                instruction = """
+                    get_next_action を呼び出して次の指示を確認してください。
+
+                    【重要】セッション終了時
+                    - プロセスを終了する前に必ず `logout` ツールを呼び出してください
+                    - これによりセッションが正しくクリーンアップされます
+                    """
             }
 
             var response: [String: Any] = [
