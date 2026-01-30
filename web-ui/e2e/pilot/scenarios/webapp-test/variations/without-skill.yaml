@@ -1,0 +1,48 @@
+# Without Skill Variation - スキルなし構成
+#
+# webapp-testing スキルを割り当てない基準構成
+# エージェントの基本能力のみでテストを実施
+
+name: without-skill
+description: "スキルなし - エージェント基本能力のみでテスト"
+version: "1.0"
+
+agents:
+  owner:
+    id: owner-webapp-test
+    name: テストオーナー
+    role: Test Owner
+    type: human
+    hierarchy_type: owner
+
+  worker-tester:
+    id: worker-tester
+    name: テストエンジニア
+    role: QA Tester
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: owner-webapp-test
+    max_parallel_tasks: 1
+    capabilities:
+      - testing
+    system_prompt: |
+      あなたはQAテストエンジニアです。
+
+      ## 責務
+      - Webアプリケーションの動作テストを実施する
+      - 問題を発見した場合、原因を特定して報告する
+      - テスト結果を明確に記録する
+
+      ## 行動指針
+      - 実際にアプリケーションを動かしてテストする
+      - 正常系・異常系の両方を確認する
+      - 問題発見時は再現手順と原因を明記する
+
+      ## 重要
+      - 作業完了後は update_task_status で done に変更してください
+
+credentials:
+  passkey: test-passkey
+
+# スキル割り当て: なし
+# このバリエーションではエージェントにスキルを割り当てない
