@@ -56,6 +56,10 @@ final class RESTServer {
     private let executionLogRepository: ExecutionLogRepository
     /// 参照: docs/design/TASK_EXECUTION_LOG_DISPLAY.md - 実行ログ表示
     private let contextRepository: ContextRepository
+    // スキル関連リポジトリ
+    // 参照: docs/design/AGENT_SKILLS.md
+    private let skillDefinitionRepository: SkillDefinitionRepository
+    private let agentSkillAssignmentRepository: AgentSkillAssignmentRepository
 
     // MCP Server for HTTP transport
     // 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
@@ -97,6 +101,9 @@ final class RESTServer {
         self.executionLogRepository = ExecutionLogRepository(database: database)
         // 参照: docs/design/TASK_EXECUTION_LOG_DISPLAY.md - 実行ログ表示
         self.contextRepository = ContextRepository(database: database)
+        // 参照: docs/design/AGENT_SKILLS.md - スキル機能
+        self.skillDefinitionRepository = SkillDefinitionRepository(database: database)
+        self.agentSkillAssignmentRepository = AgentSkillAssignmentRepository(database: database)
     }
 
     func run() async throws {
@@ -430,7 +437,25 @@ final class RESTServer {
         agentRouter.patch(":agentId") { [self] request, context in
             try await updateAgent(request: request, context: context)
         }
-        debugLog("Agent routes registered: GET/assignable, GET/subordinates, GET/:agentId, PATCH/:agentId")
+        // Agent skills
+        // 参照: docs/design/AGENT_SKILLS.md
+        agentRouter.get(":agentId/skills") { [self] request, context in
+            debugLog("GET /api/agents/:agentId/skills called")
+            return try await getAgentSkills(request: request, context: context)
+        }
+        agentRouter.put(":agentId/skills") { [self] request, context in
+            debugLog("PUT /api/agents/:agentId/skills called")
+            return try await assignAgentSkills(request: request, context: context)
+        }
+        debugLog("Agent routes registered: GET/assignable, GET/subordinates, GET/:agentId, PATCH/:agentId, GET/:agentId/skills, PUT/:agentId/skills")
+
+        // Skills (list all available skills)
+        let skillRouter = protectedRouter.group("skills")
+        skillRouter.get { [self] request, context in
+            debugLog("GET /api/skills called")
+            return try await listSkills(request: request, context: context)
+        }
+        debugLog("Skill routes registered: GET/skills")
 
         // Handoffs
         let handoffRouter = protectedRouter.group("handoffs")
@@ -1447,6 +1472,91 @@ final class RESTServer {
 
         debugLog("canChatWithAgent: DENIED - no relationship found")
         return false
+    }
+
+    // MARK: - Skill Handlers
+    // 参照: docs/design/AGENT_SKILLS.md
+
+    /// GET /api/skills - 利用可能なスキル一覧
+    private func listSkills(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard context.agentId != nil else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        let skills = try skillDefinitionRepository.findAll()
+        let dtos = skills.map { SkillDTO(from: $0) }
+        return jsonResponse(dtos)
+    }
+
+    /// GET /api/agents/:agentId/skills - エージェントに割り当てられたスキル一覧
+    private func getAgentSkills(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let targetAgentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Agent ID is required")
+        }
+        let targetAgentId = AgentID(value: targetAgentIdStr)
+
+        // 自分または部下のみアクセス可能
+        let isDescendant = try agentRepository.findAllDescendants(currentAgentId).contains(where: { $0.id == targetAgentId })
+        guard targetAgentId == currentAgentId || isDescendant else {
+            return errorResponse(status: .forbidden, message: "Access denied")
+        }
+
+        let skills = try agentSkillAssignmentRepository.findByAgentId(targetAgentId)
+        let response = AgentSkillsResponse(
+            agentId: targetAgentId.value,
+            skills: skills.map { SkillDTO(from: $0) }
+        )
+        return jsonResponse(response)
+    }
+
+    /// PUT /api/agents/:agentId/skills - エージェントにスキルを割り当て
+    private func assignAgentSkills(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard let currentAgentId = context.agentId else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        guard let targetAgentIdStr = context.parameters.get("agentId") else {
+            return errorResponse(status: .badRequest, message: "Agent ID is required")
+        }
+        let targetAgentId = AgentID(value: targetAgentIdStr)
+
+        // 自分または部下のみ更新可能
+        let isDescendant = try agentRepository.findAllDescendants(currentAgentId).contains(where: { $0.id == targetAgentId })
+        guard targetAgentId == currentAgentId || isDescendant else {
+            return errorResponse(status: .forbidden, message: "Access denied")
+        }
+
+        // Parse request body
+        let body = try await request.body.collect(upTo: 1024 * 1024)
+        guard let data = body.getData(at: 0, length: body.readableBytes),
+              let assignRequest = try? JSONDecoder().decode(AssignSkillsRequest.self, from: data) else {
+            return errorResponse(status: .badRequest, message: "Invalid request body")
+        }
+
+        // スキルIDをドメイン型に変換
+        let skillIds = assignRequest.skillIds.map { SkillID(value: $0) }
+
+        // 全スキルIDが存在するか確認
+        for skillId in skillIds {
+            guard try skillDefinitionRepository.findById(skillId) != nil else {
+                return errorResponse(status: .badRequest, message: "Skill not found: \(skillId.value)")
+            }
+        }
+
+        // 割り当て実行
+        try agentSkillAssignmentRepository.assignSkills(agentId: targetAgentId, skillIds: skillIds)
+
+        // 更新後のスキル一覧を返す
+        let skills = try agentSkillAssignmentRepository.findByAgentId(targetAgentId)
+        let response = AgentSkillsResponse(
+            agentId: targetAgentId.value,
+            skills: skills.map { SkillDTO(from: $0) }
+        )
+        return jsonResponse(response)
     }
 
     // MARK: - Handoff Handlers
