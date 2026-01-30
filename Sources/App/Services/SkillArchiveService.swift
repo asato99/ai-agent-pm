@@ -501,6 +501,183 @@ public final class SkillArchiveService: @unchecked Sendable {
         return data
     }
 
+    // MARK: - Multi-File Operations
+
+    /// アーカイブから指定ファイルの内容を取得
+    public func extractFileContent(from archiveData: Data, path: String) -> String? {
+        extractFileData(from: archiveData, path: path)
+            .flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    /// アーカイブから全ファイルを抽出（パス -> 内容）
+    public func extractAllFiles(from archiveData: Data) -> [String: String] {
+        var result: [String: String] = [:]
+
+        var offset = 0
+        while offset + 30 < archiveData.count {
+            guard archiveData[offset] == 0x50 && archiveData[offset+1] == 0x4b &&
+                  archiveData[offset+2] == 0x03 && archiveData[offset+3] == 0x04 else {
+                break
+            }
+
+            let compressionMethod = readUInt16(from: archiveData, at: offset + 8)
+            let compressedSize = Int(readUInt32(from: archiveData, at: offset + 18))
+            let uncompressedSize = Int(readUInt32(from: archiveData, at: offset + 22))
+            let fileNameLength = Int(readUInt16(from: archiveData, at: offset + 26))
+            let extraFieldLength = Int(readUInt16(from: archiveData, at: offset + 28))
+
+            let fileNameStart = offset + 30
+            let fileNameEnd = fileNameStart + fileNameLength
+            guard fileNameEnd <= archiveData.count else { break }
+
+            if let fileName = String(data: archiveData[fileNameStart..<fileNameEnd], encoding: .utf8) {
+                // ディレクトリはスキップ
+                if !fileName.hasSuffix("/") {
+                    let dataStart = fileNameEnd + extraFieldLength
+                    let size = compressionMethod == 0 ? uncompressedSize : compressedSize
+                    let dataEnd = dataStart + size
+                    guard dataEnd <= archiveData.count else { break }
+
+                    if compressionMethod == 0 {
+                        if let content = String(data: archiveData[dataStart..<dataEnd], encoding: .utf8) {
+                            result[fileName] = content
+                        }
+                    }
+                }
+
+                let dataStart = fileNameEnd + extraFieldLength
+                let size = compressionMethod == 0 ? uncompressedSize : compressedSize
+                offset = dataStart + size
+            } else {
+                break
+            }
+        }
+
+        return result
+    }
+
+    /// ファイル辞書からZIPアーカイブを作成
+    public func createArchiveFromFiles(_ files: [String: String]) -> Data {
+        var data = Data()
+        var centralDirectory = Data()
+        var localHeaderOffsets: [Int] = []
+
+        // ファイルをソートして処理（SKILL.mdを先頭に）
+        let sortedFiles = files.sorted { lhs, rhs in
+            if lhs.key == "SKILL.md" { return true }
+            if rhs.key == "SKILL.md" { return false }
+            return lhs.key < rhs.key
+        }
+
+        for (path, content) in sortedFiles {
+            localHeaderOffsets.append(data.count)
+
+            let fileNameData = path.data(using: .utf8)!
+            let contentData = content.data(using: .utf8) ?? Data()
+            let crc = crc32(contentData)
+
+            // Local File Header
+            data.append(contentsOf: [0x50, 0x4b, 0x03, 0x04])
+            data.append(contentsOf: [0x0a, 0x00]) // version
+            data.append(contentsOf: [0x00, 0x00]) // flags
+            data.append(contentsOf: [0x00, 0x00]) // compression (stored)
+            data.append(contentsOf: [0x00, 0x00]) // mod time
+            data.append(contentsOf: [0x00, 0x00]) // mod date
+            data.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+            data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+            data.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+            data.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+            data.append(contentsOf: [0x00, 0x00]) // extra field length
+            data.append(fileNameData)
+            data.append(contentData)
+
+            // Central Directory Entry
+            centralDirectory.append(contentsOf: [0x50, 0x4b, 0x01, 0x02])
+            centralDirectory.append(contentsOf: [0x14, 0x00]) // version made by
+            centralDirectory.append(contentsOf: [0x0a, 0x00]) // version needed
+            centralDirectory.append(contentsOf: [0x00, 0x00]) // flags
+            centralDirectory.append(contentsOf: [0x00, 0x00]) // compression
+            centralDirectory.append(contentsOf: [0x00, 0x00]) // mod time
+            centralDirectory.append(contentsOf: [0x00, 0x00]) // mod date
+            centralDirectory.append(contentsOf: withUnsafeBytes(of: crc.littleEndian) { Array($0) })
+            centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+            centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(contentData.count).littleEndian) { Array($0) })
+            centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt16(fileNameData.count).littleEndian) { Array($0) })
+            centralDirectory.append(contentsOf: [0x00, 0x00]) // extra field length
+            centralDirectory.append(contentsOf: [0x00, 0x00]) // file comment length
+            centralDirectory.append(contentsOf: [0x00, 0x00]) // disk number
+            centralDirectory.append(contentsOf: [0x00, 0x00]) // internal attrs
+            centralDirectory.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // external attrs
+            centralDirectory.append(contentsOf: withUnsafeBytes(of: UInt32(localHeaderOffsets.last!).littleEndian) { Array($0) })
+            centralDirectory.append(fileNameData)
+        }
+
+        let centralDirOffset = data.count
+        data.append(centralDirectory)
+
+        // End of Central Directory
+        data.append(contentsOf: [0x50, 0x4b, 0x05, 0x06])
+        data.append(contentsOf: [0x00, 0x00]) // disk number
+        data.append(contentsOf: [0x00, 0x00]) // disk with central dir
+        data.append(contentsOf: withUnsafeBytes(of: UInt16(files.count).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt16(files.count).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirectory.count).littleEndian) { Array($0) })
+        data.append(contentsOf: withUnsafeBytes(of: UInt32(centralDirOffset).littleEndian) { Array($0) })
+        data.append(contentsOf: [0x00, 0x00]) // comment length
+
+        return data
+    }
+
+    /// ファイルがテキストファイルかどうかを判定
+    public func isTextFile(_ path: String) -> Bool {
+        let textExtensions = ["md", "txt", "py", "js", "ts", "json", "yaml", "yml", "sh", "bash",
+                              "html", "css", "xml", "csv", "swift", "rs", "go", "rb", "pl"]
+        let ext = (path as NSString).pathExtension.lowercased()
+        return textExtensions.contains(ext) || ext.isEmpty
+    }
+
+    // MARK: - Private Helpers
+
+    /// アーカイブからファイルデータを抽出
+    private func extractFileData(from archiveData: Data, path: String) -> Data? {
+        var offset = 0
+        while offset + 30 < archiveData.count {
+            guard archiveData[offset] == 0x50 && archiveData[offset+1] == 0x4b &&
+                  archiveData[offset+2] == 0x03 && archiveData[offset+3] == 0x04 else {
+                break
+            }
+
+            let compressionMethod = readUInt16(from: archiveData, at: offset + 8)
+            let compressedSize = Int(readUInt32(from: archiveData, at: offset + 18))
+            let uncompressedSize = Int(readUInt32(from: archiveData, at: offset + 22))
+            let fileNameLength = Int(readUInt16(from: archiveData, at: offset + 26))
+            let extraFieldLength = Int(readUInt16(from: archiveData, at: offset + 28))
+
+            let fileNameStart = offset + 30
+            let fileNameEnd = fileNameStart + fileNameLength
+            guard fileNameEnd <= archiveData.count else { break }
+
+            if let fileName = String(data: archiveData[fileNameStart..<fileNameEnd], encoding: .utf8) {
+                let dataStart = fileNameEnd + extraFieldLength
+                let size = compressionMethod == 0 ? uncompressedSize : compressedSize
+                let dataEnd = dataStart + size
+                guard dataEnd <= archiveData.count else { break }
+
+                if fileName == path {
+                    if compressionMethod == 0 {
+                        return Data(archiveData[dataStart..<dataEnd])
+                    }
+                    return nil
+                }
+
+                offset = dataEnd
+            } else {
+                break
+            }
+        }
+        return nil
+    }
+
     /// CRC-32を計算
     private func crc32(_ data: Data) -> UInt32 {
         var crc: UInt32 = 0xFFFFFFFF

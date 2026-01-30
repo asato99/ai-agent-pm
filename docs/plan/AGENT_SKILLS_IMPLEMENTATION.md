@@ -914,6 +914,9 @@ def _write_skills(self, config_dir: Path, skills: list[SkillDefinition]):
 | 2026-01-29 | coordinator.py更新（ZIP展開処理） | Claude |
 | 2026-01-29 | Pythonテスト全パス（41テスト） | Claude |
 | 2026-01-29 | Swiftテスト全パス（42テスト: UseCase 20 + Infrastructure 22） | Claude |
+| 2026-01-30 | SkillArchiveService: extractAllFiles/createArchiveFromFiles/isTextFile追加 | Claude |
+| 2026-01-30 | SkillEditorView完全リライト（ファイルツリー、マルチファイル編集、追加・削除、インポート・エクスポート） | Claude |
+| 2026-01-30 | SkillArchiveDocument追加（ZIPエクスポート用FileDocument） | Claude |
 
 ---
 
@@ -971,7 +974,9 @@ Phase 2（MCP API）
 ### Phase 7（アーカイブ形式）✅
 - [x] DBマイグレーション成功
 - [x] ZIPインポート/エクスポート機能動作
-- [x] ファイルツリー表示機能動作（基本実装）
+- [x] ファイルツリー表示機能動作
+- [x] 全ファイル編集機能動作（SKILL.md以外も編集可能）
+- [x] ファイル追加・削除機能動作（SKILL.mdは削除保護）
 - [x] MCP API（archive_base64）動作
 - [x] Coordinator ZIP展開動作
 - [x] Phase 7 の全テストが GREEN（Python 41 + Swift 42）
@@ -992,3 +997,4 @@ Phase 2（MCP API）
 | 2026-01-29 | Phase 1〜6 完了（自動テスト全パス） |
 | 2026-01-29 | Phase 7 追加（アーカイブ形式移行）、設計書のアーカイブ対応に合わせて更新 |
 | 2026-01-29 | Phase 7 完了（全7フェーズ完了、Python 41テスト + Swift 42テスト全パス） |
+| 2026-01-30 | Phase 7.5 UI完全実装（ファイルツリー、マルチファイル編集、追加・削除、インポート・エクスポート） |
