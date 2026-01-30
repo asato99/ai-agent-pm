@@ -2592,7 +2592,10 @@ public final class MCPServer {
         return [
             "success": true,
             "action": "exit",
-            "instruction": "タスクが完了しました。プロセスを終了してください。"
+            "instruction": """
+                タスクが完了しました。セッションは既に終了しています。
+                get_next_action や logout を呼び出さずに、直ちにプロセスを終了してください。
+                """
         ]
     }
 
