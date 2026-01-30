@@ -296,11 +296,13 @@ struct FlowLayout: Layout {
     }
 
     private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
-        let maxWidth = proposal.width ?? .infinity
+        // 無限幅が渡されると SwiftUI がクラッシュするため、有限値にフォールバック
+        let maxWidth = proposal.width ?? 300
         var currentX: CGFloat = 0
         var currentY: CGFloat = 0
         var lineHeight: CGFloat = 0
         var positions: [CGPoint] = []
+        var actualMaxX: CGFloat = 0
 
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
@@ -313,10 +315,13 @@ struct FlowLayout: Layout {
 
             positions.append(CGPoint(x: currentX, y: currentY))
             currentX += size.width + spacing
+            actualMaxX = max(actualMaxX, currentX)
             lineHeight = max(lineHeight, size.height)
         }
 
         let totalHeight = currentY + lineHeight
-        return (CGSize(width: maxWidth, height: totalHeight), positions)
+        // 実際に使用した幅を返す（提案幅がnilの場合でも有限値）
+        let finalWidth = proposal.width ?? actualMaxX
+        return (CGSize(width: finalWidth, height: totalHeight), positions)
     }
 }
