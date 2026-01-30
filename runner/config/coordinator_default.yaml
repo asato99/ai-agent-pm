@@ -16,7 +16,7 @@ ai_providers:
     cli_args:
       - "--dangerously-skip-permissions"
       - "--max-turns"
-      - "50"
+      - "300"
       - "--verbose"  # 人間向け詳細ログ出力
 
   gemini:
