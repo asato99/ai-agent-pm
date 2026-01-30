@@ -16,7 +16,16 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { VariationLoader } from '../lib/variation-loader.js'
 import { ResultRecorder, aggregateAgentStats } from '../lib/result-recorder.js'
-import { ScenarioConfig, VariationConfig, TaskResult, ArtifactTest, ArtifactResult } from '../lib/types.js'
+import {
+  ScenarioConfig,
+  VariationConfig,
+  TaskResult,
+  ArtifactTest,
+  ArtifactResult,
+  ReportResult,
+  ReportAssertionResult,
+  ReportAssertion,
+} from '../lib/types.js'
 
 // ES module で __dirname を取得
 const __filename = fileURLToPath(import.meta.url)
@@ -118,6 +127,14 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
       () => testArtifacts()
     )
 
+    // Phase 8: レポートを検証（expected_reportが定義されている場合）
+    let reportResult: ReportResult | undefined
+    let reportPassed = true
+    if (scenarioConfig.expected_report) {
+      reportResult = await measurePhase('レポート検証', () => verifyReport())
+      reportPassed = reportResult.all_passed
+    }
+
     // 結果を記録
     const tasks = await fetchTaskStates()
     const agentStats = aggregateAgentStats(recorder['events'])
@@ -131,9 +148,16 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
       total_duration_ms: phaseMetrics.reduce((sum, p) => sum + p.duration_ms, 0),
     })
 
+    // 成功判定: 成果物 + レポート両方がパス
+    const allSuccess =
+      artifactResults.every((a) => a.exists && a.validation_passed) &&
+      artifactTestsPassed &&
+      reportPassed
+
     const result = recorder.saveResult({
-      success: artifactResults.every((a) => a.exists && a.validation_passed) && artifactTestsPassed,
+      success: allSuccess,
       artifacts: artifactResults,
+      report: reportResult,
       tasks,
       agents: agentStats,
       observations: 'Full flow completed',
@@ -142,6 +166,9 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     // テスト結果を検証
     expect(result.outcome.success).toBe(true)
     expect(artifactTestsPassed).toBe(true)
+    if (scenarioConfig.expected_report) {
+      expect(reportPassed).toBe(true)
+    }
   })
 
   /**
@@ -487,6 +514,186 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
     recorder.recordEvent('artifacts_tested', { results: allResults, all_passed: allPassed })
 
     return { testResults: allResults, allPassed }
+  }
+
+  /**
+   * JSONパスでネストされた値を取得
+   * 例: "bugs_found.0.description" → report.bugs_found[0].description
+   */
+  function getValueByPath(obj: unknown, path: string): unknown {
+    const parts = path.split('.')
+    let current: unknown = obj
+
+    for (const part of parts) {
+      if (current === null || current === undefined) {
+        return undefined
+      }
+
+      // 配列インデックスの場合
+      const arrayMatch = part.match(/^(\d+)$/)
+      if (arrayMatch && Array.isArray(current)) {
+        current = current[parseInt(arrayMatch[1], 10)]
+      } else if (typeof current === 'object' && current !== null) {
+        current = (current as Record<string, unknown>)[part]
+      } else {
+        return undefined
+      }
+    }
+
+    return current
+  }
+
+  /**
+   * アサーションを評価
+   */
+  function evaluateAssertion(report: unknown, assertion: ReportAssertion): ReportAssertionResult {
+    const value = getValueByPath(report, assertion.field)
+
+    switch (assertion.type) {
+      case 'exists': {
+        const passed = value !== undefined && value !== null
+        return {
+          assertion,
+          passed,
+          actual_value: value,
+          message: passed ? undefined : `フィールド '${assertion.field}' が存在しません`,
+        }
+      }
+
+      case 'equals': {
+        const passed = value === assertion.value
+        return {
+          assertion,
+          passed,
+          actual_value: value,
+          message: passed ? undefined : `期待値: ${assertion.value}, 実際: ${value}`,
+        }
+      }
+
+      case 'matches': {
+        const stringValue = typeof value === 'string' ? value : String(value ?? '')
+        const regex = new RegExp(assertion.pattern)
+        const passed = regex.test(stringValue)
+        return {
+          assertion,
+          passed,
+          actual_value: value,
+          message: passed ? undefined : `パターン '${assertion.pattern}' に一致しません`,
+        }
+      }
+
+      case 'contains': {
+        const stringValue = typeof value === 'string' ? value : String(value ?? '')
+        const passed = assertion.values.some((v) => stringValue.includes(v))
+        return {
+          assertion,
+          passed,
+          actual_value: value,
+          message: passed
+            ? undefined
+            : `いずれの値も含まれません: [${assertion.values.join(', ')}]`,
+        }
+      }
+
+      case 'min_length': {
+        const length = Array.isArray(value) ? value.length : 0
+        const passed = length >= assertion.min
+        return {
+          assertion,
+          passed,
+          actual_value: length,
+          message: passed ? undefined : `最小長 ${assertion.min} 未満です (実際: ${length})`,
+        }
+      }
+
+      default:
+        return {
+          assertion,
+          passed: false,
+          message: `未知のアサーションタイプ: ${(assertion as ReportAssertion).type}`,
+        }
+    }
+  }
+
+  /**
+   * レポートを検証
+   */
+  function verifyReport(): ReportResult {
+    const expectedReport = scenarioConfig.expected_report!
+    const workingDir = scenarioConfig.project.working_directory
+    const fullPath = path.join(workingDir, expectedReport.path)
+
+    console.log('\n' + '='.repeat(60))
+    console.log('📋 レポート検証')
+    console.log('='.repeat(60))
+    console.log(`ファイル: ${fullPath}`)
+
+    // ファイル存在確認
+    if (!fs.existsSync(fullPath)) {
+      console.log('❌ レポートファイルが存在しません')
+      recorder.recordEvent('report_verified', { exists: false, all_passed: false })
+      return {
+        path: expectedReport.path,
+        exists: false,
+        assertions: [],
+        all_passed: false,
+      }
+    }
+    console.log('✅ ファイル存在確認')
+
+    // JSON パース
+    let report: unknown
+    try {
+      const content = fs.readFileSync(fullPath, 'utf-8')
+      report = JSON.parse(content)
+      console.log('✅ JSONパース成功')
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.log(`❌ JSONパースエラー: ${errorMessage}`)
+      recorder.recordEvent('report_verified', { exists: true, parse_error: errorMessage, all_passed: false })
+      return {
+        path: expectedReport.path,
+        exists: true,
+        parse_error: errorMessage,
+        assertions: [],
+        all_passed: false,
+      }
+    }
+
+    // アサーション評価
+    console.log(`\nアサーション (${expectedReport.assertions.length} 件):`)
+    const assertionResults: ReportAssertionResult[] = []
+
+    for (const assertion of expectedReport.assertions) {
+      const result = evaluateAssertion(report, assertion)
+      assertionResults.push(result)
+
+      const icon = result.passed ? '✅' : '❌'
+      const fieldDisplay = assertion.field
+      const typeDisplay = assertion.type
+      console.log(`  ${icon} [${typeDisplay}] ${fieldDisplay}`)
+      if (!result.passed && result.message) {
+        console.log(`     → ${result.message}`)
+      }
+    }
+
+    const allPassed = assertionResults.every((r) => r.passed)
+    console.log('\n' + '='.repeat(60))
+    console.log(`📋 レポート検証結果: ${allPassed ? '✅ ALL PASSED' : '❌ SOME FAILED'}`)
+    console.log('='.repeat(60) + '\n')
+
+    recorder.recordEvent('report_verified', {
+      exists: true,
+      assertions: assertionResults,
+      all_passed: allPassed,
+    })
+
+    return {
+      path: expectedReport.path,
+      exists: true,
+      assertions: assertionResults,
+      all_passed: allPassed,
+    }
   }
 
   /**

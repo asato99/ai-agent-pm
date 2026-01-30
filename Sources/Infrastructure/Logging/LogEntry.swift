@@ -168,6 +168,14 @@ public struct LogEntry: Codable, Sendable {
 
         parts.append(message)
 
+        // details がある場合は出力に追加
+        if let details = details, !details.isEmpty {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: details, options: [.sortedKeys]),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                parts.append("details:\(jsonString)")
+            }
+        }
+
         return parts.joined(separator: " ")
     }
 }

@@ -855,6 +855,12 @@ public final class MCPServer {
             }
             return try getMyTask(session: session)
 
+        case "get_my_task_progress":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            return try getMyTaskProgress(session: session)
+
         case "get_notifications":
             // 通知取得ツール: エージェントの未読通知を取得
             // 参照: docs/design/NOTIFICATION_SYSTEM.md
@@ -900,7 +906,7 @@ public final class MCPServer {
             }
             _ = try validateTaskWriteAccess(taskId: TaskID(value: taskId), session: session)
             let reason = arguments["reason"] as? String
-            return try updateTaskStatus(taskId: taskId, status: status, reason: reason)
+            return try updateTaskStatus(taskId: taskId, status: status, reason: reason, session: session)
 
         case "get_project":
             guard let projectId = arguments["project_id"] as? String else {
@@ -2141,6 +2147,54 @@ public final class MCPServer {
         }
     }
 
+    /// get_my_task_progress - タスク進行状況確認（読み取り専用）
+    /// 副作用なし: ログ書き込みやセッション作成は行わない
+    /// 参照: docs/plan/GET_MY_TASK_PROGRESS.md
+    private func getMyTaskProgress(session: AgentSession) throws -> [String: Any] {
+        let agentId = session.agentId
+        let projectId = session.projectId
+        Self.log("[MCP] getMyTaskProgress called for agent: '\(agentId.value)', project: '\(projectId.value)'")
+
+        // エージェントに割り当てられた全タスクを取得
+        let allTasks = try taskRepository.findByAssignee(agentId)
+
+        // 対象プロジェクト内のタスクのみ抽出
+        let projectTasks = allTasks.filter { $0.projectId == projectId }
+
+        // 親タスク（parent_task_id が nil）と子タスクに分類
+        let parentTasks = projectTasks.filter { $0.parentTaskId == nil }
+
+        // 結果を構造化
+        var tasksList: [[String: Any]] = []
+
+        for parentTask in parentTasks {
+            // このタスクのサブタスクを取得
+            let subTasks = projectTasks.filter { $0.parentTaskId == parentTask.id }
+
+            var taskDict: [String: Any] = [
+                "id": parentTask.id.value,
+                "title": parentTask.title,
+                "status": parentTask.status.rawValue
+            ]
+
+            if !subTasks.isEmpty {
+                taskDict["subtasks"] = subTasks.map { subTask in
+                    [
+                        "id": subTask.id.value,
+                        "title": subTask.title,
+                        "status": subTask.status.rawValue
+                    ] as [String: Any]
+                }
+            }
+
+            tasksList.append(taskDict)
+        }
+
+        return [
+            "tasks": tasksList
+        ]
+    }
+
     /// get_notifications - エージェントの未読通知を取得
     /// 参照: docs/design/NOTIFICATION_SYSTEM.md
     private func getNotifications(
@@ -2717,11 +2771,11 @@ public final class MCPServer {
                         現在処理待ちのメッセージがありません。
                         2秒後に再度 get_next_action を呼び出して新しいメッセージを確認してください。
 
-                        【重要】作業依頼（「〜を実装してください」「〜を追加してください」など）を受けた場合は、
-                        まず request_task を呼び出してタスクを登録し、respond_chat で「承知しました」と応答してください。
+                        【重要】チャットセッションの役割
+                        - ユーザーとの対話、質問への回答、タスク依頼の受付のみを行います
+                        - 実際の作業はタスクセッションで別途実行されます
 
-                        他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
-                        その他の可能な操作は help ツールで確認できます。
+                        作業依頼を受けた場合は request_task でタスク登録してください。
                         """,
                     "state": "chat_waiting",
                     "wait_seconds": 2,
@@ -2735,15 +2789,21 @@ public final class MCPServer {
                         チャットセッションです。
                         get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
 
-                        【重要】以下のような作業依頼を受けた場合は、まず request_task を呼び出してタスクを登録してください:
-                        - 「〜を実装してください」「〜を追加してください」「〜を修正してください」
+                        【重要】チャットセッションの役割
+                        - ユーザーとの対話、質問への回答、タスク依頼の受付のみを行います
+                        - 実際の作業（コード実装、テスト実行、ファイル作成など）は行いません
+                        - 作業はタスクセッションで別途実行されます
+
+                        【作業依頼を受けた場合】
+                        以下のような依頼は request_task でタスク登録し、respond_chat で応答してください:
+                        - 「〜を実装してください」「〜を修正してください」
                         - 「〜機能を作ってください」「〜をお願いします」
-                        - その他、具体的な開発作業や修正を依頼された場合
-                        タスク登録後、respond_chat で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください。
+                        応答例: 「ご依頼を承りました。タスクを登録しました」
+
+                        【使用できないツール】
+                        create_task, update_task_status などのタスク操作ツールはチャットセッションでは使用できません。
 
                         単なる質問や相談への応答は respond_chat で送信してください。
-                        他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
-                        その他の可能な操作は help ツールで確認できます。
                         """,
                     "state": "chat_session"
                 ]
@@ -3019,7 +3079,6 @@ public final class MCPServer {
                     このタスクを直接実行してください。
                     タスクの内容に従って作業を行い、完了したら
                     update_task_status で status を 'done' に変更してください。
-                    その後 get_next_action を呼び出してください。
                     """,
                 "state": "execute_task",
                 "task": [
@@ -3120,8 +3179,7 @@ public final class MCPServer {
                     "action": "execute_subtask",
                     "instruction": """
                         現在のサブタスクを実行してください。
-                        完了したら update_task_status で status を 'done' に変更し、
-                        get_next_action を呼び出してください。
+                        完了したら update_task_status で status を 'done' に変更してください。
                         """,
                     "state": "executing_subtask",
                     "current_subtask": [
@@ -4453,7 +4511,8 @@ public final class MCPServer {
     /// update_task_status - タスクのステータスを更新
     /// UpdateTaskStatusUseCaseに委譲（カスケードブロック等のロジックを統一）
     /// 参照: docs/design/EXECUTION_LOG_DESIGN.md - タスク完了時の実行ログ更新
-    private func updateTaskStatus(taskId: String, status: String, reason: String?) throws -> [String: Any] {
+    /// 参照: docs/plan/GET_MY_TASK_PROGRESS.md - done更新時の指示返却
+    private func updateTaskStatus(taskId: String, status: String, reason: String?, session: AgentSession) throws -> [String: Any] {
         guard let newStatus = TaskStatus(rawValue: status) else {
             throw MCPError.invalidStatus(status)
         }
@@ -4496,7 +4555,7 @@ public final class MCPServer {
                 }
             }
 
-            return [
+            var response: [String: Any] = [
                 "success": true,
                 "task": [
                     "id": result.task.id.value,
@@ -4505,6 +4564,26 @@ public final class MCPServer {
                     "new_status": result.task.status.rawValue
                 ]
             ]
+
+            // doneへの更新時に次アクションの指示を返す
+            // 参照: docs/plan/GET_MY_TASK_PROGRESS.md
+            if newStatus == .done {
+                // 同一プロジェクト内で自分に割り当てられた未完了タスクを確認
+                let allTasks = try taskRepository.findByAssignee(session.agentId)
+                let remainingTasks = allTasks.filter { task in
+                    task.projectId == session.projectId &&
+                    task.status != .done &&
+                    task.status != .cancelled
+                }
+
+                if remainingTasks.isEmpty {
+                    response["instruction"] = "担当タスクが全て完了しました。report_completed を呼び出してください。"
+                } else {
+                    response["instruction"] = "get_my_task_progress で残りのタスク状況を確認し、必要な作業を続けてください。"
+                }
+            }
+
+            return response
         } catch UseCaseError.taskNotFound {
             throw MCPError.taskNotFound(taskId)
         } catch UseCaseError.invalidStatusTransition(let from, let to) {

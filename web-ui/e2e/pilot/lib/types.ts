@@ -32,6 +32,74 @@ export interface ExpectedArtifact {
   }
 }
 
+// ============================================================================
+// Structured Report Assertions
+// ============================================================================
+
+/**
+ * フィールド存在アサーション
+ */
+export interface ExistsAssertion {
+  type: 'exists'
+  field: string // JSONパス（ドット区切り: e.g., "bug.description"）
+}
+
+/**
+ * 正規表現マッチアサーション
+ */
+export interface MatchesAssertion {
+  type: 'matches'
+  field: string
+  pattern: string // 正規表現パターン
+}
+
+/**
+ * 文字列含有アサーション
+ */
+export interface ContainsAssertion {
+  type: 'contains'
+  field: string
+  values: string[] // いずれかを含む
+}
+
+/**
+ * 配列最小長アサーション
+ */
+export interface MinLengthAssertion {
+  type: 'min_length'
+  field: string
+  min: number
+}
+
+/**
+ * 値一致アサーション
+ */
+export interface EqualsAssertion {
+  type: 'equals'
+  field: string
+  value: string | number | boolean
+}
+
+export type ReportAssertion =
+  | ExistsAssertion
+  | MatchesAssertion
+  | ContainsAssertion
+  | MinLengthAssertion
+  | EqualsAssertion
+
+/**
+ * 期待するレポートの定義
+ * AIエージェントが作成する構造化レポート（JSON形式）の検証ルール
+ */
+export interface ExpectedReport {
+  /** レポートファイルのパス（作業ディレクトリからの相対パス） */
+  path: string
+  /** レポートの形式（現在はjsonのみサポート） */
+  format: 'json'
+  /** アサーションの配列 */
+  assertions: ReportAssertion[]
+}
+
 export interface ScenarioConfig {
   name: string
   description: string
@@ -50,6 +118,10 @@ export interface ScenarioConfig {
   }>
 
   expected_artifacts: ExpectedArtifact[]
+
+  // 期待するレポート（オプション）
+  // AIエージェントが作成する構造化レポートの検証ルール
+  expected_report?: ExpectedReport
 
   timeouts: {
     task_creation: number // seconds
@@ -141,6 +213,27 @@ export interface ArtifactResult {
   all_tests_passed?: boolean
 }
 
+/**
+ * レポートアサーションの検証結果
+ */
+export interface ReportAssertionResult {
+  assertion: ReportAssertion
+  passed: boolean
+  actual_value?: unknown
+  message?: string
+}
+
+/**
+ * レポート検証結果
+ */
+export interface ReportResult {
+  path: string
+  exists: boolean
+  parse_error?: string
+  assertions: ReportAssertionResult[]
+  all_passed: boolean
+}
+
 export interface PilotResult {
   scenario: string
   variation: string
@@ -153,6 +246,7 @@ export interface PilotResult {
     success: boolean
     failure_reason?: string
     artifacts: ArtifactResult[]
+    report?: ReportResult
   }
 
   tasks: {
@@ -184,6 +278,7 @@ export type PilotEventType =
   | 'artifact_created'
   | 'artifacts_tested'
   | 'artifacts_verified'
+  | 'report_verified'
   | 'performance_report'
   | 'error'
   // Pilot test specific events

@@ -32,16 +32,19 @@ enum ToolDefinitions {
             // ========================================
             // Manager専用（session_token + hierarchy_type=manager）
             // ========================================
-            listSubordinates,      // NEW: 下位エージェント一覧
-            getSubordinateProfile, // NEW: 下位エージェント詳細
-            createTask,
-            createTasksBatch,      // NEW: 依存関係付き一括タスク作成
+            listSubordinates,      // 下位エージェント一覧
+            getSubordinateProfile, // 下位エージェント詳細
             assignTask,
 
             // ========================================
-            // Worker専用（session_token + hierarchy_type=worker）
+            // タスクセッション専用（purpose=task）
             // ========================================
-            reportCompleted,
+            createTask,            // サブタスク作成
+            createTasksBatch,      // 依存関係付き一括タスク作成
+            reportCompleted,       // タスク完了報告
+            updateTaskStatus,      // ステータス更新
+            reportExecutionStart,  // 実行開始報告（非推奨）
+            reportExecutionComplete, // 実行完了報告（非推奨）
 
             // ========================================
             // 認証済み共通（Manager + Worker）
@@ -50,14 +53,12 @@ enum ToolDefinitions {
             reportModel,
             getMyProfile,
             getMyTask,
+            getMyTaskProgress, // タスク進行状況確認（読み取り専用）
             getNotifications,  // 通知取得
             getNextAction,
-            updateTaskStatus,
             getProject,
             listTasks,
             getTask,
-            reportExecutionStart,  // 非推奨（後方互換性のため維持）
-            reportExecutionComplete,  // 非推奨（後方互換性のため維持）
 
             // ========================================
             // チャット機能（認証済み）
@@ -250,6 +251,23 @@ enum ToolDefinitions {
         ]
     ]
 
+    /// get_my_task_progress - タスク進行状況確認（読み取り専用）
+    /// 参照: docs/plan/GET_MY_TASK_PROGRESS.md
+    static let getMyTaskProgress: [String: Any] = [
+        "name": "get_my_task_progress",
+        "description": "自分に割り当てられたタスクの進行状況を構造的に確認します。副作用なしの読み取り専用ツール。親タスクとサブタスクの関係が階層で表示されます。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ]
+            ] as [String: Any],
+            "required": ["session_token"]
+        ]
+    ]
+
     /// get_notifications - 未読通知を取得
     /// 参照: docs/design/NOTIFICATION_SYSTEM.md
     static let getNotifications: [String: Any] = [
@@ -275,7 +293,7 @@ enum ToolDefinitions {
     /// 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md
     static let reportCompleted: [String: Any] = [
         "name": "report_completed",
-        "description": "タスク完了を報告します。resultには 'success', 'failed', 'blocked' のいずれかを指定します。成功時はタスクがdoneに、失敗・ブロック時はblockedに変更されます。",
+        "description": "【タスクセッション専用】タスク完了を報告します。resultには 'success', 'failed', 'blocked' のいずれかを指定します。成功時はタスクがdoneに、失敗・ブロック時はblockedに変更されます。チャットセッションからは呼び出せません。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -515,7 +533,7 @@ enum ToolDefinitions {
     /// Agent Instanceがメインタスクをサブタスクに分解する際に使用
     static let createTask: [String: Any] = [
         "name": "create_task",
-        "description": "新しいタスクを作成します。セッショントークンで認証されたエージェントがサブタスクを作成する際に使用します。作成されたタスクは自動的に現在のプロジェクトに紐づき、作成者に割り当てられます。",
+        "description": "【タスクセッション専用】新しいサブタスクを作成します。作成されたタスクは自動的に現在のプロジェクトに紐づき、作成者に割り当てられます。チャットセッションからは呼び出せません。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -555,8 +573,8 @@ enum ToolDefinitions {
     static let createTasksBatch: [String: Any] = [
         "name": "create_tasks_batch",
         "description": """
-            複数のサブタスクを一括で作成します。各タスクにlocal_idを指定し、dependenciesでそのlocal_idを参照することで、
-            バッチ内のタスク間の依存関係を設定できます。システムがlocal_idを実際のタスクIDに解決します。
+            【タスクセッション専用】複数のサブタスクを一括で作成します。各タスクにlocal_idを指定し、dependenciesでそのlocal_idを参照することで、
+            バッチ内のタスク間の依存関係を設定できます。チャットセッションからは呼び出せません。
             """,
         "inputSchema": [
             "type": "object",
@@ -610,7 +628,7 @@ enum ToolDefinitions {
     /// Phase 4: session_token必須（権限チェック）
     static let updateTaskStatus: [String: Any] = [
         "name": "update_task_status",
-        "description": "タスクのステータスを更新します。ステータス遷移ルールに従う必要があります。自分が担当するタスクまたはサブタスクのみ更新可能です。",
+        "description": "【タスクセッション専用】タスクのステータスを更新します。ステータス遷移ルールに従う必要があります。自分が担当するタスクまたはサブタスクのみ更新可能です。チャットセッションからは呼び出せません。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -806,7 +824,7 @@ enum ToolDefinitions {
     /// ⚠️ Phase 4で非推奨: get_my_task呼び出し時に自動記録されます
     static let reportExecutionStart: [String: Any] = [
         "name": "report_execution_start",
-        "description": "【非推奨: get_my_task呼び出し時に自動記録されます】タスク実行の開始を報告します。Runnerがタスク実行を開始した際に呼び出します。execution_log_idが返されるので、完了時にreport_execution_completeに渡してください。セッショントークンで認証が必要です。",
+        "description": "【タスクセッション専用・非推奨】タスク実行の開始を報告します。get_my_task呼び出し時に自動記録されるため、通常は不要です。チャットセッションからは呼び出せません。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -829,7 +847,7 @@ enum ToolDefinitions {
     /// ⚠️ Phase 4で非推奨: report_completed を使用してください
     static let reportExecutionComplete: [String: Any] = [
         "name": "report_execution_complete",
-        "description": "【非推奨: report_completed を使用してください】タスク実行の完了を報告します。exit_codeが0なら成功、それ以外は失敗として記録されます。セッショントークンで認証が必要です。",
+        "description": "【タスクセッション専用・非推奨】タスク実行の完了を報告します。report_completedを使用してください。チャットセッションからは呼び出せません。",
         "inputSchema": [
             "type": "object",
             "properties": [

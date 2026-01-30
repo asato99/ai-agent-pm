@@ -170,14 +170,20 @@ initial_files:
       // localStorageを使用してブラウザに状態を保存
 
       const STORAGE_KEY = 'shopping_cart';
+      const TOTAL_KEY = 'shopping_cart_total';
 
       /**
        * 保存されたカートデータを読み込む
        */
       export function loadCart() {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          return JSON.parse(saved);
+        const savedItems = localStorage.getItem(STORAGE_KEY);
+        const savedTotal = localStorage.getItem(TOTAL_KEY);
+
+        if (savedItems) {
+          return {
+            items: JSON.parse(savedItems),
+            total: savedTotal || 0  // 文字列のまま返す（バグ）
+          };
         }
         return { items: [], total: 0 };
       }
@@ -186,7 +192,8 @@ initial_files:
        * カートデータを保存する
        */
       export function saveCart(cart) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cart.items));
+        localStorage.setItem(TOTAL_KEY, cart.total);  // 数値を文字列として保存
       }
 
       /**
@@ -194,6 +201,7 @@ initial_files:
        */
       export function clearCartData() {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(TOTAL_KEY);
       }
 
   - name: app.js
@@ -237,13 +245,28 @@ initial_files:
       updateDisplay();
 
 # 期待する成果物
-# このシナリオでは成果物ではなく、問題発見の報告を評価する
 expected_artifacts: []
+
+# 期待するレポート
+# AIエージェントが作成する構造化レポート（JSON形式）の検証ルール
+expected_report:
+  path: TEST_REPORT.json
+  format: json
+  assertions:
+    # テストケースが4件以上実施されている
+    - type: min_length
+      field: test_cases
+      min: 4
+
+    # バグが1件以上発見されている
+    - type: min_length
+      field: bugs_found
+      min: 1
 
 # タイムアウト設定（秒）
 timeouts:
   task_creation: 300      # タスク作成待ち
-  task_completion: 900    # テスト完了待ち（15分）
+  task_completion: 600    # テスト完了待ち（10分）
 
 # 初期アクション
 initial_action:
@@ -253,14 +276,59 @@ initial_action:
   message: |
     作業ディレクトリにあるショッピングカートアプリケーションのテストを実施してください。
 
-    アプリの概要:
-    - 商品を追加すると合計金額が計算される
-    - カートの状態はブラウザに保存される
+    ## アプリの要件
 
-    確認観点:
-    - 商品追加機能が正しく動作するか
-    - 合計金額の計算が正しいか
-    - ページリロード後も正しく動作するか
+    ### 基本機能
+    - 商品（りんご¥100、バナナ¥150、みかん¥200）をカートに追加できる
+    - 合計金額が正しく計算される
+    - 「カートをクリア」ボタンでカートを空にできる
 
-    問題を発見した場合は、再現手順と原因を報告してください。
-    テスト完了後、タスクを完了にしてください。
+    ### データ永続性
+    - カートの状態はブラウザのlocalStorageに保存される
+    - ページをリロードしても状態が復元される
+    - リロード後に商品を追加しても、合計金額が正しく計算される
+
+    ## 注意事項
+    - バグを発見した場合は記録してください（原因調査は不要）
+
+    ## 成果物要件（必須）
+    テスト完了後、作業ディレクトリに `TEST_REPORT.json` を作成してください。
+
+    **重要: 以下のフィールド名を正確に使用してください（自動検証されます）**
+
+    必須フィールド:
+    - `test_cases` (配列): テストケースを格納 ※ test_results ではありません
+    - `bugs_found` (配列): 発見したバグを格納
+    - `test_completed` (boolean): 必ず true を設定
+
+    ```json
+    {
+      "summary": "テスト結果の概要",
+      "test_completed": true,
+      "test_cases": [
+        {
+          "id": "TC01",
+          "name": "テストケース名",
+          "steps": ["実施した手順1", "手順2"],
+          "expected": "期待結果",
+          "actual": "実際の結果",
+          "passed": true
+        }
+      ],
+      "bugs_found": [
+        {
+          "description": "発見したバグの内容",
+          "test_case_id": "関連するテストケースID",
+          "reproduction_steps": ["再現手順1", "再現手順2"],
+          "severity": "high/medium/low"
+        }
+      ],
+      "environment": {
+        "browser": "使用したブラウザ"
+      }
+    }
+    ```
+
+    - すべてのテストケースを `test_cases` 配列に記録してください（4件以上）
+    - バグを発見しなかった場合は `bugs_found` を空配列にしてください
+    - レポート作成後、タスクを完了にしてください

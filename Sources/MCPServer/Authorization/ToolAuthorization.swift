@@ -92,26 +92,26 @@ struct ToolAuthorization {
         "get_subordinate_profile": .managerOnly,
         "assign_task": .managerOnly,
 
-        // 認証済み共通（Manager + Worker）- サブタスク作成用
-        "create_task": .authenticated,  // Workers can create sub-tasks for self-execution
-        "create_tasks_batch": .authenticated,  // Batch creation with local dependency references
+        // タスクセッション専用 - サブタスク作成用
+        "create_task": .taskOnly,  // Workers can create sub-tasks for self-execution
+        "create_tasks_batch": .taskOnly,  // Batch creation with local dependency references
 
-        // 認証済み共通（Manager + Worker）- タスク完了報告
-        // Managerも自分のメインタスクを完了報告する必要がある
-        "report_completed": .authenticated,
+        // タスクセッション専用 - タスク完了報告
+        "report_completed": .taskOnly,
 
         // 認証済み共通（Manager + Worker）
         "report_model": .authenticated,
         "get_my_profile": .authenticated,
         "get_my_task": .authenticated,
+        "get_my_task_progress": .authenticated,  // タスク進行状況確認（読み取り専用）
         "get_notifications": .authenticated,  // 通知取得
         "get_next_action": .authenticated,
-        "update_task_status": .authenticated,
+        "update_task_status": .taskOnly,  // タスクセッション専用
         "get_project": .authenticated,
         "list_tasks": .authenticated,
         "get_task": .authenticated,
-        "report_execution_start": .authenticated,
-        "report_execution_complete": .authenticated,
+        "report_execution_start": .taskOnly,  // タスクセッション専用
+        "report_execution_complete": .taskOnly,  // タスクセッション専用
         "logout": .authenticated,  // セッション終了
 
         // チャット機能（チャットセッション専用）- UC009
