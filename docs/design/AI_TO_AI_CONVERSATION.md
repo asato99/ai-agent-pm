@@ -1,5 +1,12 @@
 # 設計書: AIエージェント間会話機能
 
+> **📝 権限に関する注記**
+>
+> 本設計の会話関連ツール（`start_conversation`, `end_conversation`）は **チャットセッション専用** (`.chatOnly`) です。
+> タスクセッションから会話を開始する場合は、`delegate_to_chat_session` ツールでチャットセッションに委譲してください。
+>
+> **詳細:** [TASK_CHAT_SESSION_SEPARATION.md](./TASK_CHAT_SESSION_SEPARATION.md)
+
 ## 概要
 
 AIエージェント同士がチャットセッションを通じて対話できる機能を追加する。
@@ -11,8 +18,10 @@ AIエージェント同士がチャットセッションを通じて対話でき
 | パターン | 開始者 | 応答者 | セッション | 状態 |
 |----------|--------|--------|------------|------|
 | Human → AI | Human (Web UI) | AI Worker (chat) | Human が制御 | UC014/UC015で実装済み |
-| AI (task) → AI (chat) | AI Worker (task) | AI Worker (chat) | 非同期送信 | UC012/UC013で実装済み |
+| AI (task) → AI (chat) | AI Worker (task) | AI Worker (chat) | 非同期送信 | ~~UC012/UC013で実装済み~~ **廃止予定** |
 | **AI ⇄ AI** | AI Worker (chat) | AI Worker (chat) | **双方が対話** | **本設計で追加** |
+
+> **注:** 「AI (task) → AI (chat)」パターンは廃止予定。タスクセッションからは `delegate_to_chat_session` を使用。
 
 ### 目的
 

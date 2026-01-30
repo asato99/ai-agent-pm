@@ -44,10 +44,19 @@ enum ToolPermission: String {
 |--------|-----------|-----------|
 | `get_pending_messages` | authenticated | **chatOnly** |
 | `respond_chat` | authenticated | **chatOnly** |
+| `start_conversation` | authenticated | **chatOnly** |
+| `end_conversation` | authenticated | **chatOnly** |
+| `send_message` | authenticated | **chatOnly** |
+| `delegate_to_chat_session` | (新規) | **taskOnly** |
 | `get_my_task` | authenticated | authenticated（変更なし） |
 | `report_completed` | authenticated | authenticated（変更なし） |
 
-> **設計判断**: タスク系ツールは`taskOnly`にしない。チャットセッションでも参照は許可し、`get_next_action`で適切な指示を出す方針を維持。
+> **設計判断**:
+> - **コミュニケーション系ツール**（会話・メッセージ）は `chatOnly` に統一
+> - **タスク系ツール**は `taskOnly` にしない（チャットセッションでも参照は許可）
+> - タスクセッションからコミュニケーションが必要な場合は `delegate_to_chat_session` を使用
+>
+> **詳細:** [TASK_CHAT_SESSION_SEPARATION.md](./TASK_CHAT_SESSION_SEPARATION.md)
 
 #### 認可チェックロジック
 
@@ -64,7 +73,7 @@ static func authorize(tool: String, caller: CallerType) throws {
     case (.chatOnly, _):
         throw ToolAuthorizationError.authenticationRequired(tool)
 
-    // taskOnly: purpose=task のセッションのみ（将来用）
+    // taskOnly: purpose=task のセッションのみ
     case (.taskOnly, .manager(_, let session)), (.taskOnly, .worker(_, let session)):
         guard session.purpose == .task else {
             throw ToolAuthorizationError.taskSessionRequired(tool)

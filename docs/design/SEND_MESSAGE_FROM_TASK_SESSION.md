@@ -1,5 +1,16 @@
 # 設計書: タスクセッションからのメッセージ送信機能
 
+> **⚠️ 廃止予定 (Deprecated)**
+>
+> この設計は新しい設計方針により**廃止予定**です。
+>
+> **変更内容:**
+> - `send_message` ツールの権限が `.authenticated` → `.chatOnly` に変更
+> - タスクセッションから直接メッセージを送信することは不可に
+> - 代わりに `delegate_to_chat_session` ツールでチャットセッションに委譲
+>
+> **新しい設計:** [TASK_CHAT_SESSION_SEPARATION.md](./TASK_CHAT_SESSION_SEPARATION.md)
+
 ## 概要
 
 タスク実行中のエージェントが、同一プロジェクト内の他のエージェントにメッセージを送信できる機能を追加する。
