@@ -4717,6 +4717,9 @@ public final class MCPServer {
         let approvalStatus: ApprovalStatus = isAncestor ? .approved : .pendingApproval
 
         // タスク作成
+        // createdByAgentId には actualRequester を使用
+        // チャットセッションの場合: 依頼者（オーナー等）が作成者となり、isDelegatedTask=true になる
+        // これによりサブタスク作成フェーズへ進める
         var newTask = Task(
             id: TaskID.generate(),
             projectId: session.projectId,
@@ -4725,8 +4728,8 @@ public final class MCPServer {
             status: .backlog,
             priority: taskPriority,
             assigneeId: assignee.id,
-            createdByAgentId: session.agentId,
-            requesterId: session.agentId,
+            createdByAgentId: actualRequester,
+            requesterId: actualRequester,
             approvalStatus: approvalStatus
         )
 
