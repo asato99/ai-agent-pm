@@ -3,6 +3,7 @@
 
 import Foundation
 import Domain
+import Compression
 
 // MARK: - ImportedSkill
 
@@ -63,22 +64,52 @@ public final class SkillArchiveService: @unchecked Sendable {
         }
 
         // ZIPを解析してファイル一覧を取得
-        let files = try listFiles(archiveData: data)
+        var files = try listFiles(archiveData: data)
 
         // SKILL.mdの存在確認
         guard files.contains(where: { $0.path == "SKILL.md" || $0.path.hasSuffix("/SKILL.md") }) else {
             throw SkillArchiveError.missingSkillMd
         }
 
+        // トップレベルディレクトリの検出と除去
+        // Finderで圧縮すると「folder/SKILL.md」のような構成になるため
+        let rootPrefix = detectCommonRootDirectory(files: files)
+        var processedData = data
+        var processedFiles = files
+
+        if let prefix = rootPrefix {
+            // ルートディレクトリを除去してZIPを再構築
+            let allContents = extractAllFiles(from: data)
+            var normalizedContents: [String: String] = [:]
+
+            for (path, content) in allContents {
+                if path.hasPrefix(prefix) {
+                    let newPath = String(path.dropFirst(prefix.count))
+                    if !newPath.isEmpty {
+                        normalizedContents[newPath] = content
+                    }
+                }
+            }
+
+            processedData = createArchiveFromFiles(normalizedContents)
+            processedFiles = normalizedContents.map { path, content in
+                SkillFileEntry(
+                    path: path,
+                    isDirectory: path.hasSuffix("/"),
+                    size: Int64(content.utf8.count)
+                )
+            }.sorted { $0.path < $1.path }
+        }
+
         // 禁止ファイルのチェック
-        for file in files {
+        for file in processedFiles {
             if isForbiddenPath(file.path) {
                 throw SkillArchiveError.forbiddenFile(file.path)
             }
         }
 
         // SKILL.mdの内容を抽出してfrontmatterをパース
-        let (name, description) = try parseSkillMdFrontmatter(from: data)
+        let (name, description) = try parseSkillMdFrontmatter(from: processedData)
 
         // ディレクトリ名を正規化
         let directoryName = normalizeDirectoryName(suggestedName)
@@ -87,9 +118,34 @@ public final class SkillArchiveService: @unchecked Sendable {
             name: name.isEmpty ? suggestedName : name,
             description: description,
             suggestedDirectoryName: directoryName,
-            archiveData: data,
-            files: files
+            archiveData: processedData,
+            files: processedFiles
         )
+    }
+
+    /// 共通のルートディレクトリを検出（例: "my-skill/" が全ファイルの共通プレフィックスの場合）
+    private func detectCommonRootDirectory(files: [SkillFileEntry]) -> String? {
+        // ファイルのみを対象にする（ディレクトリエントリは除く）
+        let filePaths = files.filter { !$0.isDirectory }.map { $0.path }
+
+        guard !filePaths.isEmpty else { return nil }
+
+        // 最初のファイルのパスからルートディレクトリ候補を取得
+        guard let firstPath = filePaths.first,
+              let slashIndex = firstPath.firstIndex(of: "/") else {
+            return nil
+        }
+
+        let rootCandidate = String(firstPath[...slashIndex])  // "folder/" を含む
+
+        // 全てのファイルがこのプレフィックスを持っているか確認
+        let allHavePrefix = filePaths.allSatisfy { $0.hasPrefix(rootCandidate) }
+
+        if allHavePrefix {
+            return rootCandidate
+        }
+
+        return nil
     }
 
     /// フォルダからスキルをインポート（ZIPに変換）
@@ -351,7 +407,12 @@ public final class SkillArchiveService: @unchecked Sendable {
                 case "name":
                     name = value
                 case "description":
-                    description = value
+                    // 最大長で切り詰め
+                    if value.count > SkillDefinition.maxDescriptionLength {
+                        description = String(value.prefix(SkillDefinition.maxDescriptionLength))
+                    } else {
+                        description = value
+                    }
                 default:
                     break
                 }
@@ -385,14 +446,20 @@ public final class SkillArchiveService: @unchecked Sendable {
             if let fileName = String(data: archiveData[fileNameStart..<fileNameEnd], encoding: .utf8) {
                 if fileName == "SKILL.md" || fileName.hasSuffix("/SKILL.md") {
                     let dataStart = fileNameEnd + extraFieldLength
-                    let dataEnd = dataStart + (compressionMethod == 0 ? uncompressedSize : compressedSize)
+                    let dataEnd = dataStart + compressedSize
                     guard dataEnd <= archiveData.count else { break }
 
+                    let compressedData = Data(archiveData[dataStart..<dataEnd])
+
                     if compressionMethod == 0 {
-                        // 非圧縮
-                        return String(data: archiveData[dataStart..<dataEnd], encoding: .utf8)
+                        // 非圧縮（Stored）
+                        return String(data: compressedData, encoding: .utf8)
+                    } else if compressionMethod == 8 {
+                        // Deflate圧縮
+                        if let decompressed = decompressDeflate(compressedData, expectedSize: uncompressedSize) {
+                            return String(data: decompressed, encoding: .utf8)
+                        }
                     }
-                    // 圧縮されている場合は非サポート（現状は非圧縮のみ対応）
                     return nil
                 }
             }
@@ -531,23 +598,29 @@ public final class SkillArchiveService: @unchecked Sendable {
             guard fileNameEnd <= archiveData.count else { break }
 
             if let fileName = String(data: archiveData[fileNameStart..<fileNameEnd], encoding: .utf8) {
+                let dataStart = fileNameEnd + extraFieldLength
+                let dataEnd = dataStart + compressedSize
+                guard dataEnd <= archiveData.count else { break }
+
                 // ディレクトリはスキップ
                 if !fileName.hasSuffix("/") {
-                    let dataStart = fileNameEnd + extraFieldLength
-                    let size = compressionMethod == 0 ? uncompressedSize : compressedSize
-                    let dataEnd = dataStart + size
-                    guard dataEnd <= archiveData.count else { break }
+                    let compressedContent = Data(archiveData[dataStart..<dataEnd])
 
                     if compressionMethod == 0 {
-                        if let content = String(data: archiveData[dataStart..<dataEnd], encoding: .utf8) {
+                        // 非圧縮
+                        if let content = String(data: compressedContent, encoding: .utf8) {
+                            result[fileName] = content
+                        }
+                    } else if compressionMethod == 8 {
+                        // Deflate圧縮
+                        if let decompressed = decompressDeflate(compressedContent, expectedSize: uncompressedSize),
+                           let content = String(data: decompressed, encoding: .utf8) {
                             result[fileName] = content
                         }
                     }
                 }
 
-                let dataStart = fileNameEnd + extraFieldLength
-                let size = compressionMethod == 0 ? uncompressedSize : compressedSize
-                offset = dataStart + size
+                offset = dataEnd
             } else {
                 break
             }
@@ -659,13 +732,18 @@ public final class SkillArchiveService: @unchecked Sendable {
 
             if let fileName = String(data: archiveData[fileNameStart..<fileNameEnd], encoding: .utf8) {
                 let dataStart = fileNameEnd + extraFieldLength
-                let size = compressionMethod == 0 ? uncompressedSize : compressedSize
-                let dataEnd = dataStart + size
+                let dataEnd = dataStart + compressedSize
                 guard dataEnd <= archiveData.count else { break }
 
                 if fileName == path {
+                    let compressedContent = Data(archiveData[dataStart..<dataEnd])
+
                     if compressionMethod == 0 {
-                        return Data(archiveData[dataStart..<dataEnd])
+                        // 非圧縮
+                        return compressedContent
+                    } else if compressionMethod == 8 {
+                        // Deflate圧縮
+                        return decompressDeflate(compressedContent, expectedSize: uncompressedSize)
                     }
                     return nil
                 }
@@ -703,5 +781,28 @@ public final class SkillArchiveService: @unchecked Sendable {
         (UInt32(data[offset + 1]) << 8) |
         (UInt32(data[offset + 2]) << 16) |
         (UInt32(data[offset + 3]) << 24)
+    }
+
+    /// Deflate圧縮データを解凍
+    private func decompressDeflate(_ compressedData: Data, expectedSize: Int) -> Data? {
+        // ZIPのDeflateはraw deflate
+        // compression_decode_bufferを使用（COMPRESSION_ZLIBはraw deflateも処理可能）
+        let destinationBufferSize = max(expectedSize, compressedData.count * 4)
+        var destinationBuffer = [UInt8](repeating: 0, count: destinationBufferSize)
+
+        let decompressedSize = compressedData.withUnsafeBytes { sourcePointer -> Int in
+            guard let sourceBaseAddress = sourcePointer.baseAddress else { return 0 }
+            return compression_decode_buffer(
+                &destinationBuffer,
+                destinationBufferSize,
+                sourceBaseAddress.assumingMemoryBound(to: UInt8.self),
+                compressedData.count,
+                nil,
+                COMPRESSION_ZLIB
+            )
+        }
+
+        guard decompressedSize > 0 else { return nil }
+        return Data(destinationBuffer.prefix(decompressedSize))
     }
 }

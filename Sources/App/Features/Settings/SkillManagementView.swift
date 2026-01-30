@@ -365,6 +365,13 @@ struct SkillEditorView: View {
         return nil
     }
 
+    private var descriptionValidationError: String? {
+        if description.count > SkillDefinition.maxDescriptionLength {
+            return "Description too long (\(description.count)/\(SkillDefinition.maxDescriptionLength) characters)"
+        }
+        return nil
+    }
+
     private var sortedFilePaths: [String] {
         // SKILL.mdを先頭に、残りはアルファベット順
         var paths = Array(files.keys) + Array(binaryFiles)
@@ -469,8 +476,16 @@ struct SkillEditorView: View {
                     TextField("Skill Name", text: $name)
                         .accessibilityIdentifier("SkillNameField")
 
-                    TextField("Description", text: $description)
-                        .accessibilityIdentifier("SkillDescriptionField")
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("Description", text: $description)
+                            .accessibilityIdentifier("SkillDescriptionField")
+
+                        if let error = descriptionValidationError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
 
                     VStack(alignment: .leading, spacing: 4) {
                         TextField("Directory Name", text: $directoryName)
