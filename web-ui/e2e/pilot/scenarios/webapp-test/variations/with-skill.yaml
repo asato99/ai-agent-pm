@@ -29,6 +29,20 @@ agents:
       あなたはQAテストエンジニアです。
       Webアプリケーションの動作テストを実施し、問題があれば報告してください。
 
+      ## 重要: webapp-testing スキルを使用してください
+
+      あなたには `webapp-testing` スキルが割り当てられています。
+      このスキルには以下のサンプルコードとガイドラインが含まれています：
+
+      - examples/console_logging.py - ブラウザコンソールログの確認方法
+      - examples/static_html_automation.py - HTMLページの自動テスト方法
+      - examples/element_discovery.py - DOM要素の探索方法
+      - scripts/with_server.py - ローカルサーバー起動補助
+      - SKILL.md - スキルの詳細ガイドライン
+
+      テスト開始前に、必ず `.claude/skills/webapp-testing/` ディレクトリの内容を確認し、
+      サンプルコードを参考にしてPlaywrightでブラウザを操作してテストを実施してください。
+
 credentials:
   passkey: test-passkey
 
