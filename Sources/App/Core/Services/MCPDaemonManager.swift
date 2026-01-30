@@ -483,8 +483,27 @@ public final class MCPDaemonManager: ObservableObject {
     }
 
     /// Load the last N lines from the log file
+    /// Performance optimization: Only reads the tail of the file instead of the entire file
     private func loadLogLines() {
-        guard let content = try? String(contentsOfFile: logPath, encoding: .utf8) else {
+        guard let handle = FileHandle(forReadingAtPath: logPath) else {
+            return
+        }
+        defer { try? handle.close() }
+
+        // Seek to near the end of file (read last ~512KB which should contain 200+ lines)
+        let maxBytesToRead: UInt64 = 512 * 1024
+        let fileSize = handle.seekToEndOfFile()
+
+        let readStart: UInt64
+        if fileSize > maxBytesToRead {
+            readStart = fileSize - maxBytesToRead
+            handle.seek(toFileOffset: readStart)
+        } else {
+            handle.seek(toFileOffset: 0)
+        }
+
+        guard let data = try? handle.readToEnd(),
+              let content = String(data: data, encoding: .utf8) else {
             return
         }
 

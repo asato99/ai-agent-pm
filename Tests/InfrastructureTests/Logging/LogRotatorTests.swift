@@ -292,4 +292,371 @@ final class LogRotatorTests: XCTestCase {
         XCTAssertTrue(content!.contains("existing content"), "既存の内容が保持されるべき")
         XCTAssertTrue(content!.contains("old content"), "古い内容が追記されるべき")
     }
+
+    // MARK: - Rotated Files Pattern Matching Tests
+
+    func testLogRotatorDeletesRotatedFiles() {
+        // 古いログファイル（.log）
+        createLogFile(named: "mcp-server-2026-01-10.log", modifiedDaysAgo: 20)
+
+        // 古いローテーションファイル（.log.1, .log.2）
+        createLogFile(named: "mcp-server-2026-01-10.log.1", modifiedDaysAgo: 20)
+        createLogFile(named: "mcp-server-2026-01-10.log.2", modifiedDaysAgo: 20)
+
+        // 新しいファイル（保持されるべき）
+        createLogFile(named: "mcp-server-2026-01-28.log", modifiedDaysAgo: 0)
+        createLogFile(named: "mcp-server-2026-01-28.log.1", modifiedDaysAgo: 0)
+
+        let rotator = LogRotator(directory: tempDir, retentionDays: 7)
+        rotator.rotate()
+
+        XCTAssertFalse(fileExists("mcp-server-2026-01-10.log"), "古いログは削除")
+        XCTAssertFalse(fileExists("mcp-server-2026-01-10.log.1"), "古いローテーションファイルも削除")
+        XCTAssertFalse(fileExists("mcp-server-2026-01-10.log.2"), "古いローテーションファイルも削除")
+        XCTAssertTrue(fileExists("mcp-server-2026-01-28.log"), "新しいログは保持")
+        XCTAssertTrue(fileExists("mcp-server-2026-01-28.log.1"), "新しいローテーションファイルは保持")
+    }
+
+    // MARK: - Total Size Based Rotation Tests
+
+    private func createLogFileWithSize(named fileName: String, modifiedDaysAgo days: Int, sizeInKB: Int) {
+        let filePath = tempDir + fileName
+        let data = Data(repeating: 0x41, count: sizeInKB * 1024)
+        FileManager.default.createFile(atPath: filePath, contents: data)
+
+        let modifiedDate = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
+        try? FileManager.default.setAttributes(
+            [.modificationDate: modifiedDate],
+            ofItemAtPath: filePath
+        )
+    }
+
+    func testLogRotatorDeletesOldestFilesWhenTotalSizeExceeded() {
+        // 全体サイズ制限: 50KB
+        // ファイル: 各20KB × 3 = 60KB（制限超過）
+        createLogFileWithSize(named: "mcp-server-1.log", modifiedDaysAgo: 3, sizeInKB: 20)  // 最古
+        createLogFileWithSize(named: "mcp-server-2.log", modifiedDaysAgo: 2, sizeInKB: 20)
+        createLogFileWithSize(named: "mcp-server-3.log", modifiedDaysAgo: 1, sizeInKB: 20)  // 最新
+
+        let rotator = LogRotator(
+            directory: tempDir,
+            retentionDays: 7,
+            maxTotalSize: 50 * 1024  // 50KB
+        )
+        let deletedCount = rotator.rotate()
+
+        XCTAssertEqual(deletedCount, 1, "1ファイル削除で50KB以下になる")
+        XCTAssertFalse(fileExists("mcp-server-1.log"), "最古のファイルが削除される")
+        XCTAssertTrue(fileExists("mcp-server-2.log"), "新しいファイルは保持")
+        XCTAssertTrue(fileExists("mcp-server-3.log"), "最新のファイルは保持")
+    }
+
+    func testLogRotatorDeletesMultipleFilesWhenTotalSizeExceeded() {
+        // 全体サイズ制限: 30KB
+        // ファイル: 各20KB × 3 = 60KB（大幅超過）
+        createLogFileWithSize(named: "mcp-server-1.log", modifiedDaysAgo: 3, sizeInKB: 20)  // 最古
+        createLogFileWithSize(named: "mcp-server-2.log", modifiedDaysAgo: 2, sizeInKB: 20)
+        createLogFileWithSize(named: "mcp-server-3.log", modifiedDaysAgo: 1, sizeInKB: 20)  // 最新
+
+        let rotator = LogRotator(
+            directory: tempDir,
+            retentionDays: 7,
+            maxTotalSize: 30 * 1024  // 30KB
+        )
+        let deletedCount = rotator.rotate()
+
+        XCTAssertEqual(deletedCount, 2, "2ファイル削除で30KB以下になる")
+        XCTAssertFalse(fileExists("mcp-server-1.log"), "最古のファイルが削除")
+        XCTAssertFalse(fileExists("mcp-server-2.log"), "2番目に古いファイルも削除")
+        XCTAssertTrue(fileExists("mcp-server-3.log"), "最新のファイルは保持")
+    }
+
+    func testLogRotatorDoesNothingWhenTotalSizeUnderLimit() {
+        // 全体サイズ制限: 100KB
+        // ファイル: 各20KB × 3 = 60KB（制限未満）
+        createLogFileWithSize(named: "mcp-server-1.log", modifiedDaysAgo: 3, sizeInKB: 20)
+        createLogFileWithSize(named: "mcp-server-2.log", modifiedDaysAgo: 2, sizeInKB: 20)
+        createLogFileWithSize(named: "mcp-server-3.log", modifiedDaysAgo: 1, sizeInKB: 20)
+
+        let rotator = LogRotator(
+            directory: tempDir,
+            retentionDays: 7,
+            maxTotalSize: 100 * 1024  // 100KB
+        )
+        let deletedCount = rotator.rotate()
+
+        XCTAssertEqual(deletedCount, 0, "制限未満なので削除なし")
+        XCTAssertTrue(fileExists("mcp-server-1.log"))
+        XCTAssertTrue(fileExists("mcp-server-2.log"))
+        XCTAssertTrue(fileExists("mcp-server-3.log"))
+    }
+
+    func testLogRotatorCombinesAgeAndSizeBasedDeletion() {
+        // 年齢ベース: 8日以上古いファイルを削除
+        // サイズベース: 30KB超過で古いファイルから削除
+        createLogFileWithSize(named: "mcp-server-old.log", modifiedDaysAgo: 10, sizeInKB: 20)  // 年齢で削除
+        createLogFileWithSize(named: "mcp-server-mid.log", modifiedDaysAgo: 3, sizeInKB: 20)   // サイズで削除
+        createLogFileWithSize(named: "mcp-server-new.log", modifiedDaysAgo: 1, sizeInKB: 20)   // 保持
+
+        let rotator = LogRotator(
+            directory: tempDir,
+            retentionDays: 7,
+            maxTotalSize: 30 * 1024  // 30KB（年齢削除後も40KB残るので超過）
+        )
+        let deletedCount = rotator.rotate()
+
+        XCTAssertEqual(deletedCount, 2, "年齢で1、サイズで1、計2削除")
+        XCTAssertFalse(fileExists("mcp-server-old.log"), "古いファイルは年齢ベースで削除")
+        XCTAssertFalse(fileExists("mcp-server-mid.log"), "中間のファイルはサイズベースで削除")
+        XCTAssertTrue(fileExists("mcp-server-new.log"), "最新のファイルは保持")
+    }
+
+    func testLogRotatorWithZeroMaxTotalSizeDisablesSizeCheck() {
+        // maxTotalSize: 0 はサイズチェックを無効化
+        createLogFileWithSize(named: "mcp-server-1.log", modifiedDaysAgo: 1, sizeInKB: 1000)
+        createLogFileWithSize(named: "mcp-server-2.log", modifiedDaysAgo: 1, sizeInKB: 1000)
+
+        let rotator = LogRotator(
+            directory: tempDir,
+            retentionDays: 7,
+            maxTotalSize: 0  // 無効化
+        )
+        let deletedCount = rotator.rotate()
+
+        XCTAssertEqual(deletedCount, 0, "サイズチェック無効なので削除なし")
+        XCTAssertTrue(fileExists("mcp-server-1.log"))
+        XCTAssertTrue(fileExists("mcp-server-2.log"))
+    }
+
+    func testLogRotatorGetTotalSize() {
+        createLogFileWithSize(named: "mcp-server-1.log", modifiedDaysAgo: 1, sizeInKB: 10)
+        createLogFileWithSize(named: "mcp-server-2.log", modifiedDaysAgo: 1, sizeInKB: 20)
+        createLogFileWithSize(named: "config.json", modifiedDaysAgo: 1, sizeInKB: 5)  // 非ログファイル
+
+        let rotator = LogRotator(directory: tempDir, retentionDays: 7)
+        let totalSize = rotator.getTotalSize()
+
+        XCTAssertEqual(totalSize, 30 * 1024, "ログファイルのみの合計サイズ")
+    }
+
+    // MARK: - LogRotationConfig Total Size Tests
+
+    func testLogRotationConfigDefaultMaxTotalSize() {
+        let config = LogRotationConfig.default
+
+        XCTAssertEqual(config.maxTotalSize, 500 * 1024 * 1024, "デフォルトは500MB")
+    }
+
+    func testLogRotationConfigFromEnvironmentWithMaxTotalSize() {
+        setenv("MCP_LOG_MAX_TOTAL_SIZE_MB", "200", 1)
+        defer { unsetenv("MCP_LOG_MAX_TOTAL_SIZE_MB") }
+
+        let config = LogRotationConfig.fromEnvironment()
+
+        XCTAssertEqual(config.maxTotalSize, 200 * 1024 * 1024, "200MBに設定")
+    }
+
+    func testLogRotationConfigFromEnvironmentWithInvalidMaxTotalSize() {
+        setenv("MCP_LOG_MAX_TOTAL_SIZE_MB", "invalid", 1)
+        defer { unsetenv("MCP_LOG_MAX_TOTAL_SIZE_MB") }
+
+        let config = LogRotationConfig.fromEnvironment()
+
+        XCTAssertEqual(config.maxTotalSize, 500 * 1024 * 1024, "無効値はデフォルト500MB")
+    }
+}
+
+// MARK: - SizeBasedLogRotatorTests
+
+final class SizeBasedLogRotatorTests: XCTestCase {
+
+    private var tempDir: String!
+
+    override func setUp() {
+        super.setUp()
+        tempDir = NSTemporaryDirectory() + "size_rotator_test_\(UUID().uuidString)/"
+        try? FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(atPath: tempDir)
+        super.tearDown()
+    }
+
+    // MARK: - Helper Methods
+
+    private func createFileWithSize(named fileName: String, sizeInBytes: Int) {
+        let filePath = tempDir + fileName
+        let data = Data(repeating: 0x41, count: sizeInBytes) // 'A' で埋める
+        FileManager.default.createFile(atPath: filePath, contents: data)
+    }
+
+    private func fileExists(_ fileName: String) -> Bool {
+        FileManager.default.fileExists(atPath: tempDir + fileName)
+    }
+
+    private func getFileSize(_ fileName: String) -> UInt64 {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: tempDir + fileName),
+              let size = attrs[.size] as? UInt64 else {
+            return 0
+        }
+        return size
+    }
+
+    // MARK: - Rotation Tests
+
+    func testRotateIfNeededDoesNothingWhenUnderLimit() {
+        // 1KBのファイル作成（制限: 10KB）
+        createFileWithSize(named: "test.log", sizeInBytes: 1024)
+
+        let rotator = SizeBasedLogRotator(maxFileSize: 10 * 1024, maxRotations: 5)
+        let rotated = rotator.rotateIfNeeded(filePath: tempDir + "test.log")
+
+        XCTAssertFalse(rotated, "制限未満ならローテーションしない")
+        XCTAssertTrue(fileExists("test.log"), "元のファイルは残る")
+        XCTAssertFalse(fileExists("test.log.1"), "ローテーションファイルは作成されない")
+    }
+
+    func testRotateIfNeededRotatesWhenOverLimit() {
+        // 15KBのファイル作成（制限: 10KB）
+        createFileWithSize(named: "test.log", sizeInBytes: 15 * 1024)
+
+        let rotator = SizeBasedLogRotator(maxFileSize: 10 * 1024, maxRotations: 5)
+        let rotated = rotator.rotateIfNeeded(filePath: tempDir + "test.log")
+
+        XCTAssertTrue(rotated, "制限超過でローテーション実行")
+        XCTAssertFalse(fileExists("test.log"), "元のファイルはリネームされる")
+        XCTAssertTrue(fileExists("test.log.1"), "ローテーションファイルが作成される")
+        XCTAssertEqual(getFileSize("test.log.1"), UInt64(15 * 1024), "ファイルサイズは保持される")
+    }
+
+    func testRotateShiftsExistingRotatedFiles() {
+        // 既存のローテーションファイルを作成
+        createFileWithSize(named: "test.log.1", sizeInBytes: 1000)
+        createFileWithSize(named: "test.log.2", sizeInBytes: 2000)
+
+        // 新しいログファイル（制限超過）
+        createFileWithSize(named: "test.log", sizeInBytes: 15 * 1024)
+
+        let rotator = SizeBasedLogRotator(maxFileSize: 10 * 1024, maxRotations: 5)
+        let rotated = rotator.rotateIfNeeded(filePath: tempDir + "test.log")
+
+        XCTAssertTrue(rotated)
+        XCTAssertFalse(fileExists("test.log"), "元のファイルはリネーム")
+        XCTAssertTrue(fileExists("test.log.1"), "新しい.1が作成")
+        XCTAssertTrue(fileExists("test.log.2"), "旧.1は.2にシフト")
+        XCTAssertTrue(fileExists("test.log.3"), "旧.2は.3にシフト")
+
+        // サイズでシフトを確認
+        XCTAssertEqual(getFileSize("test.log.1"), UInt64(15 * 1024), "新しい.1は元のログ")
+        XCTAssertEqual(getFileSize("test.log.2"), 1000, ".2は旧.1")
+        XCTAssertEqual(getFileSize("test.log.3"), 2000, ".3は旧.2")
+    }
+
+    func testRotateDeletesOldestWhenMaxReached() {
+        // maxRotations: 3 で、既存の.1, .2, .3を作成
+        createFileWithSize(named: "test.log.1", sizeInBytes: 100)
+        createFileWithSize(named: "test.log.2", sizeInBytes: 200)
+        createFileWithSize(named: "test.log.3", sizeInBytes: 300)
+
+        // 新しいログファイル（制限超過）
+        createFileWithSize(named: "test.log", sizeInBytes: 15 * 1024)
+
+        let rotator = SizeBasedLogRotator(maxFileSize: 10 * 1024, maxRotations: 3)
+        let rotated = rotator.rotateIfNeeded(filePath: tempDir + "test.log")
+
+        XCTAssertTrue(rotated)
+        XCTAssertTrue(fileExists("test.log.1"), ".1は存在")
+        XCTAssertTrue(fileExists("test.log.2"), ".2は存在")
+        XCTAssertTrue(fileExists("test.log.3"), ".3は存在")
+        XCTAssertFalse(fileExists("test.log.4"), ".4は作成されない（max=3）")
+
+        // 古い.3は削除され、新しいチェーンになる
+        XCTAssertEqual(getFileSize("test.log.1"), UInt64(15 * 1024), ".1は元のログ")
+        XCTAssertEqual(getFileSize("test.log.2"), 100, ".2は旧.1")
+        XCTAssertEqual(getFileSize("test.log.3"), 200, ".3は旧.2（旧.3は削除）")
+    }
+
+    func testRotateIfNeededWithNonExistentFile() {
+        let rotator = SizeBasedLogRotator(maxFileSize: 10 * 1024, maxRotations: 5)
+        let rotated = rotator.rotateIfNeeded(filePath: tempDir + "nonexistent.log")
+
+        XCTAssertFalse(rotated, "存在しないファイルはローテーションしない")
+    }
+
+    // MARK: - Utility Tests
+
+    func testGetRotatedFilesReturnsExistingFiles() {
+        createFileWithSize(named: "test.log", sizeInBytes: 100)
+        createFileWithSize(named: "test.log.1", sizeInBytes: 100)
+        createFileWithSize(named: "test.log.2", sizeInBytes: 100)
+        // .3は作成しない（欠番）
+        createFileWithSize(named: "test.log.4", sizeInBytes: 100)
+
+        let rotator = SizeBasedLogRotator(maxFileSize: 10 * 1024, maxRotations: 10)
+        let files = rotator.getRotatedFiles(basePath: tempDir + "test.log")
+
+        XCTAssertEqual(files.count, 3, ".1, .2, .4が存在")
+        XCTAssertTrue(files.contains(tempDir + "test.log.1"))
+        XCTAssertTrue(files.contains(tempDir + "test.log.2"))
+        XCTAssertTrue(files.contains(tempDir + "test.log.4"))
+    }
+
+    func testGetTotalSizeIncludesAllFiles() {
+        createFileWithSize(named: "test.log", sizeInBytes: 1000)
+        createFileWithSize(named: "test.log.1", sizeInBytes: 2000)
+        createFileWithSize(named: "test.log.2", sizeInBytes: 3000)
+
+        let rotator = SizeBasedLogRotator(maxFileSize: 10 * 1024, maxRotations: 10)
+        let totalSize = rotator.getTotalSize(basePath: tempDir + "test.log")
+
+        XCTAssertEqual(totalSize, 6000, "合計サイズは6000バイト")
+    }
+
+    // MARK: - Default Values Tests
+
+    func testDefaultMaxFileSize() {
+        XCTAssertEqual(SizeBasedLogRotator.defaultMaxFileSize, 50 * 1024 * 1024, "デフォルトは50MB")
+    }
+
+    func testDefaultMaxRotations() {
+        XCTAssertEqual(SizeBasedLogRotator.defaultMaxRotations, 10, "デフォルトは10ファイル")
+    }
+
+    // MARK: - LogRotationConfig Size Tests
+
+    func testLogRotationConfigDefaultSizeValues() {
+        let config = LogRotationConfig.default
+
+        XCTAssertEqual(config.maxFileSize, 50 * 1024 * 1024, "デフォルトは50MB")
+        XCTAssertEqual(config.maxRotations, 10, "デフォルトは10ファイル")
+    }
+
+    func testLogRotationConfigFromEnvironmentWithSizeValue() {
+        setenv("MCP_LOG_MAX_FILE_SIZE_MB", "100", 1)
+        setenv("MCP_LOG_MAX_ROTATIONS", "5", 1)
+        defer {
+            unsetenv("MCP_LOG_MAX_FILE_SIZE_MB")
+            unsetenv("MCP_LOG_MAX_ROTATIONS")
+        }
+
+        let config = LogRotationConfig.fromEnvironment()
+
+        XCTAssertEqual(config.maxFileSize, 100 * 1024 * 1024, "100MBに設定")
+        XCTAssertEqual(config.maxRotations, 5, "5ファイルに設定")
+    }
+
+    func testLogRotationConfigFromEnvironmentWithInvalidSizeValue() {
+        setenv("MCP_LOG_MAX_FILE_SIZE_MB", "invalid", 1)
+        setenv("MCP_LOG_MAX_ROTATIONS", "-1", 1)
+        defer {
+            unsetenv("MCP_LOG_MAX_FILE_SIZE_MB")
+            unsetenv("MCP_LOG_MAX_ROTATIONS")
+        }
+
+        let config = LogRotationConfig.fromEnvironment()
+
+        XCTAssertEqual(config.maxFileSize, 50 * 1024 * 1024, "無効値はデフォルト")
+        XCTAssertEqual(config.maxRotations, 10, "無効値はデフォルト")
+    }
 }

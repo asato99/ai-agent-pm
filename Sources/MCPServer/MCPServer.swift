@@ -1806,20 +1806,17 @@ public final class MCPServer {
             ]
         }
 
-        // Debug: log all tasks found for this agent with full details
-        Self.log("[MCP] getAgentAction: Agent '\(agentId)' checking for in_progress tasks in project '\(projectId)'")
-        Self.log("[MCP] getAgentAction: Found \(tasks.count) total assigned task(s)")
-        for task in tasks {
-            let matchesProject = task.projectId == projId
-            let isInProgress = task.status == .inProgress
-            Self.log("[MCP] getAgentAction:   - Task '\(task.id.value)': status=\(task.status.rawValue), projectId=\(task.projectId.value), matchesProject=\(matchesProject), isInProgress=\(isInProgress)")
-        }
+        // Note: Detailed per-task logging removed to reduce log file size
+        // (was generating ~1.6M log lines/day with 50+ tasks)
 
         let inProgressTask = tasks.first { task in
             task.status == .inProgress && task.projectId == projId
         }
 
-        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': inProgressTask=\(inProgressTask?.id.value ?? "none")")
+        // Log only when there's an in-progress task (reduces log volume)
+        if let task = inProgressTask {
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': inProgressTask=\(task.id.value)")
+        }
 
         // Manager の待機状態チェック（Context.progress に基づく早期判定）
         if agent.hierarchyType == .manager, let task = inProgressTask {
@@ -1889,19 +1886,19 @@ public final class MCPServer {
 
         // Session Spawn Architecture: WorkDetectionService で仕事判定
         // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
-        Self.log("[MCP] getAgentAction: Using WorkDetectionService for work detection")
 
         // 共通ロジックで仕事の有無を判定
         let hasChatWork = try workDetectionService.hasChatWork(agentId: id, projectId: projId)
         let hasTaskWork = try checkTaskWorkWithHierarchy(agentId: id, projectId: projId, agent: agent)
         let hasWork = hasChatWork || hasTaskWork
 
-        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasChatWork=\(hasChatWork), hasTaskWork=\(hasTaskWork)")
-
         // スポーン中チェック（project_agents.spawn_started_at ベース）
         let spawnInProgress = try checkSpawnInProgress(agentId: id, projectId: projId)
 
-        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasWork=\(hasWork), spawnInProgress=\(spawnInProgress)")
+        // Log only when there's work or spawn is in progress (reduces log volume for idle polling)
+        if hasWork || spawnInProgress {
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hasChatWork=\(hasChatWork), hasTaskWork=\(hasTaskWork), spawnInProgress=\(spawnInProgress)")
+        }
 
         // 仕事があり、スポーン中でなければ start
         if hasWork && !spawnInProgress {
@@ -1929,7 +1926,11 @@ public final class MCPServer {
 
         // hold を返す
         let holdReason = spawnInProgress ? "spawn_in_progress" : "no_work"
-        Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (reason: \(holdReason))")
+        // Note: "hold (no_work)" logging removed - it's the most common case and generates excessive logs
+        // Only log when there's something notable (spawn in progress)
+        if spawnInProgress {
+            Self.log("[MCP] getAgentAction for '\(agentId)/\(projectId)': hold (reason: spawn_in_progress)")
+        }
         return [
             "action": "hold",
             "reason": holdReason
