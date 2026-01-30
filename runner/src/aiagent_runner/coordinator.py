@@ -1412,15 +1412,27 @@ def run_coordinator(config: CoordinatorConfig) -> None:
             main_task.cancel()
 
     # Install signal handlers on the event loop
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, handle_signal)
+    # Note: add_signal_handler is not supported on Windows
+    if not is_windows():
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, handle_signal)
 
     try:
         main_task = loop.create_task(run_coordinator_async(config))
         loop.run_until_complete(main_task)
     except asyncio.CancelledError:
         logger.info("Coordinator interrupted")
+    except KeyboardInterrupt:
+        # Fallback for Windows where add_signal_handler is not available
+        logger.info("Coordinator interrupted by keyboard")
+        if main_task and not main_task.done():
+            main_task.cancel()
+            try:
+                loop.run_until_complete(main_task)
+            except asyncio.CancelledError:
+                pass
     finally:
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.remove_signal_handler(sig)
+        if not is_windows():
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
         loop.close()
