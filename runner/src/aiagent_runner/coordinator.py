@@ -669,10 +669,6 @@ class Coordinator:
                     skills = profile.skills
                     logger.debug(f"Got system_prompt for {agent_id}: {len(system_prompt)} chars")
                     logger.debug(f"Got {len(skills)} skills for {agent_id}")
-                    # TEMPORARY: Skill debugging logs (remove after investigation)
-                    logger.info(f"[SKILL DEBUG] Agent {agent_id}: received {len(skills)} skills from MCP")
-                    for skill in skills:
-                        logger.info(f"[SKILL DEBUG]   - {skill.name} (dir: {skill.directory_name}, archive: {len(skill.archive_base64)} chars)")
                 except Exception as e:
                     logger.warning(f"Failed to get subordinate profile for {agent_id}: {e}")
 
@@ -696,10 +692,6 @@ class Coordinator:
                     skills = profile.skills
                     logger.debug(f"Got system_prompt for {agent_id}: {len(system_prompt)} chars")
                     logger.debug(f"Got {len(skills)} skills for {agent_id}")
-                    # TEMPORARY: Skill debugging logs (remove after investigation)
-                    logger.info(f"[SKILL DEBUG] Agent {agent_id}: received {len(skills)} skills from MCP")
-                    for skill in skills:
-                        logger.info(f"[SKILL DEBUG]   - {skill.name} (dir: {skill.directory_name}, archive: {len(skill.archive_base64)} chars)")
                 except Exception as e:
                     logger.warning(f"Failed to get subordinate profile for {agent_id}: {e}")
 
@@ -864,21 +856,15 @@ Always prefix your file paths with `{real_working_dir}/`.
 
         if not skills:
             logger.debug("No skills to write")
-            # TEMPORARY: Skill debugging log (remove after investigation)
-            logger.info(f"[SKILL DEBUG] _write_skills: no skills to write for {config_dir}")
             return
 
         # Create skills directory and extract each skill's archive
-        # TEMPORARY: Skill debugging log (remove after investigation)
-        logger.info(f"[SKILL DEBUG] _write_skills: extracting {len(skills)} skills to {skills_dir}")
         for skill in skills:
             skill_path = skills_dir / skill.directory_name
 
             try:
                 # Base64 decode -> ZIP extraction
                 archive_bytes = base64.b64decode(skill.archive_base64)
-                # TEMPORARY: Skill debugging log (remove after investigation)
-                logger.info(f"[SKILL DEBUG]   Extracting {skill.name}: archive={len(archive_bytes)} bytes")
                 with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
                     # Security: Validate paths to prevent directory traversal
                     for member in zf.namelist():
@@ -888,8 +874,6 @@ Always prefix your file paths with `{real_working_dir}/`.
                     zf.extractall(skill_path)
 
                 logger.debug(f"Extracted skill: {skill_path}")
-                # TEMPORARY: Skill debugging log (remove after investigation)
-                logger.info(f"[SKILL DEBUG]   Success: {skill_path}")
             except Exception as e:
                 logger.error(f"Failed to extract skill {skill.directory_name}: {e}")
                 # Create fallback directory with error info
