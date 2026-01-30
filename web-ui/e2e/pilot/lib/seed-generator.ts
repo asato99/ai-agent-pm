@@ -66,13 +66,14 @@ export function generateSeedSQL(
     `-- Auto-generated seed for: ${scenario.name} / ${variation.name}`,
     `-- Generated at: ${new Date().toISOString()}`,
     `--`,
-    `-- IMPORTANT: This seed creates ONLY prerequisites (agents, project).`,
+    `-- IMPORTANT: This seed creates ONLY prerequisites (agents, project, skill assignments).`,
     `-- Expected results (tasks, status changes) are NEVER seeded.`,
     ``,
     `-- Cleanup existing data`,
     `-- Note: pending_agent_purposes table was removed, using spawn_started_at in project_agents`,
     `DELETE FROM conversations WHERE project_id = '${project.id}';`,
     `DELETE FROM tasks WHERE project_id = '${project.id}';`,
+    `DELETE FROM agent_skill_assignments WHERE agent_id IN (${agentIds});`,
     `DELETE FROM agent_sessions WHERE agent_id IN (${agentIds});`,
     `DELETE FROM agent_credentials WHERE agent_id IN (${agentIds});`,
     `DELETE FROM agents WHERE id IN (${agentIds});`,
@@ -116,6 +117,22 @@ VALUES (
   lines.push(`VALUES`)
   const assignments = agents.map((a) => `    ('${project.id}', '${a.id}', datetime('now'))`)
   lines.push(assignments.join(',\n') + ';')
+
+  // スキル割り当て（オプション）
+  if (variation.skill_assignments) {
+    lines.push('')
+    lines.push(`-- Assign skills to agents`)
+    lines.push(`-- NOTE: Skills must be imported via UI before running this seed.`)
+    lines.push(`-- This references skills by name from skill_definitions table.`)
+
+    for (const [agentId, skillNames] of Object.entries(variation.skill_assignments)) {
+      for (const skillName of skillNames) {
+        lines.push(`INSERT INTO agent_skill_assignments (agent_id, skill_id, assigned_at)`)
+        lines.push(`SELECT '${agentId}', id, datetime('now')`)
+        lines.push(`FROM skill_definitions WHERE directory_name = '${skillName}';`)
+      }
+    }
+  }
 
   return lines.join('\n')
 }

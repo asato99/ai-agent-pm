@@ -91,6 +91,10 @@ export interface VariationConfig {
   credentials: {
     passkey: string
   }
+
+  // スキル割り当て（オプション）
+  // キー: エージェントID、値: スキル名の配列
+  skill_assignments?: Record<string, string[]>
 }
 
 // ============================================================================

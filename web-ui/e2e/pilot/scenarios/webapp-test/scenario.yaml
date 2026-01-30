@@ -1,0 +1,266 @@
+# Webapp Test Scenario - シナリオ定義
+#
+# webapp-testing スキルの効果を検証するシナリオ
+# localStorageの型変換バグを含むショッピングカートアプリ
+
+name: webapp-test
+description: "Webアプリテスト - スキル有無による問題発見効率の比較"
+version: "1.0"
+
+# プロジェクト設定
+project:
+  id: pilot-webapp-test
+  name: "Webアプリテスト"
+  working_directory: /tmp/pilot_webapp_test
+
+# 初期ファイル（テスト対象のWebアプリ）
+initial_files:
+  - name: index.html
+    content: |
+      <!DOCTYPE html>
+      <html lang="ja">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>ショッピングカート</title>
+        <link rel="stylesheet" href="style.css">
+      </head>
+      <body>
+        <div class="container">
+          <h1>ショッピングカート</h1>
+
+          <div class="products">
+            <h2>商品一覧</h2>
+            <div class="product" data-price="100">
+              <span class="name">りんご</span>
+              <span class="price">¥100</span>
+              <button onclick="addToCart('りんご', 100)">追加</button>
+            </div>
+            <div class="product" data-price="150">
+              <span class="name">バナナ</span>
+              <span class="price">¥150</span>
+              <button onclick="addToCart('バナナ', 150)">追加</button>
+            </div>
+            <div class="product" data-price="200">
+              <span class="name">みかん</span>
+              <span class="price">¥200</span>
+              <button onclick="addToCart('みかん', 200)">追加</button>
+            </div>
+          </div>
+
+          <div class="cart">
+            <h2>カート</h2>
+            <div id="cart-items"></div>
+            <div class="total">
+              合計: ¥<span id="total">0</span>
+            </div>
+            <button onclick="clearCart()">カートをクリア</button>
+          </div>
+        </div>
+
+        <script type="module" src="app.js"></script>
+      </body>
+      </html>
+
+  - name: style.css
+    content: |
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        background: #f5f5f5;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+
+      h1 {
+        margin-bottom: 20px;
+        color: #333;
+      }
+
+      h2 {
+        margin: 20px 0 10px;
+        color: #666;
+        font-size: 1.1em;
+      }
+
+      .product {
+        display: flex;
+        align-items: center;
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+      }
+
+      .product .name {
+        flex: 1;
+      }
+
+      .product .price {
+        margin-right: 10px;
+        color: #e74c3c;
+      }
+
+      .product button {
+        padding: 5px 15px;
+        background: #3498db;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .product button:hover {
+        background: #2980b9;
+      }
+
+      .cart {
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 2px solid #eee;
+      }
+
+      #cart-items {
+        min-height: 50px;
+      }
+
+      .cart-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        color: #666;
+      }
+
+      .total {
+        font-size: 1.5em;
+        font-weight: bold;
+        margin: 20px 0;
+        padding: 10px;
+        background: #f9f9f9;
+        border-radius: 4px;
+      }
+
+      .cart button {
+        padding: 10px 20px;
+        background: #e74c3c;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .cart button:hover {
+        background: #c0392b;
+      }
+
+  - name: data.js
+    content: |
+      // カートデータの管理
+      // localStorageを使用してブラウザに状態を保存
+
+      const STORAGE_KEY = 'shopping_cart';
+
+      /**
+       * 保存されたカートデータを読み込む
+       */
+      export function loadCart() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          return JSON.parse(saved);
+        }
+        return { items: [], total: 0 };
+      }
+
+      /**
+       * カートデータを保存する
+       */
+      export function saveCart(cart) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
+      }
+
+      /**
+       * カートをクリアする
+       */
+      export function clearCartData() {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+
+  - name: app.js
+    content: |
+      // ショッピングカート アプリケーション
+      import { loadCart, saveCart, clearCartData } from './data.js';
+
+      // カートの状態
+      let cart = loadCart();
+
+      // 画面を更新
+      function updateDisplay() {
+        const itemsContainer = document.getElementById('cart-items');
+        const totalElement = document.getElementById('total');
+
+        // カートアイテムを表示
+        itemsContainer.innerHTML = cart.items
+          .map(item => `<div class="cart-item"><span>${item.name}</span><span>¥${item.price}</span></div>`)
+          .join('');
+
+        // 合計を表示
+        totalElement.textContent = cart.total;
+      }
+
+      // 商品をカートに追加
+      window.addToCart = function(name, price) {
+        cart.items.push({ name, price });
+        cart.total = cart.total + price;
+        saveCart(cart);
+        updateDisplay();
+      };
+
+      // カートをクリア
+      window.clearCart = function() {
+        cart = { items: [], total: 0 };
+        clearCartData();
+        updateDisplay();
+      };
+
+      // 初期表示
+      updateDisplay();
+
+# 期待する成果物
+# このシナリオでは成果物ではなく、問題発見の報告を評価する
+expected_artifacts: []
+
+# タイムアウト設定（秒）
+timeouts:
+  task_creation: 300      # タスク作成待ち
+  task_completion: 900    # テスト完了待ち（15分）
+
+# 初期アクション
+initial_action:
+  type: chat
+  from: owner-webapp-test
+  to: worker-tester
+  message: |
+    作業ディレクトリにあるショッピングカートアプリケーションのテストを実施してください。
+
+    アプリの概要:
+    - 商品を追加すると合計金額が計算される
+    - カートの状態はブラウザに保存される
+
+    確認観点:
+    - 商品追加機能が正しく動作するか
+    - 合計金額の計算が正しいか
+    - ページリロード後も正しく動作するか
+
+    問題を発見した場合は、再現手順と原因を報告してください。
+    テスト完了後、タスクを完了にしてください。
