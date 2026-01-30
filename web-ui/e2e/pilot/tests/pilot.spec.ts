@@ -212,7 +212,7 @@ test.describe(`Pilot Test: ${SCENARIO} / ${VARIATION}`, () => {
 
     // プロジェクトが表示されることを確認
     const projectName = scenarioConfig.project.name
-    await expect(page.getByText(projectName)).toBeVisible()
+    await expect(page.getByRole('heading', { name: projectName })).toBeVisible()
 
     recorder.recordEvent('prerequisites_verified', {
       owner: owner.id,

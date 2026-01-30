@@ -315,6 +315,18 @@ class MCPClient:
         # Parse MCP protocol response format
         # MCP returns: {"result": {"content": [{"type": "text", "text": "JSON"}]}}
         result = data.get("result", {})
+
+        # Check for isError flag in MCP result (tool-level errors)
+        # MCPServer returns: {"content": [...], "isError": true} for authorization/tool errors
+        if result.get("isError", False):
+            content = result.get("content", [])
+            if content and isinstance(content, list) and len(content) > 0:
+                first_content = content[0]
+                if isinstance(first_content, dict) and first_content.get("type") == "text":
+                    error_text = first_content.get("text", "Unknown tool error")
+                    raise MCPError(error_text)
+            raise MCPError("Tool returned error with no message")
+
         content = result.get("content", [])
         if content and isinstance(content, list) and len(content) > 0:
             first_content = content[0]

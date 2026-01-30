@@ -9,7 +9,18 @@ import * as path from 'path'
 import * as crypto from 'crypto'
 import * as yaml from 'js-yaml'
 import { fileURLToPath } from 'url'
+import AdmZip from 'adm-zip'
 import { ScenarioConfig, VariationConfig, AgentConfig } from './types.js'
+
+// パイロットスキルディレクトリ
+const SKILLS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills')
+
+interface SkillInfo {
+  name: string
+  description: string
+  directoryName: string
+  archiveHex: string
+}
 
 /**
  * パスキーのハッシュを計算
@@ -17,6 +28,87 @@ import { ScenarioConfig, VariationConfig, AgentConfig } from './types.js'
  */
 function hashPasskey(passkey: string, salt: string): string {
   return crypto.createHash('sha256').update(passkey + salt).digest('hex')
+}
+
+/**
+ * SKILL.mdのフロントマターをパース
+ */
+function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/)
+  if (!frontmatterMatch) {
+    return {}
+  }
+
+  const frontmatter = frontmatterMatch[1]
+  const result: { name?: string; description?: string } = {}
+
+  for (const line of frontmatter.split('\n')) {
+    const [key, ...valueParts] = line.split(':')
+    const value = valueParts.join(':').trim()
+    if (key.trim() === 'name') {
+      result.name = value
+    } else if (key.trim() === 'description') {
+      result.description = value
+    }
+  }
+
+  return result
+}
+
+/**
+ * スキルZIPファイルを読み込んでスキル情報を抽出
+ */
+function loadSkillFromZip(zipPath: string): SkillInfo | null {
+  try {
+    const zip = new AdmZip(zipPath)
+    const zipEntries = zip.getEntries()
+
+    // SKILL.mdを探す（ルートまたは1階層下）
+    let skillMdEntry = zipEntries.find(e => e.entryName === 'SKILL.md')
+    if (!skillMdEntry) {
+      skillMdEntry = zipEntries.find(e => e.entryName.endsWith('/SKILL.md') && e.entryName.split('/').length === 2)
+    }
+
+    if (!skillMdEntry) {
+      console.error(`SKILL.md not found in ${zipPath}`)
+      return null
+    }
+
+    const skillMdContent = skillMdEntry.getData().toString('utf8')
+    const frontmatter = parseSkillFrontmatter(skillMdContent)
+
+    // ディレクトリ名はZIPファイル名から取得
+    const directoryName = path.basename(zipPath, '.zip')
+
+    // ZIPファイル全体を16進数文字列に変換
+    const archiveData = fs.readFileSync(zipPath)
+    const archiveHex = archiveData.toString('hex')
+
+    return {
+      name: frontmatter.name || directoryName,
+      description: frontmatter.description || '',
+      directoryName,
+      archiveHex,
+    }
+  } catch (error) {
+    console.error(`Failed to load skill from ${zipPath}:`, error)
+    return null
+  }
+}
+
+/**
+ * バリエーションで参照されているスキルを収集
+ */
+function collectRequiredSkills(variation: VariationConfig): Set<string> {
+  const skills = new Set<string>()
+  if (variation.skill_assignments) {
+    for (const skillNames of Object.values(variation.skill_assignments)) {
+      for (const skillName of skillNames) {
+        skills.add(skillName)
+      }
+    }
+  }
+  return skills
 }
 
 /**
@@ -51,6 +143,9 @@ function generateCredentialInsert(agentId: string, passkey: string): string {
 VALUES ('${credId}', '${agentId}', '${hash}', '${salt}', '${passkey}', datetime('now'));`
 }
 
+// Coordinator token for pilot tests - must match run-pilot.sh
+const PILOT_COORDINATOR_TOKEN = 'test_coordinator_token_pilot'
+
 /**
  * シナリオとバリエーションからseed SQLを生成
  */
@@ -79,6 +174,12 @@ export function generateSeedSQL(
     `DELETE FROM agents WHERE id IN (${agentIds});`,
     `DELETE FROM project_agents WHERE project_id = '${project.id}';`,
     `DELETE FROM projects WHERE id = '${project.id}';`,
+    ``,
+    `-- Set coordinator token for pilot test authentication`,
+    `-- This ensures get_subordinate_profile and other coordinator-only tools work correctly`,
+    `-- Use INSERT OR REPLACE to handle both fresh DB and existing DB cases`,
+    `INSERT OR REPLACE INTO app_settings (id, coordinator_token, created_at, updated_at, pending_purpose_ttl_seconds, allow_remote_access)`,
+    `VALUES ('app_settings', '${PILOT_COORDINATOR_TOKEN}', datetime('now'), datetime('now'), 300, 0);`,
     ``,
     `-- Insert agents`,
   ]
@@ -118,13 +219,43 @@ VALUES (
   const assignments = agents.map((a) => `    ('${project.id}', '${a.id}', datetime('now'))`)
   lines.push(assignments.join(',\n') + ';')
 
-  // スキル割り当て（オプション）
+  // スキル定義と割り当て（オプション）
   if (variation.skill_assignments) {
-    lines.push('')
-    lines.push(`-- Assign skills to agents`)
-    lines.push(`-- NOTE: Skills must be imported via UI before running this seed.`)
-    lines.push(`-- This references skills by name from skill_definitions table.`)
+    const requiredSkills = collectRequiredSkills(variation)
+    const loadedSkills = new Map<string, SkillInfo>()
 
+    // 必要なスキルをZIPから読み込み
+    for (const skillName of requiredSkills) {
+      const zipPath = path.join(SKILLS_DIR, `${skillName}.zip`)
+      if (fs.existsSync(zipPath)) {
+        const skillInfo = loadSkillFromZip(zipPath)
+        if (skillInfo) {
+          loadedSkills.set(skillName, skillInfo)
+        }
+      } else {
+        console.error(`Skill ZIP not found: ${zipPath}`)
+      }
+    }
+
+    // スキル定義を挿入
+    if (loadedSkills.size > 0) {
+      lines.push('')
+      lines.push(`-- Insert skill definitions`)
+
+      for (const [skillName, skill] of loadedSkills) {
+        const skillId = `skill-pilot-${skillName}`
+        const escapedName = skill.name.replace(/'/g, "''")
+        const escapedDesc = skill.description.replace(/'/g, "''")
+
+        lines.push(`DELETE FROM skill_definitions WHERE directory_name = '${skill.directoryName}';`)
+        lines.push(`INSERT INTO skill_definitions (id, name, description, directory_name, archive_data, created_at, updated_at)`)
+        lines.push(`VALUES ('${skillId}', '${escapedName}', '${escapedDesc}', '${skill.directoryName}', X'${skill.archiveHex}', datetime('now'), datetime('now'));`)
+        lines.push('')
+      }
+    }
+
+    // スキル割り当て
+    lines.push(`-- Assign skills to agents`)
     for (const [agentId, skillNames] of Object.entries(variation.skill_assignments)) {
       for (const skillName of skillNames) {
         lines.push(`INSERT INTO agent_skill_assignments (agent_id, skill_id, assigned_at)`)
