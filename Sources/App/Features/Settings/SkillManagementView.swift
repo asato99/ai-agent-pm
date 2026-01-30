@@ -221,6 +221,102 @@ struct SkillRowView: View {
     }
 }
 
+// MARK: - FileTreeItem
+
+/// ファイルツリーのフラット表現（表示用）
+struct FileTreeItem: Identifiable {
+    let id: String          // フルパス（ファイル）またはディレクトリパス
+    let name: String        // 表示名
+    let depth: Int          // インデントレベル
+    let isDirectory: Bool
+    let isFile: Bool        // ファイルの場合true
+
+    /// フラットなパス配列からツリー表示用リストを構築
+    static func buildFlatTree(from paths: [String], expandedDirs: Set<String>) -> [FileTreeItem] {
+        // ディレクトリとファイルを収集
+        var directories: Set<String> = []
+        var filesByDir: [String: [String]] = [:]  // ディレクトリパス -> ファイル名リスト
+
+        for path in paths {
+            let components = path.split(separator: "/").map(String.init)
+            if components.count == 1 {
+                // ルートレベルのファイル
+                filesByDir["", default: []].append(path)
+            } else {
+                // ディレクトリ内のファイル
+                var dirPath = ""
+                for i in 0..<(components.count - 1) {
+                    if !dirPath.isEmpty { dirPath += "/" }
+                    dirPath += components[i]
+                    directories.insert(dirPath)
+                }
+                filesByDir[dirPath, default: []].append(path)
+            }
+        }
+
+        var result: [FileTreeItem] = []
+
+        // ルートレベルのファイル（SKILL.mdを先頭に）
+        let rootFiles = filesByDir[""] ?? []
+        let sortedRootFiles = rootFiles.sorted { lhs, rhs in
+            if lhs == "SKILL.md" { return true }
+            if rhs == "SKILL.md" { return false }
+            return lhs < rhs
+        }
+        for file in sortedRootFiles {
+            result.append(FileTreeItem(id: file, name: file, depth: 0, isDirectory: false, isFile: true))
+        }
+
+        // ディレクトリをソートして処理
+        let sortedDirs = directories.sorted()
+        for dir in sortedDirs {
+            let components = dir.split(separator: "/").map(String.init)
+            let depth = components.count - 1
+
+            // 親ディレクトリが展開されているかチェック
+            var parentExpanded = true
+            if depth > 0 {
+                var parentPath = ""
+                for i in 0..<(components.count - 1) {
+                    if !parentPath.isEmpty { parentPath += "/" }
+                    parentPath += components[i]
+                    if !expandedDirs.contains(parentPath) {
+                        parentExpanded = false
+                        break
+                    }
+                }
+            }
+
+            if parentExpanded {
+                result.append(FileTreeItem(
+                    id: dir,
+                    name: components.last ?? dir,
+                    depth: depth,
+                    isDirectory: true,
+                    isFile: false
+                ))
+
+                // このディレクトリ内のファイルを追加（展開されている場合のみ）
+                if expandedDirs.contains(dir) {
+                    let filesInDir = filesByDir[dir] ?? []
+                    for file in filesInDir.sorted() {
+                        let fileName = file.split(separator: "/").last.map(String.init) ?? file
+                        result.append(FileTreeItem(
+                            id: file,
+                            name: fileName,
+                            depth: depth + 1,
+                            isDirectory: false,
+                            isFile: true
+                        ))
+                    }
+                }
+            }
+        }
+
+        return result
+    }
+}
+
 // MARK: - SkillEditorView
 
 struct SkillEditorView: View {
@@ -237,8 +333,10 @@ struct SkillEditorView: View {
 
     // ファイル管理
     @State private var files: [String: String] = [:]
+    @State private var originalFiles: [String: String] = [:]  // 最終保存時の状態
     @State private var selectedFile: String? = nil
     @State private var binaryFiles: Set<String> = []
+    @State private var deletedFiles: [(path: String, content: String)] = []  // 削除されたファイル
 
     // UI状態
     @State private var isSaving = false
@@ -248,6 +346,7 @@ struct SkillEditorView: View {
     @State private var showDeleteConfirmation = false
     @State private var showImportPicker = false
     @State private var showExportPicker = false
+    @State private var expandedDirectories: Set<String> = []
 
     private var isEditing: Bool { skill != nil }
 
@@ -275,6 +374,10 @@ struct SkillEditorView: View {
             return lhs < rhs
         }
         return paths
+    }
+
+    private var fileTreeItems: [FileTreeItem] {
+        FileTreeItem.buildFlatTree(from: sortedFilePaths, expandedDirs: expandedDirectories)
     }
 
     private var canDeleteSelectedFile: Bool {
@@ -421,8 +524,42 @@ struct SkillEditorView: View {
             .padding(.vertical, 8)
 
             // ファイルツリー
-            List(sortedFilePaths, id: \.self, selection: $selectedFile) { path in
-                fileRowView(path: path)
+            List(selection: $selectedFile) {
+                ForEach(fileTreeItems) { item in
+                    fileTreeItemView(item: item)
+                }
+
+                // 削除されたファイル（undo可能）
+                if !deletedFiles.isEmpty {
+                    Section {
+                        ForEach(Array(deletedFiles.enumerated()), id: \.offset) { index, deleted in
+                            HStack {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.red.opacity(0.6))
+                                    .frame(width: 16)
+                                Text(deleted.path)
+                                    .strikethrough()
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer()
+                                Button {
+                                    restoreDeletedFile(index)
+                                } label: {
+                                    Image(systemName: "arrow.uturn.backward")
+                                        .font(.caption)
+                                        .foregroundStyle(.blue)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Restore \(deleted.path)")
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    } header: {
+                        Text("Deleted")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .listStyle(.plain)
 
@@ -450,31 +587,105 @@ struct SkillEditorView: View {
         }
     }
 
-    private func fileRowView(path: String) -> some View {
-        HStack {
-            Image(systemName: fileIcon(for: path))
-                .foregroundStyle(fileIconColor(for: path))
-                .frame(width: 16)
-
-            Text(path)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            Spacer()
-
-            if binaryFiles.contains(path) {
-                Text("binary")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
-                    .background(.quaternary)
-                    .cornerRadius(2)
+    private func fileTreeItemView(item: FileTreeItem) -> some View {
+        HStack(spacing: 4) {
+            // インデント
+            if item.depth > 0 {
+                Spacer()
+                    .frame(width: CGFloat(item.depth) * 16)
             }
 
-            if path == "SKILL.md" {
-                Image(systemName: "lock.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            if item.isDirectory {
+                // ディレクトリ行
+                Button {
+                    if expandedDirectories.contains(item.id) {
+                        expandedDirectories.remove(item.id)
+                    } else {
+                        expandedDirectories.insert(item.id)
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: expandedDirectories.contains(item.id) ? "chevron.down" : "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 12)
+                        Image(systemName: expandedDirectories.contains(item.id) ? "folder.fill" : "folder")
+                            .foregroundStyle(.blue)
+                            .frame(width: 16)
+                        Text(item.name)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+
+                // ディレクトリに+ボタン
+                Button {
+                    newFileName = item.id + "/"
+                    showNewFileDialog = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Add file to \(item.name)")
+            } else {
+                // ファイル行
+                HStack {
+                    Spacer()
+                        .frame(width: 12)  // chevronの分のスペース
+                    Image(systemName: fileIcon(for: item.id))
+                        .foregroundStyle(fileIconColor(for: item.id))
+                        .frame(width: 16)
+
+                    Text(item.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    Spacer()
+
+                    if binaryFiles.contains(item.id) {
+                        Text("binary")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .background(.quaternary)
+                            .cornerRadius(2)
+                    }
+
+                    // 変更されたファイルにundoボタン
+                    if isFileModified(item.id) {
+                        Button {
+                            revertFile(item.id)
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Revert to saved state")
+                    }
+
+                    if item.id == "SKILL.md" {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        // ファイルに-ボタン（SKILL.md以外）
+                        Button {
+                            selectedFile = item.id
+                            showDeleteConfirmation = true
+                        } label: {
+                            Image(systemName: "minus")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Delete \(item.name)")
+                    }
+                }
+                .tag(item.id)
             }
         }
         .padding(.vertical, 2)
@@ -578,13 +789,19 @@ struct SkillEditorView: View {
     }
 
     private var newFileDialogView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             Text("New File")
                 .font(.headline)
 
-            TextField("File name (e.g., scripts/helper.py)", text: $newFileName)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 300)
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("File name", text: $newFileName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 300)
+
+                Text("Example: scripts/helper.py, templates/output.json")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack {
                 Button("Cancel") {
@@ -637,6 +854,7 @@ struct SkillEditorView: View {
 
             // アーカイブから全ファイルを抽出
             files = container.skillArchiveService.extractAllFiles(from: skill.archiveData)
+            originalFiles = files  // 元の状態を保存
 
             // ファイル一覧を取得してバイナリファイルを特定
             if let entries = try? container.skillArchiveService.listFiles(archiveData: skill.archiveData) {
@@ -695,11 +913,38 @@ struct SkillEditorView: View {
     private func deleteSelectedFile() {
         guard let selected = selectedFile, selected != "SKILL.md" else { return }
 
+        // 削除前に保存（undo用）
+        if let content = files[selected] {
+            deletedFiles.append((path: selected, content: content))
+        }
+
         files.removeValue(forKey: selected)
         binaryFiles.remove(selected)
 
         // 別のファイルを選択
         selectedFile = sortedFilePaths.first
+    }
+
+    private func isFileModified(_ path: String) -> Bool {
+        // 元のファイルが存在し、内容が変更された場合のみ
+        guard let original = originalFiles[path], let current = files[path] else {
+            return false
+        }
+        return original != current
+    }
+
+    private func revertFile(_ path: String) {
+        // 元の内容に戻す（削除はしない）
+        if let original = originalFiles[path] {
+            files[path] = original
+        }
+    }
+
+    private func restoreDeletedFile(_ index: Int) {
+        guard index < deletedFiles.count else { return }
+        let deleted = deletedFiles.remove(at: index)
+        files[deleted.path] = deleted.content
+        selectedFile = deleted.path
     }
 
     private func handleImportResult(_ result: Result<[URL], Error>) {
