@@ -859,24 +859,29 @@ Always prefix your file paths with `{real_working_dir}/`.
             return
 
         # Create skills directory and extract each skill's archive
+        # Note: ZIP files already contain the root directory (e.g., webapp-testing/),
+        # so we extract directly to skills_dir, not to a subdirectory.
         for skill in skills:
-            skill_path = skills_dir / skill.directory_name
-
             try:
                 # Base64 decode -> ZIP extraction
                 archive_bytes = base64.b64decode(skill.archive_base64)
                 with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
                     # Security: Validate paths to prevent directory traversal
+                    safe_members = []
                     for member in zf.namelist():
                         if member.startswith('/') or '..' in member:
                             logger.warning(f"Skipping unsafe path in skill archive: {member}")
                             continue
-                    zf.extractall(skill_path)
+                        safe_members.append(member)
+                    # Extract directly to skills_dir - ZIP already contains the directory structure
+                    zf.extractall(skills_dir, members=safe_members)
 
+                skill_path = skills_dir / skill.directory_name
                 logger.debug(f"Extracted skill: {skill_path}")
             except Exception as e:
                 logger.error(f"Failed to extract skill {skill.directory_name}: {e}")
                 # Create fallback directory with error info
+                skill_path = skills_dir / skill.directory_name
                 skill_path.mkdir(parents=True, exist_ok=True)
                 error_file = skill_path / "EXTRACTION_ERROR.txt"
                 error_file.write_text(f"Failed to extract skill archive: {e}")
