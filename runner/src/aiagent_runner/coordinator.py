@@ -198,8 +198,8 @@ class Coordinator:
                     # Normal timeout, continue polling
                     pass
 
-    def stop(self) -> None:
-        """Stop the Coordinator loop."""
+    async def stop(self) -> None:
+        """Stop the Coordinator loop and clean up sessions."""
         logger.info("Stopping Coordinator")
         self._running = False
 
@@ -207,13 +207,32 @@ class Coordinator:
         if self._shutdown_event:
             self._shutdown_event.set()
 
-        # Terminate all running instances
+        # Terminate all running instances and invalidate their sessions
         for key, info in list(self._instances.items()):
             logger.info(f"Terminating {key.agent_id}/{key.project_id}")
             try:
                 info.process.terminate()
+                # Wait for process to finish
+                try:
+                    info.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Instance {key.agent_id}/{key.project_id} did not terminate, killing")
+                    info.process.kill()
             except Exception as e:
                 logger.warning(f"Failed to terminate {key}: {e}")
+
+            # Invalidate session so next coordinator can start fresh
+            try:
+                success = await self.mcp_client.invalidate_session(
+                    agent_id=key.agent_id,
+                    project_id=key.project_id
+                )
+                if success:
+                    logger.info(f"Invalidated session for {key.agent_id}/{key.project_id}")
+                else:
+                    logger.warning(f"Failed to invalidate session for {key.agent_id}/{key.project_id}")
+            except MCPError as e:
+                logger.error(f"Error invalidating session for {key.agent_id}/{key.project_id}: {e}")
 
     async def _run_once(self) -> None:
         """Run one iteration of the polling loop."""
@@ -1389,7 +1408,7 @@ async def run_coordinator_async(config: CoordinatorConfig) -> None:
         logger.info("Coordinator cancelled")
     finally:
         if coordinator:
-            coordinator.stop()
+            await coordinator.stop()
         lock.release()
         logger.info("Released coordinator lock")
 
