@@ -23,6 +23,7 @@ final class ChatSessionTimeoutTests: XCTestCase {
 
     let testAgentId = AgentID(value: "agt_chat_timeout_test")
     let testProjectId = ProjectID(value: "prj_chat_timeout_test")
+    let targetAgentId = AgentID(value: "agt_chat_timeout_target")  // send_message のターゲット
     var tempDirectory: URL!
 
     override func setUpWithError() throws {
@@ -88,10 +89,25 @@ final class ChatSessionTimeoutTests: XCTestCase {
         )
         try agentRepository.save(agent)
 
-        // Assign agent to project
+        // Create target agent for send_message tests (human type to avoid AI-to-AI conversation requirement)
+        let targetAgent = Agent(
+            id: targetAgentId,
+            name: "Chat Timeout Target Agent",
+            role: "Target agent",
+            type: .human,
+            hierarchyType: .worker,
+            systemPrompt: "Target prompt"
+        )
+        try agentRepository.save(targetAgent)
+
+        // Assign agents to project
         _ = try projectAgentAssignmentRepository.assign(
             projectId: testProjectId,
             agentId: testAgentId
+        )
+        _ = try projectAgentAssignmentRepository.assign(
+            projectId: testProjectId,
+            agentId: targetAgentId
         )
 
         // Create credential
@@ -230,11 +246,12 @@ final class ChatSessionTimeoutTests: XCTestCase {
         }
         let lastActivityBefore = sessionBefore.lastActivityAt
 
-        // respondChat を呼び出し
+        // sendMessage を呼び出し
         let result = try mcpServer.executeTool(
-            name: "respond_chat",
+            name: "send_message",
             arguments: [
                 "session_token": token,
+                "target_agent_id": targetAgentId.value,
                 "content": "Test response message"
             ],
             caller: .worker(agentId: testAgentId, session: sessionBefore)
@@ -242,14 +259,14 @@ final class ChatSessionTimeoutTests: XCTestCase {
 
         guard let dict = result as? [String: Any],
               let success = dict["success"] as? Bool else {
-            XCTFail("respond_chat should return success")
+            XCTFail("send_message should return success")
             return
         }
-        XCTAssertTrue(success, "respond_chat should succeed")
+        XCTAssertTrue(success, "send_message should succeed")
 
         // 更新後の lastActivityAt を確認
         guard let sessionAfter = try agentSessionRepository.findByToken(token) else {
-            XCTFail("Session not found after respond_chat")
+            XCTFail("Session not found after send_message")
             return
         }
 
@@ -257,7 +274,7 @@ final class ChatSessionTimeoutTests: XCTestCase {
         XCTAssertGreaterThan(
             sessionAfter.lastActivityAt,
             lastActivityBefore,
-            "lastActivityAt should be updated after respond_chat"
+            "lastActivityAt should be updated after send_message"
         )
 
         // 更新後の時刻が現在時刻に近いことを確認（1秒以内）
@@ -265,10 +282,10 @@ final class ChatSessionTimeoutTests: XCTestCase {
         XCTAssertLessThan(timeDiff, 1.0, "lastActivityAt should be close to now")
     }
 
-    // MARK: - Test 4: respondChat 後のタイムアウトリセット
+    // MARK: - Test 4: sendMessage 後のタイムアウトリセット
 
-    /// respondChat 呼び出し後、タイムアウトウィンドウがリセットされることを確認
-    func testRespondChatResetsTimeoutWindow() throws {
+    /// sendMessage 呼び出し後、タイムアウトウィンドウがリセットされることを確認
+    func testSendMessageResetsTimeoutWindow() throws {
         let token = try createChatSession()
 
         // lastActivityAt を9分前に設定（タイムアウト間近）
@@ -283,11 +300,12 @@ final class ChatSessionTimeoutTests: XCTestCase {
         session.modelVerified = true
         try agentSessionRepository.save(session)
 
-        // respondChat を呼び出し（タイムアウトリセット）
+        // sendMessage を呼び出し（タイムアウトリセット）
         _ = try mcpServer.executeTool(
-            name: "respond_chat",
+            name: "send_message",
             arguments: [
                 "session_token": token,
+                "target_agent_id": targetAgentId.value,
                 "content": "Test response to reset timeout"
             ],
             caller: .worker(agentId: testAgentId, session: session)
@@ -313,6 +331,6 @@ final class ChatSessionTimeoutTests: XCTestCase {
 
         // タイムアウトリセットされているので logout ではない
         let action = dict["action"] as? String ?? ""
-        XCTAssertNotEqual(action, "logout", "Should NOT timeout after respond_chat resets the timer")
+        XCTAssertNotEqual(action, "logout", "Should NOT timeout after send_message resets the timer")
     }
 }

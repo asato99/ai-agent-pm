@@ -202,7 +202,6 @@ final class CommunicationToolAuthorizationTests: XCTestCase {
         XCTAssertTrue(chatOnlyTools.contains("end_conversation"))
         XCTAssertTrue(chatOnlyTools.contains("send_message"))
         XCTAssertTrue(chatOnlyTools.contains("get_pending_messages"))
-        XCTAssertTrue(chatOnlyTools.contains("respond_chat"))
     }
 }
 

@@ -118,7 +118,6 @@ struct ToolAuthorization {
         // 参照: docs/design/CHAT_FEATURE.md
         // 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
         "get_pending_messages": .chatOnly,
-        "respond_chat": .chatOnly,
 
         // メッセージ送信（チャットセッション専用）
         // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md

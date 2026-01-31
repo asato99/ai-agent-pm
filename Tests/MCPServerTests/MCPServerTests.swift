@@ -535,13 +535,14 @@ final class MCPServerTests: XCTestCase {
         // Manager-only: 5 (list_subordinates, get_subordinate_profile, assign_task, approve_task_request, reject_task_request)
         // Task-only: 7 (create_task, create_tasks_batch, report_completed, update_task_status, report_execution_start, report_execution_complete, delegate_to_chat_session)
         // Authenticated (Manager + Worker): 11 (logout, report_model, get_my_profile, get_my_task, get_my_task_progress, get_notifications, get_next_action, get_project, list_tasks, get_task, request_task)
-        // Chat-only: 6 (get_pending_messages, respond_chat, send_message, start_conversation, end_conversation, report_delegation_completed)
+        // Chat-only: 5 (get_pending_messages, send_message, start_conversation, end_conversation, report_delegation_completed)
         // 注: list_agents, get_agent_profile, list_projects は削除済み
         // 注: get_my_tasks, get_pending_tasks はget_my_taskに統合済み
         // 注: start_conversation, end_conversation, send_message はchatOnlyに変更（タスク/チャット分離）
         // 注: request_task, approve_task_request, reject_task_request はタスク依頼機能用
         // 注: delegate_to_chat_session（taskOnly）, report_delegation_completed（chatOnly）はタスク/チャット分離用
-        XCTAssertEqual(tools.count, 38, "Should have 38 tools defined")
+        // 注: respond_chat は削除（send_message に統合）
+        XCTAssertEqual(tools.count, 37, "Should have 37 tools defined")
     }
 }
 
@@ -905,7 +906,7 @@ final class ToolAuthorizationTests: XCTestCase {
     /// 参照: docs/design/TOOL_AUTHORIZATION_ENHANCEMENT.md
     func testChatOnlyToolPermissions() {
         XCTAssertEqual(ToolAuthorization.permissions["get_pending_messages"], .chatOnly)
-        XCTAssertEqual(ToolAuthorization.permissions["respond_chat"], .chatOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["send_message"], .chatOnly)
     }
 
     /// ヘルプツールの権限確認（未認証でも利用可能）
@@ -964,11 +965,11 @@ final class ToolAuthorizationTests: XCTestCase {
 
         // Worker with chat session can access chat tools
         XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "get_pending_messages", caller: workerChatCaller))
-        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "respond_chat", caller: workerChatCaller))
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "send_message", caller: workerChatCaller))
 
         // Manager with chat session can also access chat tools
         XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "get_pending_messages", caller: managerChatCaller))
-        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "respond_chat", caller: managerChatCaller))
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "send_message", caller: managerChatCaller))
     }
 
     /// chatOnlyツールはtaskセッションでは拒否される
@@ -989,12 +990,12 @@ final class ToolAuthorizationTests: XCTestCase {
             XCTAssertEqual(currentPurpose, .task)
         }
 
-        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "respond_chat", caller: workerTaskCaller)) { error in
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "send_message", caller: workerTaskCaller)) { error in
             guard case ToolAuthorizationError.chatSessionRequired(let tool, let currentPurpose) = error else {
                 XCTFail("Expected chatSessionRequired error, got \(error)")
                 return
             }
-            XCTAssertEqual(tool, "respond_chat")
+            XCTAssertEqual(tool, "send_message")
             XCTAssertEqual(currentPurpose, .task)
         }
     }
@@ -1034,7 +1035,7 @@ final class ToolAuthorizationTests: XCTestCase {
         // Chat-only tools (Phase: Tool Authorization Enhancement)
         let chatTools = ToolAuthorization.tools(for: .chatOnly)
         XCTAssertTrue(chatTools.contains("get_pending_messages"))
-        XCTAssertTrue(chatTools.contains("respond_chat"))
+        XCTAssertTrue(chatTools.contains("send_message"))
 
         // Unauthenticated tools
         let unauthenticatedTools = ToolAuthorization.tools(for: .unauthenticated)
@@ -1170,7 +1171,7 @@ final class HelpToolTests: XCTestCase {
 
         // chatOnlyツールは含まれない
         XCTAssertFalse(toolNames.contains("get_pending_messages"))
-        XCTAssertFalse(toolNames.contains("respond_chat"))
+        XCTAssertFalse(toolNames.contains("send_message"))
 
         // Coordinator専用ツールは含まれない
         XCTAssertFalse(toolNames.contains("health_check"))
@@ -1205,7 +1206,7 @@ final class HelpToolTests: XCTestCase {
 
         // chatOnlyツールが含まれる
         XCTAssertTrue(toolNames.contains("get_pending_messages"))
-        XCTAssertTrue(toolNames.contains("respond_chat"))
+        XCTAssertTrue(toolNames.contains("send_message"))
     }
 
     /// Coordinatorでhelpを呼び出すと、Coordinator専用ツールも含まれる
@@ -2513,29 +2514,6 @@ final class ChatToolsTests: XCTestCase {
         XCTAssertTrue(description.contains("pending_messages"), "Description should mention pending_messages")
         XCTAssertTrue(description.contains("total_history_count"), "Description should mention total_history_count")
         XCTAssertTrue(description.contains("context_truncated"), "Description should mention context_truncated")
-    }
-
-    /// respond_chat ツールが定義されていることを確認
-    func testRespondChatToolDefinition() {
-        let tool = ToolDefinitions.respondChat
-
-        XCTAssertEqual(tool["name"] as? String, "respond_chat")
-        XCTAssertNotNil(tool["description"])
-
-        if let schema = tool["inputSchema"] as? [String: Any] {
-            XCTAssertEqual(schema["type"] as? String, "object")
-            let required = schema["required"] as? [String] ?? []
-            XCTAssertTrue(required.contains("session_token"), "respond_chat should require session_token")
-            XCTAssertTrue(required.contains("content"), "respond_chat should require content")
-        }
-    }
-
-    /// respond_chat ツールが全ツール一覧に含まれることを確認
-    func testRespondChatToolInAllTools() {
-        let tools = ToolDefinitions.all()
-        let toolNames = tools.compactMap { $0["name"] as? String }
-
-        XCTAssertTrue(toolNames.contains("respond_chat"), "respond_chat should be in all tools")
     }
 }
 

@@ -41,6 +41,10 @@ public final class MCPServer {
     // AI-to-AI会話リポジトリ（UC016）
     private let conversationRepository: ConversationRepository
 
+    // チャットセッション委譲リポジトリ
+    // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+    private let chatDelegationRepository: ChatDelegationRepository
+
     // アプリ設定リポジトリ（TTL設定など）
     private let appSettingsRepository: AppSettingsRepository
 
@@ -105,6 +109,8 @@ public final class MCPServer {
         )
         // AI-to-AI会話リポジトリ
         self.conversationRepository = ConversationRepository(database: database)
+        // チャットセッション委譲リポジトリ
+        self.chatDelegationRepository = ChatDelegationRepository(database: database)
         // アプリ設定リポジトリ
         self.appSettingsRepository = AppSettingsRepository(database: database)
         // Phase 2.3: ワーキングディレクトリリポジトリ
@@ -115,10 +121,12 @@ public final class MCPServer {
         self.skillDefinitionRepository = SkillDefinitionRepository(database: database)
         self.agentSkillAssignmentRepository = AgentSkillAssignmentRepository(database: database)
         // WorkDetectionService: 共通の仕事判定ロジック
+        // chatDelegationRepositoryを渡してpending委譲の検出を有効化
         self.workDetectionService = WorkDetectionService(
             chatRepository: self.chatRepository,
             sessionRepository: self.agentSessionRepository,
-            taskRepository: self.taskRepository
+            taskRepository: self.taskRepository,
+            chatDelegationRepository: self.chatDelegationRepository
         )
         self.debugMode = ProcessInfo.processInfo.environment["MCP_DEBUG"] == "1"
 
@@ -964,16 +972,6 @@ public final class MCPServer {
             }
             return try getPendingMessages(session: session)
 
-        case "respond_chat":
-            guard let session = caller.session else {
-                throw MCPError.sessionTokenRequired
-            }
-            guard let content = arguments["content"] as? String else {
-                throw MCPError.missingArguments(["content"])
-            }
-            let targetAgentId = arguments["target_agent_id"] as? String
-            return try respondChat(session: session, content: content, targetAgentId: targetAgentId)
-
         case "send_message":
             guard let session = caller.session else {
                 throw MCPError.sessionTokenRequired
@@ -1032,6 +1030,42 @@ public final class MCPServer {
                 session: session,
                 conversationId: conversationId,
                 finalMessage: finalMessage
+            )
+
+        // ========================================
+        // チャットセッション委譲機能
+        // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+        // ========================================
+        case "delegate_to_chat_session":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let targetAgentId = arguments["target_agent_id"] as? String else {
+                throw MCPError.missingArguments(["target_agent_id"])
+            }
+            guard let purpose = arguments["purpose"] as? String else {
+                throw MCPError.missingArguments(["purpose"])
+            }
+            let context = arguments["context"] as? String
+            return try delegateToChatSession(
+                session: session,
+                targetAgentId: targetAgentId,
+                purpose: purpose,
+                context: context
+            )
+
+        case "report_delegation_completed":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let delegationId = arguments["delegation_id"] as? String else {
+                throw MCPError.missingArguments(["delegation_id"])
+            }
+            let result = arguments["result"] as? String
+            return try reportDelegationCompleted(
+                session: session,
+                delegationId: delegationId,
+                result: result
             )
 
         // ========================================
@@ -2757,6 +2791,44 @@ public final class MCPServer {
                 }
             }
 
+            // pending委譲があるかチェック（タスクセッションからの依頼）
+            // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+            let pendingDelegations = try chatDelegationRepository.findPendingByAgentId(
+                session.agentId,
+                projectId: session.projectId
+            )
+
+            if let delegation = pendingDelegations.first {
+                // pending委譲がある = 他エージェントとの会話を開始する
+                Self.log("[MCP] getNextAction: Chat session has pending delegation to \(delegation.targetAgentId.value), directing to start_conversation")
+                // 委譲をprocessingに更新
+                try chatDelegationRepository.updateStatus(delegation.id, status: .processing)
+                return [
+                    "action": "start_conversation",
+                    "instruction": """
+                        タスクセッションから他エージェントとの会話依頼があります。
+
+                        【依頼内容】
+                        対象エージェント: \(delegation.targetAgentId.value)
+                        目的: \(delegation.purpose)
+                        \(delegation.context.map { "コンテキスト: \($0)" } ?? "")
+
+                        start_conversation ツールを使用して、対象エージェントとの会話を開始してください。
+                        引数:
+                        - participant_agent_id: "\(delegation.targetAgentId.value)"
+                        - purpose: "\(delegation.purpose)"
+                        - initial_message: 目的に沿った最初のメッセージを作成してください
+
+                        会話が完了したら、report_delegation_completed ツールで結果を報告してください。
+                        """,
+                    "state": "process_delegation",
+                    "delegation_id": delegation.id.value,
+                    "target_agent_id": delegation.targetAgentId.value,
+                    "purpose": delegation.purpose,
+                    "context": delegation.context as Any
+                ]
+            }
+
             // 未読メッセージがあるか確認してからアクションを決定
             let pendingMessages = try chatRepository.findUnreadMessages(
                 projectId: session.projectId,
@@ -2798,7 +2870,7 @@ public final class MCPServer {
                         - 作業はタスクセッションで別途実行されます
 
                         【作業依頼を受けた場合】
-                        以下のような依頼は request_task でタスク登録し、respond_chat で応答してください:
+                        以下のような依頼は request_task でタスク登録し、send_message で応答してください:
                         - 「〜を実装してください」「〜を修正してください」
                         - 「〜機能を作ってください」「〜をお願いします」
                         応答例: 「ご依頼を承りました。タスクを登録しました」
@@ -2806,7 +2878,7 @@ public final class MCPServer {
                         【使用できないツール】
                         create_task, update_task_status などのタスク操作ツールはチャットセッションでは使用できません。
 
-                        単なる質問や相談への応答は respond_chat で送信してください。
+                        単なる質問や相談への応答は send_message で送信してください。
                         """,
                     "state": "chat_session"
                 ]
@@ -2841,6 +2913,7 @@ public final class MCPServer {
                     get_my_task を呼び出してタスク詳細を取得してください。
                     取得後、get_next_action を呼び出して次の指示を受けてください。
                     タスクの description を直接実行しないでください。
+                    その他の可能な操作は help ツールで確認できます。
                     """,
                 "state": "needs_task"
             ]
@@ -2940,9 +3013,9 @@ public final class MCPServer {
                         - 「〜を実装してください」「〜を追加してください」「〜を修正してください」
                         - 「〜機能を作ってください」「〜をお願いします」
                         - その他、具体的な開発作業や修正を依頼された場合
-                        タスク登録後、respond_chat で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください。
+                        タスク登録後、send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください。
 
-                        単なる質問や相談への応答は respond_chat で送信してください。
+                        単なる質問や相談への応答は send_message で送信してください。
                         他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                         その他の可能な操作は help ツールで確認できます。
                         """,
@@ -2989,7 +3062,7 @@ public final class MCPServer {
                 【待機不要】サーバー側でLong Polling待機済みです。すぐに get_next_action を呼び出してください。
 
                 【重要】作業依頼（「〜を実装してください」「〜を追加してください」など）を受けた場合は、
-                まず request_task を呼び出してタスクを登録し、respond_chat で「承知しました」と応答してください。
+                まず request_task を呼び出してタスクを登録し、send_message で「承知しました」と応答してください。
 
                 他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                 その他の可能な操作は help ツールで確認できます。
@@ -5414,9 +5487,9 @@ public final class MCPServer {
 
             【重要】メッセージが作業依頼の場合（「〜を実装してください」「〜を追加してください」など）:
             1. まず request_task を呼び出してタスクを登録してください
-            2. その後 respond_chat で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください
+            2. その後 send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください
 
-            単なる質問や相談の場合は、respond_chat で直接応答してください。
+            単なる質問や相談の場合は、send_message で直接応答してください。
             """
         }
 
@@ -5428,131 +5501,6 @@ public final class MCPServer {
             "context_truncated": result.contextTruncated,
             "instruction": instruction
         ]
-    }
-
-    /// respond_chat - チャット応答を保存
-    /// エージェントがユーザーメッセージに対する応答を保存する
-    /// Dual write: saves to both agent's and receiver's storage
-    /// - Parameters:
-    ///   - targetAgentId: 送信先エージェントID（省略時は最新未読メッセージの送信者に返信）
-    ///                    UC013のようなリレーシナリオでは、明示的に人間を指定する
-    private func respondChat(session: AgentSession, content: String, targetAgentId: String? = nil) throws -> [String: Any] {
-        Self.log("[MCP] respondChat called: agentId='\(session.agentId.value)', content length=\(content.count), targetAgentId='\(targetAgentId ?? "auto")'")
-
-        // Determine receiver
-        let receiverId: AgentID?
-        if let explicitTarget = targetAgentId {
-            // 明示的な送信先が指定された場合（リレーシナリオなど）
-            // 送信先エージェントの存在確認
-            guard let _ = try agentRepository.findById(AgentID(value: explicitTarget)) else {
-                throw MCPError.agentNotFound(explicitTarget)
-            }
-            // 同一プロジェクト内のエージェントか確認
-            let isTargetInProject = try projectAgentAssignmentRepository.isAgentAssignedToProject(
-                agentId: AgentID(value: explicitTarget),
-                projectId: session.projectId
-            )
-            guard isTargetInProject else {
-                throw MCPError.targetAgentNotInProject(targetAgentId: explicitTarget, projectId: session.projectId.value)
-            }
-            receiverId = AgentID(value: explicitTarget)
-            Self.log("[MCP] respondChat: Using explicit target agent: \(explicitTarget)")
-        } else {
-            // 送信先が未指定の場合は最新未読メッセージの送信者に返信
-            let unreadMessages = try chatRepository.findUnreadMessages(
-                projectId: session.projectId,
-                agentId: session.agentId
-            )
-            receiverId = unreadMessages.last?.senderId
-            Self.log("[MCP] respondChat: Auto-detected receiver from unread messages: \(receiverId?.value ?? "none")")
-        }
-
-        // conversationIdの解決
-        // receiverIdがAIエージェントの場合、アクティブな会話があれば自動設定
-        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
-        var resolvedConversationId: ConversationID? = nil
-        if let receiverAgentId = receiverId {
-            // 受信者がAIエージェントか確認
-            if let receiverAgent = try agentRepository.findById(receiverAgentId),
-               receiverAgent.type == .ai {
-                // 送信者と受信者間のアクティブな会話を検索
-                let activeConversations = try conversationRepository.findActiveByAgentId(
-                    session.agentId,
-                    projectId: session.projectId
-                )
-                // 両者が参加している会話を探す
-                if let activeConv = activeConversations.first(where: {
-                    $0.getPartnerId(for: session.agentId)?.value == receiverAgentId.value
-                }) {
-                    resolvedConversationId = activeConv.id
-                    Self.log("[MCP] respondChat: Auto-resolved conversation_id from active: \(activeConv.id.value)")
-                }
-            }
-        }
-
-        // エージェント応答メッセージを作成
-        let message = ChatMessage(
-            id: ChatMessageID.generate(),
-            senderId: session.agentId,
-            receiverId: receiverId,
-            content: content,
-            createdAt: Date(),
-            conversationId: resolvedConversationId
-        )
-
-        // メッセージを保存 (dual write if receiver is known)
-        if let receiverAgentId = receiverId {
-            try chatRepository.saveMessageDualWrite(
-                message,
-                projectId: session.projectId,
-                senderAgentId: session.agentId,
-                receiverAgentId: receiverAgentId
-            )
-            Self.log("[MCP] Chat response saved with dual write: \(message.id.value) → \(receiverAgentId.value)")
-        } else {
-            // No receiver known, save only to agent's own storage
-            try chatRepository.saveMessage(message, projectId: session.projectId, agentId: session.agentId)
-            Self.log("[MCP] Chat response saved (no receiver): \(message.id.value)")
-        }
-
-        // セッションの lastActivityAt を更新（チャットタイムアウトのリセット）
-        try agentSessionRepository.updateLastActivity(token: session.token)
-        Self.log("[MCP] respondChat: Updated lastActivityAt for session: \(session.token.prefix(8))...")
-
-        var result: [String: Any] = [
-            "success": true,
-            "message_id": message.id.value,
-            "receiver_id": receiverId?.value as Any,
-            "instruction": "応答を保存しました。get_next_action を呼び出して次の指示を確認してください。"
-        ]
-
-        // 会話内メッセージ数をカウント
-        // 参照: docs/design/AI_TO_AI_CONVERSATION.md
-        if let convId = resolvedConversationId {
-            result["conversation_id"] = convId.value
-            let allMessages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
-            let conversationMessageCount = allMessages.filter { $0.conversationId == convId }.count
-
-            // 会話を取得してmax_turnsをチェック
-            if let conversation = try conversationRepository.findById(convId) {
-                result["current_turns"] = conversationMessageCount
-                result["max_turns"] = conversation.maxTurns
-
-                // ターン数上限に達した場合、会話を自動終了
-                if conversationMessageCount >= conversation.maxTurns {
-                    try conversationRepository.updateState(convId, state: .ended, endedAt: Date())
-                    result["conversation_ended"] = true
-                    result["warning"] = "【会話終了】最大ターン数（\(conversation.maxTurns)）に達したため会話を自動終了しました。必要であれば新しい会話を開始してください。"
-                    Self.log("[MCP] respondChat: Conversation auto-ended due to max_turns limit: \(conversationMessageCount)/\(conversation.maxTurns)")
-                } else if conversationMessageCount > 0 && conversationMessageCount % 5 == 0 {
-                    // 5件ごとにリマインド
-                    result["reminder"] = "【確認】会話の目的は達成されましたか？達成された場合は end_conversation で会話を終了してください。（\(conversationMessageCount)/\(conversation.maxTurns)ターン）"
-                    Self.log("[MCP] respondChat: Conversation reminder added at message count: \(conversationMessageCount)/\(conversation.maxTurns)")
-                }
-            }
-        }
-
-        return result
     }
 
     /// send_message - プロジェクト内の他のエージェントにメッセージを送信
@@ -5691,6 +5639,11 @@ public final class MCPServer {
                 }
             }
         }
+
+        // セッションの lastActivityAt を更新（タイムアウト管理のため）
+        // 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md
+        try agentSessionRepository.updateLastActivity(token: session.token)
+
         return result
     }
 
@@ -5849,6 +5802,128 @@ public final class MCPServer {
             "conversation_id": conversationId,
             "state": ConversationState.terminating.rawValue,
             "instruction": "会話終了を要求しました。相手エージェントが終了を確認後、会話は完全に終了します。"
+        ]
+    }
+
+    // MARK: - Chat Delegation
+
+    /// delegate_to_chat_session - タスクセッションからチャットセッションへ委譲
+    /// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+    private func delegateToChatSession(
+        session: AgentSession,
+        targetAgentId: String,
+        purpose: String,
+        context: String?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] delegateToChatSession called: agent='\(session.agentId.value)' target='\(targetAgentId)' purpose='\(purpose)'")
+
+        // 1. タスクセッションからのみ呼び出し可能
+        guard session.purpose == .task else {
+            throw MCPError.toolNotAvailable(
+                tool: "delegate_to_chat_session",
+                reason: "このツールはタスクセッション専用です。現在のセッション目的: \(session.purpose.rawValue)"
+            )
+        }
+
+        // 2. ターゲットエージェントの存在確認
+        let targetId = AgentID(value: targetAgentId)
+        guard let _ = try agentRepository.findById(targetId) else {
+            throw MCPError.agentNotFound(targetAgentId)
+        }
+
+        // 3. ターゲットエージェントが同じプロジェクトに所属しているか確認
+        let projectAgents = try projectAgentAssignmentRepository.findAgentsByProject(session.projectId)
+        guard projectAgents.contains(where: { $0.id.value == targetAgentId }) else {
+            throw MCPError.agentNotAssignedToProject(
+                agentId: targetAgentId,
+                projectId: session.projectId.value
+            )
+        }
+
+        // 4. 自分自身への委譲は不可
+        guard targetAgentId != session.agentId.value else {
+            throw MCPError.invalidOperation("自分自身にチャットを委譲することはできません")
+        }
+
+        // 5. ChatDelegationを作成して保存
+        let delegation = ChatDelegation(
+            id: ChatDelegationID.generate(),
+            agentId: session.agentId,
+            projectId: session.projectId,
+            targetAgentId: targetId,
+            purpose: purpose,
+            context: context,
+            status: .pending,
+            createdAt: Date(),
+            processedAt: nil,
+            result: nil
+        )
+        try chatDelegationRepository.save(delegation)
+
+        Self.log("[MCP] ChatDelegation created: \(delegation.id.value)")
+
+        return [
+            "success": true,
+            "delegation_id": delegation.id.value,
+            "target_agent_id": targetAgentId,
+            "purpose": purpose,
+            "instruction": """
+                チャットセッションへの委譲を作成しました。
+                チャットセッションが起動されると、この委譲を受け取り処理します。
+                委譲ID: \(delegation.id.value)
+                """
+        ]
+    }
+
+    /// report_delegation_completed - 委譲処理の完了報告
+    /// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+    private func reportDelegationCompleted(
+        session: AgentSession,
+        delegationId: String,
+        result: String?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] reportDelegationCompleted called: delegation='\(delegationId)' by='\(session.agentId.value)'")
+
+        // 1. チャットセッションからのみ呼び出し可能
+        guard session.purpose == .chat else {
+            throw MCPError.toolNotAvailable(
+                tool: "report_delegation_completed",
+                reason: "このツールはチャットセッション専用です。現在のセッション目的: \(session.purpose.rawValue)"
+            )
+        }
+
+        // 2. 委譲の存在確認
+        let delId = ChatDelegationID(value: delegationId)
+        guard let delegation = try chatDelegationRepository.findById(delId) else {
+            throw MCPError.delegationNotFound(delegationId)
+        }
+
+        // 3. 自分の委譲であることを確認
+        guard delegation.agentId == session.agentId else {
+            throw MCPError.notDelegationOwner(
+                delegationId: delegationId,
+                agentId: session.agentId.value
+            )
+        }
+
+        // 4. 委譲状態の確認（pending or processing のみ完了可能）
+        guard delegation.status == .pending || delegation.status == .processing else {
+            throw MCPError.delegationAlreadyProcessed(
+                delegationId: delegationId,
+                currentStatus: delegation.status.rawValue
+            )
+        }
+
+        // 5. 完了マーク
+        try chatDelegationRepository.markCompleted(delId, result: result)
+
+        Self.log("[MCP] ChatDelegation completed: \(delegationId)")
+
+        return [
+            "success": true,
+            "delegation_id": delegationId,
+            "status": "completed",
+            "instruction": "委譲処理の完了を報告しました。"
         ]
     }
 
@@ -6127,9 +6202,9 @@ public final class MCPServer {
 
         // chatOnly ツールがtaskセッションで利用不可の場合
         if case .manager(_, let session) = caller, session.purpose == .task {
-            unavailableInfo["chat_tools"] = "チャットツール（get_pending_messages, respond_chat）はpurpose=chatのセッションでのみ利用可能です"
+            unavailableInfo["chat_tools"] = "チャットツール（get_pending_messages, send_message）はpurpose=chatのセッションでのみ利用可能です"
         } else if case .worker(_, let session) = caller, session.purpose == .task {
-            unavailableInfo["chat_tools"] = "チャットツール（get_pending_messages, respond_chat）はpurpose=chatのセッションでのみ利用可能です"
+            unavailableInfo["chat_tools"] = "チャットツール（get_pending_messages, send_message）はpurpose=chatのセッションでのみ利用可能です"
         }
 
         // 未認証の場合
@@ -6294,6 +6369,14 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
     case conversationNotActive(conversationId: String, currentState: String)  // 会話がアクティブではない
     case conversationRequiredForAIToAI(fromAgentId: String, toAgentId: String)  // AI間メッセージにはアクティブ会話必須
 
+    // チャットセッション委譲用エラー
+    // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+    case delegationNotFound(String)  // 委譲が見つからない
+    case notDelegationOwner(delegationId: String, agentId: String)  // 委譲の所有者ではない
+    case delegationAlreadyProcessed(delegationId: String, currentStatus: String)  // 委譲が既に処理済み
+    case toolNotAvailable(tool: String, reason: String)  // ツールが利用不可
+    case invalidOperation(String)  // 無効な操作
+
     var description: String {
         switch self {
         case .agentNotFound(let id):
@@ -6364,6 +6447,16 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
             return "Conversation '\(conversationId)' is not active (current state: \(currentState))"
         case .conversationRequiredForAIToAI(let fromAgentId, let toAgentId):
             return "AIエージェント間のメッセージ送信にはアクティブな会話が必要です。先にstart_conversation(participant_agent_id: \"\(toAgentId)\", initial_message: \"...\")を呼び出してください。(from: \(fromAgentId), to: \(toAgentId))"
+        case .delegationNotFound(let id):
+            return "Chat delegation not found: \(id)"
+        case .notDelegationOwner(let delegationId, let agentId):
+            return "Agent '\(agentId)' is not the owner of delegation '\(delegationId)'"
+        case .delegationAlreadyProcessed(let delegationId, let currentStatus):
+            return "Delegation '\(delegationId)' has already been processed (current status: \(currentStatus))"
+        case .toolNotAvailable(let tool, let reason):
+            return "Tool '\(tool)' is not available: \(reason)"
+        case .invalidOperation(let message):
+            return "Invalid operation: \(message)"
         }
     }
 

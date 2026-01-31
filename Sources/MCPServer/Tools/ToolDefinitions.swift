@@ -68,7 +68,6 @@ enum ToolDefinitions {
             // 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
             // ========================================
             getPendingMessages,
-            respondChat,
             sendMessage,  // タスク・チャット両方で使用可能
 
             // ========================================
@@ -985,32 +984,6 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token"]
-        ]
-    ]
-
-    /// respond_chat - チャット応答を保存
-    /// Agent Instance用: ユーザーメッセージに対する応答を保存
-    /// target_agent_idを指定することで、メッセージリレーなど特定エージェントへの送信が可能
-    static let respondChat: [String: Any] = [
-        "name": "respond_chat",
-        "description": "チャットメッセージに対する応答を保存します。get_pending_messagesで取得したメッセージに対して応答する際に使用します。target_agent_idを指定すると特定のエージェントに送信できます（リレーシナリオ用）。",
-        "inputSchema": [
-            "type": "object",
-            "properties": [
-                "session_token": [
-                    "type": "string",
-                    "description": "authenticateツールで取得したセッショントークン"
-                ],
-                "content": [
-                    "type": "string",
-                    "description": "応答メッセージの内容"
-                ],
-                "target_agent_id": [
-                    "type": "string",
-                    "description": "送信先エージェントID（省略時は未読メッセージの送信者に返信）。メッセージリレーの場合は明示的に送信先のエージェントIDを指定"
-                ]
-            ] as [String: Any],
-            "required": ["session_token", "content"]
         ]
     ]
 

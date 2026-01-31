@@ -25,6 +25,7 @@ final class LongPollingTests: XCTestCase {
 
     let testAgentId = AgentID(value: "agt_long_polling_test")
     let testProjectId = ProjectID(value: "prj_long_polling_test")
+    let targetAgentId = AgentID(value: "agt_long_polling_target")  // send_message のターゲット
     var tempDirectory: URL!
 
     override func setUpWithError() throws {
@@ -90,10 +91,25 @@ final class LongPollingTests: XCTestCase {
         )
         try agentRepository.save(agent)
 
-        // Assign agent to project
+        // Create target agent for send_message tests (human type to avoid AI-to-AI conversation requirement)
+        let targetAgent = Agent(
+            id: targetAgentId,
+            name: "Long Polling Target Agent",
+            role: "Target agent",
+            type: .human,
+            hierarchyType: .worker,
+            systemPrompt: "Target prompt"
+        )
+        try agentRepository.save(targetAgent)
+
+        // Assign agents to project
         _ = try projectAgentAssignmentRepository.assign(
             projectId: testProjectId,
             agentId: testAgentId
+        )
+        _ = try projectAgentAssignmentRepository.assign(
+            projectId: testProjectId,
+            agentId: targetAgentId
         )
 
         // Create credential
@@ -340,12 +356,13 @@ final class LongPollingTests: XCTestCase {
             return
         }
 
-        // respond_chat ツールを使用してエージェントからの応答を送信
+        // send_message ツールを使用してエージェントからの応答を送信
         // これにより未読メッセージが解消される（最後の自分の応答より前のメッセージは未読ではなくなる）
         _ = try mcpServer.executeTool(
-            name: "respond_chat",
+            name: "send_message",
             arguments: [
                 "session_token": token,
+                "target_agent_id": targetAgentId.value,
                 "content": "Acknowledged all pending messages"
             ],
             caller: .worker(agentId: testAgentId, session: session)
