@@ -1082,6 +1082,31 @@ public final class DatabaseSetup {
             try db.create(indexOn: "skill_definitions", columns: ["directory_name"])
         }
 
+        // v46: チャットセッション委譲テーブル
+        // タスクセッションからチャットセッションへのコミュニケーション委譲を管理
+        // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+        migrator.registerMigration("v46_chat_delegations") { db in
+            try db.create(table: "chat_delegations", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("project_id", .text).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("target_agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("purpose", .text).notNull()
+                t.column("context", .text)
+                t.column("status", .text).notNull().defaults(to: "pending")
+                t.column("created_at", .datetime).notNull()
+                t.column("processed_at", .datetime)
+                t.column("result", .text)
+            }
+            // エージェント×ステータスでの検索用（hasPending、findPendingByAgentId）
+            try db.create(indexOn: "chat_delegations", columns: ["agent_id", "project_id", "status"])
+            // ステータス別の検索用
+            try db.create(indexOn: "chat_delegations", columns: ["status"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 

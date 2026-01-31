@@ -200,6 +200,60 @@ pending → processing → completed
 
 ---
 
+## チャットセッション起動トリガー
+
+### WorkDetectionService の拡張
+
+`delegate_to_chat_session` が呼ばれた時、チャットセッションが自動的に起動されるよう、`hasChatWork` を拡張する。
+
+```swift
+// WorkDetectionService.swift
+public func hasChatWork(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+    // 既存: 未読メッセージ
+    let hasUnread = try chatRepository.hasUnreadMessages(projectId: projectId, agentId: agentId)
+
+    // 新規: 委譲リクエスト（pending状態）
+    let hasPendingDelegation = try delegationRepository.hasPending(agentId: agentId, projectId: projectId)
+
+    let sessions = try sessionRepository.findByAgentIdAndProjectId(agentId, projectId: projectId)
+    let hasActiveChat = sessions.contains { $0.purpose == .chat && !$0.isExpired }
+
+    // 未読メッセージ OR 委譲リクエストがあり、アクティブなチャットセッションがない場合
+    return (hasUnread || hasPendingDelegation) && !hasActiveChat
+}
+```
+
+### 起動フロー
+
+```
+タスクセッション
+  │
+  ├─ delegate_to_chat_session()
+  │   └─ chat_delegations に status=pending で保存
+  │
+  └─ 即座に戻る（非同期）
+
+         ... Coordinator の次回ポーリング（数秒以内） ...
+
+getAgentAction (MCPServer)
+  │
+  ├─ hasChatWork() → true (pending_delegation あり)
+  │
+  └─ return "start" → Coordinator がチャットセッションをスポーン
+
+authenticate (MCPServer)
+  │
+  └─ purpose=chat のセッション生成
+
+チャットセッション
+  │
+  ├─ get_pending_messages() → pending_delegations を取得
+  │
+  └─ 委譲内容を処理（会話 or メッセージ送信）
+```
+
+---
+
 ## チャットセッションの挙動変更
 
 ### get_pending_messages の拡張

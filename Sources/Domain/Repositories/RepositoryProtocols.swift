@@ -475,3 +475,32 @@ public protocol AgentSkillAssignmentRepositoryProtocol: Sendable {
     /// 特定のスキル割り当てが存在するか確認
     func isAssigned(agentId: AgentID, skillId: SkillID) throws -> Bool
 }
+
+// MARK: - ChatDelegationRepositoryProtocol
+
+/// チャットセッション委譲リポジトリのプロトコル
+/// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+public protocol ChatDelegationRepositoryProtocol: Sendable {
+    /// 委譲を保存
+    func save(_ delegation: ChatDelegation) throws
+
+    /// IDで委譲を検索
+    func findById(_ id: ChatDelegationID) throws -> ChatDelegation?
+
+    /// エージェント×プロジェクトの保留中（pending）委譲を取得
+    /// チャットセッション起動時に取得し、processingに更新する
+    func findPendingByAgentId(_ agentId: AgentID, projectId: ProjectID) throws -> [ChatDelegation]
+
+    /// エージェント×プロジェクトにpending状態の委譲があるか（高速チェック）
+    /// WorkDetectionServiceでの使用を想定
+    func hasPending(agentId: AgentID, projectId: ProjectID) throws -> Bool
+
+    /// 委譲のステータスを更新
+    func updateStatus(_ id: ChatDelegationID, status: ChatDelegationStatus) throws
+
+    /// 委譲の完了を報告（ステータス、処理日時、結果を更新）
+    func markCompleted(_ id: ChatDelegationID, result: String?) throws
+
+    /// 委譲の失敗を報告（ステータス、処理日時、結果を更新）
+    func markFailed(_ id: ChatDelegationID, result: String?) throws
+}

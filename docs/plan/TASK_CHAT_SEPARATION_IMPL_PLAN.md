@@ -400,6 +400,154 @@ private func handleDelegateToChatSession(
 
 ---
 
+## Phase 3.5: チャットセッション自動起動トリガー
+
+### 目的
+
+`delegate_to_chat_session` が呼ばれた際、チャットセッションが自動的に起動されるようにする。
+Coordinatorは `get_agent_action` を通じて `hasChatWork()` をポーリングしており、この関数で委譲リクエストを検出できれば、チャットセッションがスポーンされる。
+
+### 3.5.1 テスト作成（RED）
+
+**ファイル:** `Tests/DomainTests/WorkDetectionServiceTests.swift`
+
+```swift
+// テストケース1: 委譲リクエストがあればチャット作業ありと判定
+func testHasChatWorkWithPendingDelegation() async throws {
+    // Given: worker-aにpendingの委譲がある
+    let delegation = ChatDelegation(
+        id: .generate(),
+        agentId: AgentID("worker-a"),
+        projectId: ProjectID("project-1"),
+        targetAgentId: AgentID("worker-b"),
+        purpose: "テスト",
+        status: .pending,
+        createdAt: Date()
+    )
+    try await delegationRepository.save(delegation)
+
+    // And: アクティブなチャットセッションはない
+
+    // When: hasChatWorkを呼び出す
+    let hasWork = try await workDetectionService.hasChatWork(
+        agentId: AgentID("worker-a"),
+        projectId: ProjectID("project-1")
+    )
+
+    // Then: trueが返る
+    XCTAssertTrue(hasWork)
+}
+
+// テストケース2: アクティブなチャットセッションがあれば作業なしと判定
+func testHasChatWorkWithActiveSession() async throws {
+    // Given: worker-aにpendingの委譲がある
+    try await delegationRepository.save(createDelegation(status: .pending))
+
+    // And: アクティブなチャットセッションがある
+    let chatSession = AgentSession(
+        agentId: AgentID("worker-a"),
+        projectId: ProjectID("project-1"),
+        purpose: .chat
+    )
+    try await sessionRepository.save(chatSession)
+
+    // When: hasChatWorkを呼び出す
+    let hasWork = try await workDetectionService.hasChatWork(
+        agentId: AgentID("worker-a"),
+        projectId: ProjectID("project-1")
+    )
+
+    // Then: falseが返る（既にチャットセッションがあるため）
+    XCTAssertFalse(hasWork)
+}
+
+// テストケース3: processing状態の委譲は作業なしと判定
+func testHasChatWorkWithProcessingDelegation() async throws {
+    // Given: worker-aにprocessing状態の委譲がある（既に処理中）
+    try await delegationRepository.save(createDelegation(status: .processing))
+
+    // And: アクティブなチャットセッションはない
+
+    // When: hasChatWorkを呼び出す
+    let hasWork = try await workDetectionService.hasChatWork(
+        agentId: AgentID("worker-a"),
+        projectId: ProjectID("project-1")
+    )
+
+    // Then: falseが返る（pending以外はトリガーしない）
+    XCTAssertFalse(hasWork)
+}
+```
+
+### 3.5.2 実装（GREEN）
+
+**ファイル:** `Sources/Domain/Services/WorkDetectionService.swift`
+
+```swift
+public func hasChatWork(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+    // 既存: 未読メッセージ
+    let hasUnread = try chatRepository.hasUnreadMessages(
+        projectId: projectId,
+        agentId: agentId
+    )
+
+    // 新規: 委譲リクエスト（pending状態のみ）
+    let hasPendingDelegation = try delegationRepository.hasPending(
+        agentId: agentId,
+        projectId: projectId
+    )
+
+    // アクティブなチャットセッションがあるか確認
+    let sessions = try sessionRepository.findByAgentIdAndProjectId(agentId, projectId: projectId)
+    let hasActiveChat = sessions.contains { $0.purpose == .chat && !$0.isExpired }
+
+    // 未読メッセージ OR 委譲リクエストがあり、アクティブなチャットセッションがない場合
+    return (hasUnread || hasPendingDelegation) && !hasActiveChat
+}
+```
+
+**ファイル:** `Sources/Domain/Repositories/ChatDelegationRepositoryProtocol.swift`
+
+```swift
+public protocol ChatDelegationRepositoryProtocol: Sendable {
+    // ... 既存メソッド ...
+
+    /// 指定エージェント・プロジェクトにpending状態の委譲があるか
+    func hasPending(agentId: AgentID, projectId: ProjectID) async throws -> Bool
+}
+```
+
+### 3.5.3 起動フローの確認
+
+```
+1. タスクセッション: delegate_to_chat_session() を呼び出す
+   └─ chat_delegations に status=pending で保存
+
+2. Coordinator: 数秒後に get_agent_action をポーリング
+   └─ MCPServer: hasChatWork() を呼び出す
+      └─ delegationRepository.hasPending() → true
+      └─ hasActiveChat → false
+      └─ return true
+
+3. Coordinator: action="start" (reason="chat_work") を受信
+   └─ チャットセッションをスポーン
+
+4. チャットセッション: authenticate() → get_pending_messages()
+   └─ pending_delegations を取得し、会話/メッセージを実行
+```
+
+### 3.5.4 検証項目
+
+- [x] `testHasChatWork_WithPendingDelegation_ReturnsTrue` がGREEN
+- [x] `testHasChatWork_WithPendingDelegationAndActiveSession_ReturnsFalse` がGREEN
+- [x] `testHasChatWork_WithProcessingDelegation_ReturnsFalse` がGREEN
+- [x] `testHasChatWork_WithBothUnreadAndDelegation_ReturnsTrue` がGREEN
+- [x] `testHasChatWork_WithPendingDelegationAndTaskSession_ReturnsTrue` がGREEN
+- [x] `testHasChatWork_WithDelegationInDifferentProject_ReturnsFalse` がGREEN
+- [ ] Coordinatorからのポーリングでチャットセッションが起動することを確認（統合テスト）
+
+---
+
 ## Phase 4: チャットセッションでの委譲処理
 
 ### 目的
@@ -604,14 +752,19 @@ web-ui/e2e/integration/
 
 ## 実装順序サマリー
 
-| Phase | 内容 | テスト数 | 見積もり |
-|-------|------|---------|---------|
-| 1 | 権限変更 | 4 | 小 |
-| 2 | 委譲テーブル | 3 | 小 |
-| 3 | delegate_to_chat_session | 4 | 中 |
-| 4 | チャットセッション処理 | 3 | 中 |
-| 5 | 統合テスト | 1 | 小 |
-| 6 | 既存テスト更新 | 多数 | 中 |
+| Phase | 内容 | テスト数 | 見積もり | ステータス |
+|-------|------|---------|---------|-----------|
+| 1 | 権限変更 | 17 | 小 | ✅ 完了 |
+| 2 | 委譲テーブル | 11 | 小 | ✅ 完了 |
+| 3 | delegate_to_chat_session | 5 | 中 | ✅ 完了 |
+| 3.5 | チャットセッション自動起動 | 6 | 小 | ✅ 完了 |
+| 4 | チャットセッション処理 | 4 | 中 | ✅ 完了 |
+| 5 | 統合テスト | 1 | 小 | ✅ 完了 |
+| 6 | 既存テスト更新 | 多数 | 中 | 🔄 進行中 |
+
+### 6.3 完了した更新
+
+- [x] `testToolCount`: ツール数を36→38に更新（delegate_to_chat_session, report_delegation_completed追加）
 
 ---
 

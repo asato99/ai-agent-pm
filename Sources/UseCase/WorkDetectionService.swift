@@ -1,5 +1,6 @@
 // Sources/UseCase/WorkDetectionService.swift
 // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md - 共通ロジック
+// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md - タスク/チャット分離
 //
 // getAgentAction と authenticate で使用する共通の仕事判定サービス
 // - 一貫性: 両者で同じ判定ロジックを使用し、不一致を防止
@@ -15,6 +16,7 @@ public struct WorkDetectionService: Sendable {
     private let chatRepository: any ChatRepositoryProtocol
     private let sessionRepository: any AgentSessionRepositoryProtocol
     private let taskRepository: any TaskRepositoryProtocol
+    private let chatDelegationRepository: (any ChatDelegationRepositoryProtocol)?
 
     public init(
         chatRepository: any ChatRepositoryProtocol,
@@ -24,17 +26,47 @@ public struct WorkDetectionService: Sendable {
         self.chatRepository = chatRepository
         self.sessionRepository = sessionRepository
         self.taskRepository = taskRepository
+        self.chatDelegationRepository = nil
+    }
+
+    /// 委譲リポジトリを含む初期化
+    /// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+    public init(
+        chatRepository: any ChatRepositoryProtocol,
+        sessionRepository: any AgentSessionRepositoryProtocol,
+        taskRepository: any TaskRepositoryProtocol,
+        chatDelegationRepository: any ChatDelegationRepositoryProtocol
+    ) {
+        self.chatRepository = chatRepository
+        self.sessionRepository = sessionRepository
+        self.taskRepository = taskRepository
+        self.chatDelegationRepository = chatDelegationRepository
     }
 
     /// チャットの仕事があるか判定
     /// - 未読チャットメッセージがある
+    /// - または、pending状態の委譲リクエストがある
     /// - かつ、アクティブなチャットセッションがない
+    /// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
     public func hasChatWork(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+        // 未読メッセージをチェック
         let unreadMessages = try chatRepository.findUnreadMessages(projectId: projectId, agentId: agentId)
-        guard !unreadMessages.isEmpty else {
+        let hasUnread = !unreadMessages.isEmpty
+
+        // pending状態の委譲リクエストをチェック
+        let hasPendingDelegation: Bool
+        if let delegationRepo = chatDelegationRepository {
+            hasPendingDelegation = try delegationRepo.hasPending(agentId: agentId, projectId: projectId)
+        } else {
+            hasPendingDelegation = false
+        }
+
+        // 仕事がなければfalse
+        guard hasUnread || hasPendingDelegation else {
             return false
         }
 
+        // アクティブなチャットセッションがあればfalse（既に処理中）
         let sessions = try sessionRepository.findByAgentIdAndProjectId(agentId, projectId: projectId)
         let hasActiveChat = sessions.contains { session in
             session.purpose == .chat && session.expiresAt > Date()

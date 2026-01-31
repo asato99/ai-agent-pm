@@ -45,6 +45,8 @@ enum ToolDefinitions {
             updateTaskStatus,      // ステータス更新
             reportExecutionStart,  // 実行開始報告（非推奨）
             reportExecutionComplete, // 実行完了報告（非推奨）
+            delegateToChatSession, // チャットセッションへ委譲
+            reportDelegationCompleted, // 委譲完了報告
 
             // ========================================
             // 認証済み共通（Manager + Worker）
@@ -1122,6 +1124,73 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "conversation_id"]
+        ]
+    ]
+
+    // MARK: - Chat Delegation Tools
+    // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+
+    /// delegate_to_chat_session - チャットセッションへコミュニケーションを委譲
+    /// タスクセッション専用（purpose=task）
+    static let delegateToChatSession: [String: Any] = [
+        "name": "delegate_to_chat_session",
+        "description": """
+            チャットセッションへコミュニケーションを委譲します。
+            タスクセッションから他エージェントへのメッセージ送信や会話開始は直接行えないため、
+            このツールでチャットセッションに処理を依頼してください。
+            チャットセッションが起動時に委譲を受け取り、実行方法（会話 or 単発メッセージ）を判断して処理します。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "target_agent_id": [
+                    "type": "string",
+                    "description": "コミュニケーション相手のエージェントID（同一プロジェクト内のエージェントのみ）"
+                ],
+                "purpose": [
+                    "type": "string",
+                    "description": "依頼内容（何を伝えたいか、何をしてほしいか）"
+                ],
+                "context": [
+                    "type": "string",
+                    "description": "追加のコンテキスト情報（任意）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "target_agent_id", "purpose"]
+        ]
+    ]
+
+    /// report_delegation_completed - 委譲処理の完了報告
+    /// チャットセッションが委譲されたコミュニケーション処理を完了したことを報告
+    /// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+    static let reportDelegationCompleted: [String: Any] = [
+        "name": "report_delegation_completed",
+        "description": """
+            チャットセッションへ委譲されたコミュニケーション処理の完了を報告します。
+            get_pending_messages で取得した pending_delegations を処理した後に呼び出してください。
+            会話または単発メッセージの送信が完了したら、このツールで完了を報告します。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "delegation_id": [
+                    "type": "string",
+                    "description": "完了した委譲のID（pending_delegationsから取得）"
+                ],
+                "result": [
+                    "type": "string",
+                    "description": "処理結果の説明（任意）。例: 「会話が完了しました」「メッセージを送信しました」"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "delegation_id"]
         ]
     ]
 

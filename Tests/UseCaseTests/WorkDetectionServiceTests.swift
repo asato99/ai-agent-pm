@@ -182,6 +182,95 @@ final class MockSessionRepositoryForWorkDetection: AgentSessionRepositoryProtoco
     }
 }
 
+// MARK: - Mock ChatDelegationRepository
+// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+
+final class MockChatDelegationRepositoryForWorkDetection: ChatDelegationRepositoryProtocol {
+    var delegations: [ChatDelegationID: ChatDelegation] = [:]
+
+    func save(_ delegation: ChatDelegation) throws {
+        delegations[delegation.id] = delegation
+    }
+
+    func findById(_ id: ChatDelegationID) throws -> ChatDelegation? {
+        delegations[id]
+    }
+
+    func findPendingByAgentId(_ agentId: AgentID, projectId: ProjectID) throws -> [ChatDelegation] {
+        Array(delegations.values.filter {
+            $0.agentId == agentId &&
+            $0.projectId == projectId &&
+            $0.status == .pending
+        })
+    }
+
+    func hasPending(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+        delegations.values.contains {
+            $0.agentId == agentId &&
+            $0.projectId == projectId &&
+            $0.status == .pending
+        }
+    }
+
+    func updateStatus(_ id: ChatDelegationID, status: ChatDelegationStatus) throws {
+        if var d = delegations[id] {
+            d.status = status
+            delegations[id] = d
+        }
+    }
+
+    func markCompleted(_ id: ChatDelegationID, result: String?) throws {
+        if var d = delegations[id] {
+            d.status = .completed
+            d.processedAt = Date()
+            d.result = result
+            delegations[id] = d
+        }
+    }
+
+    func markFailed(_ id: ChatDelegationID, result: String?) throws {
+        if var d = delegations[id] {
+            d.status = .failed
+            d.processedAt = Date()
+            d.result = result
+            delegations[id] = d
+        }
+    }
+
+    // Helper for tests
+    func addPendingDelegation(_ agentId: AgentID, _ projectId: ProjectID) {
+        let delegation = ChatDelegation(
+            id: ChatDelegationID.generate(),
+            agentId: agentId,
+            projectId: projectId,
+            targetAgentId: AgentID(value: "target-agent"),
+            purpose: "Test purpose",
+            context: nil,
+            status: .pending,
+            createdAt: Date()
+        )
+        delegations[delegation.id] = delegation
+    }
+
+    func addProcessingDelegation(_ agentId: AgentID, _ projectId: ProjectID) {
+        let delegation = ChatDelegation(
+            id: ChatDelegationID.generate(),
+            agentId: agentId,
+            projectId: projectId,
+            targetAgentId: AgentID(value: "target-agent"),
+            purpose: "Test purpose",
+            context: nil,
+            status: .processing,
+            createdAt: Date()
+        )
+        delegations[delegation.id] = delegation
+    }
+
+    func clearDelegations() {
+        delegations.removeAll()
+    }
+}
+
 // MARK: - Mock TaskRepository
 
 final class MockTaskRepositoryForWorkDetection: TaskRepositoryProtocol {
@@ -434,6 +523,131 @@ final class WorkDetectionServiceTests: XCTestCase {
 
         // When
         let result = try workService.hasTaskWork(agentId: testAgentId, projectId: testProjectId)
+
+        // Then
+        XCTAssertFalse(result)
+    }
+}
+
+// MARK: - WorkDetectionService Delegation Tests
+// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+
+final class WorkDetectionServiceDelegationTests: XCTestCase {
+    var chatRepo: MockChatRepositoryForWorkDetection!
+    var sessionRepo: MockSessionRepositoryForWorkDetection!
+    var taskRepo: MockTaskRepositoryForWorkDetection!
+    var delegationRepo: MockChatDelegationRepositoryForWorkDetection!
+    var workService: WorkDetectionService!
+
+    let testAgentId = AgentID(value: "test-agent")
+    let testProjectId = ProjectID(value: "test-project")
+
+    override func setUp() {
+        super.setUp()
+        chatRepo = MockChatRepositoryForWorkDetection()
+        sessionRepo = MockSessionRepositoryForWorkDetection()
+        taskRepo = MockTaskRepositoryForWorkDetection()
+        delegationRepo = MockChatDelegationRepositoryForWorkDetection()
+        workService = WorkDetectionService(
+            chatRepository: chatRepo,
+            sessionRepository: sessionRepo,
+            taskRepository: taskRepo,
+            chatDelegationRepository: delegationRepo
+        )
+    }
+
+    override func tearDown() {
+        chatRepo = nil
+        sessionRepo = nil
+        taskRepo = nil
+        delegationRepo = nil
+        workService = nil
+        super.tearDown()
+    }
+
+    // MARK: - hasChatWork with Delegation Tests
+
+    /// テストケース1: pending委譲があればチャット作業ありと判定
+    func testHasChatWork_WithPendingDelegation_ReturnsTrue() throws {
+        // Given: pending状態の委譲あり、未読メッセージなし、アクティブセッションなし
+        delegationRepo.addPendingDelegation(testAgentId, testProjectId)
+        chatRepo.clearMessages(testProjectId, testAgentId)
+
+        // When
+        let result = try workService.hasChatWork(agentId: testAgentId, projectId: testProjectId)
+
+        // Then
+        XCTAssertTrue(result)
+    }
+
+    /// テストケース2: アクティブなチャットセッションがあれば作業なし
+    func testHasChatWork_WithPendingDelegationAndActiveSession_ReturnsFalse() throws {
+        // Given: pending状態の委譲あり、アクティブなチャットセッションあり
+        delegationRepo.addPendingDelegation(testAgentId, testProjectId)
+        sessionRepo.addActiveSession(testAgentId, testProjectId, .chat)
+
+        // When
+        let result = try workService.hasChatWork(agentId: testAgentId, projectId: testProjectId)
+
+        // Then: 既にチャットセッションがあるため、新しいセッションは不要
+        XCTAssertFalse(result)
+    }
+
+    /// テストケース3: processing状態の委譲は作業なしと判定
+    func testHasChatWork_WithProcessingDelegation_ReturnsFalse() throws {
+        // Given: processing状態の委譲あり（既に処理中）、未読メッセージなし
+        delegationRepo.addProcessingDelegation(testAgentId, testProjectId)
+        chatRepo.clearMessages(testProjectId, testAgentId)
+
+        // When
+        let result = try workService.hasChatWork(agentId: testAgentId, projectId: testProjectId)
+
+        // Then: processing状態はトリガーしない
+        XCTAssertFalse(result)
+    }
+
+    /// テストケース4: 未読メッセージと委譲の両方がある場合
+    func testHasChatWork_WithBothUnreadAndDelegation_ReturnsTrue() throws {
+        // Given: 未読メッセージあり、pending委譲あり、アクティブセッションなし
+        let message = ChatMessage(
+            id: ChatMessageID(value: UUID().uuidString),
+            senderId: AgentID(value: "other-agent"),
+            receiverId: testAgentId,
+            content: "Hello",
+            createdAt: Date()
+        )
+        chatRepo.setUnreadMessages(testProjectId, testAgentId, [message])
+        delegationRepo.addPendingDelegation(testAgentId, testProjectId)
+
+        // When
+        let result = try workService.hasChatWork(agentId: testAgentId, projectId: testProjectId)
+
+        // Then
+        XCTAssertTrue(result)
+    }
+
+    /// テストケース5: タスクセッションがあってもチャット作業は検出される
+    func testHasChatWork_WithPendingDelegationAndTaskSession_ReturnsTrue() throws {
+        // Given: pending委譲あり、アクティブなタスクセッションあり（チャットセッションではない）
+        delegationRepo.addPendingDelegation(testAgentId, testProjectId)
+        sessionRepo.addActiveSession(testAgentId, testProjectId, .task)
+
+        // When
+        let result = try workService.hasChatWork(agentId: testAgentId, projectId: testProjectId)
+
+        // Then: タスクセッションはチャット作業に影響しない
+        XCTAssertTrue(result)
+    }
+
+    /// テストケース6: 別プロジェクトの委譲は検出されない
+    func testHasChatWork_WithDelegationInDifferentProject_ReturnsFalse() throws {
+        // Given: 別プロジェクトにpending委譲あり
+        let otherProjectId = ProjectID(value: "other-project")
+        delegationRepo.addPendingDelegation(testAgentId, otherProjectId)
+        chatRepo.clearMessages(testProjectId, testAgentId)
+
+        // When
+        let result = try workService.hasChatWork(agentId: testAgentId, projectId: testProjectId)
 
         // Then
         XCTAssertFalse(result)

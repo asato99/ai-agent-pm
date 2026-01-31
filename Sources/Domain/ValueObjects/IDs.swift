@@ -324,3 +324,21 @@ public struct ConversationID: Hashable, Codable, Sendable, CustomStringConvertib
 
     public var description: String { value }
 }
+
+// MARK: - ChatDelegationID
+
+/// タスクセッション→チャットセッション委譲の一意識別子
+/// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+public struct ChatDelegationID: Hashable, Codable, Sendable, CustomStringConvertible {
+    public let value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+
+    public static func generate() -> ChatDelegationID {
+        ChatDelegationID(value: "dlg_\(UUID().uuidString.prefix(12).lowercased())")
+    }
+
+    public var description: String { value }
+}

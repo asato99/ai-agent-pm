@@ -120,14 +120,21 @@ struct ToolAuthorization {
         "get_pending_messages": .chatOnly,
         "respond_chat": .chatOnly,
 
-        // メッセージ送信（タスク・チャット両方で使用可能）- UC012, UC013
-        // 参照: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
-        "send_message": .authenticated,
+        // メッセージ送信（チャットセッション専用）
+        // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+        // 廃止: docs/design/SEND_MESSAGE_FROM_TASK_SESSION.md
+        "send_message": .chatOnly,
 
-        // AI-to-AI会話機能（認証済み）- UC016
+        // AI-to-AI会話機能（チャットセッション専用）- UC016
+        // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
         // 参照: docs/design/AI_TO_AI_CONVERSATION.md
-        "start_conversation": .authenticated,
-        "end_conversation": .authenticated,
+        "start_conversation": .chatOnly,
+        "end_conversation": .chatOnly,
+
+        // タスクセッションからチャットセッションへの委譲
+        // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+        "delegate_to_chat_session": .taskOnly,
+        "report_delegation_completed": .chatOnly,
 
         // タスク依頼・承認機能
         // 参照: docs/design/TASK_REQUEST_APPROVAL.md

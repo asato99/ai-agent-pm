@@ -529,18 +529,19 @@ final class MCPServerTests: XCTestCase {
     func testToolCount() {
         let tools = ToolDefinitions.all()
 
-        // 現在のツール一覧: 35個
+        // 現在のツール一覧: 38個
         // Unauthenticated: 2 (help, authenticate)
         // Coordinator-only: 7 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, invalidate_session, report_agent_error)
-        // Manager-only: 7 (list_subordinates, get_subordinate_profile, create_task, create_tasks_batch, assign_task, approve_task_request, reject_task_request)
-        // Worker-only: 1 (report_completed)
-        // Authenticated (Manager + Worker): 15 (logout, report_model, get_my_profile, get_my_task, get_notifications, get_next_action, update_task_status, get_project, list_tasks, get_task, report_execution_start, report_execution_complete, send_message, start_conversation, end_conversation, request_task)
-        // Chat-only: 2 (get_pending_messages, respond_chat)
+        // Manager-only: 5 (list_subordinates, get_subordinate_profile, assign_task, approve_task_request, reject_task_request)
+        // Task-only: 7 (create_task, create_tasks_batch, report_completed, update_task_status, report_execution_start, report_execution_complete, delegate_to_chat_session)
+        // Authenticated (Manager + Worker): 11 (logout, report_model, get_my_profile, get_my_task, get_my_task_progress, get_notifications, get_next_action, get_project, list_tasks, get_task, request_task)
+        // Chat-only: 6 (get_pending_messages, respond_chat, send_message, start_conversation, end_conversation, report_delegation_completed)
         // 注: list_agents, get_agent_profile, list_projects は削除済み
         // 注: get_my_tasks, get_pending_tasks はget_my_taskに統合済み
-        // 注: start_conversation, end_conversation はAI-to-AI会話用（UC016）
+        // 注: start_conversation, end_conversation, send_message はchatOnlyに変更（タスク/チャット分離）
         // 注: request_task, approve_task_request, reject_task_request はタスク依頼機能用
-        XCTAssertEqual(tools.count, 35, "Should have 35 tools defined")
+        // 注: delegate_to_chat_session（taskOnly）, report_delegation_completed（chatOnly）はタスク/チャット分離用
+        XCTAssertEqual(tools.count, 38, "Should have 38 tools defined")
     }
 }
 
@@ -915,9 +916,10 @@ final class ToolAuthorizationTests: XCTestCase {
     /// 認証済み共通ツールの権限確認
     func testAuthenticatedToolPermissions() {
         XCTAssertEqual(ToolAuthorization.permissions["get_my_profile"], .authenticated)
-        XCTAssertEqual(ToolAuthorization.permissions["update_task_status"], .authenticated)
         XCTAssertEqual(ToolAuthorization.permissions["list_tasks"], .authenticated)
         XCTAssertEqual(ToolAuthorization.permissions["get_task"], .authenticated)
+        // update_task_status は taskOnly に変更済み
+        XCTAssertEqual(ToolAuthorization.permissions["update_task_status"], .taskOnly)
     }
 
     // MARK: - Authorization Logic Tests
@@ -2940,15 +2942,16 @@ final class SendMessageToolDefinitionTests: XCTestCase {
 }
 
 /// send_message ツール認可テスト
+/// 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
 final class SendMessageToolAuthorizationTests: XCTestCase {
 
-    /// send_message ツールが authenticated 権限であることを確認
+    /// send_message ツールが chatOnly 権限であることを確認
     func testSendMessageToolPermission() {
-        XCTAssertEqual(ToolAuthorization.permissions["send_message"], .authenticated)
+        XCTAssertEqual(ToolAuthorization.permissions["send_message"], .chatOnly)
     }
 
-    /// send_message がタスクセッションで使用可能なことを確認
-    func testSendMessageAllowedInTaskSession() {
+    /// send_message がタスクセッションでは拒否されることを確認
+    func testSendMessageRejectedInTaskSession() {
         let taskSession = AgentSession(
             agentId: AgentID(value: "agent-001"),
             projectId: ProjectID(value: "proj-001"),
@@ -2956,10 +2959,17 @@ final class SendMessageToolAuthorizationTests: XCTestCase {
         )
         let workerTaskCaller = CallerType.worker(agentId: taskSession.agentId, session: taskSession)
 
-        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "send_message", caller: workerTaskCaller))
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "send_message", caller: workerTaskCaller)) { error in
+            guard case ToolAuthorizationError.chatSessionRequired(let tool, let currentPurpose) = error else {
+                XCTFail("Expected chatSessionRequired error, got \(error)")
+                return
+            }
+            XCTAssertEqual(tool, "send_message")
+            XCTAssertEqual(currentPurpose, .task)
+        }
     }
 
-    /// send_message がチャットセッションでも使用可能なことを確認
+    /// send_message がチャットセッションで使用可能なことを確認
     func testSendMessageAllowedInChatSession() {
         let chatSession = AgentSession(
             agentId: AgentID(value: "agent-001"),
@@ -2981,8 +2991,20 @@ final class SendMessageToolAuthorizationTests: XCTestCase {
         }
     }
 
-    /// send_message がManagerでも使用可能なことを確認
-    func testSendMessageAllowedForManager() {
+    /// send_message がManagerのチャットセッションで使用可能なことを確認
+    func testSendMessageAllowedForManagerChatSession() {
+        let chatSession = AgentSession(
+            agentId: AgentID(value: "manager-001"),
+            projectId: ProjectID(value: "proj-001"),
+            purpose: .chat
+        )
+        let managerCaller = CallerType.manager(agentId: chatSession.agentId, session: chatSession)
+
+        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "send_message", caller: managerCaller))
+    }
+
+    /// send_message がManagerのタスクセッションでは拒否されることを確認
+    func testSendMessageRejectedForManagerTaskSession() {
         let taskSession = AgentSession(
             agentId: AgentID(value: "manager-001"),
             projectId: ProjectID(value: "proj-001"),
@@ -2990,7 +3012,14 @@ final class SendMessageToolAuthorizationTests: XCTestCase {
         )
         let managerCaller = CallerType.manager(agentId: taskSession.agentId, session: taskSession)
 
-        XCTAssertNoThrow(try ToolAuthorization.authorize(tool: "send_message", caller: managerCaller))
+        XCTAssertThrowsError(try ToolAuthorization.authorize(tool: "send_message", caller: managerCaller)) { error in
+            guard case ToolAuthorizationError.chatSessionRequired(let tool, let currentPurpose) = error else {
+                XCTFail("Expected chatSessionRequired error, got \(error)")
+                return
+            }
+            XCTAssertEqual(tool, "send_message")
+            XCTAssertEqual(currentPurpose, .task)
+        }
     }
 }
 
