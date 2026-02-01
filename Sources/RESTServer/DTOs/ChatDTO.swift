@@ -14,6 +14,7 @@ public struct ChatMessageDTO: Codable {
     public let content: String
     public let createdAt: String
     public let relatedTaskId: String?
+    public let conversationId: String?
 
     public init(from message: ChatMessage) {
         self.id = message.id.value
@@ -22,6 +23,7 @@ public struct ChatMessageDTO: Codable {
         self.content = message.content
         self.createdAt = ISO8601DateFormatter().string(from: message.createdAt)
         self.relatedTaskId = message.relatedTaskId?.value
+        self.conversationId = message.conversationId?.value
     }
 }
 
