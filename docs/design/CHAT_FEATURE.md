@@ -672,8 +672,154 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
 {"id":"msg_02","senderId":"worker-1","receiverId":"owner-1","content":"現在50%です","createdAt":"2026-01-11T10:00:05Z"}
 ```
 
-- 未読管理はファイル読み込み時に判定（DBで管理しない）
-- エージェント応答後のメッセージは既読扱い
+---
+
+## 9.11 既読管理
+
+### 9.11.1 設計方針
+
+**重要**: 未読の判定は「返信したかどうか」ではなく「既読時刻」に基づいて行う。
+
+| 観点 | 旧方式（廃止） | 新方式 |
+|------|---------------|--------|
+| 未読判定 | 最後の返信より後のメッセージ | 既読時刻より後のメッセージ |
+| 問題点 | 読んだが返信しないケースで未読が消えない | なし |
+| データ保存 | 不要 | `last_read.json` |
+
+### 9.11.2 ストレージ構成
+
+```
+{project.workingDirectory}/
+└── .ai-pm/
+    └── agents/
+        └── {agent-id}/
+            ├── chat.jsonl       # チャット履歴
+            └── last_read.json   # 既読時刻（送信者ごと）
+```
+
+**last_read.json 形式**:
+```json
+{
+  "owner-1": "2026-01-11T10:05:00Z",
+  "worker-2": "2026-01-11T09:30:00Z"
+}
+```
+
+- キー: 送信者のエージェントID
+- 値: その送信者からのメッセージを最後に読んだ時刻（ISO8601）
+
+### 9.11.3 既読の更新タイミング
+
+**原則**: メッセージを取得した時点で既読とする（取得 = 既読）
+
+| トリガー | 処理 | 備考 |
+|----------|------|------|
+| **MCP: `get_pending_messages`** | 全送信者を既読に更新 | AIエージェントがメッセージを取得した時点で既読 |
+| **REST API: `GET /chat/messages`** | 対象エージェントを既読に更新 | ポーリング含む全ての取得で既読更新 |
+
+#### REST API での自動既読更新
+
+**重要**: `GET /chat/messages` を呼び出すたびに、対象エージェントからのメッセージを既読とする。
+
+```
+【Web UI フロー】
+1. ユーザーがチャットパネルを開く
+2. GET /chat/messages → メッセージ取得 + 既読更新
+3. ポーリング開始（3秒間隔）
+4. 新メッセージ着信
+5. GET /chat/messages（ポーリング）→ 取得 + 既読更新
+6. パネル開いている間は常に既読状態が維持される
+7. パネルを閉じる → ポーリング停止
+8. 新メッセージ着信 → 未読扱い（正しい動作）
+```
+
+**REST API 実装**:
+```swift
+private func getChatMessages(...) async throws -> Response {
+    // 1. メッセージ取得
+    let page = try chatRepository.findMessagesWithCursor(...)
+
+    // 2. 対象エージェントからのメッセージを既読に更新
+    //    （チャットパネルを開いている = そのエージェントのメッセージを見ている）
+    try chatRepository.markAsRead(
+        projectId: projectId,
+        currentAgentId: currentAgentId,
+        senderAgentId: targetAgentId  // チャット相手
+    )
+
+    // 3. レスポンス返却
+    return jsonResponse(response)
+}
+```
+
+**`POST /chat/mark-read` について**:
+- 互換性のため残すが、通常は不要
+- 特殊なケース（明示的に既読にしたい場合）のみ使用
+
+#### MCP ツールでの自動既読更新
+
+**MCPツール実装**:
+```swift
+private func getPendingMessages(session: AgentSession) throws -> [String: Any] {
+    // 1. メッセージ取得
+    let messages = try chatRepository.findMessages(...)
+
+    // 2. 全送信者を既読に更新（取得 = 既読）
+    let senderIds = Set(messages.filter { $0.senderId != session.agentId }.map { $0.senderId })
+    for senderId in senderIds {
+        try chatRepository.markAsRead(
+            projectId: session.projectId,
+            currentAgentId: session.agentId,
+            senderAgentId: senderId
+        )
+    }
+
+    // 3. 未読判定して返却（既読更新後なので次回は未読0件）
+    // ...
+}
+```
+
+### 9.11.4 未読判定ロジック
+
+```swift
+/// 未読メッセージを取得
+func findUnreadMessages(projectId: ProjectID, agentId: AgentID) -> [ChatMessage] {
+    let allMessages = findMessages(projectId: projectId, agentId: agentId)
+    let lastReadTimes = getLastReadTimes(projectId: projectId, agentId: agentId)
+
+    return allMessages.filter { message in
+        // 自分が送ったメッセージは未読対象外
+        guard message.senderId != agentId else { return false }
+
+        // 送信者の既読時刻を取得
+        let lastReadTime = lastReadTimes[message.senderId.value]
+
+        // 既読時刻がない → 未読
+        // メッセージ作成時刻 > 既読時刻 → 未読
+        if let lastRead = lastReadTime {
+            return message.createdAt > lastRead
+        } else {
+            return true
+        }
+    }
+}
+```
+
+### 9.11.5 エージェント起動判定との連携
+
+**WorkDetectionService.hasChatWork**:
+- `findUnreadMessages` を呼び出して未読の有無を判定
+- 既読時刻ベースの判定により、「読んだが返信していない」ケースは未読扱いにならない
+
+```
+【起動判定フロー】
+1. get_agent_action ポーリング
+2. WorkDetectionService.hasChatWork(agentId, projectId) を呼び出し
+3. findUnreadMessages で既読時刻ベースの未読を取得
+4. 未読あり → action: "start" を返す
+5. エージェント起動 → get_pending_messages で既読更新
+6. 次回ポーリング → findUnreadMessages は0件 → action: "hold"
+```
 
 ---
 
@@ -791,6 +937,11 @@ Response:
   ],
   "hasMore": false
 }
+
+副作用（重要）:
+- このAPIを呼び出すと、対象エージェント（agentId）からのメッセージが既読になる
+- ポーリング時も毎回既読更新されるため、パネルを開いている間は常に既読状態が維持される
+- 参照: Section 9.11.3 既読の更新タイミング
 
 注意: `receiverId` は自分が送信したメッセージにのみ存在する。
 相手から受信したメッセージには `receiverId` がない（自分のストレージにある = 自分宛て）。
@@ -1111,7 +1262,7 @@ function ChatMessage({ message, currentAgentId, targetAgentId, agentMap }: ChatM
 | **保存場所** | **PMアプリ端末のみ** | **一元管理、整合性維持、リモート端末に分散させない** |
 | **リモートアクセス** | **REST API経由** | **Web UI・リモートエージェント共通** |
 | 制御情報 | DB（pending_agent_purposes） | MCP側で起動理由を管理 |
-| 未読管理 | ファイルから判定 | 専用テーブル不要 |
+| 未読管理 | **既読時刻ベース（`last_read.json`）** | メッセージ取得時に既読更新、返信有無に依存しない |
 | ファイル形式 | JSONL | 追記高速、行単位処理 |
 | 起動理由 | MCP内部で管理 | Runnerは action: "start" のみ判断 |
 | タスク/チャット優先度 | チャット優先 | リアルタイム性重視 |
