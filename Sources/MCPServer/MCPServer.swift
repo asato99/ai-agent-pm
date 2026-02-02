@@ -5439,6 +5439,21 @@ public final class MCPServer {
             pendingLimit: PendingMessageIdentifier.defaultPendingLimit   // 10
         )
 
+        // 自動既読更新: フィルタ前に全送信者を既読にマーク（システムメッセージを含む）
+        // これにより、システムメッセージも既読になり、不要なスポーンが防止される
+        // Reference: docs/plan/UNREAD_MESSAGE_REFACTOR_TDD.md - Phase 3
+        let allUniqueSenderIds = Set(rawResult.pendingMessages.map { $0.senderId })
+        for senderId in allUniqueSenderIds {
+            try chatRepository.markAsRead(
+                projectId: session.projectId,
+                currentAgentId: session.agentId,
+                senderAgentId: senderId
+            )
+        }
+        if !allUniqueSenderIds.isEmpty {
+            Self.log("[MCP] Marked \(allUniqueSenderIds.count) sender(s) as read (including system)")
+        }
+
         // Filter out system messages (senderId starts with "system")
         // These are used to trigger chat session spawn but should not be shown to agents
         // Reference: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 2.2
@@ -5453,20 +5468,6 @@ public final class MCPServer {
         )
 
         Self.log("[MCP] Context: \(result.contextMessages.count), Pending: \(result.pendingMessages.count), Truncated: \(result.contextTruncated)")
-
-        // 自動既読更新: 取得した未読メッセージの送信者を既読にマーク
-        // Reference: docs/plan/UNREAD_MESSAGE_REFACTOR_TDD.md - Phase 3
-        let uniqueSenderIds = Set(result.pendingMessages.map { $0.senderId })
-        for senderId in uniqueSenderIds {
-            try chatRepository.markAsRead(
-                projectId: session.projectId,
-                currentAgentId: session.agentId,
-                senderAgentId: senderId
-            )
-        }
-        if !uniqueSenderIds.isEmpty {
-            Self.log("[MCP] Marked \(uniqueSenderIds.count) sender(s) as read")
-        }
 
         // ISO8601フォーマッタを共有
         let formatter = ISO8601DateFormatter()
