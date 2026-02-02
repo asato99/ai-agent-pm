@@ -1,0 +1,202 @@
+# Markdown Editor Scenario
+#
+# 単一ワーカーによるMarkdownエディタ開発シナリオ
+
+name: markdown-editor
+description: "Markdownエディタ開発 - Webアプリ開発能力の検証"
+version: "1.0"
+
+# プロジェクト設定
+project:
+  id: pilot-markdown-editor
+  name: "Markdownエディタ"
+  working_directory: /tmp/pilot_markdown_editor
+
+# 期待する成果物
+expected_artifacts:
+  - path: index.html
+    description: "メインHTMLファイル"
+
+# タイムアウト設定（秒）
+timeouts:
+  task_creation: 600      # 10分
+  task_completion: 1200   # 20分
+
+# 初期アクション
+initial_action:
+  type: chat
+  from: owner-markdown
+  to: worker-dev
+  message: |
+    Markdownエディタを作成してください。
+
+    ## 機能要件
+    - Markdownテキストを入力できる
+    - 入力に応じてリアルタイムでHTMLプレビューを表示
+    - ページリロード後も内容が復元される
+    - 内容をクリアするボタンがある
+
+    ## サポートするMarkdown記法
+    - 見出し
+    - リスト
+    - 太字
+    - リンク
+
+    ## テスト用識別子（必須）
+    以下のdata-testid属性を必ず付与してください：
+    - 入力エリア: data-testid="markdown-input"
+    - プレビュー領域: data-testid="preview-output"
+    - クリアボタン: data-testid="clear-button"
+
+    作業ディレクトリに保存してください。
+
+# E2Eテストケース
+e2e_tests:
+  # Markdown変換テスト
+  - id: MD-01
+    name: "見出し変換 (# → h1)"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "# Hello World"
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="preview-output"] h1'
+        expected: "Hello World"
+
+  - id: MD-02
+    name: "見出しレベル (## → h2)"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "## Section Title"
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="preview-output"] h2'
+        expected: "Section Title"
+
+  - id: MD-03
+    name: "リスト変換 (- item → li)"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "- Item 1\n- Item 2"
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="preview-output"] li'
+
+  - id: MD-04
+    name: "太字変換 (**text** → strong/b)"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "This is **bold** text"
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="preview-output"]'
+        expected: "bold"
+
+  - id: MD-05
+    name: "リンク変換 ([text](url) → a)"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "[Click here](https://example.com)"
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="preview-output"] a[href="https://example.com"]'
+
+  # リアルタイム更新テスト
+  - id: RT-01
+    name: "リアルタイムプレビュー更新"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "# Initial"
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="preview-output"] h1'
+        expected: "Initial"
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "# Updated"
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="preview-output"] h1'
+        expected: "Updated"
+
+  # 永続化テスト
+  - id: PS-01
+    name: "リロード後の復元"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "# Persistent Content"
+      - action: wait
+        timeout: 1000
+      - action: reload
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="markdown-input"]'
+        expected: "# Persistent Content"
+
+  - id: PS-02
+    name: "クリア後のリロードで空"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "# To be cleared"
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="clear-button"]'
+      - action: wait
+        timeout: 500
+      - action: reload
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="markdown-input"]'
+        expected: ""
+
+  # クリアボタンテスト
+  - id: CL-01
+    name: "クリアボタンで入力クリア"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "# Content to clear"
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="clear-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="markdown-input"]'
+        expected: ""
+
+  - id: CL-02
+    name: "クリアボタンでプレビューもクリア"
+    steps:
+      - action: fill
+        selector: '[data-testid="markdown-input"]'
+        value: "# Content"
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="preview-output"] h1'
+      - action: click
+        selector: '[data-testid="clear-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_not_exists
+        selector: '[data-testid="preview-output"] h1'

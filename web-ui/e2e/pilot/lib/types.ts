@@ -134,6 +134,34 @@ export interface ScenarioConfig {
     to: string
     message: string
   }
+
+  // E2Eテストケース（オプション）
+  // ブラウザでの自動テストを定義
+  e2e_tests?: E2ETestCase[]
+}
+
+// ============================================================================
+// E2E Test Configuration
+// ============================================================================
+
+/**
+ * E2Eテストのステップ
+ */
+export interface E2ETestStep {
+  action: 'fill' | 'click' | 'wait' | 'reload' | 'assert_text' | 'assert_exists' | 'assert_not_exists'
+  selector?: string
+  value?: string
+  expected?: string
+  timeout?: number
+}
+
+/**
+ * E2Eテストケース
+ */
+export interface E2ETestCase {
+  id: string
+  name: string
+  steps: E2ETestStep[]
 }
 
 // ============================================================================
@@ -290,6 +318,7 @@ export type PilotEventType =
   | 'task_status_check'
   | 'all_tasks_completed'
   | 'task_completion_timeout'
+  | 'e2e_tests_completed'
 
 export interface PilotEvent {
   timestamp: string
