@@ -5967,8 +5967,23 @@ public final class MCPServer {
             ]
         }
 
-        // 3. 会話を検索
-        let conversations = try conversationRepository.findByTaskId(taskId, projectId: session.projectId)
+        // 3. 会話を検索（現在のタスク + 親タスクも含める）
+        // サブタスクのセッションでも親タスクの会話を確認できるようにする
+        var conversations = try conversationRepository.findByTaskId(taskId, projectId: session.projectId)
+        var searchedTaskIds = [taskId.value]
+
+        // 親タスクがあれば、その会話も検索
+        if let task = try taskRepository.findById(taskId),
+           let parentTaskId = task.parentTaskId {
+            let parentConversations = try conversationRepository.findByTaskId(parentTaskId, projectId: session.projectId)
+            // 重複を避けて追加
+            let existingIds = Set(conversations.map { $0.id.value })
+            for conv in parentConversations where !existingIds.contains(conv.id.value) {
+                conversations.append(conv)
+            }
+            searchedTaskIds.append(parentTaskId.value)
+            Self.log("[MCP] getTaskConversations: Also searched parent task \(parentTaskId.value)")
+        }
 
         // 4. 会話情報を整形
         let conversationDicts: [[String: Any]] = conversations.map { conv in
