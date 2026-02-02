@@ -533,16 +533,16 @@ final class MCPServerTests: XCTestCase {
         // Unauthenticated: 2 (help, authenticate)
         // Coordinator-only: 7 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, invalidate_session, report_agent_error)
         // Manager-only: 5 (list_subordinates, get_subordinate_profile, assign_task, approve_task_request, reject_task_request)
-        // Task-only: 7 (create_task, create_tasks_batch, report_completed, update_task_status, report_execution_start, report_execution_complete, delegate_to_chat_session)
+        // Task-only: 8 (create_task, create_tasks_batch, report_completed, update_task_status, report_execution_start, report_execution_complete, delegate_to_chat_session, get_task_conversations)
         // Authenticated (Manager + Worker): 11 (logout, report_model, get_my_profile, get_my_task, get_my_task_progress, get_notifications, get_next_action, get_project, list_tasks, get_task, request_task)
         // Chat-only: 5 (get_pending_messages, send_message, start_conversation, end_conversation, report_delegation_completed)
         // 注: list_agents, get_agent_profile, list_projects は削除済み
         // 注: get_my_tasks, get_pending_tasks はget_my_taskに統合済み
         // 注: start_conversation, end_conversation, send_message はchatOnlyに変更（タスク/チャット分離）
         // 注: request_task, approve_task_request, reject_task_request はタスク依頼機能用
-        // 注: delegate_to_chat_session（taskOnly）, report_delegation_completed（chatOnly）はタスク/チャット分離用
+        // 注: delegate_to_chat_session, get_task_conversations（taskOnly）, report_delegation_completed（chatOnly）はタスク/チャット分離用
         // 注: respond_chat は削除（send_message に統合）
-        XCTAssertEqual(tools.count, 37, "Should have 37 tools defined")
+        XCTAssertEqual(tools.count, 38, "Should have 38 tools defined")
     }
 }
 
