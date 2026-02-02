@@ -230,8 +230,8 @@ echo ""
 # Step 2: Seed SQL 生成
 echo -e "${YELLOW}Step 2: Generating seed SQL${NC}"
 mkdir -p "$SCRIPT_DIR/generated"
-cd "$SCRIPT_DIR"
-npx tsx lib/seed-generator.ts "$SCENARIO_YAML" "$VARIATION_YAML" > "$SEED_SQL"
+cd "$WEB_UI_DIR"
+npx tsx "$SCRIPT_DIR/lib/seed-generator.ts" "$SCENARIO_YAML" "$VARIATION_YAML" > "$SEED_SQL"
 echo -e "${GREEN}✓ Generated: $SEED_SQL${NC}"
 echo ""
 
@@ -390,7 +390,7 @@ export AIAGENTPM_WEBSERVER_PORT="$REST_PORT"
 export PILOT_RESULT_DIR="$RESULT_DIR"
 
 set -o pipefail
-npx playwright test pilot/tests/pilot.spec.ts \
+npx playwright test pilot/tests/scenario.spec.ts \
   --config=pilot/playwright.pilot.config.ts \
   --reporter=list \
   --timeout=300000 \
