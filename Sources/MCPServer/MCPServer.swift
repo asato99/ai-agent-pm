@@ -5422,10 +5422,19 @@ public final class MCPServer {
 
         Self.log("[MCP] Found \(allMessages.count) total message(s)")
 
+        // 既読時刻を取得（既読時刻ベースの未読判定用）
+        // Reference: docs/design/CHAT_FEATURE.md - Section 9.11
+        let lastReadTimes = try chatRepository.getLastReadTimes(
+            projectId: session.projectId,
+            agentId: session.agentId
+        )
+
         // PendingMessageIdentifier を使用してコンテキストと未読を分離
+        // lastReadTimes を渡して既読時刻ベースの判定を有効化
         let rawResult = PendingMessageIdentifier.separateContextAndPending(
             allMessages,
             agentId: session.agentId,
+            lastReadTimes: lastReadTimes,
             contextLimit: PendingMessageIdentifier.defaultContextLimit,  // 20
             pendingLimit: PendingMessageIdentifier.defaultPendingLimit   // 10
         )
@@ -5444,6 +5453,20 @@ public final class MCPServer {
         )
 
         Self.log("[MCP] Context: \(result.contextMessages.count), Pending: \(result.pendingMessages.count), Truncated: \(result.contextTruncated)")
+
+        // 自動既読更新: 取得した未読メッセージの送信者を既読にマーク
+        // Reference: docs/plan/UNREAD_MESSAGE_REFACTOR_TDD.md - Phase 3
+        let uniqueSenderIds = Set(result.pendingMessages.map { $0.senderId })
+        for senderId in uniqueSenderIds {
+            try chatRepository.markAsRead(
+                projectId: session.projectId,
+                currentAgentId: session.agentId,
+                senderAgentId: senderId
+            )
+        }
+        if !uniqueSenderIds.isEmpty {
+            Self.log("[MCP] Marked \(uniqueSenderIds.count) sender(s) as read")
+        }
 
         // ISO8601フォーマッタを共有
         let formatter = ISO8601DateFormatter()

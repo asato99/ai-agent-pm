@@ -8,10 +8,12 @@ import Domain
 /// 未読（pending）メッセージを特定するユーティリティ
 ///
 /// 未読の定義（senderId/receiverIdモデル）:
-/// - 最後の自分の応答より後に送信された他者からのメッセージ
-/// - 自分の応答がない場合は、全ての他者からのメッセージが未読
+/// - 既読時刻が指定されている場合: 既読時刻より後に送信された他者からのメッセージ
+/// - 既読時刻がない場合（後方互換）: 最後の自分の応答より後に送信された他者からのメッセージ
 /// - senderId == agentId のメッセージは自分が送信したもの
 /// - senderId != agentId のメッセージは他者から受信したもの
+///
+/// Reference: docs/design/CHAT_FEATURE.md - Section 9.11
 public enum PendingMessageIdentifier {
 
     /// MCP用のデフォルトコンテキスト件数
@@ -25,23 +27,25 @@ public enum PendingMessageIdentifier {
     /// - Parameters:
     ///   - messages: 全メッセージ（時系列順）
     ///   - agentId: 自分のエージェントID（未読判定の基準）
+    ///   - lastReadTimes: 送信者ID -> 最終既読時刻 のマッピング（オプション）
     ///   - limit: 返す未読メッセージの最大件数（nilの場合は全件）
     /// - Returns: 未読の受信メッセージ（時系列順）
-    public static func identify(_ messages: [ChatMessage], agentId: AgentID, limit: Int? = nil) -> [ChatMessage] {
+    public static func identify(
+        _ messages: [ChatMessage],
+        agentId: AgentID,
+        lastReadTimes: [String: Date] = [:],
+        limit: Int? = nil
+    ) -> [ChatMessage] {
         guard !messages.isEmpty else { return [] }
-
-        // 最後の自分の応答のインデックスを探す
-        let lastMyMessageIndex = messages.lastIndex { $0.senderId == agentId }
 
         let pendingMessages: [ChatMessage]
 
-        if let lastMyMessageIndex = lastMyMessageIndex {
-            // 自分の応答より後の他者からのメッセージを取得
-            pendingMessages = messages.suffix(from: lastMyMessageIndex + 1)
-                .filter { $0.senderId != agentId }
+        if lastReadTimes.isEmpty {
+            // 後方互換: 既読時刻がない場合は従来の返信ベースロジック
+            pendingMessages = identifyByReply(messages, agentId: agentId)
         } else {
-            // 自分の応答がない場合、全ての他者からのメッセージが未読
-            pendingMessages = messages.filter { $0.senderId != agentId }
+            // 新方式: 既読時刻ベース
+            pendingMessages = identifyByLastReadTime(messages, agentId: agentId, lastReadTimes: lastReadTimes)
         }
 
         // limit が指定されている場合は最新のものに制限
@@ -52,6 +56,45 @@ public enum PendingMessageIdentifier {
         return pendingMessages
     }
 
+    /// 既読時刻ベースの未読判定
+    private static func identifyByLastReadTime(
+        _ messages: [ChatMessage],
+        agentId: AgentID,
+        lastReadTimes: [String: Date]
+    ) -> [ChatMessage] {
+        messages.filter { message in
+            // 自分が送ったメッセージは未読対象外
+            guard message.senderId != agentId else { return false }
+
+            // 送信者の既読時刻を取得
+            if let lastRead = lastReadTimes[message.senderId.value] {
+                // 既読時刻より後のメッセージのみが未読
+                return message.createdAt > lastRead
+            } else {
+                // この送信者からの既読時刻がない場合は未読
+                return true
+            }
+        }
+    }
+
+    /// 返信ベースの未読判定（後方互換）
+    private static func identifyByReply(
+        _ messages: [ChatMessage],
+        agentId: AgentID
+    ) -> [ChatMessage] {
+        // 最後の自分の応答のインデックスを探す
+        let lastMyMessageIndex = messages.lastIndex { $0.senderId == agentId }
+
+        if let lastMyMessageIndex = lastMyMessageIndex {
+            // 自分の応答より後の他者からのメッセージを取得
+            return messages.suffix(from: lastMyMessageIndex + 1)
+                .filter { $0.senderId != agentId }
+        } else {
+            // 自分の応答がない場合、全ての他者からのメッセージが未読
+            return messages.filter { $0.senderId != agentId }
+        }
+    }
+
     /// コンテキストと未読メッセージを分離して取得する
     ///
     /// MCP `get_pending_messages` 用のメソッド
@@ -59,12 +102,14 @@ public enum PendingMessageIdentifier {
     /// - Parameters:
     ///   - messages: 全メッセージ（時系列順）
     ///   - agentId: 自分のエージェントID（未読判定の基準）
+    ///   - lastReadTimes: 送信者ID -> 最終既読時刻 のマッピング（オプション）
     ///   - contextLimit: コンテキストとして返す最大件数
     ///   - pendingLimit: 未読として返す最大件数
     /// - Returns: コンテキストと未読メッセージ、および統計情報
     public static func separateContextAndPending(
         _ messages: [ChatMessage],
         agentId: AgentID,
+        lastReadTimes: [String: Date] = [:],
         contextLimit: Int = defaultContextLimit,
         pendingLimit: Int = defaultPendingLimit
     ) -> ContextAndPendingResult {
@@ -77,8 +122,8 @@ public enum PendingMessageIdentifier {
             )
         }
 
-        // 未読メッセージを特定（limit付き）
-        let allPending = identify(messages, agentId: agentId)
+        // 未読メッセージを特定（既読時刻を考慮）
+        let allPending = identify(messages, agentId: agentId, lastReadTimes: lastReadTimes)
         let limitedPending = Array(allPending.suffix(pendingLimit))
 
         // コンテキスト = 未読を除いた直近のメッセージ

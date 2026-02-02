@@ -2148,7 +2148,8 @@ final class InfrastructureTests: XCTestCase {
     }
 
     func testChatFileRepositoryFindUnreadUserMessages() throws {
-        // PRD: 未読ユーザーメッセージの取得
+        // 未読判定: 既読時刻ベース（docs/design/CHAT_FEATURE.md Section 9.11）
+        // 既読にした後のメッセージのみが未読になる
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
 
         defer {
@@ -2175,18 +2176,24 @@ final class InfrastructureTests: XCTestCase {
         let ownerAgentId = AgentID(value: "owner")
         let msg1 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg1", createdAt: Date())
         let msg2 = ChatMessage(id: ChatMessageID.generate(), senderId: agent.id, receiverId: ownerAgentId, content: "msg2", createdAt: Date())
-        let msg3 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg3", createdAt: Date())
-        let msg4 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg4", createdAt: Date())
 
         try chatRepo.saveMessage(msg1, projectId: project.id, agentId: agent.id)
         try chatRepo.saveMessage(msg2, projectId: project.id, agentId: agent.id)
+
+        // ownerからのメッセージを既読にする
+        try chatRepo.markAsRead(projectId: project.id, currentAgentId: agent.id, senderAgentId: ownerAgentId)
+
+        // 既読後に新しいメッセージを追加（createdAt を明示的に未来に設定して確実に既読時刻より後にする）
+        let futureTime = Date().addingTimeInterval(1)
+        let msg3 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg3", createdAt: futureTime)
+        let msg4 = ChatMessage(id: ChatMessageID.generate(), senderId: ownerAgentId, receiverId: agent.id, content: "msg4", createdAt: futureTime.addingTimeInterval(1))
         try chatRepo.saveMessage(msg3, projectId: project.id, agentId: agent.id)
         try chatRepo.saveMessage(msg4, projectId: project.id, agentId: agent.id)
 
         // When: 未読ユーザーメッセージを取得
         let unreadMessages = try chatRepo.findUnreadMessages(projectId: project.id, agentId: agent.id)
 
-        // Then: エージェント応答後のユーザーメッセージが返される
+        // Then: 既読後のメッセージのみが返される
         XCTAssertEqual(unreadMessages.count, 2)
         XCTAssertEqual(unreadMessages[0].content, "msg3")
         XCTAssertEqual(unreadMessages[1].content, "msg4")

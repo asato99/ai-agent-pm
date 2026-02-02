@@ -99,20 +99,30 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
         return Array(allMessages.suffix(limit))
     }
 
-    /// Find unread messages (messages from others after my last message)
-    /// Uses senderId to identify who sent each message
+    /// Find unread messages based on last read times
+    ///
+    /// 未読の定義: 既読時刻より後に送信された他者からのメッセージ
+    /// - 既読時刻がない送信者からのメッセージは全て未読
+    /// - 自分が送信したメッセージは未読対象外
+    ///
+    /// Reference: docs/design/CHAT_FEATURE.md - Section 9.11
     public func findUnreadMessages(projectId: ProjectID, agentId: AgentID) throws -> [ChatMessage] {
         let allMessages = try findMessages(projectId: projectId, agentId: agentId)
+        let lastReadTimes = try getLastReadTimes(projectId: projectId, agentId: agentId)
 
-        // Find the index of my last sent message
-        guard let lastSentIndex = allMessages.lastIndex(where: { $0.senderId == agentId }) else {
-            // No messages from me, all messages from others are unread
-            return allMessages.filter { $0.senderId != agentId }
+        return allMessages.filter { message in
+            // 自分が送ったメッセージは未読対象外
+            guard message.senderId != agentId else { return false }
+
+            // 送信者の既読時刻を取得
+            if let lastRead = lastReadTimes[message.senderId.value] {
+                // 既読時刻より後のメッセージのみが未読
+                return message.createdAt > lastRead
+            } else {
+                // 既読時刻がない場合は全て未読
+                return true
+            }
         }
-
-        // Get messages after my last sent message that are from others
-        let messagesAfterLastSent = allMessages[(lastSentIndex + 1)...]
-        return messagesAfterLastSent.filter { $0.senderId != agentId }
     }
 
     // MARK: - Dual Write (双方向保存)

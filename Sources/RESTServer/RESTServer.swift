@@ -1859,6 +1859,14 @@ final class RESTServer {
                 before: beforeId
             )
 
+            // 自動既読更新: チャット画面を開いたとき、相手からのメッセージを既読にマーク
+            // Reference: docs/plan/UNREAD_MESSAGE_REFACTOR_TDD.md - Phase 4
+            try chatRepository.markAsRead(
+                projectId: projectId,
+                currentAgentId: currentAgentId,
+                senderAgentId: targetAgentId
+            )
+
             // Check if the agent has pending messages to respond to
             // This uses the same logic as get_next_action to determine waiting state
             let pendingMessages = try chatRepository.findUnreadMessages(
