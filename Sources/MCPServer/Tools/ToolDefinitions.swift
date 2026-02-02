@@ -46,6 +46,7 @@ enum ToolDefinitions {
             reportExecutionStart,  // 実行開始報告（非推奨）
             reportExecutionComplete, // 実行完了報告（非推奨）
             delegateToChatSession, // チャットセッションへ委譲
+            getTaskConversations,  // タスクに紐付く会話を取得
             reportDelegationCompleted, // 委譲完了報告
 
             // ========================================
@@ -1134,6 +1135,28 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "target_agent_id", "purpose"]
+        ]
+    ]
+
+    /// get_task_conversations - タスクに紐付く会話を取得
+    /// タスクセッションから委譲した会話の状況を確認するために使用
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    static let getTaskConversations: [String: Any] = [
+        "name": "get_task_conversations",
+        "description": """
+            このタスクに紐付く会話の一覧を取得します。
+            delegate_to_chat_session で委譲した会話の進行状況を確認するために使用してください。
+            タスクセッション専用のツールです。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ]
+            ] as [String: Any],
+            "required": ["session_token"]
         ]
     ]
 

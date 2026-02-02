@@ -132,7 +132,9 @@ struct ToolAuthorization {
 
         // タスクセッションからチャットセッションへの委譲
         // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+        // 参照: docs/design/TASK_CONVERSATION_AWAIT.md
         "delegate_to_chat_session": .taskOnly,
+        "get_task_conversations": .taskOnly,
         "report_delegation_completed": .chatOnly,
 
         // タスク依頼・承認機能

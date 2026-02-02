@@ -396,6 +396,11 @@ public protocol ConversationRepositoryProtocol: Sendable {
         participantAgentId: AgentID,
         projectId: ProjectID
     ) throws -> Bool
+
+    /// タスクIDに紐付く会話を検索
+    /// get_task_conversations ツールで使用
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    func findByTaskId(_ taskId: TaskID, projectId: ProjectID) throws -> [Conversation]
 }
 
 // MARK: - NotificationRepositoryProtocol
@@ -503,4 +508,13 @@ public protocol ChatDelegationRepositoryProtocol: Sendable {
 
     /// 委譲の失敗を報告（ステータス、処理日時、結果を更新）
     func markFailed(_ id: ChatDelegationID, result: String?) throws
+
+    /// 処理中（processing）の委譲を検索
+    /// start_conversationでtaskIdを継承するために使用
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    func findProcessingDelegation(
+        agentId: AgentID,
+        targetAgentId: AgentID,
+        projectId: ProjectID
+    ) throws -> ChatDelegation?
 }

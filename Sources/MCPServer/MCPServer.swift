@@ -1054,6 +1054,12 @@ public final class MCPServer {
                 context: context
             )
 
+        case "get_task_conversations":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            return try getTaskConversations(session: session)
+
         case "report_delegation_completed":
             guard let session = caller.session else {
                 throw MCPError.sessionTokenRequired
@@ -5726,12 +5732,29 @@ public final class MCPServer {
             )
         }
 
-        // 6. 会話エンティティ作成
+        // 6. ChatDelegationからtaskIdを継承（存在する場合）
+        // 参照: docs/design/TASK_CONVERSATION_AWAIT.md - 会話へのtaskId紐付け
+        var inheritedTaskId: TaskID? = nil
+        if session.purpose == .chat {
+            // チャットセッションからの会話開始時、処理中の委譲があればtaskIdを継承
+            // 委譲は同じエージェントのタスクセッションから作成され、getNextActionでprocessingに更新済み
+            if let processingDelegation = try chatDelegationRepository.findProcessingDelegation(
+                agentId: session.agentId,
+                targetAgentId: AgentID(value: participantAgentId),
+                projectId: session.projectId
+            ) {
+                inheritedTaskId = processingDelegation.taskId
+                Self.log("[MCP] startConversation: Inherited taskId from delegation: \(processingDelegation.taskId?.value ?? "nil")")
+            }
+        }
+
+        // 7. 会話エンティティ作成
         // maxTurnsはシステム上限（40）以下に制限
         let validatedMaxTurns = min(max(maxTurns, 2), Conversation.systemMaxTurns)
         let conversation = Conversation(
             id: ConversationID.generate(),
             projectId: session.projectId,
+            taskId: inheritedTaskId,
             initiatorAgentId: session.agentId,
             participantAgentId: AgentID(value: participantAgentId),
             state: .pending,
@@ -5740,7 +5763,7 @@ public final class MCPServer {
             createdAt: Date()
         )
         try conversationRepository.save(conversation)
-        Self.log("[MCP] Created conversation: \(conversation.id.value) state=pending maxTurns=\(validatedMaxTurns)")
+        Self.log("[MCP] Created conversation: \(conversation.id.value) state=pending maxTurns=\(validatedMaxTurns) taskId=\(inheritedTaskId?.value ?? "nil")")
 
         // 7. 初期メッセージを送信（会話IDを紐付け）
         let message = ChatMessage(
@@ -5854,9 +5877,10 @@ public final class MCPServer {
             )
         }
 
-        // 2. ターゲットエージェントの存在確認
+        // 2. ターゲットエージェントの存在確認と情報取得
+        // 参照: docs/design/TASK_CONVERSATION_AWAIT.md - instruction生成のためにエージェントタイプを取得
         let targetId = AgentID(value: targetAgentId)
-        guard let _ = try agentRepository.findById(targetId) else {
+        guard let targetAgent = try agentRepository.findById(targetId) else {
             throw MCPError.agentNotFound(targetAgentId)
         }
 
@@ -5875,10 +5899,12 @@ public final class MCPServer {
         }
 
         // 5. ChatDelegationを作成して保存
+        // 参照: docs/design/TASK_CONVERSATION_AWAIT.md - session.taskIdを継承
         let delegation = ChatDelegation(
             id: ChatDelegationID.generate(),
             agentId: session.agentId,
             projectId: session.projectId,
+            taskId: session.taskId,
             targetAgentId: targetId,
             purpose: purpose,
             context: context,
@@ -5889,18 +5915,116 @@ public final class MCPServer {
         )
         try chatDelegationRepository.save(delegation)
 
-        Self.log("[MCP] ChatDelegation created: \(delegation.id.value)")
+        Self.log("[MCP] ChatDelegation created: \(delegation.id.value) taskId=\(session.taskId?.value ?? "nil")")
+
+        // 6. 動的instructionの生成
+        // 参照: docs/design/TASK_CONVERSATION_AWAIT.md - エージェントタイプに応じた指示
+        let targetTypeNote = targetAgent.type == .ai
+            ? "相手はAIのため、人間より応答が速い傾向があります。"
+            : "相手は人間のため、応答に時間がかかる可能性があります。"
+
+        let instruction = """
+            会話を \(targetAgent.name)（\(targetAgent.type == .ai ? "AI" : "人間")）に移譲しました。確認方法：get_task_conversations()
+
+            【確認頻度】
+            タスク内に他の作業があれば、作業を進めつつ区切りで確認してください。
+            他の作業がなければ、確認の頻度を上げてください。
+            \(targetTypeNote)
+
+            【中断判断】
+            相手のタイプ、会話の進捗状況、応答の見込みを考慮して判断してください。
+            見込みがないと判断したら、タスクを blocked に変更し理由を記録して退出。
+            """
 
         return [
             "success": true,
-            "delegation_id": delegation.id.value,
             "target_agent_id": targetAgentId,
             "purpose": purpose,
-            "instruction": """
-                チャットセッションへの委譲を作成しました。
-                チャットセッションが起動されると、この委譲を受け取り処理します。
-                委譲ID: \(delegation.id.value)
+            "instruction": instruction
+        ]
+    }
+
+    /// get_task_conversations - タスクに紐付く会話を取得
+    /// タスクセッションから委譲した会話の状況を確認するために使用
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    private func getTaskConversations(session: AgentSession) throws -> [String: Any] {
+        Self.log("[MCP] getTaskConversations called: agent='\(session.agentId.value)' taskId=\(session.taskId?.value ?? "nil")")
+
+        // 1. タスクセッションからのみ呼び出し可能
+        guard session.purpose == .task else {
+            throw MCPError.toolNotAvailable(
+                tool: "get_task_conversations",
+                reason: "このツールはタスクセッション専用です。現在のセッション目的: \(session.purpose.rawValue)"
+            )
+        }
+
+        // 2. taskIdが必要
+        guard let taskId = session.taskId else {
+            return [
+                "success": true,
+                "conversations": [] as [[String: Any]],
+                "instruction": "このタスクセッションには紐付くタスクがありません。"
+            ]
+        }
+
+        // 3. 会話を検索
+        let conversations = try conversationRepository.findByTaskId(taskId, projectId: session.projectId)
+
+        // 4. 会話情報を整形
+        let conversationDicts: [[String: Any]] = conversations.map { conv in
+            [
+                "conversation_id": conv.id.value,
+                "state": conv.state.rawValue,
+                "initiator_agent_id": conv.initiatorAgentId.value,
+                "participant_agent_id": conv.participantAgentId.value,
+                "purpose": conv.purpose ?? "",
+                "created_at": ISO8601DateFormatter().string(from: conv.createdAt),
+                "ended_at": conv.endedAt.map { ISO8601DateFormatter().string(from: $0) } as Any
+            ]
+        }
+
+        // 5. 状態別のサマリー
+        let activeCount = conversations.filter { $0.state == .active }.count
+        let pendingCount = conversations.filter { $0.state == .pending }.count
+        let endedCount = conversations.filter { $0.state == .ended || $0.state == .expired }.count
+        let terminatingCount = conversations.filter { $0.state == .terminating }.count
+
+        let instruction: String
+        if conversations.isEmpty {
+            instruction = "このタスクに紐付く会話はまだありません。"
+        } else if activeCount > 0 || pendingCount > 0 {
+            instruction = """
+                進行中の会話があります。
+                - active: \(activeCount)件（両者参加中）
+                - pending: \(pendingCount)件（相手の参加待ち）
+                - terminating: \(terminatingCount)件（終了処理中）
+                - ended: \(endedCount)件（終了済み）
+
+                会話の応答を待つか、他の作業を進めてください。
                 """
+        } else {
+            instruction = """
+                すべての会話が終了しています。
+                - ended: \(endedCount)件（終了済み）
+
+                必要に応じて結果を確認してタスクを進めてください。
+                """
+        }
+
+        Self.log("[MCP] getTaskConversations: Found \(conversations.count) conversations (active=\(activeCount), pending=\(pendingCount), ended=\(endedCount))")
+
+        return [
+            "success": true,
+            "task_id": taskId.value,
+            "conversations": conversationDicts,
+            "summary": [
+                "total": conversations.count,
+                "active": activeCount,
+                "pending": pendingCount,
+                "terminating": terminatingCount,
+                "ended": endedCount
+            ],
+            "instruction": instruction
         ]
     }
 

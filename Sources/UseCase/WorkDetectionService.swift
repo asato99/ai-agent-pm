@@ -80,10 +80,19 @@ public struct WorkDetectionService: Sendable {
     /// - かつ、アクティブなタスクセッションがない
     /// 注意: 階層タイプ別の追加条件は呼び出し元で判定する
     public func hasTaskWork(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+        return try findTaskWork(agentId: agentId, projectId: projectId) != nil
+    }
+
+    /// タスクの仕事を検出し、該当タスクIDを返す
+    /// - in_progress タスクがある（assignee = 対象エージェント）
+    /// - かつ、アクティブなタスクセッションがない
+    /// - Returns: 対象タスクID（仕事がない場合はnil）
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md - タスクセッションへのtaskId紐付け
+    public func findTaskWork(agentId: AgentID, projectId: ProjectID) throws -> TaskID? {
         let inProgressTasks = try taskRepository.findByProject(projectId, status: .inProgress)
-        let hasInProgressTask = inProgressTasks.contains { $0.assigneeId == agentId }
-        guard hasInProgressTask else {
-            return false
+        let assignedTask = inProgressTasks.first { $0.assigneeId == agentId }
+        guard let task = assignedTask else {
+            return nil
         }
 
         let sessions = try sessionRepository.findByAgentIdAndProjectId(agentId, projectId: projectId)
@@ -91,6 +100,6 @@ public struct WorkDetectionService: Sendable {
             session.purpose == .task && session.expiresAt > Date()
         }
 
-        return !hasActiveTask
+        return hasActiveTask ? nil : task.id
     }
 }

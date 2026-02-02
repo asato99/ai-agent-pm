@@ -1,5 +1,6 @@
 // Sources/Domain/Entities/ChatDelegation.swift
 // 参照: docs/design/TASK_CHAT_SESSION_SEPARATION.md
+// 参照: docs/design/TASK_CONVERSATION_AWAIT.md - タスクIDによる会話紐付け
 //
 // タスクセッションからチャットセッションへのコミュニケーション委譲を管理するエンティティ
 // タスクセッションは直接メッセージ送信や会話開始ができないため、
@@ -36,6 +37,9 @@ public struct ChatDelegation: Identifiable, Codable, Sendable, Equatable {
     public let agentId: AgentID
     /// プロジェクトID
     public let projectId: ProjectID
+    /// 移譲元タスクID（タスクセッションから自動設定）
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    public let taskId: TaskID?
     /// コミュニケーション相手のエージェントID
     public let targetAgentId: AgentID
     /// 依頼内容（何を伝えたいか、何をしてほしいか）
@@ -55,6 +59,7 @@ public struct ChatDelegation: Identifiable, Codable, Sendable, Equatable {
         id: ChatDelegationID = .generate(),
         agentId: AgentID,
         projectId: ProjectID,
+        taskId: TaskID? = nil,
         targetAgentId: AgentID,
         purpose: String,
         context: String? = nil,
@@ -66,6 +71,7 @@ public struct ChatDelegation: Identifiable, Codable, Sendable, Equatable {
         self.id = id
         self.agentId = agentId
         self.projectId = projectId
+        self.taskId = taskId
         self.targetAgentId = targetAgentId
         self.purpose = purpose
         self.context = context
