@@ -136,6 +136,8 @@ async function executeStep(page: any, step: E2ETestStep): Promise<void> {
         throw new Error('fill action requires selector and value')
       }
       await page.locator(step.selector).fill(step.value, { timeout })
+      // Ensure input event is dispatched for localStorage save
+      await page.locator(step.selector).dispatchEvent('input')
       break
 
     case 'click':
@@ -168,7 +170,8 @@ async function executeStep(page: any, step: E2ETestStep): Promise<void> {
       if (!step.selector) {
         throw new Error('assert_exists action requires selector')
       }
-      await page.locator(step.selector).waitFor({ state: 'visible', timeout })
+      // Use first() to handle multiple elements
+      await page.locator(step.selector).first().waitFor({ state: 'visible', timeout })
       break
 
     case 'assert_not_exists':
