@@ -185,10 +185,34 @@ async function executeStep(page: any, step: E2ETestStep): Promise<void> {
       if (!step.selector) {
         throw new Error('assert_not_exists action requires selector')
       }
-      const count = await page.locator(step.selector).count()
-      if (count > 0) {
-        throw new Error(`Element "${step.selector}" should not exist but found ${count} elements`)
+      const countExists = await page.locator(step.selector).count()
+      if (countExists > 0) {
+        throw new Error(`Element "${step.selector}" should not exist but found ${countExists} elements`)
       }
+      break
+
+    case 'assert_not_text':
+      if (!step.selector || step.expected === undefined) {
+        throw new Error('assert_not_text action requires selector and expected')
+      }
+      const notTextLocator = page.locator(step.selector)
+      const notTextTagName = await notTextLocator.evaluate((el: Element) => el.tagName.toLowerCase())
+      let notText: string | null
+      if (notTextTagName === 'input' || notTextTagName === 'textarea') {
+        notText = await notTextLocator.inputValue({ timeout })
+      } else {
+        notText = await notTextLocator.textContent({ timeout })
+      }
+      if (notText?.includes(step.expected)) {
+        throw new Error(`Text "${step.expected}" should not be present but found in "${notText}"`)
+      }
+      break
+
+    case 'drag':
+      if (!step.from || !step.to) {
+        throw new Error('drag action requires from and to selectors')
+      }
+      await page.locator(step.from).first().dragTo(page.locator(step.to).first(), { timeout })
       break
 
     default:

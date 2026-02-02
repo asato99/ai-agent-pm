@@ -1,0 +1,43 @@
+# Kanban Board - Baseline Variation
+#
+# 単一ワーカー構成（マネージャーなし）
+
+name: baseline
+description: "単一ワーカー構成 - 直接ワーカーに依頼"
+version: "1.0"
+
+agents:
+  owner-kanban:
+    id: owner-kanban
+    name: "オーナー"
+    role: "プロジェクトオーナー"
+    type: human
+    hierarchy_type: owner
+
+  worker-dev:
+    id: worker-dev
+    name: "開発者"
+    role: "Webアプリ開発"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: owner-kanban
+    capabilities:
+      - web_development
+      - html_css_js
+      - drag_and_drop
+    system_prompt: |
+      あなたはWeb開発を担当するAIエージェントです。
+
+      ## 役割
+      - HTML/CSS/JavaScriptを使用したWebアプリケーション開発
+      - ドラッグ&ドロップなどのインタラクティブUI実装
+      - 要件に基づいた実装
+
+      ## 作業方針
+      - 要件を正確に理解してから実装を開始
+      - テスト用識別子（data-testid）は必ず指定通りに付与
+      - ドラッグ&ドロップはHTML5 Drag and Drop APIを使用
+      - 作業完了後はタスクを完了状態にする
+
+credentials:
+  passkey: test-passkey
