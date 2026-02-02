@@ -6,9 +6,7 @@ AI Agent Project Managerの実装計画ドキュメント。
 
 ## 現在進行中
 
-| 計画 | 概要 | ドキュメント |
-|------|------|-------------|
-| **未読メッセージ判定リファクタリング** | 未読判定を「返信ベース」から「既読時刻ベース」に変更 | [UNREAD_MESSAGE_REFACTOR_TDD.md](./UNREAD_MESSAGE_REFACTOR_TDD.md) |
+現在進行中の計画はありません。
 
 ---
 
@@ -20,6 +18,7 @@ AI Agent Project Managerの実装計画ドキュメント。
 
 | 計画 | 概要 | ドキュメント |
 |------|------|-------------|
+| 未読メッセージ判定リファクタリング | 未読判定を「返信ベース」から「既読時刻ベース」に変更 | [UNREAD_MESSAGE_REFACTOR_TDD.md](./UNREAD_MESSAGE_REFACTOR_TDD.md) |
 | Phase 1: MCP連携検証 | MCPサーバーの基本動作確認 | [archive/PHASE1_MCP_VERIFICATION.md](./archive/PHASE1_MCP_VERIFICATION.md) |
 | Phase 2: フル実装 | MacアプリとMCP機能の完全実装 | [archive/PHASE2_FULL_IMPLEMENTATION.md](./archive/PHASE2_FULL_IMPLEMENTATION.md) |
 | Phase 3: プル型アーキテクチャ | Runner連携と認証基盤 | [archive/PHASE3_PULL_ARCHITECTURE.md](./archive/PHASE3_PULL_ARCHITECTURE.md) |
@@ -45,6 +44,7 @@ AI Agent Project Managerの実装計画ドキュメント。
 
 | 日付 | 変更内容 |
 |------|----------|
+| 2026-02-02 | 未読メッセージリファクタリング計画を完了 |
 | 2026-02-02 | アーカイブ構造に移行、未読メッセージリファクタリング計画を追加 |
 | 2026-01-06 | Phase 3（プル型アーキテクチャ）を追加 |
 | 2024-12-30 | 初版作成 |
