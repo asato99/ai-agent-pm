@@ -160,7 +160,14 @@ async function executeStep(page: any, step: E2ETestStep): Promise<void> {
       if (!step.selector || step.expected === undefined) {
         throw new Error('assert_text action requires selector and expected')
       }
-      const text = await page.locator(step.selector).textContent({ timeout })
+      const locator = page.locator(step.selector)
+      const tagName = await locator.evaluate((el: Element) => el.tagName.toLowerCase())
+      let text: string | null
+      if (tagName === 'input' || tagName === 'textarea') {
+        text = await locator.inputValue({ timeout })
+      } else {
+        text = await locator.textContent({ timeout })
+      }
       if (!text?.includes(step.expected)) {
         throw new Error(`Expected text "${step.expected}" not found in "${text}"`)
       }
