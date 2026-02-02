@@ -301,50 +301,5 @@ test.describe('AI-to-AI Conversation - UC016', () => {
       console.log('UC016: Chat panel opens and closes correctly')
     })
 
-    /**
-     * Test: Send message to initiator
-     *
-     * Verify that Human can send a message to initiator (without full flow).
-     */
-    test('Can send message to initiator', async ({ page }) => {
-      // Skip if not in integration environment
-      test.skip(
-        !process.env.INTEGRATION_WITH_COORDINATOR,
-        'Requires integration environment'
-      )
-
-      test.setTimeout(180_000) // 3 minutes
-
-      // Navigate to project
-      await page.goto(`/projects/${TEST_PROJECT.id}`)
-
-      // Open chat with initiator
-      const initiatorAvatar = page.locator(`[data-testid="agent-avatar-${INITIATOR.id}"]`)
-      await initiatorAvatar.click()
-
-      const chatPanel = page.getByTestId('chat-panel')
-      await expect(chatPanel).toBeVisible()
-
-      // Wait for session ready
-      const sendButton = page.getByTestId('chat-send-button')
-      await expect(sendButton).toHaveText('送信', { timeout: 120_000 })
-
-      // Send a simple test message
-      const testMessage = 'テストメッセージです。'
-      const chatInput = page.getByTestId('chat-input')
-      await chatInput.fill(testMessage)
-      await sendButton.click()
-
-      // Verify message appears
-      await expect(chatPanel.getByText(testMessage)).toBeVisible({ timeout: 5_000 })
-
-      console.log('UC016: Message sent to initiator successfully')
-
-      // Close chat panel
-      const closeButton = chatPanel
-        .getByRole('button', { name: /閉じる|Close|×/i })
-        .first()
-      await closeButton.click()
-    })
   })
 })

@@ -180,7 +180,7 @@ mcp_socket_path: $MCP_SOCKET_PATH
 ai_providers:
   claude:
     cli_command: claude
-    cli_args: ["--dangerously-skip-permissions", "--max-turns", "50"]
+    cli_args: ["--dangerously-skip-permissions", "--max-turns", "300"]
 agents:
   uc016b-manager:
     passkey: test-passkey

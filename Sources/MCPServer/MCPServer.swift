@@ -6451,7 +6451,7 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
         case .conversationNotActive(let conversationId, let currentState):
             return "Conversation '\(conversationId)' is not active (current state: \(currentState))"
         case .conversationRequiredForAIToAI(let fromAgentId, let toAgentId):
-            return "AIエージェント間のメッセージ送信にはアクティブな会話が必要です。先にstart_conversation(participant_agent_id: \"\(toAgentId)\", initial_message: \"...\")を呼び出してください。(from: \(fromAgentId), to: \(toAgentId))"
+            return "AIエージェント間の場合は、メッセージ送信にアクティブな会話が必要です。アクティブな会話がありません。業務上の必要性がある場合のみ、start_conversationで新しい会話を開始してください。(from: \(fromAgentId), to: \(toAgentId))"
         case .delegationNotFound(let id):
             return "Chat delegation not found: \(id)"
         case .notDelegationOwner(let delegationId, let agentId):
