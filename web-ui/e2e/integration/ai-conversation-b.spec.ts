@@ -50,7 +50,7 @@ test.describe('Manager-Worker AI-to-AI Conversation - UC016-B', () => {
   // Instruction message from Human to Manager
   // 6往復 = 12メッセージ、5件ごとにend_conversationリマインドが出るため10件目で終了を促される
   const INSTRUCTION_MESSAGE =
-    'uc016b-workerと6往復しりとりをしてください。最初の単語は「りんご」で始めて、終わったら結果を報告してください。'
+    'uc016b-workerとチャットで6往復しりとりをしてください。最初の単語は「りんご」で始めて、終わったら結果を報告してください。'
 
   test.beforeEach(async ({ page }) => {
     // Login as UC016-B Human (project owner)
