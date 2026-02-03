@@ -148,7 +148,7 @@ export interface ScenarioConfig {
  * E2Eテストのステップ
  */
 export interface E2ETestStep {
-  action: 'fill' | 'click' | 'wait' | 'reload' | 'assert_text' | 'assert_exists' | 'assert_not_exists' | 'assert_not_text' | 'drag'
+  action: 'fill' | 'click' | 'wait' | 'reload' | 'assert_text' | 'assert_exists' | 'assert_not_exists' | 'assert_not_text' | 'drag' | 'press'
   selector?: string
   value?: string
   expected?: string
@@ -156,6 +156,8 @@ export interface E2ETestStep {
   // drag action用
   from?: string
   to?: string
+  // press action用
+  key?: string
 }
 
 /**

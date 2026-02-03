@@ -218,6 +218,17 @@ async function executeStep(page: any, step: E2ETestStep): Promise<void> {
       await page.locator(step.from).first().dragTo(page.locator(step.to).first(), { timeout })
       break
 
+    case 'press':
+      if (!step.key) {
+        throw new Error('press action requires key')
+      }
+      if (step.selector) {
+        await page.locator(step.selector).first().press(step.key, { timeout })
+      } else {
+        await page.keyboard.press(step.key)
+      }
+      break
+
     default:
       throw new Error(`Unknown action: ${step.action}`)
   }

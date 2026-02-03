@@ -1,0 +1,327 @@
+# Weather App Scenario
+#
+# 仕様書ベースの天気予報アプリ開発シナリオ
+# AIが仕様書を読み込んで実装する
+
+name: weather-app
+description: "天気予報アプリ開発 - 仕様書ベースの実装検証"
+version: "2.0"
+
+# プロジェクト設定
+project:
+  id: pilot-weather-app
+  name: "天気予報アプリ"
+  working_directory: /tmp/pilot_weather_app
+
+# 初期ファイル（仕様書を配置）
+initial_files:
+  - name: SPEC.md
+    content: |
+      # 天気予報Webアプリ仕様書
+
+      ## 1. 概要
+
+      都市の天気情報を検索・表示するWebアプリケーション。
+      実際の天気APIを使用し、リアルタイムの気象データを表示する。
+
+      ## 2. 技術要件
+
+      - HTML/CSS/JavaScript（バニラJS、フレームワーク不要）
+      - 外部天気API使用（無料・登録不要のものを選択）
+      - レスポンシブデザイン対応
+      - localStorage使用（お気に入り保存）
+
+      ## 3. 機能要件
+
+      ### 3.1 検索機能
+      - 都市名による天気検索
+      - Enterキーでの検索対応
+      - 検索履歴は不要
+
+      ### 3.2 現在の天気表示
+      - 都市名
+      - 現在気温（℃）
+      - 天気状態（晴れ、曇り、雨など）
+      - 天気アイコン
+      - 湿度（%）
+      - 風速（m/s）
+      - 気圧（hPa）
+      - 体感温度
+
+      ### 3.3 時間別予報
+      - 今後24時間の1時間ごと予報
+      - 各時間：時刻、気温、天気アイコン
+      - 横スクロール表示
+
+      ### 3.4 週間予報
+      - 7日間の日別予報
+      - 各日：日付、天気アイコン、最高/最低気温
+
+      ### 3.5 日の出・日の入り
+      - 本日の日の出時刻
+      - 本日の日の入り時刻
+
+      ### 3.6 生活指数
+      - 紫外線指数（0-11+）
+      - 洗濯指数（天気・湿度から算出）
+      - 傘の必要性（降水確率から判定）
+
+      ### 3.7 お気に入り機能
+      - 都市をお気に入りに追加/削除
+      - 最大5件まで保存
+      - お気に入り都市をクリックで検索
+
+      ### 3.8 状態表示
+      - ローディングインジケーター
+      - エラーメッセージ（都市が見つからない等）
+
+      ## 4. UI/デザイン要件
+
+      - モダンでクリーンなデザイン
+      - カード型レイアウト
+      - レスポンシブ対応（モバイル/タブレット/デスクトップ）
+      - 天気に応じた視覚的フィードバック
+
+      ## 5. テスト用識別子（data-testid）
+
+      ### 検索
+      - search-input: 検索入力欄
+      - search-button: 検索ボタン
+
+      ### 現在の天気
+      - city-name: 都市名
+      - current-temp: 現在気温
+      - weather-condition: 天気状態
+      - humidity: 湿度
+      - wind-speed: 風速
+      - pressure: 気圧
+      - feels-like: 体感温度
+
+      ### 時間別予報
+      - hourly-forecast: 時間別予報コンテナ
+
+      ### 週間予報
+      - forecast-container: 週間予報コンテナ
+
+      ### 日の出・日の入り
+      - sunrise: 日の出時刻
+      - sunset: 日の入り時刻
+
+      ### 生活指数
+      - uv-index: 紫外線指数
+      - laundry-index: 洗濯指数
+      - umbrella-needed: 傘の必要性
+
+      ### お気に入り
+      - add-favorite: お気に入り追加ボタン
+      - favorites-list: お気に入りリスト
+
+      ### 状態
+      - loading-indicator: ローディング
+      - error-message: エラーメッセージ
+
+# 期待する成果物
+expected_artifacts:
+  - path: index.html
+    description: "メインHTMLファイル"
+
+# タイムアウト設定（秒）
+timeouts:
+  task_creation: 600
+  task_completion: 3000   # 50分（より複雑な仕様のため）
+
+# 初期アクション
+initial_action:
+  type: chat
+  from: owner-weather
+  to: worker-dev
+  message: |
+    作業ディレクトリにある SPEC.md を参照して、天気予報Webアプリを実装してください。
+
+    仕様書に記載された全ての機能要件とテスト用識別子を満たすようにしてください。
+    成果物は作業ディレクトリに保存してください。
+
+# E2Eテストケース
+e2e_tests:
+  # 構造テスト - 検索UI
+  - id: ST-01
+    name: "検索UIの存在確認"
+    steps:
+      - action: assert_exists
+        selector: '[data-testid="search-input"]'
+      - action: assert_exists
+        selector: '[data-testid="search-button"]'
+
+  # 構造テスト - お気に入りUI
+  - id: ST-02
+    name: "お気に入りUIの存在確認"
+    steps:
+      - action: assert_exists
+        selector: '[data-testid="favorites-list"]'
+
+  # 検索機能テスト
+  - id: SE-01
+    name: "都市検索 - 東京"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "Tokyo"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: wait
+        timeout: 5000
+      - action: assert_exists
+        selector: '[data-testid="city-name"]'
+      - action: assert_exists
+        selector: '[data-testid="current-temp"]'
+      - action: assert_exists
+        selector: '[data-testid="weather-condition"]'
+
+  # 現在の天気詳細テスト
+  - id: CW-01
+    name: "現在の天気詳細表示"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "Tokyo"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: wait
+        timeout: 5000
+      - action: assert_exists
+        selector: '[data-testid="humidity"]'
+      - action: assert_exists
+        selector: '[data-testid="wind-speed"]'
+      - action: assert_exists
+        selector: '[data-testid="pressure"]'
+      - action: assert_exists
+        selector: '[data-testid="feels-like"]'
+
+  # 時間別予報テスト
+  - id: HF-01
+    name: "時間別予報表示"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "Tokyo"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: wait
+        timeout: 5000
+      - action: assert_exists
+        selector: '[data-testid="hourly-forecast"]'
+
+  # 週間予報テスト
+  - id: WF-01
+    name: "週間予報表示"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "London"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: wait
+        timeout: 5000
+      - action: assert_exists
+        selector: '[data-testid="forecast-container"]'
+
+  # 日の出・日の入りテスト
+  - id: SS-01
+    name: "日の出・日の入り表示"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "Tokyo"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: wait
+        timeout: 5000
+      - action: assert_exists
+        selector: '[data-testid="sunrise"]'
+      - action: assert_exists
+        selector: '[data-testid="sunset"]'
+
+  # 生活指数テスト
+  - id: LI-01
+    name: "生活指数表示"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "Tokyo"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: wait
+        timeout: 5000
+      - action: assert_exists
+        selector: '[data-testid="uv-index"]'
+      - action: assert_exists
+        selector: '[data-testid="laundry-index"]'
+      - action: assert_exists
+        selector: '[data-testid="umbrella-needed"]'
+
+  # ローディング状態テスト
+  - id: LD-01
+    name: "ローディング表示"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "New York"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: assert_exists
+        selector: '[data-testid="loading-indicator"]'
+
+  # お気に入り機能テスト
+  - id: FV-01
+    name: "お気に入り追加"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "Tokyo"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: wait
+        timeout: 5000
+      - action: click
+        selector: '[data-testid="add-favorite"]'
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="favorites-list"]'
+        expected: "Tokyo"
+
+  # お気に入り永続化テスト
+  - id: FV-02
+    name: "お気に入り永続化"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "Berlin"
+      - action: click
+        selector: '[data-testid="search-button"]'
+      - action: wait
+        timeout: 5000
+      - action: click
+        selector: '[data-testid="add-favorite"]'
+      - action: wait
+        timeout: 1000
+      - action: reload
+      - action: wait
+        timeout: 1000
+      - action: assert_text
+        selector: '[data-testid="favorites-list"]'
+        expected: "Berlin"
+
+  # Enterキー検索テスト
+  - id: KY-01
+    name: "Enterキーで検索"
+    steps:
+      - action: fill
+        selector: '[data-testid="search-input"]'
+        value: "Sydney"
+      - action: press
+        key: "Enter"
+      - action: wait
+        timeout: 5000
+      - action: assert_exists
+        selector: '[data-testid="city-name"]'
