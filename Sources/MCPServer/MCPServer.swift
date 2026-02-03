@@ -152,8 +152,8 @@ public final class MCPServer {
         let migrator = LogMigrator(directory: logDirectory)
         migrator.migrateIfNeeded(prefix: "mcp-server")
 
-        // ファイル出力を設定（日付別ローテーション）
-        let fileOutput = RotatingFileLogOutput(directory: logDirectory, prefix: "mcp-server")
+        // ファイル出力を設定（日付別ローテーション、JSON形式）
+        let fileOutput = RotatingFileLogOutput(directory: logDirectory, prefix: "mcp-server", format: .json)
         logger.addOutput(fileOutput)
         // stderr出力を設定
         logger.addOutput(StderrLogOutput())

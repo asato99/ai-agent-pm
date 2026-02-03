@@ -18,8 +18,8 @@ private func setupLogger() {
     let migrator = LogMigrator(directory: logDirectory)
     migrator.migrateIfNeeded(prefix: "rest-server")
 
-    // ファイル出力を設定（日付別ローテーション）
-    logger.addOutput(RotatingFileLogOutput(directory: logDirectory, prefix: "rest-server"))
+    // ファイル出力を設定（日付別ローテーション、JSON形式）
+    logger.addOutput(RotatingFileLogOutput(directory: logDirectory, prefix: "rest-server", format: .json))
     logger.addOutput(StderrLogOutput())
 }
 setupLogger()
