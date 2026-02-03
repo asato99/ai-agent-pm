@@ -79,14 +79,28 @@ export class VariationLoader {
 
   /**
    * シナリオとバリエーションを両方読み込み
+   * バリエーションにinitial_actionがある場合はシナリオの設定を上書き
    */
   load(scenario: string, variation: string): {
     scenario: ScenarioConfig
     variation: VariationConfig
   } {
+    const scenarioConfig = this.loadScenario(scenario)
+    const variationConfig = this.loadVariation(scenario, variation)
+
+    // バリエーションにinitial_actionがある場合、シナリオの設定を上書き
+    if (variationConfig.initial_action) {
+      scenarioConfig.initial_action = {
+        ...scenarioConfig.initial_action,
+        ...variationConfig.initial_action,
+        // messageが省略されている場合はシナリオのものを使用
+        message: variationConfig.initial_action.message ?? scenarioConfig.initial_action.message,
+      }
+    }
+
     return {
-      scenario: this.loadScenario(scenario),
-      variation: this.loadVariation(scenario, variation),
+      scenario: scenarioConfig,
+      variation: variationConfig,
     }
   }
 

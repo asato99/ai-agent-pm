@@ -200,6 +200,15 @@ export interface VariationConfig {
   // スキル割り当て（オプション）
   // キー: エージェントID、値: スキル名の配列
   skill_assignments?: Record<string, string[]>
+
+  // 初期アクションのオーバーライド（オプション）
+  // バリエーションでシナリオのinitial_actionを上書きする場合に使用
+  initial_action?: {
+    type: 'chat'
+    from: string
+    to: string
+    message?: string  // 省略時はシナリオのメッセージを使用
+  }
 }
 
 // ============================================================================

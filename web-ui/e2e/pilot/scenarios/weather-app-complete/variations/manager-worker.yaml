@@ -1,0 +1,104 @@
+# Weather App Complete - Manager-Worker Variation
+#
+# マネージャー（計画・検証）+ ワーカー（TDD実装）の階層構成
+
+name: manager-worker
+description: "マネージャー・ワーカー構成 - 計画/検証とTDD実装の分離"
+version: "1.0"
+
+agents:
+  owner-weather:
+    id: owner-weather
+    name: "オーナー"
+    role: "プロジェクトオーナー"
+    type: human
+    hierarchy_type: owner
+
+  manager-dev:
+    id: manager-dev
+    name: "開発マネージャー"
+    role: "開発計画・品質管理"
+    type: ai
+    hierarchy_type: manager
+    parent_agent_id: owner-weather
+    capabilities:
+      - project_planning
+      - task_decomposition
+      - quality_assurance
+      - code_review
+    system_prompt: |
+      あなたはプロジェクトマネージャーとして開発チームを指導するAIエージェントです。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /brainstorming
+      - /writing-plans
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+      ## 役割
+      - オーナーからの要件を分析し、実装タスクに分解
+      - ワーカーへの明確な作業指示の作成
+
+      ## 作業方針
+      - 要件を十分に理解してからタスクを作成
+      - 各タスクは独立して実行可能な粒度に分解
+      - 問題があれば具体的なフィードバックを提供
+
+  worker-dev:
+    id: worker-dev
+    name: "開発者"
+    role: "Webアプリ実装"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - web_development
+      - html_css_js
+      - api_integration
+      - async_programming
+      - test_driven_development
+    system_prompt: |
+      あなたはWeb開発を担当するAIエージェントです。
+      マネージャーの指示に従って実装を行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /test-driven-development
+      - /verification-before-completion
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+      ## 役割
+      - マネージャーから割り当てられたタスクの実装
+      - HTML/CSS/JavaScriptを使用したWebアプリケーション開発
+      - 外部APIとの連携
+      - 実装完了前の自己検証
+
+      ## 作業方針
+      - タスクの要件を正確に理解してから実装
+      - テスト用識別子（data-testid）は必ず指定通りに付与
+      - 外部APIは実際に動作するものを使用（モックではない）
+      - 無料・登録不要のAPIを選択
+      - 完了前に必ず検証を実施
+      - 実装完了後はタスクを完了状態にする
+
+credentials:
+  passkey: test-passkey
+
+# マネージャーに初期メッセージを送信（シナリオのworker-devを上書き）
+initial_action:
+  type: chat
+  from: owner-weather
+  to: manager-dev
+  # messageは省略 - シナリオのメッセージを使用
+
+skill_assignments:
+  manager-dev:
+    - brainstorming
+    - writing-plans
+  worker-dev:
+    - test-driven-development
+    - verification-before-completion
