@@ -26,6 +26,7 @@ SCENARIO="hello-world"
 VARIATION="baseline"
 SKIP_SERVER_START=false
 VERBOSE=false
+HEADED=false
 
 # テスト設定
 TEST_DB_PATH="/tmp/AIAgentPM_Pilot.db"
@@ -55,6 +56,7 @@ Options:
   -s, --scenario NAME     シナリオ名 (default: hello-world)
   -v, --variation NAME    バリエーション名 (default: baseline)
   --skip-server           サーバー起動をスキップ（すでに起動している場合）
+  --headed                ブラウザを表示して実行
   --verbose               詳細出力
   -h, --help              ヘルプ表示
 
@@ -144,6 +146,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-server)
       SKIP_SERVER_START=true
+      shift
+      ;;
+    --headed)
+      HEADED=true
       shift
       ;;
     --verbose)
@@ -388,6 +394,11 @@ export AIAGENTPM_WEBSERVER_PORT="$REST_PORT"
 
 # 結果ディレクトリを環境変数で渡す
 export PILOT_RESULT_DIR="$RESULT_DIR"
+
+# Headed mode
+if [ "$HEADED" = true ]; then
+  export PILOT_HEADED="true"
+fi
 
 set -o pipefail
 npx playwright test pilot/tests/scenario.spec.ts \

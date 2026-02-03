@@ -43,9 +43,11 @@ export default defineConfig({
     screenshot: 'on',
     video: 'on',
     // Support observation mode via PILOT_SLOW_MO environment variable
+    // Support headed mode via PILOT_HEADED environment variable
     launchOptions: {
       slowMo: process.env.PILOT_SLOW_MO ? parseInt(process.env.PILOT_SLOW_MO) : 0,
     },
+    headless: process.env.PILOT_HEADED !== 'true',
   },
   projects: [
     {

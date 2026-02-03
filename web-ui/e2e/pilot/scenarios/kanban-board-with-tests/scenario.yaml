@@ -1,0 +1,172 @@
+# Kanban Board with E2E Tests Scenario
+#
+# 看板ボード + E2Eテスト作成シナリオ
+# AIがアプリとそのテストの両方を作成する能力を検証
+
+name: kanban-board-with-tests
+description: "看板ボード + E2Eテスト作成 - テスト作成能力の検証"
+version: "1.0"
+
+# プロジェクト設定
+project:
+  id: pilot-kanban-board-with-tests
+  name: "看板ボード（テスト付き）"
+  working_directory: /tmp/pilot_kanban_board_with_tests
+
+# 期待する成果物
+expected_artifacts:
+  - path: index.html
+    description: "メインHTMLファイル"
+  - path: e2e-tests.spec.js
+    description: "AI作成のE2Eテストファイル（Playwright形式）"
+
+# タイムアウト設定（秒）
+timeouts:
+  task_creation: 600
+  task_completion: 2400   # 40分（テスト作成も含むため）
+
+# 初期アクション
+initial_action:
+  type: chat
+  from: owner-kanban
+  to: worker-dev
+  message: |
+    看板ボード（カンバンボード）とそのE2Eテストを作成してください。
+
+    ## 機能要件
+    - 3つのカラム: To Do, In Progress, Done
+    - カードの追加（タイトルを入力して追加）
+    - カードの削除
+    - ドラッグ&ドロップでカラム間移動
+    - ページリロード後も内容が復元される
+
+    ## テスト用識別子（必須）
+    以下のdata-testid属性を必ず付与してください：
+
+    カラム:
+    - data-testid="column-todo"
+    - data-testid="column-in-progress"
+    - data-testid="column-done"
+
+    カード追加:
+    - 入力欄: data-testid="new-card-input"
+    - 追加ボタン: data-testid="add-card-button"
+
+    カード（動的に生成）:
+    - 各カード: data-testid="card-{連番}"
+    - 削除ボタン: data-testid="delete-card-{連番}"
+
+    ## E2Eテストファイル要件
+    `e2e-tests.spec.js` として以下の形式で作成してください：
+
+    ```javascript
+    // Playwright形式のE2Eテスト
+    // ファイルパスは環境変数 TEST_HTML_PATH で渡されます
+
+    const { test, expect } = require('@playwright/test');
+
+    test.describe('Kanban Board', () => {
+      test.beforeEach(async ({ page }) => {
+        await page.goto(`file://${process.env.TEST_HTML_PATH}`);
+      });
+
+      test('カード追加ができる', async ({ page }) => {
+        // テスト実装
+      });
+
+      // 他のテストケース...
+    });
+    ```
+
+    テストは以下の機能をカバーしてください：
+    - カラム表示
+    - カード追加
+    - カード削除
+    - ドラッグ&ドロップ
+    - 永続化
+
+    作業ディレクトリに保存してください。
+
+# 定義済みE2Eテストケース（アプリ検証用）
+e2e_tests:
+  # 構造テスト
+  - id: ST-01
+    name: "3カラム表示確認"
+    steps:
+      - action: assert_exists
+        selector: '[data-testid="column-todo"]'
+      - action: assert_exists
+        selector: '[data-testid="column-in-progress"]'
+      - action: assert_exists
+        selector: '[data-testid="column-done"]'
+
+  # カード追加テスト
+  - id: CA-01
+    name: "新規カード作成"
+    steps:
+      - action: fill
+        selector: '[data-testid="new-card-input"]'
+        value: "Test Card"
+      - action: click
+        selector: '[data-testid="add-card-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid^="card-"]'
+
+  # カード削除テスト
+  - id: CD-01
+    name: "カード削除"
+    steps:
+      - action: fill
+        selector: '[data-testid="new-card-input"]'
+        value: "To Delete"
+      - action: click
+        selector: '[data-testid="add-card-button"]'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid^="delete-card-"]'
+      - action: wait
+        timeout: 500
+      - action: assert_not_text
+        selector: '[data-testid="column-todo"]'
+        expected: "To Delete"
+
+  # ドラッグ&ドロップテスト
+  - id: DD-01
+    name: "ドラッグ&ドロップ"
+    steps:
+      - action: fill
+        selector: '[data-testid="new-card-input"]'
+        value: "Drag Test"
+      - action: click
+        selector: '[data-testid="add-card-button"]'
+      - action: wait
+        timeout: 500
+      - action: drag
+        from: '[data-testid^="card-"]'
+        to: '[data-testid="column-done"]'
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="column-done"]'
+        expected: "Drag Test"
+
+  # 永続化テスト
+  - id: PS-01
+    name: "リロード後復元"
+    steps:
+      - action: fill
+        selector: '[data-testid="new-card-input"]'
+        value: "Persistent"
+      - action: click
+        selector: '[data-testid="add-card-button"]'
+      - action: wait
+        timeout: 1000
+      - action: reload
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="column-todo"]'
+        expected: "Persistent"

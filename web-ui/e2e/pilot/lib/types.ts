@@ -322,6 +322,7 @@ export type PilotEventType =
   | 'all_tasks_completed'
   | 'task_completion_timeout'
   | 'e2e_tests_completed'
+  | 'generated_e2e_tests_completed'
 
 export interface PilotEvent {
   timestamp: string
