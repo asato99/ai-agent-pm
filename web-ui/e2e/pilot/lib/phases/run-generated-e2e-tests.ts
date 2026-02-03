@@ -10,14 +10,6 @@ import * as fs from 'fs'
 import { execSync } from 'child_process'
 import { PhaseDefinition, PhaseContext } from '../flow-types.js'
 
-interface GeneratedTestResult {
-  passed: number
-  failed: number
-  total: number
-  duration_ms: number
-  output: string
-}
-
 export function runGeneratedE2ETests(): PhaseDefinition {
   return {
     name: 'AI作成E2Eテスト実行',
@@ -43,11 +35,57 @@ export function runGeneratedE2ETests(): PhaseDefinition {
 
       const startTime = Date.now()
 
+      // web-uiディレクトリ
+      const webUiDir = path.resolve(__dirname, '../../../../')
+      const generatedTestDir = path.join(webUiDir, 'e2e', 'pilot', 'generated-tests')
+      const tempTestFile = path.join(generatedTestDir, 'e2e-tests.spec.ts')
+      const tempConfigPath = path.join(generatedTestDir, 'playwright.generated.config.mjs')
+
       try {
-        // Playwrightでテスト実行（web-uiディレクトリから実行）
-        const webUiDir = path.resolve(__dirname, '../../../../')
+        // 一時ディレクトリ作成
+        if (!fs.existsSync(generatedTestDir)) {
+          fs.mkdirSync(generatedTestDir, { recursive: true })
+        }
+
+        // テストファイルを読み込んでパスとモジュール形式を書き換え
+        // AIが生成したテストはprocess.cwd()とrequireを使うため、変換が必要
+        let testContent = fs.readFileSync(testFile, 'utf-8')
+        // process.cwd() → 実際のパスに置換
+        testContent = testContent.replace(/process\.cwd\(\)/g, `'${workingDir}'`)
+        // CommonJS require → ESモジュール importに変換
+        testContent = testContent.replace(
+          /const \{ test, expect \} = require\('@playwright\/test'\);?/,
+          "import { test, expect } from '@playwright/test';"
+        )
+        fs.writeFileSync(tempTestFile, testContent)
+        console.log(`📄 テストファイルをコピー: ${tempTestFile}`)
+        console.log(`   process.cwd() → '${workingDir}' に置換`)
+        console.log(`   require → import に変換`)
+
+        // 一時的なPlaywright configを作成（ESモジュール形式）
+        const headless = process.env.PILOT_HEADED !== 'true'
+        const tempConfig = `import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: '${generatedTestDir}',
+  testMatch: '**/*.spec.ts',
+  timeout: 60000,
+  retries: 0,
+  workers: 1,
+  reporter: 'list',
+  use: {
+    headless: ${headless},
+    ...devices['Desktop Chrome'],
+  },
+});
+`
+        fs.writeFileSync(tempConfigPath, tempConfig)
+        console.log(`📝 一時Playwright config作成: ${tempConfigPath}`)
+        console.log(`   headless: ${headless}`)
+
+        // Playwrightでテスト実行
         const result = execSync(
-          `npx playwright test "${testFile}" --reporter=list`,
+          `npx playwright test --config="${tempConfigPath}"`,
           {
             cwd: webUiDir,
             env: {
@@ -96,6 +134,14 @@ export function runGeneratedE2ETests(): PhaseDefinition {
           success: false,
           message: 'Some generated E2E tests failed on baseline code',
           data: { output },
+        }
+      } finally {
+        // クリーンアップ
+        if (fs.existsSync(tempTestFile)) {
+          fs.unlinkSync(tempTestFile)
+        }
+        if (fs.existsSync(tempConfigPath)) {
+          fs.unlinkSync(tempConfigPath)
         }
       }
     },
