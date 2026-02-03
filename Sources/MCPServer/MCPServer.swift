@@ -3137,13 +3137,11 @@ public final class MCPServer {
             return [
                 "action": "create_subtasks",
                 "instruction": """
-                    タスクを2〜5個のサブタスクに分解してください。
-                    create_tasks_batch ツールを使用して、一度に全てのサブタスクを作成してください。
+                    タスクの複雑さを評価し、適切にサブタスクを作成してください（目安: 2〜5個）。
+                    単純な場合は同一内容で1つ作成し即座に作業開始、
+                    複雑な場合は明確な成果物単位で分解してください。
+                    複数のサブタスクを作成する場合は create_tasks_batch ツールを使用してください。
                     parent_task_id には '\(mainTask.id.value)' を指定してください。
-                    各タスクには local_id（例: "task_1", "generator"）を付けてください。
-                    タスク間に順序関係がある場合（例: タスクBがタスクAの出力を使用する）、
-                    後続タスクの dependencies に先行タスクの local_id を指定してください。
-                    システムが local_id を実際のタスクIDに自動変換します。
                     サブタスク作成後、get_next_action を呼び出してください。
                     """,
                 "state": "needs_subtask_creation",
@@ -3470,13 +3468,11 @@ public final class MCPServer {
             return [
                 "action": "create_subtasks",
                 "instruction": """
-                    タスクを2〜5個のサブタスクに分解してください。
-                    create_tasks_batch ツールを使用して、一度に全てのサブタスクを作成してください。
+                    タスクの複雑さを評価し、適切にサブタスクを作成してください（目安: 2〜5個）。
+                    単純な場合は同一内容で1つ作成し即座に作業開始、
+                    複雑な場合は明確な成果物単位で分解してください。
+                    複数のサブタスクを作成する場合は create_tasks_batch ツールを使用してください。
                     parent_task_id には '\(mainTask.id.value)' を指定してください。
-                    各タスクには local_id（例: "task_1", "generator"）を付けてください。
-                    タスク間に順序関係がある場合（例: タスクBがタスクAの出力を使用する）、
-                    後続タスクの dependencies に先行タスクの local_id を指定してください。
-                    システムが local_id を実際のタスクIDに自動変換します。
                     サブタスク作成後、get_next_action を呼び出してください。
                     """,
                 "state": "needs_subtask_creation",
