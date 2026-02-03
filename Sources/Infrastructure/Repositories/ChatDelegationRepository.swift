@@ -14,6 +14,8 @@ struct ChatDelegationRecord: Codable, FetchableRecord, PersistableRecord {
     var id: String
     var agentId: String
     var projectId: String
+    /// 移譲元タスクID（タスクセッションから自動設定）
+    var taskId: String?
     var targetAgentId: String
     var purpose: String
     var context: String?
@@ -26,6 +28,7 @@ struct ChatDelegationRecord: Codable, FetchableRecord, PersistableRecord {
         case id
         case agentId = "agent_id"
         case projectId = "project_id"
+        case taskId = "task_id"
         case targetAgentId = "target_agent_id"
         case purpose
         case context
@@ -40,6 +43,7 @@ struct ChatDelegationRecord: Codable, FetchableRecord, PersistableRecord {
             id: ChatDelegationID(value: id),
             agentId: AgentID(value: agentId),
             projectId: ProjectID(value: projectId),
+            taskId: taskId.map { TaskID(value: $0) },
             targetAgentId: AgentID(value: targetAgentId),
             purpose: purpose,
             context: context,
@@ -55,6 +59,7 @@ struct ChatDelegationRecord: Codable, FetchableRecord, PersistableRecord {
             id: entity.id.value,
             agentId: entity.agentId.value,
             projectId: entity.projectId.value,
+            taskId: entity.taskId?.value,
             targetAgentId: entity.targetAgentId.value,
             purpose: entity.purpose,
             context: entity.context,
@@ -181,6 +186,25 @@ public final class ChatDelegationRepository: ChatDelegationRepositoryProtocol, S
         // WAL mode: 他プロセスからの可視性を確保
         try? db.write { db in
             try db.execute(sql: "PRAGMA wal_checkpoint(PASSIVE)")
+        }
+    }
+
+    /// 処理中（processing）の委譲を検索
+    /// start_conversationでtaskIdを継承するために使用
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    public func findProcessingDelegation(
+        agentId: AgentID,
+        targetAgentId: AgentID,
+        projectId: ProjectID
+    ) throws -> ChatDelegation? {
+        try db.read { db in
+            try ChatDelegationRecord
+                .filter(Column("agent_id") == agentId.value)
+                .filter(Column("target_agent_id") == targetAgentId.value)
+                .filter(Column("project_id") == projectId.value)
+                .filter(Column("status") == ChatDelegationStatus.processing.rawValue)
+                .fetchOne(db)?
+                .toDomain()
         }
     }
 }

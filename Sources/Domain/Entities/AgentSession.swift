@@ -3,6 +3,7 @@
 // 参照: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md - (agent_id, project_id) 単位のセッション管理
 // 参照: docs/design/CHAT_FEATURE.md - セッションの起動理由(purpose)管理
 // 参照: docs/design/CHAT_SESSION_MAINTENANCE_MODE.md - Section 6: セッション終了フロー
+// 参照: docs/design/TASK_CONVERSATION_AWAIT.md - タスクセッションへのtaskId紐付け
 
 import Foundation
 
@@ -34,6 +35,9 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     public let agentId: AgentID
     /// Phase 4: セッションが紐づくプロジェクトID
     public let projectId: ProjectID
+    /// タスクセッションの場合、処理対象のタスクID
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    public let taskId: TaskID?
     /// Feature 14: セッション有効期限（一時停止時に短縮される可能性がある）
     public var expiresAt: Date
     public let createdAt: Date
@@ -76,10 +80,12 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
     /// Phase 4: projectId は必須
     /// Chat機能: purpose はデフォルトで .task
     /// UC015: state はデフォルトで .active
+    /// タスク会話待機: taskId はタスクセッションの場合のみ設定
     public init(
         id: AgentSessionID = .generate(),
         agentId: AgentID,
         projectId: ProjectID,
+        taskId: TaskID? = nil,
         purpose: AgentPurpose = .task,
         state: SessionState = .active,
         expiresAt: Date? = nil,
@@ -89,6 +95,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.token = Self.generateToken()
         self.agentId = agentId
         self.projectId = projectId
+        self.taskId = taskId
         self.purpose = purpose
         self.state = state
         self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(Self.defaultExpirationInterval)
@@ -107,6 +114,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         token: String,
         agentId: AgentID,
         projectId: ProjectID,
+        taskId: TaskID? = nil,
         purpose: AgentPurpose = .task,
         state: SessionState = .active,
         expiresAt: Date,
@@ -121,6 +129,7 @@ public struct AgentSession: Identifiable, Equatable, Sendable {
         self.token = token
         self.agentId = agentId
         self.projectId = projectId
+        self.taskId = taskId
         self.purpose = purpose
         self.state = state
         self.expiresAt = expiresAt

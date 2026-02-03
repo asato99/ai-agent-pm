@@ -21,6 +21,8 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
     var agentId: String
     /// Phase 4: セッションが紐づくプロジェクトID
     var projectId: String
+    /// タスクセッションの場合、処理対象のタスクID
+    var taskId: String?
     /// Chat機能: 起動理由（task=タスク実行, chat=チャット応答）
     var purpose: String?
     /// UC015: セッション状態（active, terminating, ended）
@@ -40,6 +42,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
         case token
         case agentId = "agent_id"
         case projectId = "project_id"
+        case taskId = "task_id"
         case purpose
         case state
         case expiresAt = "expires_at"
@@ -57,6 +60,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             token: token,
             agentId: AgentID(value: agentId),
             projectId: ProjectID(value: projectId),
+            taskId: taskId.map { TaskID(value: $0) },
             purpose: AgentPurpose(rawValue: purpose ?? "task") ?? .task,
             state: SessionState(rawValue: state ?? "active") ?? .active,
             expiresAt: expiresAt,
@@ -75,6 +79,7 @@ struct AgentSessionRecord: Codable, FetchableRecord, PersistableRecord {
             token: session.token,
             agentId: session.agentId.value,
             projectId: session.projectId.value,
+            taskId: session.taskId?.value,
             purpose: session.purpose.rawValue,
             state: session.state.rawValue,
             expiresAt: session.expiresAt,

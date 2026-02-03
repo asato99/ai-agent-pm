@@ -1107,6 +1107,31 @@ public final class DatabaseSetup {
             try db.create(indexOn: "chat_delegations", columns: ["status"])
         }
 
+        // v47: タスク会話待機機能のためのtask_idカラム追加
+        // 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+        migrator.registerMigration("v47_task_conversation_await") { db in
+            // agent_sessions に task_id カラムを追加
+            try db.execute(sql: """
+                ALTER TABLE agent_sessions ADD COLUMN task_id TEXT
+                    REFERENCES tasks(id) ON DELETE SET NULL
+            """)
+
+            // chat_delegations に task_id カラムを追加
+            try db.execute(sql: """
+                ALTER TABLE chat_delegations ADD COLUMN task_id TEXT
+                    REFERENCES tasks(id) ON DELETE SET NULL
+            """)
+
+            // conversations に task_id カラムを追加
+            try db.execute(sql: """
+                ALTER TABLE conversations ADD COLUMN task_id TEXT
+                    REFERENCES tasks(id) ON DELETE SET NULL
+            """)
+
+            // task_id での検索用インデックス
+            try db.create(indexOn: "conversations", columns: ["task_id"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 

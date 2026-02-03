@@ -13,6 +13,8 @@ struct ConversationRecord: Codable, FetchableRecord, PersistableRecord {
 
     var id: String
     var projectId: String
+    /// 紐付くタスクID（ChatDelegation から継承）
+    var taskId: String?
     var initiatorAgentId: String
     var participantAgentId: String
     var state: String
@@ -24,6 +26,7 @@ struct ConversationRecord: Codable, FetchableRecord, PersistableRecord {
     enum CodingKeys: String, CodingKey {
         case id
         case projectId = "project_id"
+        case taskId = "task_id"
         case initiatorAgentId = "initiator_agent_id"
         case participantAgentId = "participant_agent_id"
         case state
@@ -37,6 +40,7 @@ struct ConversationRecord: Codable, FetchableRecord, PersistableRecord {
         Conversation(
             id: ConversationID(value: id),
             projectId: ProjectID(value: projectId),
+            taskId: taskId.map { TaskID(value: $0) },
             initiatorAgentId: AgentID(value: initiatorAgentId),
             participantAgentId: AgentID(value: participantAgentId),
             state: ConversationState(rawValue: state) ?? .pending,
@@ -51,6 +55,7 @@ struct ConversationRecord: Codable, FetchableRecord, PersistableRecord {
         ConversationRecord(
             id: entity.id.value,
             projectId: entity.projectId.value,
+            taskId: entity.taskId?.value,
             initiatorAgentId: entity.initiatorAgentId.value,
             participantAgentId: entity.participantAgentId.value,
             state: entity.state.rawValue,
@@ -192,6 +197,20 @@ public final class ConversationRepository: ConversationRepositoryProtocol, Senda
                 )
                 .fetchCount(db)
             return count > 0
+        }
+    }
+
+    /// タスクIDに紐付く会話を検索
+    /// get_task_conversations ツールで使用
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    public func findByTaskId(_ taskId: TaskID, projectId: ProjectID) throws -> [Conversation] {
+        try db.read { db in
+            try ConversationRecord
+                .filter(Column("project_id") == projectId.value)
+                .filter(Column("task_id") == taskId.value)
+                .order(Column("created_at").desc)
+                .fetchAll(db)
+                .map { $0.toDomain() }
         }
     }
 }

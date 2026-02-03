@@ -137,7 +137,8 @@ test.describe('Task-based AI-to-AI Conversation - UC020', () => {
       )
 
       // Extend timeout for this test (AI-to-AI conversation takes time)
-      test.setTimeout(360_000) // 6 minutes
+      // Note: Need enough time for conversation + task completion by TASK session
+      test.setTimeout(600_000) // 10 minutes
 
       // Navigate to project
       await page.goto(`/projects/${TEST_PROJECT.id}`)
@@ -175,7 +176,9 @@ test.describe('Task-based AI-to-AI Conversation - UC020', () => {
 
       // Poll for conversation to complete
       // The key verification is: did Worker-A and Worker-B actually converse?
-      const maxWaitTime = 300_000 // 5 minutes
+      // Note: After conversation ends, TASK session needs time to detect and complete the task
+      // Session token can expire, requiring re-authentication and retry
+      const maxWaitTime = 540_000 // 9 minutes
       const pollInterval = 15_000
       const startTime = Date.now()
 
@@ -322,10 +325,9 @@ test.describe('Task-based AI-to-AI Conversation - UC020', () => {
       // Navigate to project
       await page.goto(`/projects/${TEST_PROJECT.id}`)
 
-      // Find the task (might be in any column)
-      const taskCard = page.locator('[data-testid="task-card"]', {
-        has: page.getByText(TEST_TASK.title, { exact: true }),
-      })
+      // Find the task by its specific ID (might be in any column)
+      // Note: Using data-task-id to avoid matching subtasks that display parent task name
+      const taskCard = page.locator(`[data-testid="task-card"][data-task-id="${TEST_TASK.id}"]`)
 
       if (await taskCard.isVisible()) {
         await taskCard.click()
@@ -348,9 +350,7 @@ test.describe('Task-based AI-to-AI Conversation - UC020', () => {
         // Verify task is back in todo column
         const todoColumn = page.locator('[data-column="todo"]')
         await expect(
-          todoColumn.locator('[data-testid="task-card"]', {
-            has: page.getByText(TEST_TASK.title, { exact: true }),
-          })
+          todoColumn.locator(`[data-testid="task-card"][data-task-id="${TEST_TASK.id}"]`)
         ).toBeVisible()
 
         console.log('UC020: Task reset to todo status')

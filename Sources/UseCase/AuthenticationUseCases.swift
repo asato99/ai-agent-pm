@@ -86,12 +86,13 @@ public struct AuthenticateUseCaseV3: Sendable {
         }
 
         // WorkDetectionService で仕事判定（getAgentAction と同一ロジック）
-        let hasTaskWork = try workDetectionService.hasTaskWork(agentId: agentID, projectId: projID)
+        // 参照: docs/design/TASK_CONVERSATION_AWAIT.md - タスクセッションへのtaskId紐付け
+        let taskWorkId = try workDetectionService.findTaskWork(agentId: agentID, projectId: projID)
         let hasChatWork = try workDetectionService.hasChatWork(agentId: agentID, projectId: projID)
 
         // タスクセッション判定（優先）
-        if hasTaskWork {
-            let session = AgentSession(agentId: agentID, projectId: projID, purpose: .task)
+        if let taskId = taskWorkId {
+            let session = AgentSession(agentId: agentID, projectId: projID, taskId: taskId, purpose: .task)
             try sessionRepository.save(session)
 
             // 認証情報のlastUsedAtを更新

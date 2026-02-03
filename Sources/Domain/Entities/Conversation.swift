@@ -1,5 +1,6 @@
 // Sources/Domain/Entities/Conversation.swift
 // Reference: docs/design/AI_TO_AI_CONVERSATION.md
+// Reference: docs/design/TASK_CONVERSATION_AWAIT.md - タスクIDによる会話紐付け
 //
 // AIエージェント間の会話を管理するエンティティ
 // 明示的な会話開始・終了のライフサイクルを提供
@@ -31,6 +32,9 @@ public struct Conversation: Identifiable, Codable, Sendable, Equatable {
     public let id: ConversationID
     /// プロジェクトID
     public let projectId: ProjectID
+    /// 紐付くタスクID（ChatDelegation から継承）
+    /// 参照: docs/design/TASK_CONVERSATION_AWAIT.md
+    public let taskId: TaskID?
     /// 会話を開始したエージェント
     public let initiatorAgentId: AgentID
     /// 会話に招待されたエージェント
@@ -55,6 +59,7 @@ public struct Conversation: Identifiable, Codable, Sendable, Equatable {
     public init(
         id: ConversationID = .generate(),
         projectId: ProjectID,
+        taskId: TaskID? = nil,
         initiatorAgentId: AgentID,
         participantAgentId: AgentID,
         state: ConversationState = .pending,
@@ -65,6 +70,7 @@ public struct Conversation: Identifiable, Codable, Sendable, Equatable {
     ) {
         self.id = id
         self.projectId = projectId
+        self.taskId = taskId
         self.initiatorAgentId = initiatorAgentId
         self.participantAgentId = participantAgentId
         self.state = state

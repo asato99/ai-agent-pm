@@ -269,6 +269,19 @@ final class MockChatDelegationRepositoryForWorkDetection: ChatDelegationReposito
     func clearDelegations() {
         delegations.removeAll()
     }
+
+    func findProcessingDelegation(
+        agentId: AgentID,
+        targetAgentId: AgentID,
+        projectId: ProjectID
+    ) throws -> ChatDelegation? {
+        delegations.values.first {
+            $0.agentId == agentId &&
+            $0.targetAgentId == targetAgentId &&
+            $0.projectId == projectId &&
+            $0.status == .processing
+        }
+    }
 }
 
 // MARK: - Mock TaskRepository
