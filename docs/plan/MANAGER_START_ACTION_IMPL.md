@@ -2,8 +2,14 @@
 
 ## 概要
 
-現行の `assign` アクションと `start_task` アクションを `start` アクションに統合する。
+現行の `assign` アクションと `start_task` アクションを `dispatch_task` アクションに統合する。
 段階的にパイロットテストで動作確認しながら進める。
+
+### 名称について
+
+- `dispatch_task`: タスクをワーカーに「派遣」するというイメージ
+- 割り当て（誰に送るか）+ 開始（送り出す）を一体で表現
+- IT/ソフトウェア開発でよく使われる用語（タスクディスパッチャー等）
 
 ## 現行実装の分析
 
@@ -56,21 +62,21 @@ Phase 2: 実行可能タスクがある場合（割り当て済み + 依存ク�
 
 ---
 
-### Step 2: start アクション導入
+### Step 2: dispatch_task アクション導入
 
-**目的**: assign と start_task を start に統合
+**目的**: assign と start_task を dispatch_task に統合
 
 **変更内容**:
 
 ```swift
 // 変更前: Phase 1 (assign) と Phase 2 (start_task) が分離
 
-// 変更後: startable タスクがある場合に start を返す
-// startable = 未割り当て OR (割り当て済み + 依存クリア)
+// 変更後: dispatchable タスクがある場合に dispatch_task を返す
+// dispatchable = 未割り当て OR (割り当て済み + 依存クリア)
 
 if !unassignedSubTasks.isEmpty || !executableSubTasks.isEmpty {
-    // startable タスクを収集
-    let startableSubTasks = (unassignedSubTasks + executableSubTasks).map { task in
+    // dispatchable タスクを収集
+    let dispatchableSubTasks = (unassignedSubTasks + executableSubTasks).map { task in
         [
             "id": task.id.value,
             "title": task.title,
@@ -80,20 +86,20 @@ if !unassignedSubTasks.isEmpty || !executableSubTasks.isEmpty {
     }
 
     return [
-        "action": "start",
-        "state": "start",
+        "action": "dispatch_task",
+        "state": "dispatch_task",
         "instruction": """
-            タスクを開始してください。
+            タスクをワーカーに派遣してください。
 
             ■ 手順
-            1. 開始するタスクを選択（優先度、Worker負荷を考慮）
+            1. 派遣するタスクを選択（優先度、Worker負荷を考慮）
             2. 未割り当ての場合: assign_task で割り当て
             3. update_task_status で in_progress に変更
 
             どのタスクを誰に割り当てるかはマネージャーの裁量で判断してください。
             完了後、get_next_action を呼び出してください。
             """,
-        "startable_subtasks": startableSubTasks,
+        "dispatchable_subtasks": dispatchableSubTasks,
         "available_workers": subordinates.map { ... },
         "progress": [...]
     ]
@@ -104,7 +110,7 @@ if !unassignedSubTasks.isEmpty || !executableSubTasks.isEmpty {
 
 1. `getManagerNextAction` 関数内の Phase 1（assign）を修正
 2. Phase 2（start_task）を削除し、Phase 1 に統合
-3. アクション名を `assign` → `start` に変更
+3. アクション名を `assign` → `dispatch_task` に変更
 4. 指示文を更新（マネージャーの裁量を強調）
 
 **所要時間目安**: 1時間
@@ -117,11 +123,11 @@ if !unassignedSubTasks.isEmpty || !executableSubTasks.isEmpty {
 
 **作業**:
 1. パイロットテスト実行
-2. マネージャーのログで `start` アクションの動作を確認
+2. マネージャーのログで `dispatch_task` アクションの動作を確認
 3. マネージャーが正しく割り当て + 開始を行うか確認
 
 **確認ポイント**:
-- `start` アクションが返されるか
+- `dispatch_task` アクションが返されるか
 - マネージャーが `assign_task` と `update_task_status` を適切に呼ぶか
 - ワークフロー全体が正常に完了するか
 
@@ -170,7 +176,7 @@ if !unassignedSubTasks.isEmpty || !executableSubTasks.isEmpty {
 ## 成功基準
 
 1. パイロットテストが正常に完了
-2. マネージャーが `start` アクションで割り当て + 開始を行う
+2. マネージャーが `dispatch_task` アクションで割り当て + 開始を行う
 3. ワーカーが正常にタスクを実行
 
 ---

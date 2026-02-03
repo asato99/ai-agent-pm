@@ -69,7 +69,7 @@
 |---|------|------|------|
 | 1 | `create_subtasks` | サブタスクなし | サブタスク作成（現行維持） |
 | 2 | `situational_awareness` | サブタスクあり | **状況把握を促す（新規・中核）** |
-| 3 | `start` | マネージャー選択 | **タスク開始（割当+開始統合）** |
+| 3 | `dispatch_task` | マネージャー選択 | **タスク派遣（割当+開始統合）** |
 | 4 | `adjust` | マネージャー選択 | **調整（新規）** |
 | 5 | `wait` | マネージャー選択 | ワーカー待機（exitから改名） |
 | 6 | `needs_completion` | 全完了 | 完了報告（現行維持） |
@@ -118,11 +118,11 @@ get_next_action
      ┌─────────────┼─────────────┐                                │
      │             │             │                                │
      ▼             ▼             ▼                                │
-┌─────────┐  ┌─────────┐  ┌─────────┐                             │
-│  start  │  │ adjust  │  │  wait   │                             │
-│         │  │         │  │         │                             │
-│割当+開始│  │調整全般 │  │Worker待機│                             │
-└────┬────┘  └────┬────┘  └────┬────┘                             │
+┌───────────┐ ┌─────────┐  ┌─────────┐                            │
+│dispatch   │ │ adjust  │  │  wait   │                            │
+│  _task    │ │         │  │         │                            │
+│タスク派遣 │ │調整全般 │  │Worker待機│                            │
+└─────┬─────┘ └────┬────┘  └────┬────┘                            │
      │            │            │                                  │
      │            │            │ logout                           │
      │            │            ▼                                  │
@@ -166,19 +166,19 @@ get_next_action
 
 ### select_action - 次のアクション選択
 
-**用途**: マネージャーが次の状態（start/adjust/wait）を明示的に選択
+**用途**: マネージャーが次の状態（dispatch_task/adjust/wait）を明示的に選択
 
 ```json
 {
   "name": "select_action",
-  "description": "次のアクションを選択します。状況を確認した上で、start（開始）、adjust（調整）、wait（待機）のいずれかを選択してください。",
+  "description": "次のアクションを選択します。状況を確認した上で、dispatch_task（タスク派遣）、adjust（調整）、wait（待機）のいずれかを選択してください。",
   "inputSchema": {
     "type": "object",
     "properties": {
       "action": {
         "type": "string",
-        "enum": ["start", "adjust", "wait"],
-        "description": "選択するアクション。start: タスクを開始する、adjust: 調整を行う、wait: ワーカー完了を待機する"
+        "enum": ["dispatch_task", "adjust", "wait"],
+        "description": "選択するアクション。dispatch_task: タスクをワーカーに派遣する、adjust: 調整を行う、wait: ワーカー完了を待機する"
       },
       "reason": {
         "type": "string",
@@ -194,8 +194,8 @@ get_next_action
 ```json
 {
   "success": true,
-  "selected_action": "start",
-  "message": "アクション 'start' が選択されました。get_next_action を呼び出して詳細指示を取得してください。"
+  "selected_action": "dispatch_task",
+  "message": "アクション 'dispatch_task' が選択されました。get_next_action を呼び出して詳細指示を取得してください。"
 }
 ```
 
@@ -454,7 +454,7 @@ get_next_action
   "action": "situational_awareness",
   "state": "situational_awareness",
 
-  "instruction": "現在の状況を確認し、次のアクションを選択してください。\n\n■ 状況確認ツール\n  - list_tasks: サブタスクの全体状況を確認\n  - get_recent_completions: 最近完了したタスクと成果を確認\n  - get_task: 特定タスクの詳細を確認\n  - list_subordinates: ワーカーの状況を確認\n\n■ 次のアクション選択\n状況を把握した上で、select_action ツールで次のアクションを選択してください:\n  - start: タスクを開始する（割当+開始）\n  - adjust: 調整を行う（振り直し、修正、ブロック対処等）\n  - wait: ワーカー完了を待機する\n\n選択後、get_next_action を呼び出して詳細指示を取得してください。"
+  "instruction": "現在の状況を確認し、次のアクションを選択してください。\n\n■ 状況確認ツール\n  - list_tasks: サブタスクの全体状況を確認\n  - get_recent_completions: 最近完了したタスクと成果を確認\n  - get_task: 特定タスクの詳細を確認\n  - list_subordinates: ワーカーの状況を確認\n\n■ 次のアクション選択\n状況を把握した上で、select_action ツールで次のアクションを選択してください:\n  - dispatch_task: タスクをワーカーに派遣する（割当+開始）\n  - adjust: 調整を行う（振り直し、修正、ブロック対処等）\n  - wait: ワーカー完了を待機する\n\n選択後、get_next_action を呼び出して詳細指示を取得してください。"
 }
 ```
 
@@ -462,30 +462,30 @@ get_next_action
 1. `list_tasks` でサブタスクの状況を確認
 2. `get_recent_completions` で完了タスクの成果を確認（任意）
 3. `list_subordinates` でワーカーの状況を確認（任意）
-4. `select_action` で次のアクションを選択（start/adjust/wait）
+4. `select_action` で次のアクションを選択（dispatch_task/adjust/wait）
 5. `get_next_action` 呼び出し
 
 ---
 
-### 状態3: start（新規 - assign + start_task 統合）
+### 状態3: dispatch_task（新規 - assign + start_task 統合）
 
-**条件**: マネージャーが `select_action(action: "start")` を選択
+**条件**: マネージャーが `select_action(action: "dispatch_task")` を選択
 
-**目的**: タスクの割り当てと開始を一体で行う
+**目的**: タスクをワーカーに派遣する（割り当てと開始を一体で行う）
 
 **レスポンス**:
 ```json
 {
-  "action": "start",
-  "state": "start",
+  "action": "dispatch_task",
+  "state": "dispatch_task",
 
-  "instruction": "タスクを開始してください。\n\n■ 手順\n1. list_tasks で開始可能なタスクを確認\n2. 未割り当ての場合: assign_task で割り当て\n3. update_task_status で in_progress に変更\n\nどのタスクを誰に割り当てるかは、内容・優先度・Worker負荷を考慮して判断してください。\n完了後、get_next_action を呼び出してください。"
+  "instruction": "タスクをワーカーに派遣してください。\n\n■ 手順\n1. list_tasks で派遣可能なタスクを確認\n2. 未割り当ての場合: assign_task で割り当て\n3. update_task_status で in_progress に変更\n\nどのタスクを誰に割り当てるかは、内容・優先度・Worker負荷を考慮して判断してください。\n完了後、get_next_action を呼び出してください。"
 }
 ```
 
 **マネージャーの行動**:
-1. `list_tasks` で開始可能なタスクを確認
-2. 開始するタスクを選択（マネージャーの裁量）
+1. `list_tasks` で派遣可能なタスクを確認
+2. 派遣するタスクを選択（マネージャーの裁量）
 3. 未割り当てなら `assign_task` で割り当て
 4. `update_task_status` で `in_progress` に変更
 5. `get_next_action` 呼び出し
@@ -578,10 +578,10 @@ get_next_action
 
 | 現行状態 | 新設計 | 変更内容 |
 |----------|--------|---------|
-| `needs_assignment` | **削除** | `start` に統合 |
-| `needs_start` | **削除** | `start` に統合 |
+| `needs_assignment` | **削除** | `dispatch_task` に統合 |
+| `needs_start` | **削除** | `dispatch_task` に統合 |
 | - | `situational_awareness` | **新規追加（中核）** |
-| - | `start` | **新規（割当+開始統合）** |
+| - | `dispatch_task` | **新規（割当+開始統合）** |
 | - | `adjust` | **新規追加** |
 | `waiting_for_workers` | `wait` | 改名、復帰時に `situational_awareness` 経由 |
 | `waiting_for_dependencies` | **削除** | `wait` に統合 |
@@ -625,11 +625,11 @@ get_next_action
 
 ```swift
 // select_action 呼び出し時
-context.progress = "workflow:selected_\(action)"  // selected_start, selected_adjust, selected_wait
+context.progress = "workflow:selected_\(action)"  // selected_dispatch_task, selected_adjust, selected_wait
 
 // get_next_action での判定
-if latestContext?.progress == "workflow:selected_start" {
-    return startActionResponse()
+if latestContext?.progress == "workflow:selected_dispatch_task" {
+    return dispatchTaskActionResponse()
 } else if latestContext?.progress == "workflow:selected_adjust" {
     return adjustActionResponse()
 } else if latestContext?.progress == "workflow:selected_wait" {
@@ -646,9 +646,9 @@ if latestContext?.progress == "workflow:selected_start" {
 2. get_next_action → situational_awareness
 3. list_tasks（状況確認）
 4. get_recent_completions（完了タスク確認）
-5. select_action(action: "start")
-6. get_next_action → start
-7. list_tasks（開始可能タスク確認）
+5. select_action(action: "dispatch_task")
+6. get_next_action → dispatch_task
+7. list_tasks（派遣可能タスク確認）
 8. assign_task（割り当て）
 9. update_task_status(in_progress)
 10. get_next_action → situational_awareness（または wait）
@@ -662,7 +662,7 @@ if latestContext?.progress == "workflow:selected_start" {
 1. **マネージャーの判断権限拡大**
    - どのタスクを誰に割り当てるかはマネージャーが決定
    - 優先順位、リソース状況を考慮した判断が可能
-   - 次のアクション（start/adjust/wait）を自分で選択
+   - 次のアクション（dispatch_task/adjust/wait）を自分で選択
 
 2. **状況把握の機会確保**
    - 復帰時に必ず状況確認フェーズを経由
