@@ -27,6 +27,11 @@ public struct AppSettings: Sendable {
     /// デフォルト: false（127.0.0.1のみ）
     public var allowRemoteAccess: Bool
 
+    /// エージェントベースプロンプト
+    /// 全エージェントに共通で適用される基本プロンプト
+    /// Coordinatorがエージェント起動時に使用
+    public var agentBasePrompt: String?
+
     public let createdAt: Date
     public var updatedAt: Date
 
@@ -36,6 +41,7 @@ public struct AppSettings: Sendable {
         coordinatorToken: String? = nil,
         pendingPurposeTTLSeconds: Int = defaultPendingPurposeTTLSeconds,
         allowRemoteAccess: Bool = false,
+        agentBasePrompt: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -43,6 +49,7 @@ public struct AppSettings: Sendable {
         self.coordinatorToken = coordinatorToken
         self.pendingPurposeTTLSeconds = pendingPurposeTTLSeconds
         self.allowRemoteAccess = allowRemoteAccess
+        self.agentBasePrompt = agentBasePrompt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -61,6 +68,7 @@ public struct AppSettings: Sendable {
             coordinatorToken: token,
             pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
             allowRemoteAccess: self.allowRemoteAccess,
+            agentBasePrompt: self.agentBasePrompt,
             createdAt: self.createdAt,
             updatedAt: Date()
         )
@@ -73,6 +81,7 @@ public struct AppSettings: Sendable {
             coordinatorToken: nil,
             pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
             allowRemoteAccess: self.allowRemoteAccess,
+            agentBasePrompt: self.agentBasePrompt,
             createdAt: self.createdAt,
             updatedAt: Date()
         )
@@ -85,6 +94,7 @@ public struct AppSettings: Sendable {
             coordinatorToken: self.coordinatorToken,
             pendingPurposeTTLSeconds: seconds,
             allowRemoteAccess: self.allowRemoteAccess,
+            agentBasePrompt: self.agentBasePrompt,
             createdAt: self.createdAt,
             updatedAt: Date()
         )
@@ -97,6 +107,20 @@ public struct AppSettings: Sendable {
             coordinatorToken: self.coordinatorToken,
             pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
             allowRemoteAccess: allow,
+            agentBasePrompt: self.agentBasePrompt,
+            createdAt: self.createdAt,
+            updatedAt: Date()
+        )
+    }
+
+    /// エージェントベースプロンプトを更新
+    public func withAgentBasePrompt(_ prompt: String?) -> AppSettings {
+        return AppSettings(
+            id: self.id,
+            coordinatorToken: self.coordinatorToken,
+            pendingPurposeTTLSeconds: self.pendingPurposeTTLSeconds,
+            allowRemoteAccess: self.allowRemoteAccess,
+            agentBasePrompt: prompt,
             createdAt: self.createdAt,
             updatedAt: Date()
         )

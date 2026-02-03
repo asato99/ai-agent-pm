@@ -28,6 +28,7 @@ enum ToolDefinitions {
             registerExecutionLogFile,
             invalidateSession,
             reportAgentError,
+            getAppSettings,
 
             // ========================================
             // Manager専用（session_token + hierarchy_type=manager）
@@ -164,6 +165,18 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["agent_id", "project_id"]
+        ]
+    ]
+
+    /// get_app_settings - アプリケーション設定を取得
+    /// Coordinatorがエージェント起動時にベースプロンプトを取得するために使用
+    static let getAppSettings: [String: Any] = [
+        "name": "get_app_settings",
+        "description": "アプリケーション設定を取得します。Coordinatorがエージェント起動時にベースプロンプトなどの設定を取得するために使用します。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [:] as [String: Any],
+            "required": [] as [String]
         ]
     ]
 

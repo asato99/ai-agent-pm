@@ -86,6 +86,7 @@ struct ToolAuthorization {
         "invalidate_session": .coordinatorOnly,
         "report_agent_error": .coordinatorOnly,
         "list_managed_agents": .coordinatorOnly,
+        "get_app_settings": .coordinatorOnly,
 
         // Manager専用
         "list_subordinates": .managerOnly,

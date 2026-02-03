@@ -15,6 +15,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
     var coordinatorToken: String?
     var pendingPurposeTTLSeconds: Int
     var allowRemoteAccess: Bool
+    var agentBasePrompt: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -23,6 +24,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
         case coordinatorToken = "coordinator_token"
         case pendingPurposeTTLSeconds = "pending_purpose_ttl_seconds"
         case allowRemoteAccess = "allow_remote_access"
+        case agentBasePrompt = "agent_base_prompt"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -33,6 +35,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
             coordinatorToken: coordinatorToken,
             pendingPurposeTTLSeconds: pendingPurposeTTLSeconds,
             allowRemoteAccess: allowRemoteAccess,
+            agentBasePrompt: agentBasePrompt,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -44,6 +47,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, PersistableRecord {
             coordinatorToken: settings.coordinatorToken,
             pendingPurposeTTLSeconds: settings.pendingPurposeTTLSeconds,
             allowRemoteAccess: settings.allowRemoteAccess,
+            agentBasePrompt: settings.agentBasePrompt,
             createdAt: settings.createdAt,
             updatedAt: settings.updatedAt
         )

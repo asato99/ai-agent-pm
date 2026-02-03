@@ -1132,6 +1132,14 @@ public final class DatabaseSetup {
             try db.create(indexOn: "conversations", columns: ["task_id"])
         }
 
+        // v48: エージェントベースプロンプト設定
+        // Coordinatorが全エージェントに共通で適用する基本プロンプトをDB管理
+        migrator.registerMigration("v48_agent_base_prompt") { db in
+            try db.execute(sql: """
+                ALTER TABLE app_settings ADD COLUMN agent_base_prompt TEXT
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 

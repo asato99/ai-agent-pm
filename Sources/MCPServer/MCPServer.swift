@@ -752,6 +752,9 @@ public final class MCPServer {
             }
             return try reportAgentError(agentId: agentId, projectId: projectId, errorMessage: errorMessage)
 
+        case "get_app_settings":
+            return try getAppSettings()
+
         // ========================================
         // Manager専用
         // ========================================
@@ -5402,6 +5405,20 @@ public final class MCPServer {
             "agent_id": agentId,
             "project_id": projectId,
             "message_id": message.id.value
+        ]
+    }
+
+    /// アプリケーション設定を取得（Coordinator用）
+    /// エージェント起動時にベースプロンプトなどの設定を取得
+    private func getAppSettings() throws -> [String: Any] {
+        Self.log("[MCP] getAppSettings called")
+
+        let settings = try appSettingsRepository.get()
+
+        return [
+            "agent_base_prompt": settings.agentBasePrompt as Any,
+            "pending_purpose_ttl_seconds": settings.pendingPurposeTTLSeconds,
+            "allow_remote_access": settings.allowRemoteAccess
         ]
     }
 

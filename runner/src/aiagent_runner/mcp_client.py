@@ -69,6 +69,14 @@ class AgentActionResult:
     task_id: Optional[str] = None        # Phase 4: タスクID（ログファイル登録用）
 
 
+@dataclass
+class AppSettingsResult:
+    """Result of get_app_settings check."""
+    agent_base_prompt: Optional[str] = None  # Base prompt for all agents
+    pending_purpose_ttl_seconds: int = 300   # TTL for pending purposes
+    allow_remote_access: bool = False        # Allow remote access
+
+
 # Phase 3/4: Agent API data classes
 
 @dataclass
@@ -363,6 +371,28 @@ class MCPClient:
             status=result.get("status", "ok"),
             version=result.get("version"),
             timestamp=result.get("timestamp")
+        )
+
+    async def get_app_settings(self) -> AppSettingsResult:
+        """Get application settings from the MCP server.
+
+        The Coordinator calls this to get the agent base prompt and other settings.
+        Phase 5: Requires coordinator_token for authorization.
+
+        Returns:
+            AppSettingsResult with application settings
+
+        Raises:
+            MCPError: If request fails or unauthorized
+        """
+        args = {}
+        if self._coordinator_token:
+            args["coordinator_token"] = self._coordinator_token
+        result = await self._call_tool("get_app_settings", args)
+        return AppSettingsResult(
+            agent_base_prompt=result.get("agent_base_prompt"),
+            pending_purpose_ttl_seconds=result.get("pending_purpose_ttl_seconds", 300),
+            allow_remote_access=result.get("allow_remote_access", False)
         )
 
     async def list_active_projects_with_agents(

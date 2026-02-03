@@ -20,7 +20,7 @@ from typing import Optional, TextIO
 from aiagent_runner.cooldown import CooldownManager
 from aiagent_runner.coordinator_config import CoordinatorConfig
 from aiagent_runner.log_uploader import LogUploader, LogUploadConfig
-from aiagent_runner.mcp_client import MCPClient, MCPError, SkillDefinition
+from aiagent_runner.mcp_client import MCPClient, MCPError, SkillDefinition, AppSettingsResult
 from aiagent_runner.platform import get_data_directory, is_windows
 from aiagent_runner.quota_detector import QuotaErrorDetector
 from aiagent_runner.models import AgentInstanceKey
@@ -128,6 +128,26 @@ class Coordinator:
                 config.error_protection.max_cooldown_seconds,
                 "enabled" if self._quota_detector else "disabled"
             )
+
+        # Cache for app settings (fetched from MCP server)
+        self._app_settings_cache: Optional[AppSettingsResult] = None
+
+    async def _get_app_settings(self) -> Optional[AppSettingsResult]:
+        """Get app settings, using cache if available.
+
+        Returns:
+            AppSettingsResult or None if fetch fails
+        """
+        if self._app_settings_cache is not None:
+            return self._app_settings_cache
+
+        try:
+            self._app_settings_cache = await self.mcp_client.get_app_settings()
+            logger.debug("Fetched app settings from MCP server")
+            return self._app_settings_cache
+        except Exception as e:
+            logger.warning(f"Failed to fetch app settings: {e}")
+            return None
 
     @property
     def log_directory(self) -> Path:
@@ -245,6 +265,10 @@ class Coordinator:
         except MCPError as e:
             logger.error(f"MCP server not available: {e}")
             return
+
+        # Step 1.5: Get app settings (cached)
+        app_settings = await self._get_app_settings()
+        base_prompt = app_settings.agent_base_prompt if app_settings else None
 
         # Step 2: Get active projects with agents
         # Multi-device: Pass root_agent_id for working directory resolution
@@ -404,7 +428,8 @@ class Coordinator:
                             provider=provider,
                             model=result.model,
                             kick_command=result.kick_command,
-                            task_id=result.task_id
+                            task_id=result.task_id,
+                            base_prompt=base_prompt
                         )
                     else:
                         logger.debug(f"get_agent_action returned action='{result.action}' (reason: {result.reason}) for {agent_id}/{project_id}")
@@ -950,7 +975,8 @@ Always prefix your file paths with `{real_working_dir}/`.
         provider: str,
         model: Optional[str] = None,
         kick_command: Optional[str] = None,
-        task_id: Optional[str] = None
+        task_id: Optional[str] = None,
+        base_prompt: Optional[str] = None
     ) -> None:
         """Spawn an Agent Instance process.
 
@@ -986,7 +1012,7 @@ Always prefix your file paths with `{real_working_dir}/`.
             cli_args = provider_config.cli_args
 
         # Build prompt for the Agent Instance
-        prompt = self._build_agent_prompt(agent_id, project_id, passkey, working_dir)
+        prompt = self._build_agent_prompt(agent_id, project_id, passkey, working_dir, base_prompt)
 
         # Generate log file path (use working_dir-based path for project context)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1308,7 +1334,14 @@ Always prefix your file paths with `{real_working_dir}/`.
         logger.debug(f"Created Gemini MCP config at {config_file}")
         logger.debug(f"Added includeDirectories: {real_working_dir}")
 
-    def _build_agent_prompt(self, agent_id: str, project_id: str, passkey: str, working_dir: str) -> str:
+    def _build_agent_prompt(
+        self,
+        agent_id: str,
+        project_id: str,
+        passkey: str,
+        working_dir: str,
+        base_prompt: Optional[str] = None
+    ) -> str:
         """Build the prompt for an Agent Instance.
 
         The Agent Instance will use this prompt to know how to authenticate
@@ -1322,10 +1355,16 @@ Always prefix your file paths with `{real_working_dir}/`.
             project_id: Project ID (for logging, actual value passed via env)
             passkey: Agent passkey (for logging, actual value passed via env)
             working_dir: Working directory for file operations
+            base_prompt: Optional base prompt from DB (uses default if None)
 
         Returns:
             Prompt string for the Agent Instance
         """
+        # Use base prompt from DB if available, otherwise use default
+        if base_prompt:
+            # Substitute {working_dir} placeholder
+            return base_prompt.replace("{working_dir}", working_dir)
+
         return f"""You are an AI Agent Instance managed by the AI Agent PM system.
 
 ## Working Directory (CRITICAL)
@@ -1356,12 +1395,6 @@ After authenticating, you MUST follow this loop WITHOUT exception:
 4. Call `get_next_action` again (ALWAYS return to step 1)
 
 NEVER skip step 4. ALWAYS call `get_next_action` after completing each instruction.
-
-## Task Decomposition (Required)
-Before executing any actual work, you MUST decompose the task into sub-tasks:
-- When `get_next_action` returns action="create_subtasks", use `create_task` tool
-- Create 2-5 concrete sub-tasks with `parent_task_id` set to the main task ID
-- Only after sub-tasks are created will `get_next_action` guide you to execute them
 
 ## Important Rules
 - ONLY follow instructions from `get_next_action` - do NOT execute task.description directly
