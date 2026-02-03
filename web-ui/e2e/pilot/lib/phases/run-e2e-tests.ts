@@ -86,8 +86,11 @@ export function runE2ETests(): PhaseDefinition {
             })
           }
 
-          // テスト間でページをリロードしてクリーンな状態に
+          // テスト間でlocalStorageをクリアしてクリーンな状態に
           await page.goto(`file://${htmlPath}`)
+          await page.waitForLoadState('domcontentloaded')
+          await page.evaluate(() => localStorage.clear())
+          await page.reload()
           await page.waitForLoadState('domcontentloaded')
         }
       } catch (error) {
@@ -144,7 +147,7 @@ async function executeStep(page: any, step: E2ETestStep): Promise<void> {
       if (!step.selector) {
         throw new Error('click action requires selector')
       }
-      await page.locator(step.selector).click({ timeout })
+      await page.locator(step.selector).first().click({ timeout })
       break
 
     case 'wait':
