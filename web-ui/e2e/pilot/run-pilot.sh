@@ -26,7 +26,7 @@ SCENARIO="hello-world"
 VARIATION="baseline"
 SKIP_SERVER_START=false
 VERBOSE=false
-HEADED=false
+HEADED=true
 
 # テスト設定
 TEST_DB_PATH="/tmp/AIAgentPM_Pilot.db"
@@ -56,9 +56,11 @@ Options:
   -s, --scenario NAME     シナリオ名 (default: hello-world)
   -v, --variation NAME    バリエーション名 (default: baseline)
   --skip-server           サーバー起動をスキップ（すでに起動している場合）
-  --headed                ブラウザを表示して実行
+  --headless              ブラウザを非表示で実行
   --verbose               詳細出力
   -h, --help              ヘルプ表示
+
+Note: デフォルトはブラウザ表示（headed）モードです
 
 Examples:
   $0                                    # baseline バリエーションで実行
@@ -148,8 +150,8 @@ while [[ $# -gt 0 ]]; do
       SKIP_SERVER_START=true
       shift
       ;;
-    --headed)
-      HEADED=true
+    --headless)
+      HEADED=false
       shift
       ;;
     --verbose)
@@ -218,17 +220,19 @@ mkdir -p "$LOG_DIR"
 mkdir -p "$RESULT_DIR/agent-logs"
 echo "Results: $RESULT_DIR"
 
-# 作業ディレクトリのチャットファイルをクリーンアップ
+# 作業ディレクトリをクリーンアップ（成果物含む）
 PILOT_WORKING_DIR=$(cd "$SCRIPT_DIR" && npx tsx -e "
 import * as yaml from 'js-yaml';
 import * as fs from 'fs';
 const s = yaml.load(fs.readFileSync('$SCENARIO_YAML', 'utf8'));
 console.log(s.project.working_directory);
 " 2>/dev/null || echo "")
-if [ -n "$PILOT_WORKING_DIR" ] && [ -d "$PILOT_WORKING_DIR/.ai-pm" ]; then
-  rm -rf "$PILOT_WORKING_DIR/.ai-pm"
-  echo "Cleaned: $PILOT_WORKING_DIR/.ai-pm"
+if [ -n "$PILOT_WORKING_DIR" ] && [ -d "$PILOT_WORKING_DIR" ]; then
+  # 作業ディレクトリ全体をクリア（initial_filesはseed-generatorで再作成される）
+  rm -rf "$PILOT_WORKING_DIR"
+  echo "Cleaned: $PILOT_WORKING_DIR (全体)"
 fi
+mkdir -p "$PILOT_WORKING_DIR"
 
 echo "DB: $TEST_DB_PATH"
 echo ""

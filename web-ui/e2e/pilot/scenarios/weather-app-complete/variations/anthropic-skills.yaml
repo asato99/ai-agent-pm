@@ -1,9 +1,9 @@
-# Weather App Complete - TDD Focused Variation
+# Weather App Complete - Anthropic Skills Variation
 #
-# test-driven-development + verification-before-completion スキル
+# Anthropic公式スキル: frontend-design + web-artifacts-builder + webapp-testing
 
-name: tdd-focused
-description: "TDD重視 - テストファースト開発と完了前検証"
+name: anthropic-skills
+description: "Anthropic公式スキル - フロントエンド・アーティファクト・テスト"
 version: "1.0"
 
 agents:
@@ -32,8 +32,9 @@ agents:
 
       ## 必須: 作業開始前にスキルを読み込んでください
       実装を始める前に、以下のスキルを必ず読み込んで内容を確認してください：
-      - /test-driven-development
-      - /verification-before-completion
+      - /frontend-design
+      - /web-artifacts-builder
+      - /webapp-testing
 
       スキルを読み込まずに作業を開始することは禁止されています。
       スキルの方法論に従わない成果物は不合格となります。
@@ -53,5 +54,6 @@ credentials:
 
 skill_assignments:
   worker-dev:
-    - test-driven-development
-    - verification-before-completion
+    - frontend-design
+    - web-artifacts-builder
+    - webapp-testing
