@@ -462,8 +462,9 @@ get_next_action
 1. `list_tasks` でサブタスクの状況を確認
 2. `get_recent_completions` で完了タスクの成果を確認（任意）
 3. `list_subordinates` でワーカーの状況を確認（任意）
-4. `select_action` で次のアクションを選択（dispatch_task/adjust/wait）
-5. `get_next_action` 呼び出し
+4. 必要に応じて `delegate_chat` で下位エージェントにチャット移譲して状況確認（任意）
+5. `select_action` で次のアクションを選択（dispatch_task/adjust/wait）
+6. `get_next_action` 呼び出し
 
 ---
 
@@ -496,7 +497,7 @@ get_next_action
 
 **条件**: マネージャーが `select_action(action: "adjust")` を選択
 
-**目的**: 振り直し、修正、ブロック対処等の調整作業
+**目的**: 振り直し、修正、ブロック対処、下位エージェントとの調整等
 
 **レスポンス**:
 ```json
@@ -504,13 +505,21 @@ get_next_action
   "action": "adjust",
   "state": "adjust",
 
-  "instruction": "必要な調整を行ってください。\n\n■ 調整用ツール\n  - assign_task: 担当者変更・振り直し\n  - update_task: タスク内容の修正（title, description, priority）\n  - update_task_status: ステータス変更\n  - update_task_dependencies: 依存関係の変更\n  - block_task: タスクをブロック状態にする\n  - cancel_task: タスクをキャンセル\n  - create_tasks_batch: 追加タスク作成\n\n■ 確認用ツール\n  - list_tasks: 全体状況確認\n  - get_task: 詳細確認\n\n調整完了後、get_next_action を呼び出してください。"
+  "instruction": "必要な調整を行ってください。\n\n■ 調整用ツール\n  - assign_task: 担当者変更・振り直し\n  - update_task: タスク内容の修正（title, description, priority）\n  - update_task_status: ステータス変更\n  - update_task_dependencies: 依存関係の変更\n  - block_task: タスクをブロック状態にする\n  - cancel_task: タスクをキャンセル\n  - create_tasks_batch: 追加タスク作成\n\n■ コミュニケーション\n  - delegate_chat: 下位エージェントにチャット移譲（指示・確認・フィードバック）\n\n■ 確認用ツール\n  - list_tasks: 全体状況確認\n  - get_task: 詳細確認\n\n調整完了後、get_next_action を呼び出してください。"
 }
 ```
 
 **マネージャーの行動**:
 1. 必要な調整を実施
+   - タスクの修正・キャンセル・依存関係の変更
+   - 状況に応じて下位エージェントにチャット移譲して調整（進捗確認、追加指示、問題解決等）
 2. `get_next_action` 呼び出し
+
+**チャット移譲の活用例**:
+- ワーカーへの状況確認（進捗、問題の有無）
+- タスク要件の変更指示や追加説明
+- 問題発生時の原因確認と対処指示
+- 成果物に対するフィードバックや修正依頼
 
 ---
 
@@ -673,6 +682,7 @@ if latestContext?.progress == "workflow:selected_dispatch_task" {
    - `update_task` でタスク内容を修正
    - `block_task` / `cancel_task` でタスク状態を管理
    - `update_task_dependencies` で依存関係を調整
+   - `delegate_chat` で下位エージェントにチャット移譲してコミュニケーション
    - 状況に応じた動的な計画変更
 
 4. **確実性の担保**
@@ -694,3 +704,4 @@ if latestContext?.progress == "workflow:selected_dispatch_task" {
 |------|------|
 | 2026-02-03 | 初版作成 |
 | 2026-02-03 | 新規ツール設計追加、situational_awareness を確認促進型に変更 |
+| 2026-02-03 | 下位エージェントへのチャット移譲（delegate_chat）活用を追記 |

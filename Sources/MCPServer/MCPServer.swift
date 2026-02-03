@@ -827,6 +827,16 @@ public final class MCPServer {
             let assigneeId = arguments["assignee_id"] as? String
             return try assignTask(taskId: taskId, assigneeId: assigneeId, callingAgentId: session.agentId.value)
 
+        case "select_action":
+            guard case .manager(_, let session) = caller else {
+                throw ToolAuthorizationError.managerRequired("select_action")
+            }
+            guard let action = arguments["action"] as? String else {
+                throw MCPError.missingArguments(["action"])
+            }
+            let reason = arguments["reason"] as? String
+            return try selectAction(session: session, action: action, reason: reason)
+
         // ========================================
         // Worker専用
         // ========================================
@@ -3607,100 +3617,255 @@ public final class MCPServer {
                 ]
             }
 
-            // dispatch_task: 派遣可能タスクがある場合（未割り当て OR 割り当て済み+依存クリア）
-            // 旧 Phase 1（assign）と Phase 2（start_task）を統合
-            if !unassignedSubTasks.isEmpty || !executableSubTasks.isEmpty {
-                // 下位エージェント（Worker）を取得
-                let subordinates = try agentRepository.findByParent(mainTask.assigneeId!)
-                    .filter { $0.hierarchyType == .worker && $0.status == .active }
+            // ========================================
+            // マネージャー状態遷移 V2
+            // 参照: docs/design/MANAGER_STATE_MACHINE_V2.md
+            // ========================================
 
-                // 利用可能な Worker がいない場合、タスクを blocked 状態にする
-                if subordinates.isEmpty && !unassignedSubTasks.isEmpty {
-                    Self.log("[MCP] No available workers, blocking subtask")
-                    let firstSubTask = unassignedSubTasks[0]
-                    return [
-                        "action": "block_subtask",
-                        "instruction": """
-                            利用可能な Worker がいません。
-                            update_task_status を使用して、サブタスク '\(firstSubTask.id.value)' のステータスを
-                            'blocked' に変更し、blocked_reason に '利用可能なWorkerがいません' と設定してください。
-                            その後、logout を呼び出してセッションを終了してください。
-                            """,
-                        "state": "no_available_workers",
-                        "subtask_to_block": [
-                            "id": firstSubTask.id.value,
-                            "title": firstSubTask.title
-                        ],
-                        "reason": "no_available_workers",
-                        "progress": [
-                            "completed": completedSubTasks.count,
-                            "total": subTasks.count
-                        ]
-                    ]
-                }
+            // 下位エージェント（Worker）を取得（複数箇所で使用）
+            let subordinates = try agentRepository.findByParent(mainTask.assigneeId!)
+                .filter { $0.hierarchyType == .worker && $0.status == .active }
 
-                // 派遣可能タスクを収集（未割り当て + 実行可能）
-                var dispatchableSubTasks: [[String: Any]] = []
-
-                // 未割り当てタスク
-                for task in unassignedSubTasks {
-                    dispatchableSubTasks.append([
-                        "id": task.id.value,
-                        "title": task.title,
-                        "description": task.description ?? "",
-                        "assignee_id": NSNull(),
-                        "status": "unassigned",
-                        "deps_met": false
-                    ])
-                }
-
-                // 実行可能タスク（割り当て済み + 依存クリア）
-                for task in executableSubTasks {
-                    dispatchableSubTasks.append([
-                        "id": task.id.value,
-                        "title": task.title,
-                        "description": task.description ?? "",
-                        "assignee_id": task.assigneeId?.value ?? NSNull(),
-                        "status": "ready",
-                        "deps_met": true
-                    ])
-                }
-
-                Self.log("[MCP] dispatch_task: \(dispatchableSubTasks.count) tasks available (unassigned: \(unassignedSubTasks.count), executable: \(executableSubTasks.count))")
-
+            // 利用可能な Worker がいない場合、タスクを blocked 状態にする
+            if subordinates.isEmpty && !unassignedSubTasks.isEmpty {
+                Self.log("[MCP] No available workers, blocking subtask")
+                let firstSubTask = unassignedSubTasks[0]
                 return [
-                    "action": "dispatch_task",
+                    "action": "block_subtask",
                     "instruction": """
-                        タスクをワーカーに派遣してください。
-
-                        ■ 派遣可能なタスク一覧
-                        dispatchable_subtasks に派遣可能なタスクが含まれています。
-                        - status: "unassigned" → 未割り当て（assign_task で割り当てが必要）
-                        - status: "ready" → 割り当て済み（すぐに開始可能）
-
-                        ■ 手順
-                        1. 派遣するタスクを選択（優先度、Worker負荷を考慮して判断）
-                        2. 未割り当ての場合: assign_task で割り当て
-                        3. update_task_status で in_progress に変更
-
-                        どのタスクを誰に割り当てるかはマネージャーの裁量で判断してください。
-                        完了後、get_next_action を呼び出してください。
+                        利用可能な Worker がいません。
+                        update_task_status を使用して、サブタスク '\(firstSubTask.id.value)' のステータスを
+                        'blocked' に変更し、blocked_reason に '利用可能なWorkerがいません' と設定してください。
+                        その後、logout を呼び出してセッションを終了してください。
                         """,
-                    "state": "dispatch_task",
-                    "dispatchable_subtasks": dispatchableSubTasks,
+                    "state": "no_available_workers",
+                    "subtask_to_block": [
+                        "id": firstSubTask.id.value,
+                        "title": firstSubTask.title
+                    ],
+                    "reason": "no_available_workers",
+                    "progress": [
+                        "completed": completedSubTasks.count,
+                        "total": subTasks.count
+                    ]
+                ]
+            }
+
+            // 選択されたアクションを確認
+            let latestContext = try contextRepository.findLatest(taskId: mainTask.id)
+            let selectedAction = latestContext?.progress.flatMap { progress -> String? in
+                if progress.hasPrefix("workflow:selected_") {
+                    return String(progress.dropFirst("workflow:selected_".count))
+                }
+                return nil
+            }
+
+            // 進捗情報（複数箇所で使用）
+            let progressInfo: [String: Any] = [
+                "completed": completedSubTasks.count,
+                "unassigned": unassignedSubTasks.count,
+                "executable": executableSubTasks.count,
+                "in_progress": inProgressSubTasks.count,
+                "total": subTasks.count
+            ]
+
+            // アクションが選択されている場合、対応する状態を返す
+            if let action = selectedAction {
+                Self.log("[MCP] Selected action found: \(action)")
+
+                // 選択をクリア（次回は situational_awareness に戻る）
+                let clearSession = Session(
+                    id: SessionID.generate(),
+                    projectId: mainTask.projectId,
+                    agentId: mainTask.assigneeId!,
+                    startedAt: Date(),
+                    status: .active
+                )
+                try sessionRepository.save(clearSession)
+
+                let clearContext = Context(
+                    id: ContextID.generate(),
+                    taskId: mainTask.id,
+                    sessionId: clearSession.id,
+                    agentId: mainTask.assigneeId!,
+                    progress: "workflow:action_executed_\(action)"
+                )
+                try contextRepository.save(clearContext)
+
+                switch action {
+                case "dispatch_task":
+                    // 派遣可能タスクを収集
+                    var dispatchableSubTasks: [[String: Any]] = []
+                    for task in unassignedSubTasks {
+                        dispatchableSubTasks.append([
+                            "id": task.id.value,
+                            "title": task.title,
+                            "description": task.description ?? "",
+                            "assignee_id": NSNull(),
+                            "status": "unassigned",
+                            "deps_met": false
+                        ])
+                    }
+                    for task in executableSubTasks {
+                        dispatchableSubTasks.append([
+                            "id": task.id.value,
+                            "title": task.title,
+                            "description": task.description ?? "",
+                            "assignee_id": task.assigneeId?.value ?? NSNull(),
+                            "status": "ready",
+                            "deps_met": true
+                        ])
+                    }
+
+                    Self.log("[MCP] dispatch_task: \(dispatchableSubTasks.count) tasks available")
+                    return [
+                        "action": "dispatch_task",
+                        "instruction": """
+                            タスクをワーカーに派遣してください。
+
+                            ■ 派遣可能なタスク一覧
+                            dispatchable_subtasks に派遣可能なタスクが含まれています。
+                            - status: "unassigned" → 未割り当て（assign_task で割り当てが必要）
+                            - status: "ready" → 割り当て済み（すぐに開始可能）
+
+                            ■ 手順
+                            1. 派遣するタスクを選択（優先度、Worker負荷を考慮して判断）
+                            2. 未割り当ての場合: assign_task で割り当て
+                            3. update_task_status で in_progress に変更
+
+                            どのタスクを誰に割り当てるかはマネージャーの裁量で判断してください。
+                            完了後、get_next_action を呼び出してください。
+                            """,
+                        "state": "dispatch_task",
+                        "dispatchable_subtasks": dispatchableSubTasks,
+                        "available_workers": subordinates.map { [
+                            "id": $0.id.value,
+                            "name": $0.name,
+                            "role": $0.role,
+                            "status": $0.status.rawValue
+                        ] as [String: Any] },
+                        "progress": progressInfo
+                    ]
+
+                case "adjust":
+                    Self.log("[MCP] adjust: Returning adjust state")
+                    return [
+                        "action": "adjust",
+                        "instruction": """
+                            必要な調整を行ってください。
+
+                            ■ 調整用ツール
+                            - assign_task: 担当者変更・振り直し
+                            - update_task_status: ステータス変更
+                            - create_tasks_batch: 追加タスク作成
+
+                            ■ コミュニケーション（状況確認・変更指示）
+                            - delegate_to_chat_session: 下位エージェントにチャット移譲
+                              （進捗確認、要件の変更指示、問題対処、フィードバック等）
+
+                            ■ 確認用ツール
+                            - list_tasks: 全体状況確認
+                            - get_task: 詳細確認
+                            - list_subordinates: ワーカー状況確認
+
+                            調整完了後、get_next_action を呼び出してください。
+                            """,
+                        "state": "adjust",
+                        "available_workers": subordinates.map { [
+                            "id": $0.id.value,
+                            "name": $0.name,
+                            "role": $0.role,
+                            "status": $0.status.rawValue
+                        ] as [String: Any] },
+                        "progress": progressInfo
+                    ]
+
+                case "wait":
+                    // 待機状態を Context に記録
+                    let waitSession = Session(
+                        id: SessionID.generate(),
+                        projectId: mainTask.projectId,
+                        agentId: mainTask.assigneeId!,
+                        startedAt: Date(),
+                        status: .active
+                    )
+                    try sessionRepository.save(waitSession)
+
+                    let waitContext = Context(
+                        id: ContextID.generate(),
+                        taskId: mainTask.id,
+                        sessionId: waitSession.id,
+                        agentId: mainTask.assigneeId!,
+                        progress: "workflow:waiting_for_workers"
+                    )
+                    try contextRepository.save(waitContext)
+
+                    // セッション削除（再起動のためにhasTaskWork=trueになるようにする）
+                    try agentSessionRepository.delete(session.id)
+                    Self.log("[MCP] wait: AgentSession deleted for manager exit")
+
+                    return [
+                        "action": "wait",
+                        "instruction": """
+                            Worker の完了を待つため、プロセスを終了してください。
+                            Coordinator が Worker 完了後に自動的に再起動します。
+                            logout を呼び出してください。
+                            """,
+                        "state": "waiting_for_workers",
+                        "in_progress_subtasks": inProgressSubTasks.map { [
+                            "id": $0.id.value,
+                            "title": $0.title,
+                            "assignee_id": $0.assigneeId?.value ?? "unassigned"
+                        ] as [String: Any] },
+                        "progress": progressInfo
+                    ]
+
+                default:
+                    Self.log("[MCP] Unknown selected action: \(action), returning situational_awareness")
+                }
+            }
+
+            // アクションが選択されていない場合: situational_awareness を返す
+            // （派遣可能タスクがある、または実行中タスクがある場合）
+            if !unassignedSubTasks.isEmpty || !executableSubTasks.isEmpty || !inProgressSubTasks.isEmpty {
+                Self.log("[MCP] No action selected, returning situational_awareness")
+                return [
+                    "action": "situational_awareness",
+                    "instruction": """
+                        現在の状況を確認し、次のアクションを選択してください。
+
+                        ■ 状況確認ツール
+                        - list_tasks: サブタスクの全体状況を確認
+                        - get_task: 特定タスクの詳細を確認
+                        - list_subordinates: ワーカーの状況を確認
+
+                        ■ コミュニケーション
+                        - delegate_to_chat_session: 下位エージェントにチャット移譲
+                          （状況確認、変更指示、問題解決等）
+
+                        ■ 次のアクション選択
+                        状況を把握した上で、select_action ツールで次のアクションを選択してください:
+                        - dispatch_task: タスクをワーカーに派遣する（割当+開始）
+                        - adjust: 調整を行う（振り直し、修正、チャット移譲等）
+                        - wait: ワーカー完了を待機する
+
+                        選択後、get_next_action を呼び出して詳細指示を取得してください。
+                        """,
+                    "state": "situational_awareness",
+                    "summary": [
+                        "unassigned_tasks": unassignedSubTasks.count,
+                        "executable_tasks": executableSubTasks.count,
+                        "in_progress_tasks": inProgressSubTasks.count,
+                        "completed_tasks": completedSubTasks.count,
+                        "total_tasks": subTasks.count
+                    ],
                     "available_workers": subordinates.map { [
                         "id": $0.id.value,
                         "name": $0.name,
                         "role": $0.role,
                         "status": $0.status.rawValue
                     ] as [String: Any] },
-                    "progress": [
-                        "completed": completedSubTasks.count,
-                        "unassigned": unassignedSubTasks.count,
-                        "executable": executableSubTasks.count,
-                        "in_progress": inProgressSubTasks.count,
-                        "total": subTasks.count
-                    ]
+                    "progress": progressInfo
                 ]
             }
 
@@ -4740,6 +4905,57 @@ public final class MCPServer {
         return [
             "success": true,
             "task": taskToDict(task)
+        ]
+    }
+
+    // MARK: - Manager Action Selection
+    // 参照: docs/design/MANAGER_STATE_MACHINE_V2.md
+
+    /// select_action - マネージャーが次のアクションを選択
+    /// Context に選択結果を保存し、次の get_next_action で対応する状態を返す
+    private func selectAction(session: AgentSession, action: String, reason: String?) throws -> [String: Any] {
+        Self.log("[MCP] selectAction: agent=\(session.agentId.value), action=\(action), reason=\(reason ?? "nil")")
+
+        // 有効なアクションか確認
+        let validActions = ["dispatch_task", "adjust", "wait"]
+        guard validActions.contains(action) else {
+            throw MCPError.validationError("Invalid action: \(action). Valid actions are: \(validActions.joined(separator: ", "))")
+        }
+
+        // 現在のタスクを取得
+        guard let currentTask = try taskRepository.findByAssignee(session.agentId)
+            .filter({ $0.projectId == session.projectId && $0.status == .inProgress })
+            .first else {
+            throw MCPError.validationError("No active task found for this manager")
+        }
+
+        // Context に選択結果を保存
+        // workflow:selected_dispatch_task, workflow:selected_adjust, workflow:selected_wait の形式
+        let workflowSession = Session(
+            id: SessionID.generate(),
+            projectId: session.projectId,
+            agentId: session.agentId,
+            startedAt: Date(),
+            status: .active
+        )
+        try sessionRepository.save(workflowSession)
+
+        let context = Context(
+            id: ContextID.generate(),
+            taskId: currentTask.id,
+            sessionId: workflowSession.id,
+            agentId: session.agentId,
+            progress: "workflow:selected_\(action)"
+        )
+        try contextRepository.save(context)
+
+        Self.log("[MCP] selectAction: Saved context with progress=workflow:selected_\(action)")
+
+        return [
+            "success": true,
+            "selected_action": action,
+            "reason": reason as Any,
+            "message": "アクション '\(action)' が選択されました。get_next_action を呼び出して詳細指示を取得してください。"
         ]
     }
 

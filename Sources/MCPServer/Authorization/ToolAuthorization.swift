@@ -92,6 +92,7 @@ struct ToolAuthorization {
         "list_subordinates": .managerOnly,
         "get_subordinate_profile": .managerOnly,
         "assign_task": .managerOnly,
+        "select_action": .managerOnly,  // 次のアクション選択
 
         // タスクセッション専用 - サブタスク作成用
         "create_task": .taskOnly,  // Workers can create sub-tasks for self-execution

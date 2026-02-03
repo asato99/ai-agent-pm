@@ -36,6 +36,7 @@ enum ToolDefinitions {
             listSubordinates,      // 下位エージェント一覧
             getSubordinateProfile, // 下位エージェント詳細
             assignTask,
+            selectAction,          // 次のアクション選択
 
             // ========================================
             // タスクセッション専用（purpose=task）
@@ -690,6 +691,35 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "task_id"]
+        ]
+    ]
+
+    /// select_action - 次のアクション選択（マネージャー専用）
+    /// 参照: docs/design/MANAGER_STATE_MACHINE_V2.md
+    static let selectAction: [String: Any] = [
+        "name": "select_action",
+        "description": """
+            次のアクションを選択します。状況を確認した上で、dispatch_task（タスク派遣）、adjust（調整）、wait（待機）のいずれかを選択してください。
+            マネージャー専用のツールです。選択後、get_next_action を呼び出して詳細指示を取得してください。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "セッショントークン（authenticate で取得）"
+                ],
+                "action": [
+                    "type": "string",
+                    "enum": ["dispatch_task", "adjust", "wait"],
+                    "description": "選択するアクション。dispatch_task: タスクをワーカーに派遣する、adjust: 調整を行う（チャット移譲含む）、wait: ワーカー完了を待機する"
+                ],
+                "reason": [
+                    "type": "string",
+                    "description": "選択理由（任意）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "action"]
         ]
     ]
 
