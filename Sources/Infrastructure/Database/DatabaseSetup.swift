@@ -1140,6 +1140,15 @@ public final class DatabaseSetup {
             """)
         }
 
+        // v49: タスク完了結果フィールド追加
+        // 完了時の結果（success/failed/blocked/cancelled）とサマリーを記録
+        migrator.registerMigration("v49_task_completion_result") { db in
+            try db.alter(table: "tasks") { t in
+                t.add(column: "completion_result", .text)
+                t.add(column: "completion_summary", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 

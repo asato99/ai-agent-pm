@@ -2492,6 +2492,9 @@ public final class MCPServer {
         // これにより、誰がステータスを変更したかを追跡可能にする
         task.statusChangedByAgentId = id
         task.statusChangedAt = Date()
+        // 完了結果とサマリーをタスクに保存
+        task.completionResult = result
+        task.completionSummary = summary
         if newStatus == .done {
             task.completedAt = Date()
         }
@@ -3496,21 +3499,35 @@ public final class MCPServer {
 
         // サブタスクが存在する場合の処理
         if !subTasks.isEmpty {
-            // 全サブタスクが完了
+            // 全サブタスクが完了 → completion_check
             if completedSubTasks.count == subTasks.count {
+                Self.log("[MCP] All subtasks completed, returning completion_check")
                 return [
-                    "action": "report_completion",
+                    "action": "completion_check",
                     "instruction": """
-                        全てのサブタスクが完了しました。
-                        report_completed を呼び出してメインタスクを完了してください。
-                        result には 'success' を指定し、作業内容を summary に記載してください。
+                        全てのサブタスクが完了しました。成果物を確認してください。
+
+                        ■ 確認ツール
+                        - list_tasks: サブタスクの完了状況を確認
+                        - get_task: 各サブタスクの成果を確認
+                        - delegate_to_chat_session: ワーカーに詳細を確認
+
+                        ■ 次のアクション選択
+                        確認後、select_action ツールで次のアクションを選択してください:
+                        - complete: 完了処理に進む（report_completed を呼び出す）
+                        - adjust: 調整が必要（修正や追加タスク作成）
+
+                        選択後、get_next_action を呼び出してください。
                         """,
-                    "state": "needs_completion",
+                    "state": "completion_check",
                     "task": [
                         "id": mainTask.id.value,
                         "title": mainTask.title
                     ],
-                    "completed_subtasks": completedSubTasks.count
+                    "subtask_progress": [
+                        "total": subTasks.count,
+                        "done": completedSubTasks.count
+                    ]
                 ]
             }
 
@@ -3660,13 +3677,15 @@ public final class MCPServer {
                 return nil
             }
 
-            // 進捗情報（複数箇所で使用）
-            let progressInfo: [String: Any] = [
-                "completed": completedSubTasks.count,
-                "unassigned": unassignedSubTasks.count,
-                "executable": executableSubTasks.count,
+            // サブタスク進捗情報（複数箇所で使用）
+            let subtaskProgress: [String: Any] = [
+                "total": subTasks.count,
+                "todo": pendingSubTasks.count,
                 "in_progress": inProgressSubTasks.count,
-                "total": subTasks.count
+                "done": completedSubTasks.count,
+                "blocked": blockedSubTasks.count,
+                "unassigned": unassignedSubTasks.count,
+                "executable": executableSubTasks.count
             ]
 
             // アクションが選択されている場合、対応する状態を返す
@@ -3744,7 +3763,7 @@ public final class MCPServer {
                             "role": $0.role,
                             "status": $0.status.rawValue
                         ] as [String: Any] },
-                        "progress": progressInfo
+                        "subtask_progress": subtaskProgress
                     ]
 
                 case "adjust":
@@ -3759,14 +3778,15 @@ public final class MCPServer {
                             - update_task_status: ステータス変更
                             - create_tasks_batch: 追加タスク作成
 
-                            ■ コミュニケーション（状況確認・変更指示）
-                            - delegate_to_chat_session: 下位エージェントにチャット移譲
-                              （進捗確認、要件の変更指示、問題対処、フィードバック等）
+                            ■ ワーカーとのコミュニケーション
+                            - delegate_to_chat_session: 下位ワーカーとチャットで対話
+                              （状況確認、作業の調整指示など）
 
                             ■ 確認用ツール
                             - list_tasks: 全体状況確認
                             - get_task: 詳細確認
                             - list_subordinates: ワーカー状況確認
+                            - get_subordinate_profile: ワーカーの詳細情報を確認
 
                             調整完了後、get_next_action を呼び出してください。
                             """,
@@ -3777,7 +3797,7 @@ public final class MCPServer {
                             "role": $0.role,
                             "status": $0.status.rawValue
                         ] as [String: Any] },
-                        "progress": progressInfo
+                        "subtask_progress": subtaskProgress
                     ]
 
                 case "wait":
@@ -3817,7 +3837,24 @@ public final class MCPServer {
                             "title": $0.title,
                             "assignee_id": $0.assigneeId?.value ?? "unassigned"
                         ] as [String: Any] },
-                        "progress": progressInfo
+                        "subtask_progress": subtaskProgress
+                    ]
+
+                case "complete":
+                    Self.log("[MCP] complete: Returning report_completion state")
+                    return [
+                        "action": "report_completion",
+                        "instruction": """
+                            完了チェックが完了しました。
+                            report_completed を呼び出してメインタスクを完了してください。
+                            result と summary は成果に応じて適切に設定してください。
+                            """,
+                        "state": "report_completion",
+                        "task": [
+                            "id": mainTask.id.value,
+                            "title": mainTask.title
+                        ],
+                        "subtask_progress": subtaskProgress
                     ]
 
                 default:
@@ -3838,116 +3875,66 @@ public final class MCPServer {
                         - list_tasks: サブタスクの全体状況を確認
                         - get_task: 特定タスクの詳細を確認
                         - list_subordinates: ワーカーの状況を確認
+                        - get_subordinate_profile: ワーカーの詳細情報を確認
 
-                        ■ コミュニケーション
-                        - delegate_to_chat_session: 下位エージェントにチャット移譲
-                          （状況確認、変更指示、問題解決等）
+                        ■ ワーカーとのコミュニケーション
+                        - delegate_to_chat_session: 下位ワーカーとチャットで対話
+                          （状況確認、作業の調整指示など）
 
                         ■ 次のアクション選択
                         状況を把握した上で、select_action ツールで次のアクションを選択してください:
                         - dispatch_task: タスクをワーカーに派遣する（割当+開始）
-                        - adjust: 調整を行う（振り直し、修正、チャット移譲等）
-                        - wait: ワーカー完了を待機する
+                        - adjust: 調整を行う（タスク修正、振り直し等）
+                        - wait: ワーカーの作業完了を待機する
 
-                        選択後、get_next_action を呼び出して詳細指示を取得してください。
+                        選択後、get_next_action を呼び出してください。
                         """,
                     "state": "situational_awareness",
-                    "summary": [
-                        "unassigned_tasks": unassignedSubTasks.count,
-                        "executable_tasks": executableSubTasks.count,
-                        "in_progress_tasks": inProgressSubTasks.count,
-                        "completed_tasks": completedSubTasks.count,
-                        "total_tasks": subTasks.count
-                    ],
+                    "subtask_progress": subtaskProgress,
                     "available_workers": subordinates.map { [
                         "id": $0.id.value,
                         "name": $0.name,
                         "role": $0.role,
                         "status": $0.status.rawValue
-                    ] as [String: Any] },
-                    "progress": progressInfo
+                    ] as [String: Any] }
                 ]
             }
 
-            // 実行状態に変更可能なタスクがない → exit
-            // 待機状態を Context に記録
-            let workflowSession = Session(
-                id: SessionID.generate(),
-                projectId: mainTask.projectId,
-                agentId: mainTask.assigneeId!,
-                startedAt: Date(),
-                status: .active
-            )
-            try sessionRepository.save(workflowSession)
+            // 全サブタスク完了でない場合は常に situational_awareness を返す
+            // （マネージャーが select_action で wait を選択した場合のみ exit）
+            Self.log("[MCP] No action selected, returning situational_awareness (fallback)")
+            return [
+                "action": "situational_awareness",
+                "instruction": """
+                    現在の状況を確認し、次のアクションを選択してください。
 
-            let waitingState = !inProgressSubTasks.isEmpty ? "workflow:waiting_for_workers" : "workflow:waiting_for_dependencies"
-            let context = Context(
-                id: ContextID.generate(),
-                taskId: mainTask.id,
-                sessionId: workflowSession.id,
-                agentId: mainTask.assigneeId!,
-                progress: waitingState
-            )
-            try contextRepository.save(context)
+                    ■ 状況確認ツール
+                    - list_tasks: サブタスクの全体状況を確認
+                    - get_task: 特定タスクの詳細を確認
+                    - list_subordinates: ワーカーの状況を確認
+                    - get_subordinate_profile: ワーカーの詳細情報を確認
 
-            // セッション削除（再起動のためにhasTaskWork=trueになるようにする）
-            try agentSessionRepository.delete(session.id)
-            Self.log("[MCP] getManagerNextAction: AgentSession deleted for manager exit")
+                    ■ ワーカーとのコミュニケーション
+                    - delegate_to_chat_session: 下位ワーカーとチャットで対話
+                      （状況確認、作業の調整指示など）
 
-            if !inProgressSubTasks.isEmpty {
-                Self.log("[MCP] No more assignable tasks, waiting for workers (inProgress: \(inProgressSubTasks.count), pending: \(pendingSubTasks.count))")
-                return [
-                    "action": "exit",
-                    "instruction": """
-                        現在実行状態に変更可能なサブタスクがありません。
-                        Worker の完了を待つため、プロセスを終了してください。
-                        Coordinator が Worker 完了後に自動的に再起動します。
-                        """,
-                    "state": "waiting_for_workers",
-                    "reason": "no_assignable_tasks",
-                    "in_progress_subtasks": inProgressSubTasks.map { [
-                        "id": $0.id.value,
-                        "title": $0.title,
-                        "assignee_id": $0.assigneeId?.value ?? "unassigned"
-                    ] as [String: Any] },
-                    "progress": [
-                        "completed": completedSubTasks.count,
-                        "in_progress": inProgressSubTasks.count,
-                        "worker_assigned_waiting": workerAssignedSubTasks.count,
-                        "total": subTasks.count
-                    ]
-                ]
-            } else {
-                Self.log("[MCP] No executable tasks due to unmet dependencies (workerAssigned: \(workerAssignedSubTasks.count))")
-                let pendingWithDeps = pendingSubTasks.map { task -> [String: Any] in
-                    let unmetDeps = task.dependencies.filter { depId in
-                        subTasks.first { $0.id == depId }?.status != .done
-                    }
-                    return [
-                        "id": task.id.value,
-                        "title": task.title,
-                        "unmet_dependencies": unmetDeps.map { $0.value }
-                    ]
-                }
-                return [
-                    "action": "exit",
-                    "instruction": """
-                        現在実行状態に変更可能なサブタスクがありません。
-                        保留中のタスクは依存関係の完了を待っています。
-                        プロセスを終了してください。
-                        Worker の完了後に自動的に再起動します。
-                        """,
-                    "state": "waiting_for_dependencies",
-                    "reason": "dependencies_not_met",
-                    "pending_tasks_with_dependencies": pendingWithDeps,
-                    "progress": [
-                        "completed": completedSubTasks.count,
-                        "in_progress": 0,
-                        "worker_assigned_waiting": workerAssignedSubTasks.count,
-                        "total": subTasks.count
-                    ]
-                ]
-            }
+                    ■ 次のアクション選択
+                    状況を把握した上で、select_action ツールで次のアクションを選択してください:
+                    - dispatch_task: タスクをワーカーに派遣する（割当+開始）
+                    - adjust: 調整を行う（タスク修正、振り直し等）
+                    - wait: ワーカーの作業完了を待機する
+
+                    選択後、get_next_action を呼び出してください。
+                    """,
+                "state": "situational_awareness",
+                "subtask_progress": subtaskProgress,
+                "available_workers": subordinates.map { [
+                    "id": $0.id.value,
+                    "name": $0.name,
+                    "role": $0.role,
+                    "status": $0.status.rawValue
+                ] as [String: Any] }
+            ]
         }
 
         // サブタスク作成中フェーズ
@@ -4917,7 +4904,7 @@ public final class MCPServer {
         Self.log("[MCP] selectAction: agent=\(session.agentId.value), action=\(action), reason=\(reason ?? "nil")")
 
         // 有効なアクションか確認
-        let validActions = ["dispatch_task", "adjust", "wait"]
+        let validActions = ["dispatch_task", "adjust", "wait", "complete"]
         guard validActions.contains(action) else {
             throw MCPError.validationError("Invalid action: \(action). Valid actions are: \(validActions.joined(separator: ", "))")
         }
@@ -6383,6 +6370,12 @@ public final class MCPServer {
         }
         if let completedAt = task.completedAt {
             dict["completed_at"] = ISO8601DateFormatter().string(from: completedAt)
+        }
+        if let completionResult = task.completionResult {
+            dict["completion_result"] = completionResult
+        }
+        if let completionSummary = task.completionSummary {
+            dict["completion_summary"] = completionSummary
         }
 
         return dict

@@ -24,6 +24,12 @@ public struct Task: Identifiable, Equatable, Sendable {
     public var updatedAt: Date
     public var completedAt: Date?
 
+    // MARK: - Completion Result
+    /// 完了結果（success / failed / blocked / cancelled）
+    public var completionResult: String?
+    /// 成果サマリー
+    public var completionSummary: String?
+
     // MARK: - Status Change Tracking
     /// 最後にステータスを変更したエージェント
     /// 参照: docs/plan/BLOCKED_TASK_RECOVERY.md
@@ -71,6 +77,8 @@ public struct Task: Identifiable, Equatable, Sendable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         completedAt: Date? = nil,
+        completionResult: String? = nil,
+        completionSummary: String? = nil,
         statusChangedByAgentId: AgentID? = nil,
         statusChangedAt: Date? = nil,
         blockedReason: String? = nil,
@@ -98,6 +106,8 @@ public struct Task: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
+        self.completionResult = completionResult
+        self.completionSummary = completionSummary
         self.statusChangedByAgentId = statusChangedByAgentId
         self.statusChangedAt = statusChangedAt
         self.blockedReason = blockedReason

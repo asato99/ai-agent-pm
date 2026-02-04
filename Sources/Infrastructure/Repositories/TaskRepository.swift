@@ -26,6 +26,9 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
     var createdAt: Date
     var updatedAt: Date
     var completedAt: Date?
+    // Completion result
+    var completionResult: String?
+    var completionSummary: String?
     // Status change tracking
     var statusChangedByAgentId: String?
     var statusChangedAt: Date?
@@ -57,6 +60,8 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
+        case completionResult = "completion_result"
+        case completionSummary = "completion_summary"
         case statusChangedByAgentId = "status_changed_by_agent_id"
         case statusChangedAt = "status_changed_at"
         case blockedReason = "blocked_reason"
@@ -94,6 +99,8 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             createdAt: createdAt,
             updatedAt: updatedAt,
             completedAt: completedAt,
+            completionResult: completionResult,
+            completionSummary: completionSummary,
             statusChangedByAgentId: statusChangedByAgentId.map { AgentID(value: $0) },
             statusChangedAt: statusChangedAt,
             blockedReason: blockedReason,
@@ -133,6 +140,8 @@ struct TaskRecord: Codable, FetchableRecord, PersistableRecord {
             createdAt: task.createdAt,
             updatedAt: task.updatedAt,
             completedAt: task.completedAt,
+            completionResult: task.completionResult,
+            completionSummary: task.completionSummary,
             statusChangedByAgentId: task.statusChangedByAgentId?.value,
             statusChangedAt: task.statusChangedAt,
             blockedReason: task.blockedReason,
