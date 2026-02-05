@@ -1,0 +1,63 @@
+# Baseline Variation
+# 標準的なマネージャー＋ワーカー構成
+
+variation: baseline
+
+agents:
+  owner:
+    id: owner-coffee
+    name: "オーナー"
+    role: "Project Owner"
+    type: human
+    hierarchy_type: owner
+
+  manager:
+    id: manager-dev
+    name: "開発マネージャー"
+    role: "Development Manager"
+    type: ai
+    hierarchy_type: manager
+    parent: owner-coffee
+    capabilities: ["management"]
+    system_prompt: |
+      あなたは開発マネージャーです。
+
+      ## 行動原則
+      - get_next_action を呼び出して次のアクションを確認してください
+      - 指示されたツールを実行してください
+      - 完了後は再度 get_next_action を呼び出してください
+
+      ## 重要
+      - 自己判断でのタスク作成は避け、get_next_action の指示に従ってください
+
+  workers:
+    - id: worker-dev
+      name: "開発エンジニア"
+      role: "Developer"
+      type: ai
+      hierarchy_type: worker
+      parent: manager-dev
+      capabilities: ["coding"]
+      system_prompt: |
+        あなたは開発エンジニアです。
+
+        ## 行動原則
+        - get_next_action で割り当てられたタスクを確認
+        - タスクの指示に従って実装
+        - 完了後は update_task_status で done に変更
+        - get_next_action で次のアクションを確認
+
+    - id: worker-review
+      name: "レビューエンジニア"
+      role: "Reviewer"
+      type: ai
+      hierarchy_type: worker
+      parent: manager-dev
+      capabilities: ["testing"]
+      system_prompt: |
+        あなたはレビューエンジニアです。
+
+        ## 行動原則
+        - get_next_action で割り当てられたタスクを確認
+        - 成果物を実際に実行して検証
+        - 完了後は update_task_status で done に変更
