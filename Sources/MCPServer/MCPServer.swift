@@ -3885,7 +3885,7 @@ public final class MCPServer {
                         状況を把握した上で、select_action ツールで次のアクションを選択してください:
                         - dispatch_task: タスクをワーカーに派遣する（割当+開始）
                         - adjust: 調整を行う（タスク修正、振り直し等）
-                        - wait: ワーカーの作業完了を待機する
+                        - wait: ワーカーの作業完了を待つため一時退出する
 
                         選択後、get_next_action を呼び出してください。
                         """,
@@ -3922,7 +3922,7 @@ public final class MCPServer {
                     状況を把握した上で、select_action ツールで次のアクションを選択してください:
                     - dispatch_task: タスクをワーカーに派遣する（割当+開始）
                     - adjust: 調整を行う（タスク修正、振り直し等）
-                    - wait: ワーカーの作業完了を待機する
+                    - wait: ワーカーの作業完了を待つため一時退出する
 
                     選択後、get_next_action を呼び出してください。
                     """,
@@ -4914,6 +4914,21 @@ public final class MCPServer {
             .filter({ $0.projectId == session.projectId && $0.status == .inProgress })
             .first else {
             throw MCPError.validationError("No active task found for this manager")
+        }
+
+        // wait 選択時のバリデーション: 作業中のワーカーが必要
+        if action == "wait" {
+            let allTasks = try taskRepository.findByProject(currentTask.projectId, status: nil)
+            let subTasks = allTasks.filter { $0.parentTaskId == currentTask.id }
+            let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
+
+            if inProgressSubTasks.isEmpty {
+                throw MCPError.validationError(
+                    "wait は作業中のワーカーがいる場合のみ選択できます。" +
+                    "現在 in_progress のサブタスクがありません。" +
+                    "タスクを開始するには dispatch_task を選択してください。"
+                )
+            }
         }
 
         // Context に選択結果を保存
