@@ -127,7 +127,6 @@ agents:
       - /executing-plans
       - /frontend-design
       - /web-artifacts-builder
-      - /visual-design-principles
 
       スキルを読み込まずに作業を開始することは禁止されています。
       スキルの方法論に従わない成果物は不合格となります。
@@ -295,7 +294,6 @@ skill_assignments:
     - executing-plans
     - frontend-design
     - web-artifacts-builder
-    - visual-design-principles
 
   worker-backend:
     - executing-plans
