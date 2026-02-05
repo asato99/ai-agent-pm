@@ -183,9 +183,22 @@ final class UnixSocketTransport: MCPTransport {
     private var buffer = Data()
     private let logHandler: (String) -> Void
 
+    /// ソケット送信バッファサイズ（デフォルト: 8MB）
+    /// 大きなスキルファイル（base64エンコード後3MB超）を転送するために必要
+    private static let sendBufferSize: Int32 = 8 * 1024 * 1024
+
     init(socket: Int32, logHandler: @escaping (String) -> Void) {
         self.socket = socket
         self.logHandler = logHandler
+
+        // 送信バッファサイズを増加（大きなJSONレスポンス対応）
+        var bufferSize = Self.sendBufferSize
+        let result = setsockopt(socket, SOL_SOCKET, SO_SNDBUF, &bufferSize, socklen_t(MemoryLayout<Int32>.size))
+        if result == 0 {
+            logHandler("Socket send buffer set to \(bufferSize / 1024 / 1024)MB")
+        } else {
+            logHandler("Warning: Failed to set socket send buffer: \(errno)")
+        }
     }
 
     func readMessage() throws -> JSONRPCRequest {
@@ -235,8 +248,35 @@ final class UnixSocketTransport: MCPTransport {
         var data = try encoder.encode(response)
         data.append(contentsOf: "\n".utf8)
 
-        _ = data.withUnsafeBytes { buffer in
-            write(socket, buffer.baseAddress!, buffer.count)
+        // 部分書き込みに対応（大きなデータでも確実に全て送信）
+        var totalWritten = 0
+        let totalSize = data.count
+
+        if totalSize > 1024 * 1024 {
+            log("Writing large response: \(totalSize / 1024 / 1024)MB")
+        }
+
+        while totalWritten < totalSize {
+            let written = data.withUnsafeBytes { buffer in
+                write(socket, buffer.baseAddress! + totalWritten, totalSize - totalWritten)
+            }
+
+            if written < 0 {
+                let err = errno
+                log("Write error at \(totalWritten)/\(totalSize) bytes: \(String(cString: strerror(err)))")
+                throw SocketError.writeFailed(err)
+            }
+
+            if written == 0 {
+                log("Write returned 0 at \(totalWritten)/\(totalSize) bytes")
+                throw SocketError.writeFailed(EPIPE)
+            }
+
+            totalWritten += written
+        }
+
+        if totalSize > 1024 * 1024 {
+            log("Successfully wrote \(totalSize / 1024 / 1024)MB response")
         }
     }
 
