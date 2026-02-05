@@ -41,6 +41,7 @@ COORDINATOR_PID=""
 MCP_PID=""
 REST_PID=""
 WEB_UI_PID=""
+FFMPEG_PID=""
 TEST_PASSED=false
 
 # 結果・ログディレクトリ（テスト開始時に設定）
@@ -86,8 +87,14 @@ collect_logs() {
   # 画面録画ファイル収集（test-results/pilotから最新の動画を1本コピー）
   VIDEO_FILE=$(find "$WEB_UI_DIR/test-results/pilot" -name "*.webm" -type f 2>/dev/null | head -1)
   if [ -n "$VIDEO_FILE" ]; then
-    cp "$VIDEO_FILE" "$LOG_DIR/recording.webm"
-    echo -e "${GREEN}✓ Video saved: recording.webm${NC}"
+    cp "$VIDEO_FILE" "$LOG_DIR/recording_playwright.webm"
+    echo -e "${GREEN}✓ Playwright video saved: recording_playwright.webm${NC}"
+  fi
+
+  # ffmpeg録画ファイル確認
+  if [ -f "$LOG_DIR/screen_recording.mp4" ]; then
+    FFMPEG_SIZE=$(du -h "$LOG_DIR/screen_recording.mp4" | cut -f1)
+    echo -e "${GREEN}✓ ffmpeg recording saved: screen_recording.mp4 ($FFMPEG_SIZE)${NC}"
   fi
 
   # 統合ログ生成（プレフィックス付き）
@@ -112,6 +119,19 @@ collect_logs() {
 cleanup() {
   echo ""
   echo -e "${YELLOW}Cleanup${NC}"
+
+  # ffmpeg録画停止（シグナルで正常終了させる）
+  if [ -n "$FFMPEG_PID" ] && kill -0 "$FFMPEG_PID" 2>/dev/null; then
+    echo -e "${BLUE}Stopping ffmpeg recording...${NC}"
+    kill -INT "$FFMPEG_PID" 2>/dev/null
+    # ffmpegが正常終了するまで待機（最大10秒）
+    for i in {1..10}; do
+      kill -0 "$FFMPEG_PID" 2>/dev/null || break
+      sleep 1
+    done
+    kill -9 "$FFMPEG_PID" 2>/dev/null || true
+    echo -e "${GREEN}✓ ffmpeg recording stopped${NC}"
+  fi
 
   # ログ収集（サーバー停止前に実行）
   collect_logs
@@ -382,6 +402,30 @@ WEB_UI_PID=$!
 
 for i in {1..20}; do curl -s "http://localhost:$WEB_UI_PORT" > /dev/null 2>&1 && break; sleep 1; done
 echo -e "${GREEN}✓ Web UI running at :$WEB_UI_PORT${NC}"
+echo ""
+
+# Step 7.5: ffmpeg画面録画開始（Playwrightの録画が途切れる問題の対策）
+echo -e "${YELLOW}Step 7.5: Starting ffmpeg screen recording${NC}"
+FFMPEG_RECORDING="$LOG_DIR/screen_recording.mp4"
+if command -v ffmpeg &> /dev/null; then
+  # 低フレームレート（5fps）で長時間録画に最適化
+  # -movflags frag_keyframe+empty_moov: 中断しても再生可能なfragmented MP4を生成
+  ffmpeg -f avfoundation -framerate 5 -capture_cursor 1 -i "0:none" \
+    -c:v libx264 -preset ultrafast -crf 28 \
+    -pix_fmt yuv420p \
+    -movflags frag_keyframe+empty_moov \
+    "$FFMPEG_RECORDING" > "$LOG_DIR/ffmpeg.log" 2>&1 &
+  FFMPEG_PID=$!
+  sleep 2
+  if kill -0 "$FFMPEG_PID" 2>/dev/null; then
+    echo -e "${GREEN}✓ ffmpeg recording started (PID: $FFMPEG_PID)${NC}"
+  else
+    echo -e "${YELLOW}⚠ ffmpeg failed to start (continuing without screen recording)${NC}"
+    FFMPEG_PID=""
+  fi
+else
+  echo -e "${YELLOW}⚠ ffmpeg not found (skipping screen recording)${NC}"
+fi
 echo ""
 
 # Step 8: Playwrightテスト実行
