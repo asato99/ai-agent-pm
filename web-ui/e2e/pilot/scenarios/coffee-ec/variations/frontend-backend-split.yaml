@@ -127,6 +127,7 @@ agents:
       - /executing-plans
       - /frontend-design
       - /web-artifacts-builder
+      - /canvas-design
 
       スキルを読み込まずに作業を開始することは禁止されています。
       スキルの方法論に従わない成果物は不合格となります。
@@ -152,6 +153,10 @@ agents:
         - 配色・タイポグラフィ
         - レイアウト・余白設計
         - インタラクション・アニメーション
+      - ビジュアルアセット作成
+        - 商品画像・バナー
+        - 装飾要素・アイコン
+        - 風味チャートのビジュアル表現
 
       ## 実装のポイント
       - data-testid属性は仕様書通りに正確に付与
@@ -294,6 +299,7 @@ skill_assignments:
     - executing-plans
     - frontend-design
     - web-artifacts-builder
+    - canvas-design
 
   worker-backend:
     - executing-plans
