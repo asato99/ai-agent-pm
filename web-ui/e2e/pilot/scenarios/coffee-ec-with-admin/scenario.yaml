@@ -1,0 +1,1942 @@
+# Coffee EC with Admin Panel Scenario
+#
+# コーヒー豆専門ECサイト + 管理画面 開発シナリオ
+# カスタマイズ注文・レビューシステム・管理機能を含む本格的なECサイト
+
+name: coffee-ec-with-admin
+description: "コーヒー豆専門ECサイト - カスタマイズ注文・レビュー機能・管理画面付き"
+version: "1.0"
+
+# プロジェクト設定
+project:
+  id: pilot-coffee-ec-admin
+  name: "コーヒー豆専門ECサイト（管理画面付き）"
+  working_directory: /tmp/pilot_coffee_ec_admin
+
+# 初期ファイル（仕様書を配置）
+initial_files:
+  - name: SPEC.md
+    content: |
+      # コーヒー豆専門ECサイト 仕様書（管理画面付き）
+
+      ## 1. 概要
+
+      スペシャルティコーヒー豆を販売するECサイト。
+      商品のカスタマイズ注文（焙煎度・挽き方・内容量）に対応し、
+      テイスティングノート付きのレビューシステムを備える。
+      さらに、店舗運営者向けの管理画面を提供する。
+
+      ## 2. 技術要件
+
+      - HTML/CSS/JavaScript（バニラJS、フレームワーク不要）
+      - レスポンシブデザイン対応
+      - localStorage使用（カート、お気に入り、管理データ保存）
+      - モック商品データ（JavaScript内で定義）
+      - 外部ライブラリ: Chart.js（テイスティングチャート・レポートグラフ用、CDN）
+
+      ## 3. データモデル
+
+      ### 3.1 商品（Product）
+      ```
+      {
+        id: string,
+        name: string,                    // 商品名
+        origin: string,                  // 産地（エチオピア、ブラジル等）
+        region: string,                  // 地域詳細
+        description: string,             // 商品説明
+        basePrice: number,               // 基本価格（100gあたり）
+        category: string,                // カテゴリ（シングルオリジン/ブレンド）
+        roastLevels: string[],           // 選択可能な焙煎度
+        flavorProfile: {                 // 風味プロファイル
+          acidity: number,               // 酸味 (1-5)
+          bitterness: number,            // 苦味 (1-5)
+          body: number,                  // コク (1-5)
+          sweetness: number,             // 甘味 (1-5)
+          aroma: number                  // 香り (1-5)
+        },
+        flavorNotes: string[],           // フレーバーノート（ベリー、チョコレート等）
+        images: string[],                // 商品画像URL
+        stock: number,                   // 在庫数
+        rating: number,                  // 平均評価
+        reviewCount: number,             // レビュー数
+        isActive: boolean,               // 販売中フラグ
+        createdAt: string,               // 登録日
+        updatedAt: string                // 更新日
+      }
+      ```
+
+      ### 3.2 カート商品（CartItem）
+      ```
+      {
+        productId: string,
+        quantity: number,
+        roastLevel: string,              // 選択した焙煎度
+        grindType: string,               // 挽き方
+        weight: number,                  // 内容量(g)
+        unitPrice: number,               // 単価（計算後）
+        subtotal: number                 // 小計
+      }
+      ```
+
+      ### 3.3 レビュー（Review）
+      ```
+      {
+        id: string,
+        productId: string,
+        userName: string,
+        rating: number,                  // 星評価 (1-5)
+        tastingNote: {                   // テイスティング評価
+          acidity: number,
+          bitterness: number,
+          body: number,
+          sweetness: number,
+          aroma: number
+        },
+        comment: string,
+        brewMethod: string,              // 抽出方法
+        status: string,                  // approved / pending / hidden
+        createdAt: string
+      }
+      ```
+
+      ### 3.4 注文（Order）
+      ```
+      {
+        id: string,
+        orderNumber: string,             // 注文番号（ORD-YYYYMMDD-XXXX形式）
+        items: OrderItem[],              // 注文商品リスト
+        customer: {
+          name: string,
+          email: string,
+          phone: string,
+          address: {
+            postal: string,
+            prefecture: string,
+            city: string,
+            address: string,
+            building: string
+          }
+        },
+        payment: {
+          method: string,                // credit / cod / bank
+          status: string                 // pending / completed / failed
+        },
+        subtotal: number,
+        shippingFee: number,
+        codFee: number,
+        discount: number,
+        couponCode: string,
+        total: number,
+        status: string,                  // pending / processing / shipped / delivered / cancelled
+        trackingNumber: string,
+        note: string,                    // 管理者メモ
+        createdAt: string,
+        updatedAt: string
+      }
+      ```
+
+      ### 3.5 顧客（Customer）
+      ```
+      {
+        id: string,
+        name: string,
+        email: string,
+        phone: string,
+        address: {
+          postal: string,
+          prefecture: string,
+          city: string,
+          address: string,
+          building: string
+        },
+        orderCount: number,
+        totalSpent: number,
+        note: string,                    // 管理者メモ
+        createdAt: string,
+        lastOrderAt: string
+      }
+      ```
+
+      ### 3.6 クーポン（Coupon）
+      ```
+      {
+        id: string,
+        code: string,                    // クーポンコード
+        discountType: string,            // percentage / fixed
+        discountValue: number,           // 割引率（%）または固定額（円）
+        minOrderAmount: number,          // 最低注文金額
+        maxUses: number,                 // 最大利用回数（0=無制限）
+        usedCount: number,               // 利用回数
+        startDate: string,
+        endDate: string,
+        isActive: boolean,
+        createdAt: string
+      }
+      ```
+
+      ### 3.7 管理者（AdminUser）
+      ```
+      {
+        id: string,
+        username: string,
+        password: string,                // ハッシュ化（モックではプレーンテキスト）
+        name: string,
+        role: string,                    // admin / staff
+        lastLoginAt: string
+      }
+      ```
+
+      ## 4. EC機能要件（フロント）
+
+      ### 4.1 商品一覧ページ
+
+      #### 検索・フィルタ
+      - キーワード検索（商品名、産地、フレーバーノート）
+      - カテゴリフィルタ（シングルオリジン/ブレンド/全て）
+      - 産地フィルタ（複数選択可）
+      - 焙煎度フィルタ
+      - 価格帯フィルタ（スライダーまたは範囲選択）
+
+      #### ソート
+      - 価格順（安い/高い）
+      - 評価順
+      - 新着順
+      - 人気順（レビュー数）
+
+      #### 表示
+      - グリッド表示（3-4列）
+      - 各商品: 画像、商品名、産地、価格、評価星
+      - ページネーション（1ページ12件）
+
+      ### 4.2 商品詳細ページ
+
+      #### 商品情報表示
+      - 商品画像（メイン + サムネイル切り替え）
+      - 商品名、産地、地域
+      - 商品説明
+      - フレーバーノート（タグ表示）
+      - テイスティングチャート（レーダーチャート）
+      - 在庫状況
+
+      #### カスタマイズ選択
+      - 焙煎度選択（ライト/ミディアム/ダーク）
+        - 選択で価格変動なし
+      - 挽き方選択
+        - 豆のまま（+0円）
+        - 粗挽き（+50円）
+        - 中挽き（+50円）
+        - 細挽き（+50円）
+        - エスプレッソ用（+100円）
+      - 内容量選択
+        - 100g: 基本価格 × 1.0
+        - 200g: 基本価格 × 1.9（5%OFF）
+        - 500g: 基本価格 × 4.5（10%OFF）
+
+      #### 価格表示
+      - 選択に応じて動的に価格更新
+      - 内訳表示（基本価格 + オプション）
+
+      #### アクション
+      - 数量選択（1-10）
+      - カートに追加ボタン
+      - お気に入りに追加ボタン
+
+      #### レビューセクション
+      - 平均評価と評価分布
+      - ユーザーレビュー一覧
+      - レビュー投稿フォーム
+
+      ### 4.3 ショッピングカート
+
+      #### カート表示
+      - 商品一覧（画像、名前、カスタマイズ内容、単価、数量、小計）
+      - 数量変更（+/-ボタン）
+      - 商品削除
+      - カート内商品数バッジ（ヘッダー）
+
+      #### 金額計算
+      - 小計
+      - 送料（5,000円以上で無料、未満は500円）
+      - クーポン割引（適用時）
+      - 合計金額
+
+      #### クーポン
+      - クーポンコード入力欄
+      - 適用ボタン
+      - 有効なコード: "FIRST10"（10%OFF）, "COFFEE20"（20%OFF）
+
+      #### アクション
+      - 買い物を続けるボタン
+      - レジに進むボタン
+
+      ### 4.4 チェックアウト（マルチステップ）
+
+      #### Step 1: 配送先情報
+      - 氏名（必須）
+      - 郵便番号（必須、形式チェック）
+      - 都道府県（必須、セレクト）
+      - 市区町村（必須）
+      - 番地（必須）
+      - 建物名（任意）
+      - 電話番号（必須、形式チェック）
+      - メールアドレス（必須、形式チェック）
+
+      #### Step 2: 支払い方法
+      - クレジットカード（モック）
+        - カード番号（形式チェック）
+        - 有効期限
+        - セキュリティコード
+      - 代金引換（+300円手数料）
+      - 銀行振込（振込先表示）
+
+      #### Step 3: 注文確認
+      - 注文内容一覧
+      - 配送先確認
+      - 支払い方法確認
+      - 最終金額確認
+      - 注文確定ボタン
+
+      #### Step 4: 注文完了
+      - 注文番号表示
+      - 注文完了メッセージ
+      - 注文詳細へのリンク
+      - トップに戻るボタン
+
+      ### 4.5 レビュー機能
+
+      #### レビュー表示
+      - 星評価（1-5）
+      - テイスティングノート（レーダーチャート）
+      - コメント
+      - 抽出方法
+      - 投稿日
+      - 「参考になった」ボタン
+
+      #### レビュー投稿
+      - 星評価選択（クリッカブル星）
+      - テイスティング評価（各項目スライダー）
+      - 抽出方法選択
+      - コメント入力
+      - 投稿ボタン
+
+      ### 4.6 お気に入り機能
+
+      - 商品詳細からお気に入り追加/削除
+      - お気に入り一覧ページ
+      - localStorage永続化
+
+      ### 4.7 共通UI
+
+      #### ヘッダー
+      - ロゴ
+      - 検索バー
+      - お気に入りアイコン（件数バッジ）
+      - カートアイコン（件数バッジ）
+
+      #### フッター
+      - サイト情報
+      - リンク
+
+      ### 4.8 状態表示
+      - ローディングインジケーター
+      - エラーメッセージ
+      - 成功メッセージ（トースト通知）
+
+      ## 5. 管理画面機能要件
+
+      ### 5.1 認証
+
+      #### ログイン
+      - ユーザー名入力
+      - パスワード入力
+      - ログインボタン
+      - エラー表示
+      - モックユーザー: admin / admin123
+
+      #### ログアウト
+      - ヘッダーにログアウトボタン
+      - ログアウト確認
+      - ログイン画面へリダイレクト
+
+      ### 5.2 ダッシュボード
+
+      #### 売上サマリーカード
+      - 本日の売上
+      - 週間売上
+      - 月間売上
+      - 前期比（増減%表示）
+
+      #### 最近の注文一覧
+      - 直近10件の注文
+      - 注文番号、顧客名、金額、ステータス
+      - 詳細へのリンク
+
+      #### 在庫アラート
+      - 在庫10個以下の商品リスト
+      - 商品名、残り在庫数
+      - 商品編集へのリンク
+
+      #### 人気商品ランキング
+      - 売上数量上位5商品
+      - 商品画像、商品名、販売数
+      - Chart.jsで棒グラフ表示
+
+      #### 売上推移グラフ
+      - 過去7日間の売上推移
+      - Chart.jsで折れ線グラフ表示
+
+      ### 5.3 商品管理
+
+      #### 商品一覧
+      - テーブル表示（ID、画像、商品名、カテゴリ、価格、在庫、ステータス）
+      - キーワード検索
+      - カテゴリフィルタ
+      - ステータスフィルタ（販売中/非公開）
+      - ページネーション（1ページ20件）
+      - 編集・削除ボタン
+
+      #### 商品追加/編集
+      - 商品名入力
+      - カテゴリ選択
+      - 産地・地域入力
+      - 商品説明（テキストエリア）
+      - 基本価格入力
+      - 焙煎度選択（複数可）
+      - フレーバープロファイル（各項目スライダー）
+      - フレーバーノート（タグ入力）
+      - 画像URL入力（複数可）
+      - 在庫数入力
+      - 販売ステータス切り替え
+      - 保存/キャンセルボタン
+      - バリデーションエラー表示
+
+      #### 商品削除
+      - 削除確認モーダル
+      - 削除実行
+      - 成功/エラー通知
+
+      #### 在庫一括更新
+      - CSVインポート機能
+      - CSV形式: 商品ID, 在庫数
+      - プレビュー表示
+      - 一括更新実行
+
+      ### 5.4 注文管理
+
+      #### 注文一覧
+      - テーブル表示（注文番号、日時、顧客名、金額、ステータス）
+      - ステータス別タブ（全て/保留中/処理中/発送済/完了/キャンセル）
+      - 日付範囲フィルタ
+      - キーワード検索（注文番号、顧客名）
+      - ページネーション
+      - 詳細・ステータス変更ボタン
+
+      #### 注文詳細
+      - 注文情報（番号、日時、ステータス）
+      - 顧客情報（名前、連絡先、配送先）
+      - 注文商品一覧
+      - 金額内訳（小計、送料、割引、合計）
+      - 支払い情報
+      - ステータス変更ドロップダウン
+      - 追跡番号入力（発送時）
+      - 管理者メモ入力
+      - 更新ボタン
+
+      #### ステータス遷移
+      - pending → processing → shipped → delivered
+      - pending → cancelled
+      - processing → cancelled
+      - ステータス変更履歴の記録
+
+      ### 5.5 顧客管理
+
+      #### 顧客一覧
+      - テーブル表示（ID、名前、メール、注文回数、累計金額、最終注文日）
+      - キーワード検索（名前、メール）
+      - ソート（注文回数、累計金額）
+      - ページネーション
+      - 詳細ボタン
+
+      #### 顧客詳細
+      - 顧客基本情報
+      - 連絡先・住所情報
+      - 注文履歴一覧
+      - 累計統計（注文回数、合計金額、平均注文金額）
+      - 管理者メモ入力・保存
+
+      ### 5.6 レビュー管理
+
+      #### レビュー一覧
+      - テーブル表示（ID、商品名、投稿者、評価、ステータス、投稿日）
+      - ステータス別タブ（全て/承認済/保留中/非表示）
+      - 評価フィルタ（1-5星）
+      - ページネーション
+      - 承認/非表示/削除ボタン
+
+      #### レビュー詳細
+      - レビュー全文表示
+      - テイスティングノート表示
+      - 対象商品情報
+      - ステータス変更
+      - 削除ボタン
+
+      #### 一括操作
+      - チェックボックスで複数選択
+      - 一括承認
+      - 一括非表示
+
+      ### 5.7 クーポン管理
+
+      #### クーポン一覧
+      - テーブル表示（コード、割引内容、有効期限、利用回数、ステータス）
+      - ステータス別タブ（全て/有効/期限切れ/無効）
+      - ページネーション
+      - 編集・削除ボタン
+
+      #### クーポン追加/編集
+      - クーポンコード入力
+      - 割引タイプ選択（%割引/固定額割引）
+      - 割引値入力
+      - 最低注文金額入力
+      - 最大利用回数入力（0=無制限）
+      - 有効期間（開始日・終了日）
+      - ステータス切り替え
+      - 保存/キャンセルボタン
+
+      #### クーポン削除
+      - 削除確認モーダル
+      - 使用履歴がある場合は警告表示
+
+      ### 5.8 レポート
+
+      #### 売上レポート
+      - 期間選択（日次/週次/月次/カスタム）
+      - 売上合計・注文件数・平均注文金額
+      - 売上推移グラフ（Chart.js）
+      - CSV出力ボタン
+
+      #### 商品別売上
+      - 期間選択
+      - 商品別売上ランキング（テーブル）
+      - 商品名、販売数量、売上金額
+      - 売上構成比グラフ（円グラフ）
+      - CSV出力ボタン
+
+      #### カテゴリ別売上
+      - 期間選択
+      - カテゴリ別売上集計
+      - 棒グラフ表示
+
+      ### 5.9 管理画面共通UI
+
+      #### サイドナビゲーション
+      - ダッシュボード
+      - 商品管理
+      - 注文管理
+      - 顧客管理
+      - レビュー管理
+      - クーポン管理
+      - レポート
+      - 設定
+
+      #### ヘッダー
+      - ロゴ/サイト名
+      - EC画面へのリンク
+      - ログインユーザー名
+      - ログアウトボタン
+
+      #### 通知
+      - 成功/エラー通知（トースト）
+      - 確認モーダル
+
+      ## 6. UI/デザイン要件
+
+      ### EC画面
+      - モダンでクリーンなデザイン
+      - コーヒーをイメージした配色（ブラウン系アクセント）
+      - カード型レイアウト
+      - レスポンシブ対応（モバイル/タブレット/デスクトップ）
+      - スムーズなアニメーション/トランジション
+
+      ### 管理画面
+      - シンプルで機能的なデザイン
+      - 左サイドバー + メインコンテンツレイアウト
+      - データテーブル中心のUI
+      - レスポンシブ対応（タブレット以上推奨）
+      - 落ち着いた配色（グレー系ベース、ブラウン系アクセント）
+
+      ## 7. モック商品データ
+
+      最低10商品を用意:
+      1. エチオピア イルガチェフェ（シングルオリジン）
+      2. ブラジル サントス（シングルオリジン）
+      3. コロンビア スプレモ（シングルオリジン）
+      4. グアテマラ アンティグア（シングルオリジン）
+      5. ケニア AA（シングルオリジン）
+      6. コスタリカ タラス（シングルオリジン）
+      7. モカブレンド（ブレンド）
+      8. ハウスブレンド（ブレンド）
+      9. エスプレッソブレンド（ブレンド）
+      10. 季節限定ブレンド（ブレンド）
+
+      ## 8. モック注文データ
+
+      最低20件の注文データを用意:
+      - 各ステータス（pending, processing, shipped, delivered, cancelled）を含む
+      - 過去30日間に分散
+      - 様々な顧客、商品組み合わせ
+
+      ## 9. テスト用識別子（data-testid）
+
+      ### EC画面 - ヘッダー
+      - header-logo: ロゴ
+      - header-search: 検索入力
+      - header-search-button: 検索ボタン
+      - header-favorites: お気に入りアイコン
+      - header-cart: カートアイコン
+      - cart-badge: カート件数バッジ
+
+      ### EC画面 - 商品一覧
+      - product-list: 商品一覧コンテナ
+      - product-card: 商品カード（複数）
+      - filter-category: カテゴリフィルタ
+      - filter-origin: 産地フィルタ
+      - filter-roast: 焙煎度フィルタ
+      - filter-price-min: 価格下限
+      - filter-price-max: 価格上限
+      - sort-select: ソート選択
+      - pagination: ページネーション
+      - page-prev: 前ページ
+      - page-next: 次ページ
+
+      ### EC画面 - 商品詳細
+      - product-name: 商品名
+      - product-origin: 産地
+      - product-description: 商品説明
+      - product-price: 価格表示
+      - product-image-main: メイン画像
+      - product-stock: 在庫状況
+      - flavor-chart: テイスティングチャート
+      - flavor-notes: フレーバーノート
+      - select-roast: 焙煎度選択
+      - select-grind: 挽き方選択
+      - select-weight: 内容量選択
+      - quantity-input: 数量入力
+      - quantity-minus: 数量減少
+      - quantity-plus: 数量増加
+      - add-to-cart: カートに追加
+      - add-to-favorites: お気に入りに追加
+
+      ### EC画面 - レビュー
+      - review-section: レビューセクション
+      - review-average: 平均評価
+      - review-count: レビュー数
+      - review-list: レビュー一覧
+      - review-item: レビュー項目（複数）
+      - review-form: レビュー投稿フォーム
+      - review-rating-input: 星評価入力
+      - review-comment: コメント入力
+      - review-brew-method: 抽出方法選択
+      - review-submit: レビュー投稿ボタン
+      - tasting-acidity: 酸味スライダー
+      - tasting-bitterness: 苦味スライダー
+      - tasting-body: コクスライダー
+      - tasting-sweetness: 甘味スライダー
+      - tasting-aroma: 香りスライダー
+
+      ### EC画面 - カート
+      - cart-container: カートコンテナ
+      - cart-items: カート商品一覧
+      - cart-item: カート商品（複数）
+      - cart-item-name: 商品名
+      - cart-item-options: カスタマイズ内容
+      - cart-item-price: 単価
+      - cart-item-quantity: 数量
+      - cart-item-subtotal: 小計
+      - cart-item-remove: 削除ボタン
+      - cart-subtotal: カート小計
+      - cart-shipping: 送料
+      - cart-discount: 割引額
+      - cart-total: 合計金額
+      - coupon-input: クーポン入力
+      - coupon-apply: クーポン適用ボタン
+      - continue-shopping: 買い物を続ける
+      - proceed-checkout: レジに進む
+
+      ### EC画面 - チェックアウト
+      - checkout-steps: ステップ表示
+      - checkout-step-1: ステップ1
+      - checkout-step-2: ステップ2
+      - checkout-step-3: ステップ3
+      - checkout-step-4: ステップ4
+      - input-name: 氏名
+      - input-postal: 郵便番号
+      - input-prefecture: 都道府県
+      - input-city: 市区町村
+      - input-address: 番地
+      - input-building: 建物名
+      - input-phone: 電話番号
+      - input-email: メールアドレス
+      - payment-credit: クレジットカード選択
+      - payment-cod: 代金引換選択
+      - payment-bank: 銀行振込選択
+      - input-card-number: カード番号
+      - input-card-expiry: 有効期限
+      - input-card-cvc: セキュリティコード
+      - btn-next-step: 次へボタン
+      - btn-prev-step: 戻るボタン
+      - btn-place-order: 注文確定ボタン
+      - order-complete: 注文完了画面
+      - order-number: 注文番号
+      - btn-back-home: トップに戻る
+
+      ### EC画面 - 状態・お気に入り
+      - loading-indicator: ローディング
+      - error-message: エラーメッセージ
+      - success-toast: 成功通知
+      - favorites-page: お気に入りページ
+      - favorites-list: お気に入り一覧
+      - favorites-empty: 空状態メッセージ
+
+      ### 管理画面 - 認証
+      - admin-login-form: ログインフォーム
+      - admin-username: ユーザー名入力
+      - admin-password: パスワード入力
+      - admin-login-button: ログインボタン
+      - admin-login-error: ログインエラー
+      - admin-logout-button: ログアウトボタン
+
+      ### 管理画面 - ナビゲーション
+      - admin-sidebar: サイドバー
+      - admin-nav-dashboard: ダッシュボードリンク
+      - admin-nav-products: 商品管理リンク
+      - admin-nav-orders: 注文管理リンク
+      - admin-nav-customers: 顧客管理リンク
+      - admin-nav-reviews: レビュー管理リンク
+      - admin-nav-coupons: クーポン管理リンク
+      - admin-nav-reports: レポートリンク
+      - admin-header: ヘッダー
+      - admin-user-name: ログインユーザー名
+
+      ### 管理画面 - ダッシュボード
+      - dashboard-sales-today: 本日売上
+      - dashboard-sales-week: 週間売上
+      - dashboard-sales-month: 月間売上
+      - dashboard-recent-orders: 最近の注文
+      - dashboard-stock-alert: 在庫アラート
+      - dashboard-popular-products: 人気商品
+      - dashboard-sales-chart: 売上グラフ
+
+      ### 管理画面 - 商品管理
+      - product-list-admin: 商品一覧（管理）
+      - product-search-admin: 商品検索
+      - product-filter-category-admin: カテゴリフィルタ
+      - product-filter-status-admin: ステータスフィルタ
+      - product-add-button: 商品追加ボタン
+      - product-table: 商品テーブル
+      - product-row: 商品行（複数）
+      - product-edit-button: 編集ボタン
+      - product-delete-button: 削除ボタン
+      - product-form: 商品フォーム
+      - product-form-name: 商品名入力
+      - product-form-category: カテゴリ選択
+      - product-form-origin: 産地入力
+      - product-form-price: 価格入力
+      - product-form-stock: 在庫入力
+      - product-form-description: 説明入力
+      - product-form-status: ステータス切替
+      - product-form-save: 保存ボタン
+      - product-form-cancel: キャンセルボタン
+      - product-delete-modal: 削除確認モーダル
+      - product-delete-confirm: 削除確定ボタン
+      - csv-import-button: CSVインポートボタン
+      - csv-import-modal: インポートモーダル
+      - csv-file-input: ファイル選択
+      - csv-import-preview: プレビュー
+      - csv-import-execute: インポート実行
+
+      ### 管理画面 - 注文管理
+      - order-list-admin: 注文一覧（管理）
+      - order-tabs: ステータスタブ
+      - order-tab-all: 全てタブ
+      - order-tab-pending: 保留中タブ
+      - order-tab-processing: 処理中タブ
+      - order-tab-shipped: 発送済タブ
+      - order-tab-delivered: 完了タブ
+      - order-tab-cancelled: キャンセルタブ
+      - order-search-admin: 注文検索
+      - order-date-filter: 日付フィルタ
+      - order-table: 注文テーブル
+      - order-row: 注文行（複数）
+      - order-detail-button: 詳細ボタン
+      - order-detail-modal: 注文詳細モーダル
+      - order-detail-info: 注文情報
+      - order-detail-customer: 顧客情報
+      - order-detail-items: 注文商品
+      - order-detail-total: 合計金額
+      - order-status-select: ステータス変更
+      - order-tracking-input: 追跡番号入力
+      - order-note-input: メモ入力
+      - order-update-button: 更新ボタン
+
+      ### 管理画面 - 顧客管理
+      - customer-list-admin: 顧客一覧
+      - customer-search-admin: 顧客検索
+      - customer-table: 顧客テーブル
+      - customer-row: 顧客行（複数）
+      - customer-detail-button: 詳細ボタン
+      - customer-detail-modal: 顧客詳細モーダル
+      - customer-detail-info: 顧客情報
+      - customer-detail-orders: 注文履歴
+      - customer-detail-stats: 統計情報
+      - customer-note-input: メモ入力
+      - customer-note-save: メモ保存
+
+      ### 管理画面 - レビュー管理
+      - review-list-admin: レビュー一覧
+      - review-tabs: ステータスタブ
+      - review-tab-all: 全てタブ
+      - review-tab-approved: 承認済タブ
+      - review-tab-pending: 保留中タブ
+      - review-tab-hidden: 非表示タブ
+      - review-table: レビューテーブル
+      - review-row: レビュー行（複数）
+      - review-approve-button: 承認ボタン
+      - review-hide-button: 非表示ボタン
+      - review-delete-button: 削除ボタン
+      - review-bulk-checkbox: 一括選択
+      - review-bulk-approve: 一括承認
+      - review-bulk-hide: 一括非表示
+      - review-detail-modal: レビュー詳細モーダル
+
+      ### 管理画面 - クーポン管理
+      - coupon-list-admin: クーポン一覧
+      - coupon-tabs: ステータスタブ
+      - coupon-tab-all: 全てタブ
+      - coupon-tab-active: 有効タブ
+      - coupon-tab-expired: 期限切れタブ
+      - coupon-tab-inactive: 無効タブ
+      - coupon-add-button: クーポン追加ボタン
+      - coupon-table: クーポンテーブル
+      - coupon-row: クーポン行（複数）
+      - coupon-edit-button: 編集ボタン
+      - coupon-delete-button: 削除ボタン
+      - coupon-form: クーポンフォーム
+      - coupon-form-code: コード入力
+      - coupon-form-type: 割引タイプ選択
+      - coupon-form-value: 割引値入力
+      - coupon-form-min-amount: 最低金額入力
+      - coupon-form-max-uses: 最大利用回数
+      - coupon-form-start: 開始日
+      - coupon-form-end: 終了日
+      - coupon-form-status: ステータス切替
+      - coupon-form-save: 保存ボタン
+      - coupon-form-cancel: キャンセルボタン
+      - coupon-delete-modal: 削除確認モーダル
+
+      ### 管理画面 - レポート
+      - report-page: レポートページ
+      - report-period-select: 期間選択
+      - report-date-start: 開始日
+      - report-date-end: 終了日
+      - report-apply-button: 適用ボタン
+      - report-sales-total: 売上合計
+      - report-order-count: 注文件数
+      - report-average-order: 平均注文金額
+      - report-sales-chart: 売上推移グラフ
+      - report-product-ranking: 商品別ランキング
+      - report-category-chart: カテゴリ別グラフ
+      - report-csv-export: CSV出力ボタン
+
+      ### 管理画面 - 共通
+      - admin-toast: 通知トースト
+      - admin-confirm-modal: 確認モーダル
+      - admin-loading: ローディング
+      - admin-pagination: ページネーション
+
+# 期待する成果物
+expected_artifacts:
+  - path: index.html
+    description: "ECサイト メインHTMLファイル"
+  - path: admin/index.html
+    description: "管理画面 メインHTMLファイル"
+  - path: js/data/products.js
+    description: "商品モックデータ"
+  - path: js/data/orders.js
+    description: "注文モックデータ"
+  - path: js/data/customers.js
+    description: "顧客モックデータ"
+  - path: js/data/reviews.js
+    description: "レビューモックデータ"
+  - path: js/data/coupons.js
+    description: "クーポンモックデータ"
+  - path: e2e/ec.spec.js
+    description: "EC画面E2Eテストファイル"
+  - path: e2e/admin.spec.js
+    description: "管理画面E2Eテストファイル"
+
+# タイムアウト設定（秒）
+timeouts:
+  task_creation: 1200
+  task_completion: 10800   # 180分（管理画面含む複雑な機能のため）
+
+# 初期アクション
+initial_action:
+  type: chat
+  from: owner-coffee-admin
+  to: worker-dev
+  message: |
+    作業ディレクトリにある SPEC.md を参照して、コーヒー豆専門ECサイト（管理画面付き）を実装してください。
+
+    要件：
+    - 実際に動作するアプリを作成
+    - ECサイト（フロント）と管理画面の両方を実装
+    - モック商品データを使用（最低10商品）
+    - モック注文データを用意（最低20件）
+    - 商品画像はフリー素材サイト（Unsplash、Pexels等）から取得して表示
+    - 仕様書に記載された全てのdata-testid属性を実装
+    - カスタマイズ注文（焙煎度・挽き方・内容量）に対応
+    - レビュー機能（テイスティングチャート付き）を実装
+    - チェックアウトはマルチステップで実装
+    - 管理画面は /admin/ 配下に配置
+    - 管理画面ログイン（admin / admin123）
+    - Chart.jsを使用してグラフ表示
+    - E2Eテストファイルを作成（Playwright形式）
+    - 成果物は作業ディレクトリに保存
+
+# E2Eテストケース
+e2e_tests:
+  # ========================================
+  # EC画面テスト
+  # ========================================
+
+  # ========== 構造テスト ==========
+  - id: EC-ST-01
+    name: "EC: ヘッダー構造確認"
+    steps:
+      - action: assert_exists
+        selector: '[data-testid="header-logo"]'
+      - action: assert_exists
+        selector: '[data-testid="header-search"]'
+      - action: assert_exists
+        selector: '[data-testid="header-cart"]'
+
+  - id: EC-ST-02
+    name: "EC: 商品一覧構造確認"
+    steps:
+      - action: assert_exists
+        selector: '[data-testid="product-list"]'
+      - action: assert_exists
+        selector: '[data-testid="filter-category"]'
+      - action: assert_exists
+        selector: '[data-testid="sort-select"]'
+
+  - id: EC-ST-03
+    name: "EC: 商品カード表示確認"
+    steps:
+      - action: assert_exists
+        selector: '[data-testid="product-card"]'
+      - action: assert_count_min
+        selector: '[data-testid="product-card"]'
+        min: 8
+
+  # ========== 検索・フィルタテスト ==========
+  - id: EC-SF-01
+    name: "EC: キーワード検索"
+    steps:
+      - action: fill
+        selector: '[data-testid="header-search"]'
+        value: "エチオピア"
+      - action: click
+        selector: '[data-testid="header-search-button"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="product-card"]'
+
+  - id: EC-SF-02
+    name: "EC: カテゴリフィルタ"
+    steps:
+      - action: select
+        selector: '[data-testid="filter-category"]'
+        value: "blend"
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="product-card"]'
+
+  - id: EC-SF-03
+    name: "EC: ソート機能"
+    steps:
+      - action: select
+        selector: '[data-testid="sort-select"]'
+        value: "price-asc"
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="product-card"]'
+
+  # ========== 商品詳細テスト ==========
+  - id: EC-PD-01
+    name: "EC: 商品詳細ページ表示"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="product-name"]'
+      - action: assert_exists
+        selector: '[data-testid="product-price"]'
+      - action: assert_exists
+        selector: '[data-testid="flavor-chart"]'
+
+  - id: EC-PD-02
+    name: "EC: カスタマイズ選択UI"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="select-roast"]'
+      - action: assert_exists
+        selector: '[data-testid="select-grind"]'
+      - action: assert_exists
+        selector: '[data-testid="select-weight"]'
+
+  - id: EC-PD-03
+    name: "EC: カスタマイズで価格変動"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 1000
+      - action: get_text
+        selector: '[data-testid="product-price"]'
+        store: initial_price
+      - action: select
+        selector: '[data-testid="select-weight"]'
+        value: "200"
+      - action: wait
+        timeout: 500
+      - action: assert_text_changed
+        selector: '[data-testid="product-price"]'
+        from: initial_price
+
+  # ========== カート機能テスト ==========
+  - id: EC-CT-01
+    name: "EC: カートに追加"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="add-to-cart"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="cart-badge"]'
+      - action: assert_text
+        selector: '[data-testid="cart-badge"]'
+        expected: "1"
+
+  - id: EC-CT-02
+    name: "EC: カートページ表示"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="add-to-cart"]'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="header-cart"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="cart-container"]'
+      - action: assert_exists
+        selector: '[data-testid="cart-item"]'
+
+  - id: EC-CT-03
+    name: "EC: カート数量変更"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="add-to-cart"]'
+      - action: click
+        selector: '[data-testid="header-cart"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="cart-item"]:first-child [data-testid="quantity-plus"]'
+      - action: wait
+        timeout: 500
+      - action: assert_text
+        selector: '[data-testid="cart-item"]:first-child [data-testid="cart-item-quantity"]'
+        expected: "2"
+
+  - id: EC-CT-04
+    name: "EC: クーポン適用"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="add-to-cart"]'
+      - action: click
+        selector: '[data-testid="header-cart"]'
+      - action: wait
+        timeout: 1000
+      - action: fill
+        selector: '[data-testid="coupon-input"]'
+        value: "FIRST10"
+      - action: click
+        selector: '[data-testid="coupon-apply"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="cart-discount"]'
+
+  # ========== チェックアウトテスト ==========
+  - id: EC-CO-01
+    name: "EC: チェックアウト開始"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="add-to-cart"]'
+      - action: click
+        selector: '[data-testid="header-cart"]'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="proceed-checkout"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="checkout-step-1"]'
+
+  - id: EC-CO-02
+    name: "EC: 配送先入力バリデーション"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="add-to-cart"]'
+      - action: click
+        selector: '[data-testid="header-cart"]'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="proceed-checkout"]'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="btn-next-step"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="error-message"]'
+
+  - id: EC-CO-03
+    name: "EC: チェックアウト完了フロー"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="add-to-cart"]'
+      - action: click
+        selector: '[data-testid="header-cart"]'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="proceed-checkout"]'
+      - action: wait
+        timeout: 500
+      - action: fill
+        selector: '[data-testid="input-name"]'
+        value: "山田太郎"
+      - action: fill
+        selector: '[data-testid="input-postal"]'
+        value: "123-4567"
+      - action: select
+        selector: '[data-testid="input-prefecture"]'
+        value: "東京都"
+      - action: fill
+        selector: '[data-testid="input-city"]'
+        value: "渋谷区"
+      - action: fill
+        selector: '[data-testid="input-address"]'
+        value: "1-2-3"
+      - action: fill
+        selector: '[data-testid="input-phone"]'
+        value: "090-1234-5678"
+      - action: fill
+        selector: '[data-testid="input-email"]'
+        value: "test@example.com"
+      - action: click
+        selector: '[data-testid="btn-next-step"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="checkout-step-2"]'
+      - action: click
+        selector: '[data-testid="payment-cod"]'
+      - action: click
+        selector: '[data-testid="btn-next-step"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="checkout-step-3"]'
+      - action: click
+        selector: '[data-testid="btn-place-order"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="order-complete"]'
+      - action: assert_exists
+        selector: '[data-testid="order-number"]'
+
+  # ========== レビュー機能テスト ==========
+  - id: EC-RV-01
+    name: "EC: レビュー表示"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="review-section"]'
+      - action: assert_exists
+        selector: '[data-testid="review-average"]'
+
+  - id: EC-RV-02
+    name: "EC: レビュー投稿フォーム"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="review-form"]'
+      - action: assert_exists
+        selector: '[data-testid="review-rating-input"]'
+      - action: assert_exists
+        selector: '[data-testid="tasting-acidity"]'
+
+  # ========== お気に入り機能テスト ==========
+  - id: EC-FV-01
+    name: "EC: お気に入り追加"
+    steps:
+      - action: click
+        selector: '[data-testid="product-card"]:first-child'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="add-to-favorites"]'
+      - action: wait
+        timeout: 500
+      - action: click
+        selector: '[data-testid="header-favorites"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="favorites-list"]'
+
+  # ========== ページネーションテスト ==========
+  - id: EC-PG-01
+    name: "EC: ページネーション動作"
+    steps:
+      - action: assert_exists
+        selector: '[data-testid="pagination"]'
+
+  # ========== レスポンシブテスト ==========
+  - id: EC-RS-01
+    name: "EC: モバイル表示"
+    steps:
+      - action: resize
+        width: 375
+        height: 667
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="product-list"]'
+      - action: assert_exists
+        selector: '[data-testid="header-cart"]'
+
+  # ========================================
+  # 管理画面テスト
+  # ========================================
+
+  # ========== 認証テスト ==========
+  - id: ADMIN-AUTH-01
+    name: "ADMIN: ログイン画面表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="admin-login-form"]'
+      - action: assert_exists
+        selector: '[data-testid="admin-username"]'
+      - action: assert_exists
+        selector: '[data-testid="admin-password"]'
+
+  - id: ADMIN-AUTH-02
+    name: "ADMIN: ログイン成功"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: wait
+        timeout: 1000
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="admin-sidebar"]'
+      - action: assert_exists
+        selector: '[data-testid="dashboard-sales-today"]'
+
+  - id: ADMIN-AUTH-03
+    name: "ADMIN: ログイン失敗"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: wait
+        timeout: 1000
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "wrongpassword"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="admin-login-error"]'
+
+  - id: ADMIN-AUTH-04
+    name: "ADMIN: ログアウト"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: wait
+        timeout: 500
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-logout-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="admin-login-form"]'
+
+  # ========== ダッシュボードテスト ==========
+  - id: ADMIN-DASH-01
+    name: "ADMIN: ダッシュボード表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="dashboard-sales-today"]'
+      - action: assert_exists
+        selector: '[data-testid="dashboard-sales-week"]'
+      - action: assert_exists
+        selector: '[data-testid="dashboard-sales-month"]'
+
+  - id: ADMIN-DASH-02
+    name: "ADMIN: ダッシュボード最近の注文"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="dashboard-recent-orders"]'
+
+  - id: ADMIN-DASH-03
+    name: "ADMIN: ダッシュボード在庫アラート"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="dashboard-stock-alert"]'
+
+  - id: ADMIN-DASH-04
+    name: "ADMIN: ダッシュボード売上グラフ"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="dashboard-sales-chart"]'
+
+  # ========== ナビゲーションテスト ==========
+  - id: ADMIN-NAV-01
+    name: "ADMIN: サイドバーナビゲーション"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="admin-nav-dashboard"]'
+      - action: assert_exists
+        selector: '[data-testid="admin-nav-products"]'
+      - action: assert_exists
+        selector: '[data-testid="admin-nav-orders"]'
+      - action: assert_exists
+        selector: '[data-testid="admin-nav-customers"]'
+      - action: assert_exists
+        selector: '[data-testid="admin-nav-reviews"]'
+      - action: assert_exists
+        selector: '[data-testid="admin-nav-coupons"]'
+      - action: assert_exists
+        selector: '[data-testid="admin-nav-reports"]'
+
+  # ========== 商品管理テスト ==========
+  - id: ADMIN-PROD-01
+    name: "ADMIN: 商品一覧表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-products"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="product-list-admin"]'
+      - action: assert_exists
+        selector: '[data-testid="product-table"]'
+
+  - id: ADMIN-PROD-02
+    name: "ADMIN: 商品検索"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-products"]'
+      - action: wait
+        timeout: 1000
+      - action: fill
+        selector: '[data-testid="product-search-admin"]'
+        value: "エチオピア"
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="product-row"]'
+
+  - id: ADMIN-PROD-03
+    name: "ADMIN: 商品追加フォーム表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-products"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="product-add-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="product-form"]'
+      - action: assert_exists
+        selector: '[data-testid="product-form-name"]'
+      - action: assert_exists
+        selector: '[data-testid="product-form-price"]'
+
+  - id: ADMIN-PROD-04
+    name: "ADMIN: 商品編集"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-products"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="product-row"]:first-child [data-testid="product-edit-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="product-form"]'
+
+  - id: ADMIN-PROD-05
+    name: "ADMIN: 商品削除確認モーダル"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-products"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="product-row"]:first-child [data-testid="product-delete-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="product-delete-modal"]'
+
+  # ========== 注文管理テスト ==========
+  - id: ADMIN-ORD-01
+    name: "ADMIN: 注文一覧表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-orders"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="order-list-admin"]'
+      - action: assert_exists
+        selector: '[data-testid="order-table"]'
+
+  - id: ADMIN-ORD-02
+    name: "ADMIN: 注文ステータスタブ"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-orders"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="order-tabs"]'
+      - action: click
+        selector: '[data-testid="order-tab-pending"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="order-table"]'
+
+  - id: ADMIN-ORD-03
+    name: "ADMIN: 注文詳細表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-orders"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="order-row"]:first-child [data-testid="order-detail-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="order-detail-modal"]'
+      - action: assert_exists
+        selector: '[data-testid="order-status-select"]'
+
+  # ========== 顧客管理テスト ==========
+  - id: ADMIN-CUST-01
+    name: "ADMIN: 顧客一覧表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-customers"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="customer-list-admin"]'
+      - action: assert_exists
+        selector: '[data-testid="customer-table"]'
+
+  - id: ADMIN-CUST-02
+    name: "ADMIN: 顧客詳細表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-customers"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="customer-row"]:first-child [data-testid="customer-detail-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="customer-detail-modal"]'
+      - action: assert_exists
+        selector: '[data-testid="customer-detail-orders"]'
+
+  # ========== レビュー管理テスト ==========
+  - id: ADMIN-REV-01
+    name: "ADMIN: レビュー一覧表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-reviews"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="review-list-admin"]'
+      - action: assert_exists
+        selector: '[data-testid="review-table"]'
+
+  - id: ADMIN-REV-02
+    name: "ADMIN: レビュー承認/非表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-reviews"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="review-approve-button"]'
+      - action: assert_exists
+        selector: '[data-testid="review-hide-button"]'
+
+  # ========== クーポン管理テスト ==========
+  - id: ADMIN-CPN-01
+    name: "ADMIN: クーポン一覧表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-coupons"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="coupon-list-admin"]'
+      - action: assert_exists
+        selector: '[data-testid="coupon-table"]'
+
+  - id: ADMIN-CPN-02
+    name: "ADMIN: クーポン追加フォーム"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-coupons"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="coupon-add-button"]'
+      - action: wait
+        timeout: 500
+      - action: assert_exists
+        selector: '[data-testid="coupon-form"]'
+      - action: assert_exists
+        selector: '[data-testid="coupon-form-code"]'
+      - action: assert_exists
+        selector: '[data-testid="coupon-form-type"]'
+      - action: assert_exists
+        selector: '[data-testid="coupon-form-value"]'
+
+  # ========== レポートテスト ==========
+  - id: ADMIN-RPT-01
+    name: "ADMIN: レポートページ表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-reports"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="report-page"]'
+      - action: assert_exists
+        selector: '[data-testid="report-period-select"]'
+
+  - id: ADMIN-RPT-02
+    name: "ADMIN: 売上レポート表示"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-reports"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="report-sales-total"]'
+      - action: assert_exists
+        selector: '[data-testid="report-order-count"]'
+      - action: assert_exists
+        selector: '[data-testid="report-sales-chart"]'
+
+  - id: ADMIN-RPT-03
+    name: "ADMIN: 商品別ランキング"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-reports"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="report-product-ranking"]'
+
+  - id: ADMIN-RPT-04
+    name: "ADMIN: CSV出力ボタン"
+    steps:
+      - action: navigate
+        url: "/admin/"
+      - action: fill
+        selector: '[data-testid="admin-username"]'
+        value: "admin"
+      - action: fill
+        selector: '[data-testid="admin-password"]'
+        value: "admin123"
+      - action: click
+        selector: '[data-testid="admin-login-button"]'
+      - action: wait
+        timeout: 1000
+      - action: click
+        selector: '[data-testid="admin-nav-reports"]'
+      - action: wait
+        timeout: 1000
+      - action: assert_exists
+        selector: '[data-testid="report-csv-export"]'
