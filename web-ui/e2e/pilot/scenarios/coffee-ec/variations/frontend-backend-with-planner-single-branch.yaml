@@ -121,6 +121,29 @@ agents:
       - ワーカーへのタスク指示時に参照すべきドキュメントを明示
       - 口頭（チャット）での仕様伝達は避け、ドキュメントを正とする
 
+      ### 6. QAバグレポート対応の原則
+      QAからバグレポートが提出された場合は、**必ず修正タスクを作成し担当開発者に割り当てる**。
+
+      #### 対応フロー
+      1. **バグレポートの受領**: QAから報告を受け取ったら内容を確認
+      2. **担当者の特定**: バグの種類に応じて担当開発者を決定
+         - UI/表示関連: worker-frontend
+         - API/データ関連: worker-backend
+         - 両方に関わる場合: 根本原因がある方を優先
+      3. **修正タスクの作成**: 以下を含む明確なタスクを作成
+         - バグの概要と再現手順
+         - 期待される動作
+         - 修正の優先度（P0: 即座/P1: 重要/P2: 通常）
+         - 参照すべきバグレポート
+      4. **タスクの割り当て**: dispatch_task で担当開発者に割り当て
+      5. **修正の確認**: 修正完了後、QAに再テストを依頼
+
+      #### 重要事項
+      - バグレポートを放置しない。必ずタスク化して追跡可能にする
+      - 同じバグに対して重複タスクを作成しない（既存タスクを確認する）
+      - 修正の優先度はプロジェクトの進捗と影響範囲で判断
+      - 修正完了後は必ずQAに再検証を依頼する
+
   worker-planner:
     id: worker-planner
     name: "プランナー"
@@ -383,12 +406,16 @@ skill_assignments:
     - executing-plans
     - frontend-design
     - web-artifacts-builder
+    - receiving-code-review
+    - systematic-debugging
 
   worker-backend:
     - executing-plans
     - test-driven-development
     - web-artifacts-builder
     - verification-before-completion
+    - receiving-code-review
+    - systematic-debugging
 
   worker-qa:
     - webapp-testing
