@@ -89,6 +89,27 @@ enum ToolDefinitions {
             rejectTaskRequest,   // 依頼却下（Manager専用）
 
             // ========================================
+            // 自己状況確認機能（認証済み：タスク・チャット両方）
+            // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 2
+            // ========================================
+            getMyExecutionHistory,  // 自分の実行履歴取得
+            getExecutionLog,        // 実行ログ詳細取得
+
+            // ========================================
+            // チャット→タスク操作ツール（チャットセッション専用）
+            // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 3
+            // ========================================
+            startTaskFromChat,      // 上位者の依頼でタスク実行開始
+            updateTaskFromChat,     // 上位者の依頼でタスク修正
+
+            // ========================================
+            // セッション間通知ツール
+            // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 4
+            // ========================================
+            notifyTaskSession,          // チャット→タスクセッションへ通知
+            getConversationMessages,    // タスクセッションから会話メッセージ取得
+
+            // ========================================
             // 削除済み（権限なし - 呼び出し不可）
             // ========================================
             // - list_agents: → list_subordinates を使用
@@ -1230,6 +1251,221 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "delegation_id"]
+        ]
+    ]
+
+    // MARK: - Self-Status Tools
+    // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 2
+
+    /// get_my_execution_history - 自分の実行履歴を取得
+    /// 認証済みエージェントが自分の過去の実行履歴を確認するために使用
+    static let getMyExecutionHistory: [String: Any] = [
+        "name": "get_my_execution_history",
+        "description": """
+            自分（認証済みエージェント）の実行履歴を取得します。
+            タスクセッション・チャットセッションの両方で使用可能です。
+            過去のタスク実行状況を確認し、同様のタスクへの対応方法を参考にできます。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "task_id": [
+                    "type": "string",
+                    "description": "特定のタスクに絞り込む場合のタスクID（任意）"
+                ],
+                "limit": [
+                    "type": "integer",
+                    "description": "取得する履歴の最大件数（任意、デフォルト: 10）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token"]
+        ]
+    ]
+
+    /// get_execution_log - 実行ログの詳細を取得
+    /// 認証済みエージェントが特定の実行ログの詳細を確認するために使用
+    static let getExecutionLog: [String: Any] = [
+        "name": "get_execution_log",
+        "description": """
+            特定の実行ログの詳細を取得します。
+            get_my_execution_historyで取得した履歴の中から、詳細を確認したい実行を指定します。
+            タスクセッション・チャットセッションの両方で使用可能です。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "execution_id": [
+                    "type": "string",
+                    "description": "取得する実行ログのID"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "execution_id"]
+        ]
+    ]
+
+    // MARK: - Chat → Task Operation Tools
+    // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 3
+
+    /// start_task_from_chat - チャットセッションから既存タスクの実行を開始
+    /// 上位者（祖先エージェント）からの依頼がある場合のみ許可される
+    static let startTaskFromChat: [String: Any] = [
+        "name": "start_task_from_chat",
+        "description": """
+            チャットセッションから既存タスクの実行を開始します。
+            上位者（祖先エージェント）からの依頼がある場合のみ使用可能です。
+            タスクのステータスが in_progress に変更され、タスクセッションへの切り替え準備を行います。
+
+            前提条件:
+            - チャットセッションからのみ呼び出し可能
+            - 指定タスクが自分に割り当てられていること
+            - 依頼者（requester_id）が自分の上位者であること
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "task_id": [
+                    "type": "string",
+                    "description": "実行を開始するタスクのID"
+                ],
+                "requester_id": [
+                    "type": "string",
+                    "description": "依頼者のエージェントID（自分の上位者である必要があります）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "task_id", "requester_id"]
+        ]
+    ]
+
+    /// update_task_from_chat - チャットセッションからタスクを修正
+    /// 上位者（祖先エージェント）からの依頼がある場合のみ許可される
+    static let updateTaskFromChat: [String: Any] = [
+        "name": "update_task_from_chat",
+        "description": """
+            チャットセッションから既存タスクを修正します。
+            上位者（祖先エージェント）からの依頼がある場合のみ使用可能です。
+            タスクの説明やステータスを更新できます。
+
+            前提条件:
+            - チャットセッションからのみ呼び出し可能
+            - 指定タスクが自分に割り当てられていること
+            - 依頼者（requester_id）が自分の上位者であること
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "task_id": [
+                    "type": "string",
+                    "description": "修正するタスクのID"
+                ],
+                "requester_id": [
+                    "type": "string",
+                    "description": "依頼者のエージェントID（自分の上位者である必要があります）"
+                ],
+                "description": [
+                    "type": "string",
+                    "description": "新しいタスク説明（任意）"
+                ],
+                "status": [
+                    "type": "string",
+                    "description": "新しいステータス（任意）",
+                    "enum": ["backlog", "todo", "in_progress", "done", "cancelled"]
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "task_id", "requester_id"]
+        ]
+    ]
+
+    // MARK: - Session Notification Tools
+    // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 4
+
+    /// notify_task_session - チャットセッションからタスクセッションへ通知を送信
+    /// チャットで受け取った重要な情報をタスクセッションに引き継ぐために使用
+    static let notifyTaskSession: [String: Any] = [
+        "name": "notify_task_session",
+        "description": """
+            チャットセッションからタスクセッションへ通知を送信します。
+            チャットで受け取った重要な情報や確認事項をタスクセッションに引き継ぐために使用します。
+            送信された通知は、次にタスクセッションを開始した際に get_notifications で取得できます。
+
+            使用例:
+            - マネージャーからの追加指示をタスク実行時に確認できるようにする
+            - チャットでの議論結果をタスク実行の参考にする
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "message": [
+                    "type": "string",
+                    "description": "通知メッセージ（タスクセッションで表示される内容）"
+                ],
+                "conversation_id": [
+                    "type": "string",
+                    "description": "関連する会話のID（任意）"
+                ],
+                "related_task_id": [
+                    "type": "string",
+                    "description": "関連するタスクのID（任意）"
+                ],
+                "priority": [
+                    "type": "string",
+                    "description": "通知の優先度（任意）",
+                    "enum": ["low", "normal", "high"]
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "message"]
+        ]
+    ]
+
+    /// get_conversation_messages - タスクセッションから会話メッセージを取得
+    /// タスク実行中にチャットで受けた指示内容を確認するために使用
+    static let getConversationMessages: [String: Any] = [
+        "name": "get_conversation_messages",
+        "description": """
+            タスクセッションから特定の会話のメッセージを取得します。
+            チャットで受けた指示内容をタスク実行中に確認するために使用します。
+            notify_task_session で受け取った通知に含まれる conversation_id を指定して呼び出します。
+
+            前提条件:
+            - タスクセッションからのみ呼び出し可能
+            - 自分が参加している会話のみ取得可能
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "conversation_id": [
+                    "type": "string",
+                    "description": "取得する会話のID"
+                ],
+                "limit": [
+                    "type": "integer",
+                    "description": "取得するメッセージの最大件数（任意、デフォルト: 50）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "conversation_id"]
         ]
     ]
 

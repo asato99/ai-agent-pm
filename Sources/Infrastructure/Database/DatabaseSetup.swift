@@ -1149,6 +1149,15 @@ public final class DatabaseSetup {
             }
         }
 
+        // v50: 通知に会話ID追加
+        // チャットセッション通知で会話を特定するため
+        // 参照: docs/plan/CHAT_TASK_EXECUTION.md
+        migrator.registerMigration("v50_notification_conversation_id") { db in
+            try db.alter(table: "notifications") { t in
+                t.add(column: "conversation_id", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 

@@ -256,6 +256,15 @@ final class MockChatRepositoryForAuth: ChatRepositoryProtocol {
         messages[key(projectId, agentId)]?.count ?? 0
     }
 
+    func findByConversationId(
+        projectId: ProjectID,
+        agentId: AgentID,
+        conversationId: ConversationID
+    ) throws -> [ChatMessage] {
+        let allMessages = messages[key(projectId, agentId)] ?? []
+        return allMessages.filter { $0.conversationId == conversationId }
+    }
+
     // Helper for tests
     func addUnreadMessage(_ projectId: ProjectID, _ agentId: AgentID) {
         let message = ChatMessage(

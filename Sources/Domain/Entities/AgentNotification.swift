@@ -8,6 +8,7 @@ import Foundation
 
 /// 通知の種類
 /// 参照: docs/design/NOTIFICATION_SYSTEM.md - 通知タイプ
+/// 参照: docs/plan/CHAT_TASK_EXECUTION.md - チャットセッション通知
 public enum AgentNotificationType: String, Codable, Sendable, CaseIterable {
     /// ステータス変更通知（タスクがblocked等に変更された場合）
     case statusChange = "status_change"
@@ -15,6 +16,9 @@ public enum AgentNotificationType: String, Codable, Sendable, CaseIterable {
     case interrupt = "interrupt"
     /// メッセージ通知（ユーザーからのメッセージ）
     case message = "message"
+    /// チャットセッション通知（同一エージェントのチャットセッションからタスクセッションへの通知）
+    /// 参照: docs/plan/CHAT_TASK_EXECUTION.md
+    case chatSessionNotification = "chat_session_notification"
 }
 
 // MARK: - AgentNotification
@@ -22,6 +26,7 @@ public enum AgentNotificationType: String, Codable, Sendable, CaseIterable {
 /// エージェントへの通知を表すエンティティ
 /// 参照: docs/design/NOTIFICATION_SYSTEM.md
 /// 参照: docs/usecase/UC010_TaskInterruptByStatusChange.md
+/// 参照: docs/plan/CHAT_TASK_EXECUTION.md - チャットセッション通知
 /// 注意: Foundation.Notification との名前衝突を避けるため AgentNotification という名前を使用
 public struct AgentNotification: Identifiable, Equatable, Codable, Sendable {
     /// 通知ID
@@ -36,6 +41,9 @@ public struct AgentNotification: Identifiable, Equatable, Codable, Sendable {
     public let action: String
     /// 関連タスクID（オプション）
     public let taskId: TaskID?
+    /// 関連会話ID（チャットセッション通知用）
+    /// 参照: docs/plan/CHAT_TASK_EXECUTION.md
+    public let conversationId: ConversationID?
     /// 通知メッセージ（人間可読）
     public let message: String
     /// エージェントへの指示
@@ -56,6 +64,7 @@ public struct AgentNotification: Identifiable, Equatable, Codable, Sendable {
         type: AgentNotificationType,
         action: String,
         taskId: TaskID?,
+        conversationId: ConversationID? = nil,
         message: String,
         instruction: String,
         createdAt: Date,
@@ -68,6 +77,7 @@ public struct AgentNotification: Identifiable, Equatable, Codable, Sendable {
         self.type = type
         self.action = action
         self.taskId = taskId
+        self.conversationId = conversationId
         self.message = message
         self.instruction = instruction
         self.createdAt = createdAt
@@ -161,6 +171,48 @@ extension AgentNotification {
             taskId: nil,
             message: "ユーザーからのメッセージがあります",
             instruction: "get_pending_messagesを呼び出して確認してください",
+            createdAt: Date()
+        )
+    }
+
+    /// チャットセッション通知を作成
+    /// 同一エージェントのチャットセッションからタスクセッションへの通知
+    /// 参照: docs/plan/CHAT_TASK_EXECUTION.md
+    /// - Parameters:
+    ///   - targetAgentId: 通知先エージェントID（自分自身）
+    ///   - targetProjectId: 通知先プロジェクトID
+    ///   - conversationId: 確認してほしい会話のID
+    ///   - message: 補足メッセージ（オプション）
+    ///   - relatedTaskId: 関連タスクID（オプション）
+    /// - Returns: 通知エンティティ
+    public static func createChatSessionNotification(
+        targetAgentId: AgentID,
+        targetProjectId: ProjectID,
+        conversationId: ConversationID,
+        message: String?,
+        relatedTaskId: TaskID?
+    ) -> AgentNotification {
+        let displayMessage = message ?? "チャットセッションからの通知があります"
+        let instruction = """
+            あなたのチャットセッションからの通知です。
+
+            【重要】この通知は、あなた自身が別のセッション（チャットセッション）から
+            送信したものです。チャットの内容を確認してください。
+
+            確認方法:
+            get_conversation_messages(conversation_id: "\(conversationId.value)") を呼び出してください。
+            """
+
+        return AgentNotification(
+            id: NotificationID.generate(),
+            targetAgentId: targetAgentId,
+            targetProjectId: targetProjectId,
+            type: .chatSessionNotification,
+            action: "check_chat",
+            taskId: relatedTaskId,
+            conversationId: conversationId,
+            message: displayMessage,
+            instruction: instruction,
             createdAt: Date()
         )
     }

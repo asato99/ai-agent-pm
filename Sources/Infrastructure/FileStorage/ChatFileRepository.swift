@@ -200,6 +200,19 @@ public final class ChatFileRepository: ChatRepositoryProtocol, @unchecked Sendab
         return allMessages.count
     }
 
+    // MARK: - 会話ID検索（チャットセッション通知用）
+
+    /// 会話IDでメッセージを検索
+    /// 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 1-2
+    public func findByConversationId(
+        projectId: ProjectID,
+        agentId: AgentID,
+        conversationId: ConversationID
+    ) throws -> [ChatMessage] {
+        let allMessages = try findMessages(projectId: projectId, agentId: agentId)
+        return allMessages.filter { $0.conversationId == conversationId }
+    }
+
     // MARK: - Private Methods
 
     /// Get working directory from project ID

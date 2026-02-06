@@ -9,6 +9,7 @@ import Domain
 // MARK: - AgentNotificationRecord
 
 /// GRDB用のAgentNotificationレコード
+/// 参照: docs/plan/CHAT_TASK_EXECUTION.md - conversationId 追加
 struct AgentNotificationRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "notifications"
 
@@ -18,6 +19,7 @@ struct AgentNotificationRecord: Codable, FetchableRecord, PersistableRecord {
     var type: String
     var action: String
     var taskId: String?
+    var conversationId: String?
     var message: String
     var instruction: String
     var createdAt: Date
@@ -31,6 +33,7 @@ struct AgentNotificationRecord: Codable, FetchableRecord, PersistableRecord {
         case type
         case action
         case taskId = "task_id"
+        case conversationId = "conversation_id"
         case message
         case instruction
         case createdAt = "created_at"
@@ -46,6 +49,7 @@ struct AgentNotificationRecord: Codable, FetchableRecord, PersistableRecord {
             type: AgentNotificationType(rawValue: type) ?? .statusChange,
             action: action,
             taskId: taskId.map { TaskID(value: $0) },
+            conversationId: conversationId.map { ConversationID(value: $0) },
             message: message,
             instruction: instruction,
             createdAt: createdAt,
@@ -62,6 +66,7 @@ struct AgentNotificationRecord: Codable, FetchableRecord, PersistableRecord {
             type: notification.type.rawValue,
             action: notification.action,
             taskId: notification.taskId?.value,
+            conversationId: notification.conversationId?.value,
             message: notification.message,
             instruction: notification.instruction,
             createdAt: notification.createdAt,

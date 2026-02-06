@@ -145,6 +145,21 @@ struct ToolAuthorization {
         "approve_task_request": .managerOnly,    // Manager専用（人間）
         "reject_task_request": .managerOnly,     // Manager専用（人間）
 
+        // 自己状況確認機能（認証済み：タスク・チャット両方）
+        // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 2
+        "get_my_execution_history": .authenticated,  // 自分の実行履歴取得
+        "get_execution_log": .authenticated,         // 実行ログ詳細取得
+
+        // チャット→タスク操作ツール（チャットセッション専用）
+        // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 3
+        "start_task_from_chat": .chatOnly,   // 上位者依頼でタスク実行開始
+        "update_task_from_chat": .chatOnly,  // 上位者依頼でタスク修正
+
+        // セッション間通知ツール
+        // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 4
+        "notify_task_session": .chatOnly,         // チャット→タスクセッションへ通知
+        "get_conversation_messages": .taskOnly,   // タスクセッションから会話メッセージ取得
+
         // ヘルプ（未認証でも利用可能）
         "help": .unauthenticated,
     ]

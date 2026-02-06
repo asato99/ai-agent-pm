@@ -288,6 +288,22 @@ public protocol ChatRepositoryProtocol: Sendable {
 
     /// 総メッセージ数を取得
     func countMessages(projectId: ProjectID, agentId: AgentID) throws -> Int
+
+    // MARK: - 会話ID検索（チャットセッション通知用）
+
+    /// 会話IDでメッセージを検索
+    /// タスクセッションがチャットセッション通知を受け取った際に、該当会話のメッセージを取得するために使用
+    /// 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 1-2
+    /// - Parameters:
+    ///   - projectId: プロジェクトID
+    ///   - agentId: エージェントID（メッセージを検索するエージェントのストレージ）
+    ///   - conversationId: 検索対象の会話ID
+    /// - Returns: 該当会話IDを持つメッセージの配列（時系列順）
+    func findByConversationId(
+        projectId: ProjectID,
+        agentId: AgentID,
+        conversationId: ConversationID
+    ) throws -> [ChatMessage]
 }
 
 // MARK: - ChatMessagePage

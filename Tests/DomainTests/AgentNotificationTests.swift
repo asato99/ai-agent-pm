@@ -240,4 +240,109 @@ final class AgentNotificationTests: XCTestCase {
         XCTAssertNil(notification.taskId)
         XCTAssertTrue(notification.instruction.contains("get_pending_messages"))
     }
+
+    // MARK: - Chat Session Notification Tests (Phase 1-1)
+
+    func testChatSessionNotificationType() {
+        // chatSessionNotification タイプが存在することを確認
+        XCTAssertEqual(AgentNotificationType.chatSessionNotification.rawValue, "chat_session_notification")
+    }
+
+    func testChatSessionNotificationTypeInAllCases() {
+        // CaseIterable に含まれることを確認
+        XCTAssertTrue(AgentNotificationType.allCases.contains(.chatSessionNotification))
+    }
+
+    func testAgentNotificationWithConversationId() {
+        let conversationId = ConversationID(value: "conv_001")
+        let notification = AgentNotification(
+            id: NotificationID(value: "ntf_chat_001"),
+            targetAgentId: AgentID(value: "agt_001"),
+            targetProjectId: ProjectID(value: "prj_001"),
+            type: .chatSessionNotification,
+            action: "check_chat",
+            taskId: TaskID(value: "tsk_001"),
+            conversationId: conversationId,
+            message: "チャットを確認してください",
+            instruction: "get_conversation_messages で確認してください",
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(notification.conversationId?.value, "conv_001")
+        XCTAssertEqual(notification.type, .chatSessionNotification)
+    }
+
+    func testAgentNotificationConversationIdOptional() {
+        // conversationId なしでも作成可能（既存互換性）
+        let notification = AgentNotification(
+            id: NotificationID(value: "ntf_no_conv"),
+            targetAgentId: AgentID(value: "agt_001"),
+            targetProjectId: ProjectID(value: "prj_001"),
+            type: .statusChange,
+            action: "blocked",
+            taskId: nil,
+            conversationId: nil,
+            message: "Test",
+            instruction: "Test",
+            createdAt: Date()
+        )
+
+        XCTAssertNil(notification.conversationId)
+    }
+
+    func testCreateChatSessionNotification() {
+        let notification = AgentNotification.createChatSessionNotification(
+            targetAgentId: AgentID(value: "worker-01"),
+            targetProjectId: ProjectID(value: "prj_001"),
+            conversationId: ConversationID(value: "conv_abc"),
+            message: "Manager から緊急の指示があります",
+            relatedTaskId: TaskID(value: "tsk_001")
+        )
+
+        XCTAssertTrue(notification.id.value.hasPrefix("ntf_"))
+        XCTAssertEqual(notification.type, .chatSessionNotification)
+        XCTAssertEqual(notification.action, "check_chat")
+        XCTAssertEqual(notification.conversationId?.value, "conv_abc")
+        XCTAssertEqual(notification.taskId?.value, "tsk_001")
+        XCTAssertTrue(notification.message.contains("Manager から緊急の指示"))
+        XCTAssertTrue(notification.instruction.contains("get_conversation_messages"))
+        XCTAssertTrue(notification.instruction.contains("conv_abc"))
+    }
+
+    func testCreateChatSessionNotificationWithoutTaskId() {
+        let notification = AgentNotification.createChatSessionNotification(
+            targetAgentId: AgentID(value: "worker-01"),
+            targetProjectId: ProjectID(value: "prj_001"),
+            conversationId: ConversationID(value: "conv_xyz"),
+            message: nil,
+            relatedTaskId: nil
+        )
+
+        XCTAssertEqual(notification.type, .chatSessionNotification)
+        XCTAssertEqual(notification.conversationId?.value, "conv_xyz")
+        XCTAssertNil(notification.taskId)
+        XCTAssertTrue(notification.instruction.contains("conv_xyz"))
+    }
+
+    func testChatSessionNotificationCodable() throws {
+        let notification = AgentNotification.createChatSessionNotification(
+            targetAgentId: AgentID(value: "worker-01"),
+            targetProjectId: ProjectID(value: "prj_001"),
+            conversationId: ConversationID(value: "conv_codable"),
+            message: "テストメッセージ",
+            relatedTaskId: TaskID(value: "tsk_001")
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(notification)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(AgentNotification.self, from: data)
+
+        XCTAssertEqual(decoded.type, .chatSessionNotification)
+        XCTAssertEqual(decoded.conversationId?.value, "conv_codable")
+        XCTAssertEqual(decoded.taskId?.value, "tsk_001")
+    }
 }

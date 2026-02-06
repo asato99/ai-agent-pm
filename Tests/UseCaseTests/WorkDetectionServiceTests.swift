@@ -60,6 +60,15 @@ final class MockChatRepositoryForWorkDetection: ChatRepositoryProtocol {
         messages[key(projectId, agentId)]?.count ?? 0
     }
 
+    func findByConversationId(
+        projectId: ProjectID,
+        agentId: AgentID,
+        conversationId: ConversationID
+    ) throws -> [ChatMessage] {
+        let allMessages = messages[key(projectId, agentId)] ?? []
+        return allMessages.filter { $0.conversationId == conversationId }
+    }
+
     // Helper for tests
     func setUnreadMessages(_ projectId: ProjectID, _ agentId: AgentID, _ msgs: [ChatMessage]) {
         messages[key(projectId, agentId)] = msgs

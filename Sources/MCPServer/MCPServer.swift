@@ -1137,6 +1137,93 @@ public final class MCPServer {
             )
 
         // ========================================
+        // 自己状況確認機能（認証済み：タスク・チャット両方）
+        // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 2
+        // ========================================
+        case "get_my_execution_history":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            let taskId = arguments["task_id"] as? String
+            let limit = arguments["limit"] as? Int
+            return try getMyExecutionHistory(session: session, taskId: taskId, limit: limit)
+
+        case "get_execution_log":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let executionId = arguments["execution_id"] as? String else {
+                throw MCPError.missingArguments(["execution_id"])
+            }
+            return try getExecutionLog(session: session, executionId: executionId)
+
+        // ========================================
+        // チャット→タスク操作ツール
+        // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 3
+        // ========================================
+        case "start_task_from_chat":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            guard let requesterId = arguments["requester_id"] as? String else {
+                throw MCPError.missingArguments(["requester_id"])
+            }
+            return try startTaskFromChat(session: session, taskId: taskId, requesterId: requesterId)
+
+        case "update_task_from_chat":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let taskId = arguments["task_id"] as? String else {
+                throw MCPError.missingArguments(["task_id"])
+            }
+            guard let requesterId = arguments["requester_id"] as? String else {
+                throw MCPError.missingArguments(["requester_id"])
+            }
+            let description = arguments["description"] as? String
+            let status = arguments["status"] as? String
+            return try updateTaskFromChat(session: session, taskId: taskId, requesterId: requesterId, description: description, status: status)
+
+        // ========================================
+        // セッション間通知ツール
+        // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 4
+        // ========================================
+        case "notify_task_session":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let message = arguments["message"] as? String else {
+                throw MCPError.missingArguments(["message"])
+            }
+            let conversationId = arguments["conversation_id"] as? String
+            let relatedTaskId = arguments["related_task_id"] as? String
+            let priority = arguments["priority"] as? String
+            return try notifyTaskSession(
+                session: session,
+                message: message,
+                conversationId: conversationId,
+                relatedTaskId: relatedTaskId,
+                priority: priority
+            )
+
+        case "get_conversation_messages":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let conversationId = arguments["conversation_id"] as? String else {
+                throw MCPError.missingArguments(["conversation_id"])
+            }
+            let limit = arguments["limit"] as? Int
+            return try getConversationMessages(
+                session: session,
+                conversationId: conversationId,
+                limit: limit
+            )
+
+        // ========================================
         // 削除済み（エラーを返す）
         // ========================================
         case "list_agents":
@@ -5638,6 +5725,385 @@ public final class MCPServer {
         ]
     }
 
+    // MARK: - Self-Status Tools
+    // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 2
+
+    /// get_my_execution_history - 自分の実行履歴を取得
+    /// 認証済みエージェントが自分の過去の実行履歴を確認するために使用
+    private func getMyExecutionHistory(session: AgentSession, taskId: String?, limit: Int?) throws -> [String: Any] {
+        Self.log("[MCP] getMyExecutionHistory called: agentId='\(session.agentId.value)', taskId='\(taskId ?? "nil")', limit=\(limit ?? 10)")
+
+        let effectiveLimit = limit ?? 10
+
+        // Get execution logs for this agent
+        let logs: [ExecutionLog]
+        if let taskIdStr = taskId {
+            // Filter by task ID
+            let allLogs = try executionLogRepository.findByAgentId(session.agentId, limit: effectiveLimit, offset: nil)
+            logs = allLogs.filter { $0.taskId.value == taskIdStr }
+        } else {
+            logs = try executionLogRepository.findByAgentId(session.agentId, limit: effectiveLimit, offset: nil)
+        }
+
+        // Get task titles for better context
+        var taskTitles: [String: String] = [:]
+        for log in logs {
+            if taskTitles[log.taskId.value] == nil {
+                if let task = try taskRepository.findById(log.taskId) {
+                    taskTitles[log.taskId.value] = task.title
+                }
+            }
+        }
+
+        let executions = logs.map { log -> [String: Any] in
+            [
+                "execution_id": log.id.value,
+                "task_id": log.taskId.value,
+                "task_title": taskTitles[log.taskId.value] ?? "",
+                "status": log.status.rawValue,
+                "started_at": ISO8601DateFormatter().string(from: log.startedAt),
+                "completed_at": log.completedAt.map { ISO8601DateFormatter().string(from: $0) } as Any,
+                "duration_seconds": log.durationSeconds as Any,
+                "exit_code": log.exitCode as Any,
+                "has_log": log.logFilePath != nil
+            ]
+        }
+
+        return [
+            "success": true,
+            "agent_id": session.agentId.value,
+            "executions": executions,
+            "total_count": executions.count,
+            "instruction": "ログ内容を確認するには get_execution_log(execution_id) を呼び出してください。"
+        ]
+    }
+
+    /// get_execution_log - 実行ログの詳細を取得
+    /// 認証済みエージェントが特定の実行ログの詳細を確認するために使用
+    private func getExecutionLog(session: AgentSession, executionId: String) throws -> [String: Any] {
+        Self.log("[MCP] getExecutionLog called: agentId='\(session.agentId.value)', executionId='\(executionId)'")
+
+        // Find the execution log
+        guard let log = try executionLogRepository.findById(ExecutionLogID(value: executionId)) else {
+            throw MCPError.executionLogNotFound(executionId)
+        }
+
+        // Verify ownership - only allow access to own execution logs
+        guard log.agentId == session.agentId else {
+            throw MCPError.permissionDenied("この実行ログにアクセスする権限がありません。自分の実行ログのみ確認できます。")
+        }
+
+        // Read log file if available
+        var logContent: [String] = []
+        var totalLines = 0
+        var truncated = false
+
+        if let logFilePath = log.logFilePath {
+            let fileManager = FileManager.default
+            if fileManager.fileExists(atPath: logFilePath) {
+                do {
+                    let content = try String(contentsOfFile: logFilePath, encoding: .utf8)
+                    let lines = content.components(separatedBy: .newlines)
+                    totalLines = lines.count
+
+                    // Return last 100 lines by default
+                    let maxLines = 100
+                    if lines.count > maxLines {
+                        logContent = Array(lines.suffix(maxLines))
+                        truncated = true
+                    } else {
+                        logContent = lines
+                    }
+                } catch {
+                    Self.log("[MCP] Failed to read log file: \(error)")
+                    logContent = ["[ログファイルの読み取りに失敗しました: \(error.localizedDescription)]"]
+                }
+            } else {
+                logContent = ["[ログファイルが見つかりません: \(logFilePath)]"]
+            }
+        } else {
+            logContent = ["[ログファイルパスが登録されていません]"]
+        }
+
+        var result: [String: Any] = [
+            "success": true,
+            "execution_id": executionId,
+            "task_id": log.taskId.value,
+            "status": log.status.rawValue,
+            "log_file_path": log.logFilePath as Any,
+            "log_content": logContent,
+            "total_lines": totalLines,
+            "returned_lines": logContent.count,
+            "truncated": truncated
+        ]
+
+        if truncated {
+            result["instruction"] = "ログが切り詰められています。先頭から確認するには offset パラメータを使用してください。"
+        } else {
+            result["instruction"] = "上記が実行ログの内容です。"
+        }
+
+        return result
+    }
+
+    // MARK: - Chat → Task Operation Tools
+    // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 3
+
+    /// start_task_from_chat - チャットセッションから既存タスクの実行を開始
+    /// 上位者（祖先エージェント）からの依頼がある場合のみ許可される
+    private func startTaskFromChat(session: AgentSession, taskId: String, requesterId: String) throws -> [String: Any] {
+        Self.log("[MCP] startTaskFromChat called: agentId='\(session.agentId.value)', taskId='\(taskId)', requesterId='\(requesterId)'")
+
+        // タスクの存在確認
+        guard let task = try taskRepository.findById(TaskID(value: taskId)) else {
+            throw MCPError.taskNotFound(taskId)
+        }
+
+        // 割り当て確認 - 自分に割り当てられているか
+        guard task.assigneeId == session.agentId else {
+            throw MCPError.taskAccessDenied(taskId)
+        }
+
+        // 依頼者が上位者（祖先エージェント）であることを確認
+        let requesterAgentId = AgentID(value: requesterId)
+        let isAncestor = try isAncestorAgent(ancestorId: requesterAgentId, descendantId: session.agentId)
+        guard isAncestor else {
+            throw MCPError.permissionDenied("依頼者(\(requesterId))が上位者ではありません。チャットからのタスク操作は上位者からの依頼がある場合のみ許可されます。")
+        }
+
+        // 依頼者がプロジェクトに所属していることを確認
+        let isRequesterInProject = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+            agentId: requesterAgentId,
+            projectId: session.projectId
+        )
+        guard isRequesterInProject else {
+            throw MCPError.agentNotAssignedToProject(agentId: requesterId, projectId: session.projectId.value)
+        }
+
+        // タスクステータスを in_progress に変更
+        var updatedTask = task
+        updatedTask.status = .inProgress
+        updatedTask.updatedAt = Date()
+        try taskRepository.save(updatedTask)
+
+        Self.log("[MCP] startTaskFromChat completed: taskId='\(taskId)', new_status='in_progress'")
+
+        return [
+            "success": true,
+            "task_id": taskId,
+            "new_status": "in_progress",
+            "instruction": "タスクの実行を開始しました。タスクセッションへ切り替えて実行を継続してください。"
+        ]
+    }
+
+    /// update_task_from_chat - チャットセッションからタスクを修正
+    /// 上位者（祖先エージェント）からの依頼がある場合のみ許可される
+    private func updateTaskFromChat(session: AgentSession, taskId: String, requesterId: String, description: String?, status: String?) throws -> [String: Any] {
+        Self.log("[MCP] updateTaskFromChat called: agentId='\(session.agentId.value)', taskId='\(taskId)', requesterId='\(requesterId)'")
+
+        // タスクの存在確認
+        guard let task = try taskRepository.findById(TaskID(value: taskId)) else {
+            throw MCPError.taskNotFound(taskId)
+        }
+
+        // 割り当て確認 - 自分に割り当てられているか
+        guard task.assigneeId == session.agentId else {
+            throw MCPError.taskAccessDenied(taskId)
+        }
+
+        // 依頼者が上位者（祖先エージェント）であることを確認
+        let requesterAgentId = AgentID(value: requesterId)
+        let isAncestor = try isAncestorAgent(ancestorId: requesterAgentId, descendantId: session.agentId)
+        guard isAncestor else {
+            throw MCPError.permissionDenied("依頼者(\(requesterId))が上位者ではありません。チャットからのタスク操作は上位者からの依頼がある場合のみ許可されます。")
+        }
+
+        // 依頼者がプロジェクトに所属していることを確認
+        let isRequesterInProject = try projectAgentAssignmentRepository.isAgentAssignedToProject(
+            agentId: requesterAgentId,
+            projectId: session.projectId
+        )
+        guard isRequesterInProject else {
+            throw MCPError.agentNotAssignedToProject(agentId: requesterId, projectId: session.projectId.value)
+        }
+
+        // タスクを更新
+        var updatedTask = task
+        var changes: [String] = []
+
+        if let newDescription = description {
+            updatedTask.description = newDescription
+            changes.append("description")
+        }
+
+        if let newStatus = status {
+            guard let taskStatus = TaskStatus(rawValue: newStatus) else {
+                throw MCPError.invalidStatus(newStatus)
+            }
+            updatedTask.status = taskStatus
+            changes.append("status")
+        }
+
+        updatedTask.updatedAt = Date()
+        try taskRepository.save(updatedTask)
+
+        Self.log("[MCP] updateTaskFromChat completed: taskId='\(taskId)', changes=\(changes)")
+
+        return [
+            "success": true,
+            "task_id": taskId,
+            "updated_fields": changes,
+            "instruction": "タスクを更新しました。"
+        ]
+    }
+
+    /// エージェントが別のエージェントの祖先（上位者）かどうかを確認
+    /// ancestorIdがdescendantIdの祖先（parent, grandparent, etc.）であればtrue
+    private func isAncestorAgent(ancestorId: AgentID, descendantId: AgentID) throws -> Bool {
+        var currentId: AgentID? = descendantId
+
+        while let id = currentId {
+            guard let agent = try agentRepository.findById(id) else {
+                return false
+            }
+
+            if let parentId = agent.parentAgentId {
+                if parentId == ancestorId {
+                    return true
+                }
+                currentId = parentId
+            } else {
+                // ルートに到達、祖先なし
+                return false
+            }
+        }
+
+        return false
+    }
+
+    // MARK: - Session Notification Tools
+    // 参照: docs/plan/CHAT_TASK_EXECUTION.md - Phase 4
+
+    /// notify_task_session - チャットセッションからタスクセッションへ通知を送信
+    /// 同一エージェントの別セッションへ通知を送る（自分自身への通知）
+    private func notifyTaskSession(
+        session: AgentSession,
+        message: String,
+        conversationId: String?,
+        relatedTaskId: String?,
+        priority: String?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] notifyTaskSession called: agentId='\(session.agentId.value)', message_length=\(message.count)")
+
+        // 会話IDが指定されている場合は存在確認
+        var convId: ConversationID?
+        if let conversationIdStr = conversationId {
+            convId = ConversationID(value: conversationIdStr)
+            // 会話の存在と参加確認
+            guard let conversation = try conversationRepository.findById(convId!) else {
+                throw MCPError.conversationNotFound(conversationIdStr)
+            }
+            guard conversation.isParticipant(session.agentId) else {
+                throw MCPError.permissionDenied("You are not a participant of this conversation")
+            }
+        }
+
+        // 関連タスクID
+        let taskId: TaskID? = relatedTaskId.map { TaskID(value: $0) }
+
+        // 優先度のバリデーション（現在は情報として保存、将来の拡張用）
+        let validPriorities = ["normal", "high", "urgent"]
+        let normalizedPriority = priority ?? "normal"
+        if !validPriorities.contains(normalizedPriority) {
+            throw MCPError.validationError("priority must be one of: normal, high, urgent")
+        }
+
+        // チャットセッション通知を作成
+        // convIdがnilの場合は、ダミーのConversationIDを生成（メッセージのみの通知）
+        let notificationConvId = convId ?? ConversationID.generate()
+        let notification = AgentNotification.createChatSessionNotification(
+            targetAgentId: session.agentId,
+            targetProjectId: session.projectId,
+            conversationId: notificationConvId,
+            message: message,
+            relatedTaskId: taskId
+        )
+
+        // 通知を保存
+        try notificationRepository.save(notification)
+
+        Self.log("[MCP] notifyTaskSession completed: notificationId='\(notification.id.value)'")
+
+        return [
+            "success": true,
+            "notification_id": notification.id.value,
+            "instruction": """
+                通知を送信しました。タスクセッションは get_notifications で通知を取得し、
+                get_conversation_messages で会話内容を確認できます。
+                """
+        ]
+    }
+
+    /// get_conversation_messages - 会話IDでメッセージを取得
+    /// タスクセッションがチャットセッションからの通知を確認するために使用
+    private func getConversationMessages(
+        session: AgentSession,
+        conversationId: String,
+        limit: Int?
+    ) throws -> [String: Any] {
+        Self.log("[MCP] getConversationMessages called: agentId='\(session.agentId.value)', conversationId='\(conversationId)'")
+
+        let convId = ConversationID(value: conversationId)
+
+        // 会話の存在と参加確認
+        guard let conversation = try conversationRepository.findById(convId) else {
+            throw MCPError.conversationNotFound(conversationId)
+        }
+        guard conversation.isParticipant(session.agentId) else {
+            throw MCPError.permissionDenied("You are not a participant of this conversation")
+        }
+
+        // メッセージを取得
+        let messages = try chatRepository.findByConversationId(
+            projectId: session.projectId,
+            agentId: session.agentId,
+            conversationId: convId
+        )
+
+        // limit適用
+        let effectiveLimit = min(limit ?? 50, 100)
+        let limitedMessages = messages.suffix(effectiveLimit)
+
+        // レスポンス形式に変換
+        let formattedMessages = limitedMessages.map { msg -> [String: Any] in
+            var result: [String: Any] = [
+                "id": msg.id.value,
+                "sender_id": msg.senderId.value,
+                "content": msg.content,
+                "created_at": ISO8601DateFormatter().string(from: msg.createdAt)
+            ]
+            if let receiverId = msg.receiverId {
+                result["receiver_id"] = receiverId.value
+            }
+            if let taskId = msg.relatedTaskId {
+                result["related_task_id"] = taskId.value
+            }
+            return result
+        }
+
+        Self.log("[MCP] getConversationMessages completed: found \(messages.count) messages, returning \(formattedMessages.count)")
+
+        return [
+            "conversation_id": conversationId,
+            "conversation_state": conversation.state.rawValue,
+            "initiator_agent_id": conversation.initiatorAgentId.value,
+            "participant_agent_id": conversation.participantAgentId.value,
+            "messages": Array(formattedMessages),
+            "total_count": messages.count,
+            "truncated": messages.count > effectiveLimit
+        ]
+    }
+
     // MARK: - Chat Tools
     // 参照: docs/design/CHAT_FEATURE.md
 
@@ -6742,6 +7208,7 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
     case projectNotFound(String)
     case sessionNotFound(String)
     case handoffNotFound(String)
+    case executionLogNotFound(String)  // Phase 2: 実行ログが見つからない
     case invalidStatus(String)
     case invalidStatusTransition(from: String, to: String)
     case unknownTool(String)
@@ -6796,6 +7263,8 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
             return "Session not found: \(id)"
         case .handoffNotFound(let id):
             return "Handoff not found: \(id)"
+        case .executionLogNotFound(let id):
+            return "Execution log not found: \(id)"
         case .invalidStatus(let status):
             return "Invalid status: \(status). Valid values: backlog, todo, in_progress, in_review, blocked, done, cancelled"
         case .invalidStatusTransition(let from, let to):
