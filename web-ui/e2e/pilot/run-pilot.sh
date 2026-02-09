@@ -233,7 +233,8 @@ rm -f "$TEST_DB_PATH" "$TEST_DB_PATH-shm" "$TEST_DB_PATH-wal" "$MCP_SOCKET_PATH"
 mkdir -p /tmp/pilot_work
 
 # 結果ディレクトリ作成
-RESULT_TIMESTAMP=$(date '+%Y-%m-%dT%H-%M-%S')
+# UTC時刻を使用（ResultRecorder.tsのtoISOString()と一致させる）
+RESULT_TIMESTAMP=$(date -u '+%Y-%m-%dT%H-%M-%S')
 RESULT_DIR="$SCRIPT_DIR/results/$SCENARIO/${RESULT_TIMESTAMP}_${VARIATION}"
 LOG_DIR="$RESULT_DIR/logs"
 mkdir -p "$LOG_DIR"
