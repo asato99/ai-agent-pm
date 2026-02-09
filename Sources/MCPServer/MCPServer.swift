@@ -1119,12 +1119,14 @@ public final class MCPServer {
             let assigneeId = session.agentId.value
             let description = arguments["description"] as? String
             let priority = arguments["priority"] as? String
+            let parentTaskId = arguments["parent_task_id"] as? String
             return try requestTask(
                 session: session,
                 title: cleanTitle,
                 description: description,
                 assigneeId: assigneeId,
-                priority: priority
+                priority: priority,
+                parentTaskId: parentTaskId
             )
 
         case "approve_task_request":
@@ -1199,6 +1201,16 @@ public final class MCPServer {
             }
             guard let requesterId = arguments["requester_id"] as? String else {
                 throw MCPError.missingArguments(["requester_id"])
+            }
+            // チャットセッションからの呼び出しは、ユーザーのチャットメッセージに @@タスク調整: マーカーが必要
+            // 参照: docs/design/CHAT_COMMAND_MARKER.md
+            if session.purpose == .chat {
+                let messages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
+                let incomingMessages = messages.filter { $0.senderId != session.agentId }
+                guard let lastMessage = incomingMessages.last,
+                      ChatCommandMarker.containsTaskAdjustMarker(lastMessage.content) else {
+                    throw MCPError.taskAdjustMarkerRequired
+                }
             }
             let description = arguments["description"] as? String
             let status = arguments["status"] as? String
@@ -3005,29 +3017,41 @@ public final class MCPServer {
                     "action": "get_pending_messages",
                     "instruction": """
                         チャットセッションです。
-                        get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
+                        get_pending_messages を呼び出して未読メッセージを取得してください。
 
                         【重要】チャットセッションの役割
-                        - ユーザーとの対話、質問への回答、タスク依頼の受付のみを行います
+                        - 他エージェントとの対話、質問への回答、タスク依頼の受付のみを行います
                         - 実際の作業（コード実装、テスト実行、ファイル作成など）は行いません
                         - 作業はタスクセッションで別途実行されます
 
-                        【作業依頼を受けた場合】
-                        以下のような依頼は request_task でタスク登録し、send_message で応答してください:
-                        - 「〜を実装してください」「〜を修正してください」
-                        - 「〜機能を作ってください」「〜をお願いします」
+                        【チャットコマンド】受信メッセージの @@マーカー に応じて適切なツールを使用してください:
 
-                        【重要】タスク作成には @@タスク作成: マーカーが必要です
-                        ■ ユーザーメッセージに「@@タスク作成: 〜」がある場合
-                          → request_task(title: "マーカー以降のテキスト") でタスク作成
+                        ■ @@タスク作成: タイトル
+                          → request_task(title: "マーカー以降のテキスト") で新規タスク作成
                           → 応答例: 「ご依頼を承りました。タスクを登録しました」
-                        ■ マーカーなしの作業依頼の場合
-                          → 「タスクとして登録するには @@タスク作成: をつけてお送りください」と案内
+
+                        ■ @@タスク通知: メッセージ
+                          → notify_task_session(message: "マーカー以降のテキスト") で既存タスクセッションに通知
+                          → 応答例: 「タスクセッションに通知しました」
+
+                        ■ @@タスク調整: 内容
+                          → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
+                          → 応答例: 「タスクを更新しました」
+
+                        ■ マーカーなし
+                          → 作業依頼や通知・調整の意図がある場合:
+                            「以下のマーカーをつけてお送りください:
+                             ・新規タスク作成: @@タスク作成: タイトル
+                             ・既存タスクへの通知: @@タスク通知: メッセージ
+                             ・既存タスクの修正/削除: @@タスク調整: 内容」と案内
+                          → 単なる質問や相談: send_message で通常応答
+
+                        【注意】タスク関連のコマンドを実行する前に、既存のタスク一覧・状況を確認し、
+                        新規作成・通知・調整のどれが適切かを判断してください。
+                        重複タスクの作成や、存在しないタスクへの操作を防ぐためです。
 
                         【使用できないツール】
                         create_task, update_task_status などのタスク操作ツールはチャットセッションでは使用できません。
-
-                        単なる質問や相談への応答は send_message で送信してください。
                         """,
                     "state": "chat_session"
                 ]
@@ -3156,21 +3180,29 @@ public final class MCPServer {
                     "action": "get_pending_messages",
                     "instruction": """
                         チャットセッションです。
-                        get_pending_messages を呼び出してユーザーからの未読メッセージを取得してください。
+                        get_pending_messages を呼び出して未読メッセージを取得してください。
 
-                        【重要】以下のような作業依頼を受けた場合は、まず request_task を呼び出してタスクを登録してください:
-                        - 「〜を実装してください」「〜を追加してください」「〜を修正してください」
-                        - 「〜機能を作ってください」「〜をお願いします」
-                        - その他、具体的な開発作業や修正を依頼された場合
+                        【チャットコマンド】受信メッセージの @@マーカー に応じて適切なツールを使用してください:
 
-                        【重要】タスク作成には @@タスク作成: マーカーが必要です
-                        ■ ユーザーメッセージに「@@タスク作成: 〜」がある場合
-                          → request_task(title: "マーカー以降のテキスト") でタスク作成
+                        ■ @@タスク作成: タイトル
+                          → request_task(title: "マーカー以降のテキスト") で新規タスク作成
                           → send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答
-                        ■ マーカーなしの作業依頼の場合
-                          → 「タスクとして登録するには @@タスク作成: をつけてお送りください」と案内
 
-                        単なる質問や相談への応答は send_message で送信してください。
+                        ■ @@タスク通知: メッセージ
+                          → notify_task_session(message: "マーカー以降のテキスト") で既存タスクセッションに通知
+                          → send_message で「タスクセッションに通知しました」と応答
+
+                        ■ @@タスク調整: 内容
+                          → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
+                          → send_message で「タスクを更新しました」と応答
+
+                        ■ マーカーなし
+                          → 作業依頼・通知・調整の意図がある場合は @@マーカーの案内をしてください
+                          → 単なる質問や相談: send_message で通常応答
+
+                        【注意】タスク関連のコマンドを実行する前に、既存のタスク一覧・状況を確認し、
+                        新規作成・通知・調整のどれが適切かを判断してください。
+
                         他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                         その他の可能な操作は help ツールで確認できます。
                         """,
@@ -3216,11 +3248,12 @@ public final class MCPServer {
                 現在処理待ちのメッセージがありません。
                 【待機不要】サーバー側でLong Polling待機済みです。すぐに get_next_action を呼び出してください。
 
-                【重要】タスク作成には @@タスク作成: マーカーが必要です
-                ■ ユーザーメッセージに「@@タスク作成: 〜」がある場合
-                  → request_task(title: "マーカー以降のテキスト") でタスク作成し、send_message で「承知しました」と応答
-                ■ マーカーなしの作業依頼の場合
-                  → 「タスクとして登録するには @@タスク作成: をつけてお送りください」と案内
+                【チャットコマンド】受信メッセージの @@マーカー に応じて適切なツールを使用してください:
+                ■ @@タスク作成: → request_task で新規タスク作成
+                ■ @@タスク通知: → notify_task_session で既存タスクセッションに通知
+                ■ @@タスク調整: → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
+                ■ マーカーなし → 意図がある場合は @@マーカーの案内、質問は send_message で応答
+                ※タスク関連コマンド実行前に既存タスク状況を確認し、適切な操作を選択してください。
 
                 他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                 その他の可能な操作は help ツールで確認できます。
@@ -5107,7 +5140,8 @@ public final class MCPServer {
         title: String,
         description: String?,
         assigneeId: String,
-        priority: String?
+        priority: String?,
+        parentTaskId: String? = nil
     ) throws -> [String: Any] {
         Self.log("[MCP] requestTask: requester=\(session.agentId.value), assignee=\(assigneeId), title=\(title)")
 
@@ -5167,6 +5201,13 @@ public final class MCPServer {
         // createdByAgentId には actualRequester を使用
         // チャットセッションの場合: 依頼者（オーナー等）が作成者となり、isDelegatedTask=true になる
         // これによりサブタスク作成フェーズへ進める
+        // 親タスクの存在確認
+        if let parentId = parentTaskId {
+            guard try taskRepository.findById(TaskID(value: parentId)) != nil else {
+                throw MCPError.taskNotFound(parentId)
+            }
+        }
+
         var newTask = Task(
             id: TaskID.generate(),
             projectId: session.projectId,
@@ -5176,6 +5217,8 @@ public final class MCPServer {
             priority: taskPriority,
             assigneeId: assignee.id,
             createdByAgentId: actualRequester,
+            dependencies: [],
+            parentTaskId: parentTaskId.map { TaskID(value: $0) },
             requesterId: actualRequester,
             approvalStatus: approvalStatus
         )
@@ -6263,19 +6306,32 @@ public final class MCPServer {
             上記の pending_messages を確認してください。
             context_messages は会話の文脈理解用です（応答対象ではありません）。
 
-            【重要】タスク作成には @@タスク作成: マーカーが必要です
-            ■ ユーザーメッセージに「@@タスク作成: 〜」がある場合
-              → request_task(title: "マーカー以降のテキスト") でタスク作成
+            【チャットコマンド】受信メッセージの @@マーカー に応じて適切なツールを使用してください:
+
+            ■ @@タスク作成: タイトル
+              → request_task(title: "マーカー以降のテキスト") で新規タスク作成
               → send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答
-            ■ マーカーなしの作業依頼の場合
-              → 「タスクとして登録するには @@タスク作成: をつけてお送りください」と案内
+
+            ■ @@タスク通知: メッセージ
+              → notify_task_session(message: "マーカー以降のテキスト") で既存タスクセッションに通知
+              → send_message で「タスクセッションに通知しました」と応答
+
+            ■ @@タスク調整: 内容
+              → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
+              → send_message で「タスクを更新しました」と応答
+
+            ■ マーカーなし
+              → 作業依頼・通知・調整の意図がある場合は @@マーカーの案内をしてください
+              → 単なる質問や相談: send_message で直接応答
+
+            【注意】タスク関連のコマンドを実行する前に、既存のタスク一覧・状況を確認し、
+            新規作成・通知・調整のどれが適切かを判断してください。
+            重複タスクの作成や、存在しないタスクへの操作を防ぐためです。
 
             【例外】他のエージェントとの会話・対話を依頼された場合:
             - 「〜とチャットしてください」「〜と話し合ってください」など
-            - この場合は request_task ではなく、start_conversation を使って直接会話を開始してください
+            - この場合は start_conversation を使って直接会話を開始してください
             - 会話開始後、send_message でメッセージを交換してください
-
-            単なる質問や相談の場合は、send_message で直接応答してください。
             """
         }
 
@@ -7307,6 +7363,7 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
     // 参照: docs/design/CHAT_COMMAND_MARKER.md
     case taskRequestMarkerRequired  // チャットセッションからのタスク作成にはマーカーが必要
     case taskNotifyMarkerRequired   // チャットセッションからのタスク通知にはマーカーが必要
+    case taskAdjustMarkerRequired   // チャットセッションからのタスク調整にはマーカーが必要
 
     var description: String {
         switch self {
@@ -7394,6 +7451,8 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
             return "チャットセッションからの新規タスク作成には、ユーザーメッセージに @@タスク作成: マーカーが必要です。ユーザーに「@@タスク作成: タスク名」の形式で送信するよう案内してください。"
         case .taskNotifyMarkerRequired:
             return "チャットセッションからのタスク通知には、ユーザーメッセージに @@タスク通知: マーカーが必要です。ユーザーに「@@タスク通知: 通知内容」の形式で送信するよう案内してください。"
+        case .taskAdjustMarkerRequired:
+            return "チャットセッションからのタスク調整には、ユーザーメッセージに @@タスク調整: マーカーが必要です。ユーザーに「@@タスク調整: 調整内容」の形式で送信するよう案内してください。"
         }
     }
 

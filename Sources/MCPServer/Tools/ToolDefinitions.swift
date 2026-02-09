@@ -1502,6 +1502,10 @@ enum ToolDefinitions {
                     "type": "string",
                     "description": "優先度",
                     "enum": ["low", "medium", "high", "urgent"]
+                ],
+                "parent_task_id": [
+                    "type": "string",
+                    "description": "親タスクのID。サブタスクとして作成する場合に指定"
                 ]
             ] as [String: Any],
             "required": ["session_token", "title"]

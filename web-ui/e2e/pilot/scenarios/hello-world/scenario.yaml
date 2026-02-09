@@ -33,5 +33,6 @@ initial_action:
   from: pilot-owner
   to: pilot-manager
   message: |
+    @@タスク作成: Hello World Pythonスクリプトの作成
     「Hello, World!」を出力するPythonスクリプト hello.py を作成してください。
     作業ディレクトリに保存し、動作確認まで行ってください。

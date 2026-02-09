@@ -89,6 +89,9 @@ public enum ChatCommandMarker {
     /// タスク通知マーカーパターン: @@タスク通知: または ＠＠タスク通知: (半角・全角混合対応)
     private static let taskNotifyPattern = "[@＠][@＠]タスク通知:"
 
+    /// タスク調整マーカーパターン: @@タスク調整: または ＠＠タスク調整: (半角・全角混合対応)
+    private static let taskAdjustPattern = "[@＠][@＠]タスク調整:"
+
     // MARK: - マーカー検出
 
     /// メッセージにタスク作成マーカーが含まれているかチェック
@@ -105,6 +108,13 @@ public enum ChatCommandMarker {
         return content.range(of: taskNotifyPattern, options: .regularExpression) != nil
     }
 
+    /// メッセージにタスク調整マーカーが含まれているかチェック
+    /// - Parameter content: チェック対象のメッセージ内容
+    /// - Returns: @@タスク調整: マーカーが含まれている場合 true
+    public static func containsTaskAdjustMarker(_ content: String) -> Bool {
+        return content.range(of: taskAdjustPattern, options: .regularExpression) != nil
+    }
+
     // MARK: - 内容抽出
 
     /// タスク作成マーカーからタスクタイトルを抽出
@@ -119,6 +129,13 @@ public enum ChatCommandMarker {
     /// - Returns: 抽出された通知メッセージ、マーカーがない場合は nil
     public static func extractNotifyMessage(from content: String) -> String? {
         return extractContent(from: content, pattern: taskNotifyPattern)
+    }
+
+    /// タスク調整マーカーから調整内容を抽出
+    /// - Parameter content: マーカーを含むメッセージ内容
+    /// - Returns: 抽出された調整内容、マーカーがない場合は nil
+    public static func extractAdjustContent(from content: String) -> String? {
+        return extractContent(from: content, pattern: taskAdjustPattern)
     }
 
     // MARK: - Private

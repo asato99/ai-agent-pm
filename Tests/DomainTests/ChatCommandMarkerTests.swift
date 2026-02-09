@@ -182,4 +182,67 @@ final class ChatCommandMarkerTests: XCTestCase {
         let message = ChatCommandMarker.extractNotifyMessage(from: content)
         XCTAssertNil(message)
     }
+
+    // MARK: - タスク調整マーカー検出テスト
+
+    /// 半角@@タスク調整マーカーを検出できる
+    func testDetectsHalfWidthTaskAdjustMarker() {
+        let content = "@@タスク調整: タスクXXXの説明を更新"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskAdjustMarker(content),
+            "Should detect half-width @@ task adjust marker"
+        )
+    }
+
+    /// 全角＠＠タスク調整マーカーを検出できる
+    func testDetectsFullWidthTaskAdjustMarker() {
+        let content = "＠＠タスク調整: タスクXXXを削除"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskAdjustMarker(content),
+            "Should detect full-width ＠＠ task adjust marker"
+        )
+    }
+
+    /// 混合マーカーを検出できる（調整）
+    func testDetectsMixedWidthTaskAdjustMarker() {
+        let content = "@＠タスク調整: 優先度を変更"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskAdjustMarker(content),
+            "Should detect mixed width task adjust marker"
+        )
+    }
+
+    /// タスク作成マーカーをタスク調整として誤検出しない
+    func testDoesNotConfuseCreateWithAdjust() {
+        let content = "@@タスク作成: ログイン機能を実装"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskAdjustMarker(content),
+            "Should not confuse task create marker with adjust marker"
+        )
+    }
+
+    /// タスク通知マーカーをタスク調整として誤検出しない
+    func testDoesNotConfuseNotifyWithAdjust() {
+        let content = "@@タスク通知: レビュー完了"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskAdjustMarker(content),
+            "Should not confuse task notify marker with adjust marker"
+        )
+    }
+
+    // MARK: - 調整内容抽出テスト
+
+    /// タスク調整マーカーから内容を抽出できる
+    func testExtractsAdjustContent() {
+        let content = "@@タスク調整: タスクXXXの説明を「認証機能の改善」に変更"
+        let extracted = ChatCommandMarker.extractAdjustContent(from: content)
+        XCTAssertEqual(extracted, "タスクXXXの説明を「認証機能の改善」に変更")
+    }
+
+    /// 調整マーカーがない場合はnilを返す
+    func testReturnsNilForMessageWithoutAdjustMarker() {
+        let content = "タスクの説明を変更してください"
+        let extracted = ChatCommandMarker.extractAdjustContent(from: content)
+        XCTAssertNil(extracted)
+    }
 }

@@ -19,6 +19,7 @@ final class ChatCommandMarkerValidationTests: XCTestCase {
     private var projectRepository: ProjectRepository!
     private var projectAgentAssignmentRepository: ProjectAgentAssignmentRepository!
     private var agentCredentialRepository: AgentCredentialRepository!
+    private var taskRepository: TaskRepository!
 
     // テストデータ
     private let ownerId = AgentID(value: "owner-01")
@@ -38,6 +39,7 @@ final class ChatCommandMarkerValidationTests: XCTestCase {
         projectRepository = ProjectRepository(database: dbQueue)
         projectAgentAssignmentRepository = ProjectAgentAssignmentRepository(database: dbQueue)
         agentCredentialRepository = AgentCredentialRepository(database: dbQueue)
+        taskRepository = TaskRepository(database: dbQueue)
 
         try setupTestData()
     }
@@ -49,6 +51,7 @@ final class ChatCommandMarkerValidationTests: XCTestCase {
         projectRepository = nil
         projectAgentAssignmentRepository = nil
         agentCredentialRepository = nil
+        taskRepository = nil
         dbQueue = nil
         try super.tearDownWithError()
     }
@@ -143,6 +146,19 @@ final class ChatCommandMarkerValidationTests: XCTestCase {
         return (workerTaskSession, caller)
     }
 
+    /// テスト用タスクを作成（ワーカーにアサイン済み）
+    private func createTestTask() throws -> Domain.Task {
+        let task = Domain.Task(
+            id: TaskID(value: "task_marker_test_\(UUID().uuidString.prefix(8))"),
+            projectId: projectId,
+            title: "テスト用タスク",
+            assigneeId: workerId,
+            createdByAgentId: ownerId
+        )
+        try taskRepository.save(task)
+        return task
+    }
+
     // MARK: - MCPError定義テスト
 
     /// taskRequestMarkerRequired エラーが定義されていることを確認
@@ -159,6 +175,15 @@ final class ChatCommandMarkerValidationTests: XCTestCase {
         let error = MCPError.taskNotifyMarkerRequired
         XCTAssertTrue(
             error.description.contains("@@タスク通知:") || error.description.contains("マーカー"),
+            "Error message should mention the marker requirement"
+        )
+    }
+
+    /// taskAdjustMarkerRequired エラーが定義されていることを確認
+    func testTaskAdjustMarkerRequiredErrorDefined() {
+        let error = MCPError.taskAdjustMarkerRequired
+        XCTAssertTrue(
+            error.description.contains("@@タスク調整:") || error.description.contains("マーカー"),
             "Error message should mention the marker requirement"
         )
     }
@@ -293,6 +318,72 @@ final class ChatCommandMarkerValidationTests: XCTestCase {
                 String(describing: mcpError),
                 String(describing: MCPError.taskNotifyMarkerRequired),
                 "Should throw taskNotifyMarkerRequired error"
+            )
+        }
+    }
+
+    // MARK: - update_task_from_chat バリデーションテスト
+
+    /// チャットセッションで、チャット履歴にマーカー付きメッセージがある場合 → update_task_from_chat 成功
+    func testUpdateTaskFromChatWithMarkerSucceeds() throws {
+        // テスト用タスクを作成
+        let task = try createTestTask()
+
+        // オーナーから調整マーカー付きメッセージを送信
+        try sendMessageFromOwnerToWorker(content: "@@タスク調整: 説明を更新してください")
+
+        // ワーカーのチャットセッションから update_task_from_chat を呼び出す
+        let (_, workerCaller) = try createWorkerChatCaller()
+
+        let result = try mcpServer.executeTool(
+            name: "update_task_from_chat",
+            arguments: [
+                "task_id": task.id.value,
+                "requester_id": ownerId.value,
+                "description": "更新された説明文"
+            ],
+            caller: workerCaller
+        )
+
+        guard let resultDict = result as? [String: Any],
+              let success = resultDict["success"] as? Bool else {
+            XCTFail("Failed to parse result: \(result)")
+            return
+        }
+        XCTAssertTrue(success, "update_task_from_chat should succeed when marker exists in chat history")
+    }
+
+    /// チャットセッションで、チャット履歴にマーカーがない場合 → update_task_from_chat エラー
+    func testUpdateTaskFromChatWithoutMarkerFails() throws {
+        // テスト用タスクを作成
+        let task = try createTestTask()
+
+        // オーナーからマーカーなしメッセージを送信
+        try sendMessageFromOwnerToWorker(content: "説明を更新してください")
+
+        // ワーカーのチャットセッションから update_task_from_chat を呼び出す
+        let (_, workerCaller) = try createWorkerChatCaller()
+
+        XCTAssertThrowsError(
+            try mcpServer.executeTool(
+                name: "update_task_from_chat",
+                arguments: [
+                    "task_id": task.id.value,
+                    "requester_id": ownerId.value,
+                    "description": "更新された説明文"
+                ],
+                caller: workerCaller
+            ),
+            "update_task_from_chat should fail when no marker in chat history"
+        ) { error in
+            guard let mcpError = error as? MCPError else {
+                XCTFail("Expected MCPError but got: \(error)")
+                return
+            }
+            XCTAssertEqual(
+                String(describing: mcpError),
+                String(describing: MCPError.taskAdjustMarkerRequired),
+                "Should throw taskAdjustMarkerRequired error"
             )
         }
     }
