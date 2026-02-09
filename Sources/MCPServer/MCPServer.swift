@@ -841,7 +841,14 @@ public final class MCPServer {
         // Worker専用
         // ========================================
         case "report_completed":
-            guard case .worker(_, let session) = caller else {
+            // Manager も自身のメインタスクを完了報告できる
+            let session: AgentSession
+            switch caller {
+            case .worker(_, let s):
+                session = s
+            case .manager(_, let s):
+                session = s
+            default:
                 throw ToolAuthorizationError.workerRequired("report_completed")
             }
             guard let result = arguments["result"] as? String else {
@@ -3700,36 +3707,44 @@ public final class MCPServer {
 
         // サブタスクが存在する場合の処理
         if !subTasks.isEmpty {
-            // 全サブタスクが完了 → completion_check
+            // 全サブタスクが完了 → completion_check（ただし selectedAction がある場合はスキップ）
             if completedSubTasks.count == subTasks.count {
-                Self.log("[MCP] All subtasks completed, returning completion_check")
-                return [
-                    "action": "completion_check",
-                    "instruction": """
-                        全てのサブタスクが完了しました。成果物を確認してください。
+                // selectedAction が既に選択されている場合は completion_check を返さず、
+                // 下流の selectedAction 処理にフォールスルーする
+                let latestCtx = try contextRepository.findLatest(taskId: mainTask.id)
+                let hasSelectedAction = latestCtx?.progress?.hasPrefix("workflow:selected_") == true
 
-                        ■ 確認ツール
-                        - list_tasks: サブタスクの完了状況を確認
-                        - get_task: 各サブタスクの成果を確認
-                        - delegate_to_chat_session: ワーカーに詳細を確認
+                if !hasSelectedAction {
+                    Self.log("[MCP] All subtasks completed, returning completion_check")
+                    return [
+                        "action": "completion_check",
+                        "instruction": """
+                            全てのサブタスクが完了しました。成果物を確認してください。
 
-                        ■ 次のアクション選択
-                        確認後、select_action ツールで次のアクションを選択してください:
-                        - complete: 完了処理に進む（report_completed を呼び出す）
-                        - adjust: 調整が必要（修正や追加タスク作成）
+                            ■ 確認ツール
+                            - list_tasks: サブタスクの完了状況を確認
+                            - get_task: 各サブタスクの成果を確認
+                            - delegate_to_chat_session: ワーカーに詳細を確認
 
-                        選択後、get_next_action を呼び出してください。
-                        """,
-                    "state": "completion_check",
-                    "task": [
-                        "id": mainTask.id.value,
-                        "title": mainTask.title
-                    ],
-                    "subtask_progress": [
-                        "total": subTasks.count,
-                        "done": completedSubTasks.count
+                            ■ 次のアクション選択
+                            確認後、select_action ツールで次のアクションを選択してください:
+                            - complete: 完了処理に進む（report_completed を呼び出す）
+                            - adjust: 調整が必要（修正や追加タスク作成）
+
+                            選択後、get_next_action を呼び出してください。
+                            """,
+                        "state": "completion_check",
+                        "task": [
+                            "id": mainTask.id.value,
+                            "title": mainTask.title
+                        ],
+                        "subtask_progress": [
+                            "total": subTasks.count,
+                            "done": completedSubTasks.count
+                        ]
                     ]
-                ]
+                }
+                Self.log("[MCP] All subtasks completed but selectedAction exists, falling through to action handling")
             }
 
             // 完了ゲート: blocked サブタスクがある場合の処理
@@ -3888,6 +3903,16 @@ public final class MCPServer {
                 "unassigned": unassignedSubTasks.count,
                 "executable": executableSubTasks.count
             ]
+
+            // サブタスク個別リスト（situational_awareness で使用）
+            let subtaskList: [[String: Any]] = subTasks.map { task in
+                [
+                    "id": task.id.value,
+                    "title": task.title,
+                    "status": task.status.rawValue,
+                    "assignee_id": task.assigneeId?.value ?? "unassigned"
+                ] as [String: Any]
+            }
 
             // アクションが選択されている場合、対応する状態を返す
             if let action = selectedAction {
@@ -4072,18 +4097,8 @@ public final class MCPServer {
                     "instruction": """
                         現在の状況を確認し、次のアクションを選択してください。
 
-                        ■ 状況確認ツール
-                        - list_tasks: サブタスクの全体状況を確認
-                        - get_task: 特定タスクの詳細を確認
-                        - list_subordinates: ワーカーの状況を確認
-                        - get_subordinate_profile: ワーカーの詳細情報を確認
-
-                        ■ ワーカーとのコミュニケーション
-                        - delegate_to_chat_session: 下位ワーカーとチャットで対話
-                          （状況確認、作業の調整指示など）
-
                         ■ 次のアクション選択
-                        状況を把握した上で、select_action ツールで次のアクションを選択してください:
+                        select_action ツールで次のアクションを選択してください:
                         - dispatch_task: タスクをワーカーに派遣する（割当+開始）
                         - adjust: 調整を行う（タスク修正、振り直し等）
                         - wait: ワーカーの作業完了を待つため一時退出する
@@ -4091,7 +4106,12 @@ public final class MCPServer {
                         選択後、get_next_action を呼び出してください。
                         """,
                     "state": "situational_awareness",
-                    "subtask_progress": subtaskProgress,
+                    "my_task": [
+                        "id": mainTask.id.value,
+                        "title": mainTask.title,
+                        "status": mainTask.status.rawValue
+                    ] as [String: Any],
+                    "subtasks": subtaskList,
                     "available_workers": subordinates.map { [
                         "id": $0.id.value,
                         "name": $0.name,
@@ -4109,18 +4129,8 @@ public final class MCPServer {
                 "instruction": """
                     現在の状況を確認し、次のアクションを選択してください。
 
-                    ■ 状況確認ツール
-                    - list_tasks: サブタスクの全体状況を確認
-                    - get_task: 特定タスクの詳細を確認
-                    - list_subordinates: ワーカーの状況を確認
-                    - get_subordinate_profile: ワーカーの詳細情報を確認
-
-                    ■ ワーカーとのコミュニケーション
-                    - delegate_to_chat_session: 下位ワーカーとチャットで対話
-                      （状況確認、作業の調整指示など）
-
                     ■ 次のアクション選択
-                    状況を把握した上で、select_action ツールで次のアクションを選択してください:
+                    select_action ツールで次のアクションを選択してください:
                     - dispatch_task: タスクをワーカーに派遣する（割当+開始）
                     - adjust: 調整を行う（タスク修正、振り直し等）
                     - wait: ワーカーの作業完了を待つため一時退出する
@@ -4128,7 +4138,11 @@ public final class MCPServer {
                     選択後、get_next_action を呼び出してください。
                     """,
                 "state": "situational_awareness",
-                "subtask_progress": subtaskProgress,
+                "main_task": [
+                    "id": mainTask.id.value,
+                    "title": mainTask.title
+                ] as [String: Any],
+                "subtasks": subtaskList,
                 "available_workers": subordinates.map { [
                     "id": $0.id.value,
                     "name": $0.name,
@@ -5117,18 +5131,33 @@ public final class MCPServer {
             throw MCPError.validationError("No active task found for this manager")
         }
 
-        // wait 選択時のバリデーション: 作業中のワーカーが必要
+        // wait 選択時のバリデーション: ワーカーが稼働中、または起動待ちであること
         if action == "wait" {
-            let allTasks = try taskRepository.findByProject(currentTask.projectId, status: nil)
-            let subTasks = allTasks.filter { $0.parentTaskId == currentTask.id }
-            let inProgressSubTasks = subTasks.filter { $0.status == .inProgress }
+            let subordinates = try agentRepository.findByParent(session.agentId)
+                .filter { $0.hierarchyType == .worker && $0.status == .active }
+            let hasActiveWorkerSession = try subordinates.contains { worker in
+                let sessions = try agentSessionRepository.findByAgentIdAndProjectId(worker.id, projectId: currentTask.projectId)
+                return !sessions.isEmpty
+            }
 
-            if inProgressSubTasks.isEmpty {
-                throw MCPError.validationError(
-                    "wait は作業中のワーカーがいる場合のみ選択できます。" +
-                    "現在 in_progress のサブタスクがありません。" +
-                    "タスクを開始するには dispatch_task を選択してください。"
-                )
+            if !hasActiveWorkerSession {
+                // ワーカーにタスクが割り当て済みか確認
+                let allTasks = try taskRepository.findByProject(currentTask.projectId, status: nil)
+                let subTasks = allTasks.filter { $0.parentTaskId == currentTask.id }
+                let workerAssignedSubTasks = subTasks.filter { task in
+                    guard let assigneeId = task.assigneeId else { return false }
+                    return assigneeId != session.agentId && (task.status == .inProgress || task.status == .todo)
+                }
+
+                if workerAssignedSubTasks.isEmpty {
+                    throw MCPError.validationError(
+                        "wait は作業中のワーカーがいる場合のみ選択できます。" +
+                        "現在ワーカーに割り当てられたタスクがありません。" +
+                        "タスクを派遣するには dispatch_task を選択してください。"
+                    )
+                }
+                // タスク割り当て済みだがワーカー未起動 → wait を許可（起動待ち）
+                Self.log("[MCP] selectAction: wait allowed - worker assigned but session not yet active (awaiting spawn)")
             }
         }
 
