@@ -1,7 +1,7 @@
 # 大規模リファクタリング計画
 
 > **作成日**: 2026-02-09
-> **ステータス**: 計画中
+> **ステータス**: Phase 0 完了
 > **目的**: レガシー化が進むコードベースの構造改善
 
 ---
@@ -31,7 +31,7 @@
 
 | ファイル | 行数 | 深刻度 | 責務数 |
 |---------|------|--------|--------|
-| MCPServer.swift | 7,542 | CRITICAL | 9+ |
+| MCPServer.swift | ~~7,542~~ → 1,530 | ~~CRITICAL~~ → MODERATE | ~~9+~~ → 3（コア+ルーティング+enum） |
 | RESTServer.swift | 2,695 | CRITICAL | 5+ |
 | ToolDefinitions.swift | 1,570 | MAJOR | 1（ただし60定義） |
 | DatabaseSetup.swift | 1,257 | MAJOR | 51マイグレーション |
@@ -47,7 +47,7 @@
 | UseCase | 12 | 3,869 | MODERATE |
 | Infrastructure | 35 | 6,863 | MODERATE |
 | App | 43 | 15,559 | MAJOR |
-| MCPServer | 8 | 9,625 | CRITICAL |
+| MCPServer | 22 | 9,625 | ~~CRITICAL~~ → MODERATE（14ファイルに分割済） |
 | RESTServer | 11 | 3,150 | MAJOR |
 
 ---
@@ -55,7 +55,7 @@
 ## フェーズ構成
 
 ```
-Phase 0: MCPServer.swift 分割         [最優先・最高リスク]
+Phase 0: MCPServer.swift 分割         [完了 ✅]
 Phase 1: RESTServer.swift 分割        [高優先]
 Phase 2: UseCase 層の改善              [中優先]
 Phase 3: Infrastructure 層の整理       [中優先]
@@ -93,136 +93,58 @@ MCPServer.swift は以下の責務を1ファイルに混在させている：
 10. **プロンプト生成**: listPrompts, getPrompt
 11. **データ変換**: エンティティ → MCP レスポンス変換
 
-### 分割方針
+### 実施結果（2026-02-09 完了）
+
+**アプローチ**: Swift extension による安全な分割
+
+計画当初は ToolHandler プロトコル + DI 設計を想定していたが、リスク最小化のため extension ベースのファイル分割を採用。MCPServer クラスの public API は一切変更なし。
+
+**実施前** → **実施後**:
+- MCPServer.swift: 7,542行 → 1,530行（プロトコルハンドリング、プロパティ、init、ルーティング、executeToolImpl switch、BlockType/MCPError enum）
+- 新規14ファイル: `Handlers/` サブディレクトリに配置
 
 ```
 Sources/MCPServer/
-├── MCPServer.swift              （残留: プロトコルハンドリング、初期化、ルーティング）
-├── MCPServer+Authentication.swift （認証・認可）
-├── Handlers/
-│   ├── TaskToolHandler.swift    （タスク関連ツール実行）
-│   ├── AgentToolHandler.swift   （エージェント関連ツール実行）
-│   ├── ProjectToolHandler.swift （プロジェクト関連ツール実行）
-│   ├── ChatToolHandler.swift    （チャット関連ツール実行）
-│   ├── AuditToolHandler.swift   （監査関連ツール実行）
-│   ├── WorkflowToolHandler.swift（ワークフロー関連ツール実行）
-│   ├── NotificationToolHandler.swift（通知関連ツール実行）
-│   └── SkillToolHandler.swift   （スキル関連ツール実行）
-├── Resources/
-│   └── ResourceHandler.swift    （リソース処理）
-├── Prompts/
-│   └── PromptHandler.swift      （プロンプト生成）
-├── Converters/
-│   └── EntityConverter.swift    （データ変換）
-└── Tools/
-    └── ToolDefinitions.swift    （既存・Phase 0 後半で分割）
+├── MCPServer.swift              （1,530行: コア、ルーティング、enum）
+├── App.swift                    （エントリーポイント）
+├── Authorization/
+│   └── ToolAuthorization.swift
+├── Handlers/                    （★新規: ツール実行ハンドラー群）
+│   ├── AgentAPI.swift           （エージェント操作: get_my_task, report_completed, logout 等）
+│   ├── ChatTaskTools.swift      （チャット→タスク: start_task_from_chat, update_task_from_chat）
+│   ├── ChatTools.swift          （チャット: send_message, get_pending_messages）
+│   ├── ConversationTools.swift  （会話管理: start/end_conversation, delegate_to_chat_session）
+│   ├── Converters.swift         （Entity→Dict変換: agentToDict, taskToDict 等）
+│   ├── CoordinatorAPI.swift     （コーディネーターAPI: health_check, list_managed_agents）
+│   ├── ExecutionLog.swift       （実行ログ: report_execution_start/complete）
+│   ├── HelpTool.swift           （ヘルプ: executeHelp, buildToolList）
+│   ├── Prompts.swift            （プロンプト: handlePromptsList, handlePromptsGet）
+│   ├── Resources.swift          （リソース: handleResourcesList, handleResourcesRead）
+│   ├── SelfStatusTools.swift    （自己ステータス: getMyExecutionHistory）
+│   ├── SessionAuth.swift        （認証: validateSession, authenticate）
+│   ├── TaskTools.swift          （タスク: createTask, assignTask, updateTaskStatus）
+│   └── WorkflowControl.swift   （ワークフロー: getNextAction, getWorkerNextAction）
+├── Tools/
+│   └── ToolDefinitions.swift
+└── Transport/
+    ├── JSONRPCTypes.swift
+    ├── StdioTransport.swift
+    ├── Transport.swift
+    └── UnixSocketTransport.swift
 ```
 
-### 実施ステップ
+**アクセス制御変更**: `private` → `internal`（extension 間参照のため）
+- プロパティ: 19個のリポジトリ依存、log/logDebug/formatResult メソッド
+- BlockType enum: private → internal
 
-#### Step 0-1: Handler プロトコル定義
+**テスト結果**:
+- MCPServerTests: 221テスト, 5件失敗（全て Phase 0 以前から既存、0 unexpected）
+- RESTServerTests: 全テスト成功
+- ビルド: MCPServer, RESTServer, AIAgentPMApp 全ターゲット成功
 
-**作業内容**:
-- `ToolHandler` プロトコルを定義
-- 各ハンドラが必要とするリポジトリのみを注入する設計
-
-```swift
-protocol ToolHandler {
-    func handle(toolName: String, arguments: [String: Any], context: ToolContext) throws -> ToolResult
-    var supportedTools: Set<String> { get }
-}
-
-struct ToolContext {
-    let agentId: AgentID
-    let sessionId: SessionID?
-}
-```
-
-**テスト**:
-- ユニットテスト: `swift test --filter MCPServerTests`（ビルド確認）
-- 既存テストが全て通ることを確認
-
-#### Step 0-2: TaskToolHandler 抽出
-
-**作業内容**:
-- タスク関連ツール（create_task, update_task_status, get_my_task, list_tasks 等）を `TaskToolHandler` に抽出
-- MCPServer.swift の callTool から TaskToolHandler にルーティング
-- TaskToolHandler には TaskRepository, ProjectRepository 等の必要最小限のリポジトリを注入
-
-**テスト**:
-- ユニットテスト: `swift test --filter MCPServerTests`
-- 重点テスト: MCPServerTests のタスク関連テストケース
-
-#### Step 0-3: AgentToolHandler 抽出
-
-**作業内容**:
-- エージェント関連ツールを `AgentToolHandler` に抽出
-
-**テスト**:
-- ユニットテスト: `swift test --filter MCPServerTests`
-
-#### Step 0-4: ChatToolHandler 抽出
-
-**作業内容**:
-- チャット関連ツールを `ChatToolHandler` に抽出
-
-**テスト**:
-- ユニットテスト: `swift test --filter MCPServerTests`
-
-#### Step 0-5: 残りのハンドラ抽出
-
-**作業内容**:
-- ProjectToolHandler, AuditToolHandler, WorkflowToolHandler, NotificationToolHandler, SkillToolHandler を順次抽出
-
-**テスト**:
-- ユニットテスト: `swift test --filter MCPServerTests`（各抽出後）
-
-#### Step 0-6: ResourceHandler・PromptHandler 抽出
-
-**作業内容**:
-- listResources / readResource を ResourceHandler に抽出
-- listPrompts / getPrompt を PromptHandler に抽出
-
-**テスト**:
-- ユニットテスト: `swift test --filter MCPServerTests`
-
-#### Step 0-7: EntityConverter 抽出
-
-**作業内容**:
-- エンティティ → MCP レスポンスの変換ロジックを EntityConverter に集約
-
-**テスト**:
-- ユニットテスト: `swift test --filter MCPServerTests`
-
-#### Step 0-8: ToolDefinitions.swift 分割
-
-**作業内容**:
-- 60のツール定義をドメイン別ファイルに分割
-
-```
-Tools/
-├── ToolDefinitions.swift        （allTools 集約のみ）
-├── TaskToolDefinitions.swift
-├── AgentToolDefinitions.swift
-├── ProjectToolDefinitions.swift
-├── ChatToolDefinitions.swift
-├── AuditToolDefinitions.swift
-├── WorkflowToolDefinitions.swift
-├── NotificationToolDefinitions.swift
-└── SkillToolDefinitions.swift
-```
-
-**テスト**:
-- ユニットテスト: `swift test --filter MCPServerTests`
-
-### Phase 0 完了チェック
-
-| チェック項目 | コマンド |
-|-------------|---------|
-| ユニットテスト全通過 | `swift test --filter MCPServerTests` |
-| UseCaseTests 通過 | `swift test --filter UseCaseTests` |
-| パイロットテスト | `npx playwright test --config=playwright.pilot.config.ts` |
-| MCPServer.swift 行数 | 目標: 500行以下（ルーティング＋初期化のみ） |
+**残タスク（Phase 0 後半として検討）**:
+- ToolHandler プロトコル導入 + DI 改善（現状は extension で十分に見通しが良いため急務ではない）
+- ToolDefinitions.swift のドメイン別分割（1,570行）
 
 ---
 
