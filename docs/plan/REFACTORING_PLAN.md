@@ -1,7 +1,7 @@
 # 大規模リファクタリング計画
 
 > **作成日**: 2026-02-09
-> **ステータス**: Phase 0 完了
+> **ステータス**: Phase 2 完了
 > **目的**: レガシー化が進むコードベースの構造改善
 
 ---
@@ -44,7 +44,7 @@
 | 層 | ファイル数 | 総行数 | 評価 |
 |----|----------|--------|------|
 | Domain | 28 | 3,054 | HEALTHY |
-| UseCase | 12 | 3,869 | MODERATE |
+| UseCase | 18 | 3,869 | ~~MODERATE~~ → HEALTHY（3ファイル→サブディレクトリ分割済） |
 | Infrastructure | 35 | 6,863 | MODERATE |
 | App | 43 | 15,559 | MAJOR |
 | MCPServer | 22 | 9,625 | ~~CRITICAL~~ → MODERATE（14ファイルに分割済） |
@@ -307,14 +307,50 @@ Sources/UseCase/
 
 **テスト**: `swift test --filter UseCaseTests`
 
-### Phase 2 完了チェック
+### Phase 2 実施結果（2026-02-09 完了）
 
-| チェック項目 | コマンド |
-|-------------|---------|
-| UseCaseTests 全通過 | `swift test --filter UseCaseTests` |
-| MCPServerTests 通過 | `swift test --filter MCPServerTests` |
-| InfrastructureTests 通過 | `swift test --filter InfrastructureTests` |
-| パイロットテスト | `npx playwright test --config=playwright.pilot.config.ts` |
+**アプローチ**: Phase 2-C（ファイル分割）のみ実施。2-A（UpdateTaskStatusUseCase内部分割）と2-B（UseCaseError整理）はリスク対効果を考慮し今回はスキップ。
+
+**実施前** → **実施後**:
+- TaskUseCases.swift (713行) → 削除、3ファイルに分割
+- UseCases.swift (518行) → 削除、UseCaseError.swift + 3ドメインファイルに分割
+- InternalAuditUseCases.swift (709行) → 削除、3ファイルに分割
+
+```
+Sources/UseCase/
+├── UseCaseError.swift           （99行: 共通エラー定義）
+├── Task/
+│   ├── UpdateTaskStatus.swift   （414行: ステータス更新）
+│   ├── TaskCommands.swift       （CreateTask, AssignTask, UpdateTask, ApproveTask, RejectTask）
+│   └── TaskQueries.swift        （GetTasks, GetTasksByAssignee, GetTaskDetail, GetMyTasks, GetPendingTasks）
+├── Project/
+│   └── ProjectUseCases.swift    （GetProjects, CreateProject, PauseProject, ResumeProject）
+├── Agent/
+│   └── AgentUseCases.swift      （GetAgents, CreateAgent, GetAgentProfile, GetAgentSessions, GetManagedAgents）
+├── Audit/
+│   ├── AuditUseCases.swift      （InternalAudit CRUD: Create, List, Get, Update, Suspend, Activate, Delete）
+│   ├── AuditRuleUseCases.swift  （AuditRule CRUD + Trigger: Create, List, EnableDisable, GetWithRules, Delete, Update, Fire, CheckTriggers）
+│   └── AuditLockUseCases.swift  （Lock/Unlock: LockTask, UnlockTask, LockAgent, UnlockAgent, GetLockedTasks, GetLockedAgents）
+├── AuthenticationUseCases.swift （変更なし）
+├── ContextUseCases.swift        （変更なし）
+├── ExecutionLogUseCases.swift   （変更なし）
+├── HandoffUseCases.swift        （変更なし）
+├── NotificationUseCases.swift   （変更なし）
+├── SessionUseCases.swift        （変更なし）
+├── SkillUseCases.swift          （変更なし）
+├── WorkDetectionService.swift   （変更なし）
+└── WorkflowTemplateUseCases.swift（変更なし）
+```
+
+**テスト結果**:
+- UseCaseTests: 152テスト全通過
+- MCPServerTests: 221テスト, 5件失敗（全て既知、0 unexpected）
+- RESTServerTests: 49テスト全通過
+- パイロットテスト: ALL PASSED
+
+**残タスク（Phase 2 後半として検討）**:
+- 2-A: UpdateTaskStatusUseCase の内部責務分割（414行 → サブコンポーネント化）
+- 2-B: UseCaseError のドメイン別分割（26ケース → ドメイン別エラー型）
 
 ---
 
