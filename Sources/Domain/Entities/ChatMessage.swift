@@ -73,3 +73,65 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
         )
     }
 }
+
+// MARK: - ChatCommandMarker
+
+/// チャットコマンドマーカー
+/// チャットメッセージ内の @@コマンド: 形式のマーカーを検出・抽出する
+/// 参照: docs/design/CHAT_COMMAND_MARKER.md
+public enum ChatCommandMarker {
+
+    // MARK: - 正規表現パターン
+
+    /// タスク作成マーカーパターン: @@タスク作成: または ＠＠タスク作成: (半角・全角混合対応)
+    private static let taskCreatePattern = "[@＠][@＠]タスク作成:"
+
+    /// タスク通知マーカーパターン: @@タスク通知: または ＠＠タスク通知: (半角・全角混合対応)
+    private static let taskNotifyPattern = "[@＠][@＠]タスク通知:"
+
+    // MARK: - マーカー検出
+
+    /// メッセージにタスク作成マーカーが含まれているかチェック
+    /// - Parameter content: チェック対象のメッセージ内容
+    /// - Returns: @@タスク作成: マーカーが含まれている場合 true
+    public static func containsTaskCreateMarker(_ content: String) -> Bool {
+        return content.range(of: taskCreatePattern, options: .regularExpression) != nil
+    }
+
+    /// メッセージにタスク通知マーカーが含まれているかチェック
+    /// - Parameter content: チェック対象のメッセージ内容
+    /// - Returns: @@タスク通知: マーカーが含まれている場合 true
+    public static func containsTaskNotifyMarker(_ content: String) -> Bool {
+        return content.range(of: taskNotifyPattern, options: .regularExpression) != nil
+    }
+
+    // MARK: - 内容抽出
+
+    /// タスク作成マーカーからタスクタイトルを抽出
+    /// - Parameter content: マーカーを含むメッセージ内容
+    /// - Returns: 抽出されたタスクタイトル、マーカーがない場合は nil
+    public static func extractTaskTitle(from content: String) -> String? {
+        return extractContent(from: content, pattern: taskCreatePattern)
+    }
+
+    /// タスク通知マーカーから通知メッセージを抽出
+    /// - Parameter content: マーカーを含むメッセージ内容
+    /// - Returns: 抽出された通知メッセージ、マーカーがない場合は nil
+    public static func extractNotifyMessage(from content: String) -> String? {
+        return extractContent(from: content, pattern: taskNotifyPattern)
+    }
+
+    // MARK: - Private
+
+    /// 指定されたパターン以降のテキストを抽出
+    private static func extractContent(from content: String, pattern: String) -> String? {
+        guard let range = content.range(of: pattern, options: .regularExpression) else {
+            return nil
+        }
+
+        let afterMarker = content[range.upperBound...]
+        let extracted = String(afterMarker).trimmingCharacters(in: .whitespaces)
+
+        return extracted.isEmpty ? nil : extracted
+    }
+}

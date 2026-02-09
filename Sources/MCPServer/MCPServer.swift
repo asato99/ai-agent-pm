@@ -1098,6 +1098,13 @@ public final class MCPServer {
             guard let title = arguments["title"] as? String else {
                 throw MCPError.missingArguments(["title"])
             }
+            // チャットセッションからの呼び出しは @@タスク作成: マーカーが必要
+            // 参照: docs/design/CHAT_COMMAND_MARKER.md
+            if session.purpose == .chat {
+                guard ChatCommandMarker.containsTaskCreateMarker(title) else {
+                    throw MCPError.taskRequestMarkerRequired
+                }
+            }
             // assignee_id は常に自分自身（チャットから他者への割り当ては不可）
             let assigneeId = session.agentId.value
             let description = arguments["description"] as? String
@@ -1197,6 +1204,13 @@ public final class MCPServer {
             }
             guard let message = arguments["message"] as? String else {
                 throw MCPError.missingArguments(["message"])
+            }
+            // チャットセッションからの呼び出しは @@タスク通知: マーカーが必要
+            // 参照: docs/design/CHAT_COMMAND_MARKER.md
+            if session.purpose == .chat {
+                guard ChatCommandMarker.containsTaskNotifyMarker(message) else {
+                    throw MCPError.taskNotifyMarkerRequired
+                }
             }
             let conversationId = arguments["conversation_id"] as? String
             let relatedTaskId = arguments["related_task_id"] as? String
@@ -2982,6 +2996,10 @@ public final class MCPServer {
                         以下のような依頼は request_task でタスク登録し、send_message で応答してください:
                         - 「〜を実装してください」「〜を修正してください」
                         - 「〜機能を作ってください」「〜をお願いします」
+
+                        【重要】タスク作成時は @@タスク作成: マーカーが必要です
+                        request_task の title には「@@タスク作成: タスクタイトル」の形式で指定してください。
+                        例: title = "@@タスク作成: ログイン機能を実装"
                         応答例: 「ご依頼を承りました。タスクを登録しました」
 
                         【使用できないツール】
@@ -3122,6 +3140,10 @@ public final class MCPServer {
                         - 「〜を実装してください」「〜を追加してください」「〜を修正してください」
                         - 「〜機能を作ってください」「〜をお願いします」
                         - その他、具体的な開発作業や修正を依頼された場合
+
+                        【重要】タスク作成時は @@タスク作成: マーカーが必要です
+                        request_task の title には「@@タスク作成: タスクタイトル」の形式で指定してください。
+                        例: title = "@@タスク作成: ログイン機能を実装"
                         タスク登録後、send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください。
 
                         単なる質問や相談への応答は send_message で送信してください。
@@ -3172,6 +3194,7 @@ public final class MCPServer {
 
                 【重要】作業依頼（「〜を実装してください」「〜を追加してください」など）を受けた場合は、
                 まず request_task を呼び出してタスクを登録し、send_message で「承知しました」と応答してください。
+                タスク作成時は title に「@@タスク作成: タスクタイトル」の形式でマーカーを含めてください。
 
                 他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                 その他の可能な操作は help ツールで確認できます。
@@ -6216,6 +6239,8 @@ public final class MCPServer {
 
             【重要】メッセージが作業依頼の場合（「〜を実装してください」「〜を追加してください」など）:
             1. まず request_task を呼び出してタスクを登録してください
+               ※ title には「@@タスク作成: タスクタイトル」の形式でマーカーを含めてください
+               例: title = "@@タスク作成: ログイン機能を実装"
             2. その後 send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください
 
             【例外】他のエージェントとの会話・対話を依頼された場合:
@@ -7251,6 +7276,11 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
     case toolNotAvailable(tool: String, reason: String)  // ツールが利用不可
     case invalidOperation(String)  // 無効な操作
 
+    // チャットコマンドマーカー用エラー
+    // 参照: docs/design/CHAT_COMMAND_MARKER.md
+    case taskRequestMarkerRequired  // チャットセッションからのタスク作成にはマーカーが必要
+    case taskNotifyMarkerRequired   // チャットセッションからのタスク通知にはマーカーが必要
+
     var description: String {
         switch self {
         case .agentNotFound(let id):
@@ -7333,6 +7363,10 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
             return "Tool '\(tool)' is not available: \(reason)"
         case .invalidOperation(let message):
             return "Invalid operation: \(message)"
+        case .taskRequestMarkerRequired:
+            return "チャットセッションからの新規タスク作成には @@タスク作成: マーカーが必要です。タイトルに @@タスク作成: を含めてください。"
+        case .taskNotifyMarkerRequired:
+            return "チャットセッションからのタスク通知には @@タスク通知: マーカーが必要です。メッセージに @@タスク通知: を含めてください。"
         }
     }
 

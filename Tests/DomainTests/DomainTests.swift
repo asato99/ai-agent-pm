@@ -1297,4 +1297,129 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(AgentPurpose.task.rawValue, "task")
         XCTAssertEqual(AgentPurpose.chat.rawValue, "chat")
     }
+
+    // MARK: - ChatCommandMarker Tests (参照: docs/design/CHAT_COMMAND_MARKER.md)
+
+    func testChatCommandMarker_DetectsHalfWidthTaskCreateMarker() {
+        let content = "@@タスク作成: ログイン機能を実装"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskCreateMarker(content),
+            "Should detect half-width @@ task create marker"
+        )
+    }
+
+    func testChatCommandMarker_DetectsFullWidthTaskCreateMarker() {
+        let content = "＠＠タスク作成: ログイン機能を実装"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskCreateMarker(content),
+            "Should detect full-width ＠＠ task create marker"
+        )
+    }
+
+    func testChatCommandMarker_DetectsMixedWidthTaskCreateMarker() {
+        let content1 = "@＠タスク作成: ログイン機能を実装"
+        let content2 = "＠@タスク作成: ログイン機能を実装"
+        XCTAssertTrue(ChatCommandMarker.containsTaskCreateMarker(content1))
+        XCTAssertTrue(ChatCommandMarker.containsTaskCreateMarker(content2))
+    }
+
+    func testChatCommandMarker_RejectsMessageWithoutMarker() {
+        let content = "ログイン機能を実装してください"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskCreateMarker(content),
+            "Should reject message without marker"
+        )
+    }
+
+    func testChatCommandMarker_RejectsSingleAtSign() {
+        let content = "@タスク作成: ログイン機能を実装"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskCreateMarker(content),
+            "Should reject single @ sign"
+        )
+    }
+
+    func testChatCommandMarker_RejectsMarkerWithoutColon() {
+        let content = "@@タスク作成 ログイン機能を実装"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskCreateMarker(content),
+            "Should reject marker without colon"
+        )
+    }
+
+    func testChatCommandMarker_DetectsMarkerInMiddleOfMessage() {
+        let content = "お願いします @@タスク作成: ログイン機能を実装 よろしく"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskCreateMarker(content),
+            "Should detect marker in middle of message"
+        )
+    }
+
+    func testChatCommandMarker_DetectsTaskNotifyMarker() {
+        let content = "@@タスク通知: レビュー完了しました"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskNotifyMarker(content),
+            "Should detect task notify marker"
+        )
+    }
+
+    func testChatCommandMarker_DetectsFullWidthTaskNotifyMarker() {
+        let content = "＠＠タスク通知: レビュー完了しました"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskNotifyMarker(content),
+            "Should detect full-width task notify marker"
+        )
+    }
+
+    func testChatCommandMarker_DoesNotConfuseCreateWithNotify() {
+        let content = "@@タスク作成: ログイン機能を実装"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskNotifyMarker(content),
+            "Should not confuse task create marker with notify marker"
+        )
+    }
+
+    func testChatCommandMarker_DoesNotConfuseNotifyWithCreate() {
+        let content = "@@タスク通知: レビュー完了しました"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskCreateMarker(content),
+            "Should not confuse task notify marker with create marker"
+        )
+    }
+
+    func testChatCommandMarker_ExtractsTaskTitle() {
+        let content = "@@タスク作成: ログイン機能を実装"
+        let title = ChatCommandMarker.extractTaskTitle(from: content)
+        XCTAssertEqual(title, "ログイン機能を実装")
+    }
+
+    func testChatCommandMarker_ExtractsTaskTitleFromFullWidthMarker() {
+        let content = "＠＠タスク作成: 決済機能のバグ修正"
+        let title = ChatCommandMarker.extractTaskTitle(from: content)
+        XCTAssertEqual(title, "決済機能のバグ修正")
+    }
+
+    func testChatCommandMarker_ReturnsNilForMessageWithoutMarker() {
+        let content = "ログイン機能を実装してください"
+        let title = ChatCommandMarker.extractTaskTitle(from: content)
+        XCTAssertNil(title)
+    }
+
+    func testChatCommandMarker_TrimsWhitespaceFromTitle() {
+        let content = "@@タスク作成:   ログイン機能を実装   "
+        let title = ChatCommandMarker.extractTaskTitle(from: content)
+        XCTAssertEqual(title, "ログイン機能を実装")
+    }
+
+    func testChatCommandMarker_ExtractsNotifyMessage() {
+        let content = "@@タスク通知: レビュー完了しました"
+        let message = ChatCommandMarker.extractNotifyMessage(from: content)
+        XCTAssertEqual(message, "レビュー完了しました")
+    }
+
+    func testChatCommandMarker_ReturnsNilForMessageWithoutNotifyMarker() {
+        let content = "レビュー完了しました"
+        let message = ChatCommandMarker.extractNotifyMessage(from: content)
+        XCTAssertNil(message)
+    }
 }

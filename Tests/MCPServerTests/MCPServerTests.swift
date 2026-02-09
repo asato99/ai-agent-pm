@@ -499,6 +499,28 @@ final class MCPServerTests: XCTestCase {
         XCTAssertTrue(error.description.contains("not assigned"))
     }
 
+    /// MCPError.taskRequestMarkerRequiredのテスト
+    /// チャットセッションからのタスク作成には @@タスク作成: マーカーが必要
+    /// 参照: docs/design/CHAT_COMMAND_MARKER.md
+    func testMCPErrorTaskRequestMarkerRequired() {
+        let error = MCPError.taskRequestMarkerRequired
+        XCTAssertTrue(
+            error.description.contains("@@タスク作成:") || error.description.contains("マーカー"),
+            "Error message should mention the marker requirement: \(error.description)"
+        )
+    }
+
+    /// MCPError.taskNotifyMarkerRequiredのテスト
+    /// チャットセッションからのタスク通知には @@タスク通知: マーカーが必要
+    /// 参照: docs/design/CHAT_COMMAND_MARKER.md
+    func testMCPErrorTaskNotifyMarkerRequired() {
+        let error = MCPError.taskNotifyMarkerRequired
+        XCTAssertTrue(
+            error.description.contains("@@タスク通知:") || error.description.contains("マーカー"),
+            "Error message should mention the marker requirement: \(error.description)"
+        )
+    }
+
     // MARK: - Status Enum Tests
 
     /// ToolDefinitionsのstatus enumがPRD仕様と一致することを確認
