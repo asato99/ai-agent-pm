@@ -77,36 +77,36 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
 // MARK: - ChatCommandMarker
 
 /// チャットコマンドマーカー
-/// チャットメッセージ内の @@コマンド: 形式のマーカーを検出・抽出する
+/// チャットメッセージ内の @@コマンド 形式のマーカーを検出・抽出する
 /// 参照: docs/design/CHAT_COMMAND_MARKER.md
 public enum ChatCommandMarker {
 
     // MARK: - 正規表現パターン
 
-    /// タスク作成マーカーパターン: @@タスク作成: または ＠＠タスク作成: (半角・全角混合対応)
-    private static let taskCreatePattern = "[@＠][@＠]タスク作成:"
+    /// タスク作成マーカーパターン: @@タスク作成 (半角・全角混合対応)
+    private static let taskCreatePattern = "[@＠][@＠]タスク作成"
 
-    /// タスク通知マーカーパターン: @@タスク通知: または ＠＠タスク通知: (半角・全角混合対応)
-    private static let taskNotifyPattern = "[@＠][@＠]タスク通知:"
+    /// タスク通知マーカーパターン: @@タスク通知 (半角・全角混合対応)
+    private static let taskNotifyPattern = "[@＠][@＠]タスク通知"
 
-    /// タスク調整マーカーパターン: @@タスク調整: または ＠＠タスク調整: (半角・全角混合対応)
-    private static let taskAdjustPattern = "[@＠][@＠]タスク調整:"
+    /// タスク調整マーカーパターン: @@タスク調整 (半角・全角混合対応)
+    private static let taskAdjustPattern = "[@＠][@＠]タスク調整"
 
-    /// タスク開始マーカーパターン: @@タスク開始: または ＠＠タスク開始: (半角・全角混合対応)
-    private static let taskStartPattern = "[@＠][@＠]タスク開始:"
+    /// タスク開始マーカーパターン: @@タスク開始 (半角・全角混合対応)
+    private static let taskStartPattern = "[@＠][@＠]タスク開始"
 
     // MARK: - マーカー検出
 
     /// メッセージにタスク作成マーカーが含まれているかチェック
     /// - Parameter content: チェック対象のメッセージ内容
-    /// - Returns: @@タスク作成: マーカーが含まれている場合 true
+    /// - Returns: @@タスク作成 マーカーが含まれている場合 true
     public static func containsTaskCreateMarker(_ content: String) -> Bool {
         return content.range(of: taskCreatePattern, options: .regularExpression) != nil
     }
 
     /// メッセージにタスク通知マーカーが含まれているかチェック
     /// - Parameter content: チェック対象のメッセージ内容
-    /// - Returns: @@タスク通知: マーカーが含まれている場合 true
+    /// - Returns: @@タスク通知 マーカーが含まれている場合 true
     public static func containsTaskNotifyMarker(_ content: String) -> Bool {
         return content.range(of: taskNotifyPattern, options: .regularExpression) != nil
     }

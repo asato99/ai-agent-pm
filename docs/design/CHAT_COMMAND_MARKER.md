@@ -26,7 +26,8 @@
 
 | 観点 | 決定 | 理由 |
 |------|------|------|
-| マーカー形式 | `@@コマンド:` | 入力しやすく視認性が高い |
+| マーカー形式 | `@@コマンド` | 入力しやすく視認性が高い |
+| 引数形式 | `--key value` | CLI風でパースが容易 |
 | 文字対応 | 半角・全角両対応 | 日本語入力時の利便性確保 |
 | 強制レベル | インストラクション + バリデーション | 段階的な導入が可能 |
 | 既存互換 | 通常メッセージは従来通り | 後方互換性を維持 |
@@ -37,40 +38,56 @@
 
 | マーカー | 用途 | 対応ツール |
 |----------|------|-----------|
-| `@@タスク作成: タイトル` | 新規タスクを作成 | `request_task` |
-| `@@タスク通知: メッセージ` | 既存タスクセッションに通知 | `notify_task_session` |
-| `@@タスク調整: 内容` | 既存タスク(backlog/todo)の修正・削除 | `update_task_from_chat` |
-| `@@タスク開始: タスクID` | backlog/todoのタスクを実行開始(in_progress) | `start_task_from_chat` |
+| `@@タスク作成` | 新規タスクを作成 | `request_task` |
+| `@@タスク通知` | 既存タスクセッションに通知 | `notify_task_session` |
+| `@@タスク調整` | 既存タスク(backlog/todo)の修正・削除 | `update_task_from_chat` |
+| `@@タスク開始` | backlog/todoのタスクを実行開始(in_progress) | `start_task_from_chat` |
 | (マーカーなし) | 通常の会話・質問 | `send_message` |
 
 ### マーカー形式
 
+`@@コマンド` の後に `--key value` 形式で引数を指定する。
+
 ```
-@@タスク作成: ログイン機能を実装
-＠＠タスク作成: ログイン機能を実装  (全角も可)
-@@タスク通知: レビュー完了しました
-@@タスク調整: タスクXXXの説明を更新
-@@タスク開始: task_001
+@@タスク作成
+--title ログイン機能を実装
+--description 詳細な説明...
+
+@@タスク通知
+--message レビュー完了しました
+
+@@タスク調整
+--task task_001
+--status todo
+
+@@タスク開始
+--task task_001
+```
+
+全角・半角混合も可能：
+```
+＠＠タスク作成
+--title ログイン機能を実装
 ```
 
 ### 正規表現パターン
 
 ```swift
 // 半角(@)・全角(＠)両対応
-let taskCreatePattern = "[@＠][@＠]タスク作成:"
-let taskNotifyPattern = "[@＠][@＠]タスク通知:"
-let taskAdjustPattern = "[@＠][@＠]タスク調整:"
-let taskStartPattern = "[@＠][@＠]タスク開始:"
+let taskCreatePattern = "[@＠][@＠]タスク作成"
+let taskNotifyPattern = "[@＠][@＠]タスク通知"
+let taskAdjustPattern = "[@＠][@＠]タスク調整"
+let taskStartPattern = "[@＠][@＠]タスク開始"
 ```
 
 以下の入力はすべてマッチ：
 
 | 入力 | マッチ |
 |------|--------|
-| `@@タスク作成:` | ✅ |
-| `＠＠タスク作成:` | ✅ |
-| `@＠タスク作成:` | ✅ |
-| `＠@タスク作成:` | ✅ |
+| `@@タスク作成` | ✅ |
+| `＠＠タスク作成` | ✅ |
+| `@＠タスク作成` | ✅ |
+| `＠@タスク作成` | ✅ |
 
 ---
 
@@ -82,9 +99,11 @@ let taskStartPattern = "[@＠][@＠]タスク開始:"
 ユーザー: "ログイン機能を作ってください"
     ↓
 エージェント: "タスク作成の場合は以下の形式でお送りください:
-              @@タスク作成: ログイン機能を実装"
+              @@タスク作成
+              --title ログイン機能を実装"
     ↓
-ユーザー: "@@タスク作成: ログイン機能を実装"
+ユーザー: "@@タスク作成
+          --title ログイン機能を実装"
     ↓
 エージェント: request_task(title: "ログイン機能を実装")
     ↓ (バリデーション通過)
@@ -94,7 +113,8 @@ let taskStartPattern = "[@＠][@＠]タスク開始:"
 ### タスク通知フロー
 
 ```
-ユーザー: "@@タスク通知: 仕様を変更しました。確認してください"
+ユーザー: "@@タスク通知
+          --message 仕様を変更しました。確認してください"
     ↓
 エージェント: notify_task_session(message: "仕様を変更しました。確認してください")
     ↓ (バリデーション通過)
@@ -104,7 +124,9 @@ let taskStartPattern = "[@＠][@＠]タスク開始:"
 ### タスク調整フロー
 
 ```
-ユーザー: "@@タスク調整: タスクXXXの説明を「認証機能の改善」に変更"
+ユーザー: "@@タスク調整
+          --task task_xxx
+          --description 認証機能の改善"
     ↓
 エージェント: update_task_from_chat(task_id: "XXX", description: "認証機能の改善", ...)
     ↓ (バリデーション通過)
@@ -114,7 +136,8 @@ let taskStartPattern = "[@＠][@＠]タスク開始:"
 ### タスク開始フロー
 
 ```
-ユーザー: "@@タスク開始: task_001"
+ユーザー: "@@タスク開始
+          --task task_001"
     ↓
 エージェント: start_task_from_chat(task_id: "task_001", requester_id: "ユーザーID")
     ↓ (バリデーション通過)
@@ -164,23 +187,27 @@ instruction = """
 【チャットコマンド】
 以下のマーカーに応じて適切なツールを使用してください:
 
-■ @@タスク作成: タイトル
+■ @@タスク作成
   → request_task を呼び出して新規タスクを作成
-  例: @@タスク作成: ログイン機能を実装
+  例: @@タスク作成
+      --title ログイン機能を実装
 
-■ @@タスク通知: メッセージ
+■ @@タスク通知
   → notify_task_session を呼び出して既存タスクに通知
-  例: @@タスク通知: レビュー完了しました
+  例: @@タスク通知
+      --message レビュー完了しました
 
-■ @@タスク調整: 内容
+■ @@タスク調整
   → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
-  例: @@タスク調整: タスクXXXの説明を更新
+  例: @@タスク調整
+      --task task_xxx
+      --description 新しい説明
 
 ■ マーカーなし
   → send_message で通常の応答
 
 マーカーなしで作業依頼を受けた場合:
-「新規タスク作成: @@タスク作成: 、既存タスク通知: @@タスク通知: 、既存タスク調整: @@タスク調整: をつけてお送りください」と案内してください。
+「新規タスク作成: @@タスク作成、既存タスク通知: @@タスク通知、既存タスク調整: @@タスク調整 をつけてお送りください」と案内してください。
 ...
 """
 ```
@@ -201,9 +228,8 @@ if session.purpose == .chat {
     let incomingMessages = messages.filter { $0.senderId != session.agentId }
 
     // 最新の受信メッセージに @@タスク作成 マーカーがあるか確認
-    let markerPattern = "[@＠][@＠]タスク作成:"
     guard let lastMessage = incomingMessages.last,
-          lastMessage.content.range(of: markerPattern, options: .regularExpression) != nil else {
+          ChatCommandMarker.containsTaskCreateMarker(lastMessage.content) else {
         throw MCPError.taskRequestMarkerRequired
     }
 }
@@ -223,9 +249,8 @@ if session.purpose == .chat {
     let incomingMessages = messages.filter { $0.senderId != session.agentId }
 
     // 最新の受信メッセージに @@タスク通知 マーカーがあるか確認
-    let markerPattern = "[@＠][@＠]タスク通知:"
     guard let lastMessage = incomingMessages.last,
-          lastMessage.content.range(of: markerPattern, options: .regularExpression) != nil else {
+          ChatCommandMarker.containsTaskNotifyMarker(lastMessage.content) else {
         throw MCPError.taskNotifyMarkerRequired
     }
 }
@@ -245,7 +270,7 @@ if session.purpose == .chat {
     let incomingMessages = messages.filter { $0.senderId != session.agentId }
 
     guard let lastMessage = incomingMessages.last,
-          lastMessage.content.range(of: "[@＠][@＠]タスク調整:", options: .regularExpression) != nil else {
+          ChatCommandMarker.containsTaskAdjustMarker(lastMessage.content) else {
         throw MCPError.taskAdjustMarkerRequired
     }
 }
@@ -284,13 +309,13 @@ case taskStartMarkerRequired
 var localizedDescription: String {
     switch self {
     case .taskRequestMarkerRequired:
-        return "新規タスク作成には @@タスク作成: マーカーが必要です"
+        return "新規タスク作成には @@タスク作成 マーカーが必要です"
     case .taskNotifyMarkerRequired:
-        return "タスク通知には @@タスク通知: マーカーが必要です"
+        return "タスク通知には @@タスク通知 マーカーが必要です"
     case .taskAdjustMarkerRequired:
-        return "タスク調整には @@タスク調整: マーカーが必要です"
+        return "タスク調整には @@タスク調整 マーカーが必要です"
     case .taskStartMarkerRequired:
-        return "タスク開始には @@タスク開始: マーカーが必要です"
+        return "タスク開始には @@タスク開始 マーカーが必要です"
     // ...
     }
 }
@@ -302,36 +327,52 @@ var localizedDescription: String {
 
 ### 概要
 
-マーカー後のフリーテキストに加え、`--key value` 形式の名前付き引数でパラメータを明示的に指定できる。引数はすべてオプションであり、省略時はエージェントが文脈やタスク一覧から自主的に判断して即実行する。
+`--key value` 形式の名前付き引数でパラメータを明示的に指定する。引数はすべてオプションであり、省略時はエージェントが文脈やタスク一覧から自主的に判断して即実行する。
 
 ### 構文
 
 ```
-@@マーカー: フリーテキスト [--key1 value1] [--key2 value2]
+@@マーカー
+--key1 value1
+--key2 value2
 ```
 
 ### 各コマンドの引数
 
 | コマンド | 引数 | 型 | 説明 |
 |----------|------|-----|------|
-| `@@タスク作成:` | `--priority` | `low\|medium\|high\|urgent` | タスク優先度（デフォルト: medium） |
+| `@@タスク作成` | `--title` | `"文字列"` | タスクタイトル |
+| | `--priority` | `low\|medium\|high\|urgent` | タスク優先度（デフォルト: medium） |
 | | `--description` | `"文字列"` | タスクの詳細説明 |
 | | `--parent` | タスクID | 親タスクID（サブタスク作成時） |
-| `@@タスク通知:` | `--task` | タスクID | 関連タスクID |
+| `@@タスク通知` | `--message` | `"文字列"` | 通知メッセージ |
+| | `--task` | タスクID | 関連タスクID |
 | | `--priority` | `low\|normal\|high` | 通知優先度（デフォルト: normal） |
-| `@@タスク調整:` | `--task` | タスクID | 対象タスクID |
+| `@@タスク調整` | `--task` | タスクID | 対象タスクID |
 | | `--status` | ステータス | 変更先ステータス |
 | | `--description` | `"文字列"` | 新しい説明文 |
-| `@@タスク開始:` | （なし） | - | タスクIDはフリーテキスト部分で指定 |
+| `@@タスク開始` | `--task` | タスクID | 対象タスクID |
 
 ### 使用例
 
 ```
-@@タスク作成: ログイン機能を実装 --priority high --parent task_001
-@@タスク作成: バグ修正 --description "ログイン画面でエラーが発生する問題の修正"
-@@タスク通知: レビューが完了しました --task task_002 --priority high
-@@タスク調整: 優先度を上げてください --task task_003 --status todo
-@@タスク開始: task_004
+@@タスク作成
+--title ログイン機能を実装
+--priority high
+--description 認証機能の新規実装
+
+@@タスク通知
+--message レビューが完了しました
+--task task_002
+--priority high
+
+@@タスク調整
+--task task_003
+--status todo
+--description 要件変更により優先度を上げる
+
+@@タスク開始
+--task task_004
 ```
 
 ### 自律決定ガイドライン
@@ -341,7 +382,7 @@ var localizedDescription: String {
 | 引数 | 判断方法 |
 |------|----------|
 | `priority` | メッセージの内容・文脈から緊急度を推測（デフォルト: medium） |
-| `description` | フリーテキスト部分から補足情報があれば設定 |
+| `description` | 会話の文脈から補足情報があれば設定 |
 | `parent` | 会話の文脈で親タスクが明示されていれば設定 |
 | `task` | `list_tasks` でタスク一覧を確認し、文脈から対象を特定 |
 | `status` | 調整内容から適切なステータスを推測 |
@@ -364,7 +405,7 @@ var localizedDescription: String {
 | コマンド | 用途 | 備考 |
 |----------|------|------|
 | `@@タスク確認` | 現在のタスク状況を確認 | 検討中 |
-| `@@ブロック報告: 理由` | ブロック状態を報告 | 検討中 |
+| `@@ブロック報告` | ブロック状態を報告 | 検討中 |
 | `@@完了報告` | タスク完了を報告 | 検討中 |
 
 ---
@@ -375,16 +416,16 @@ var localizedDescription: String {
 
 | テストケース | 期待結果 |
 |--------------|----------|
-| `@@タスク作成:` マーカーあり + request_task | 成功 |
+| `@@タスク作成` マーカーあり + request_task | 成功 |
 | マーカーなし + request_task | MCPError.taskRequestMarkerRequired |
-| `@@タスク通知:` マーカーあり + notify_task_session | 成功 |
+| `@@タスク通知` マーカーあり + notify_task_session | 成功 |
 | マーカーなし + notify_task_session | MCPError.taskNotifyMarkerRequired |
-| `@@タスク調整:` マーカーあり + update_task_from_chat | 成功 |
+| `@@タスク調整` マーカーあり + update_task_from_chat | 成功 |
 | マーカーなし + update_task_from_chat | MCPError.taskAdjustMarkerRequired |
-| `@@タスク開始:` マーカーあり + start_task_from_chat | 成功 |
+| `@@タスク開始` マーカーあり + start_task_from_chat | 成功 |
 | マーカーなし + start_task_from_chat | MCPError.taskStartMarkerRequired |
-| 全角`＠＠タスク作成:` + request_task | 成功 |
-| 混合`@＠タスク作成:` + request_task | 成功 |
+| 全角`＠＠タスク作成` + request_task | 成功 |
+| 混合`@＠タスク作成` + request_task | 成功 |
 
 ### 統合テスト
 
@@ -413,3 +454,4 @@ var localizedDescription: String {
 |------|------|
 | 2026-02-08 | 初版作成 |
 | 2026-02-09 | 名前付き引数（--key value）セクション追加 |
+| 2026-02-09 | コロン形式を廃止、@@コマンド + --args 形式に統一 |

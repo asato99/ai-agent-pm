@@ -1108,12 +1108,21 @@ public final class MCPServer {
             // チャットセッションからの呼び出しは、ユーザーのチャットメッセージに @@タスク作成: マーカーが必要
             // 参照: docs/design/CHAT_COMMAND_MARKER.md
             if session.purpose == .chat {
+                Self.log("[MCP] request_task validation: session.agentId=\(session.agentId.value), projectId=\(session.projectId.value)")
                 let messages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
+                Self.log("[MCP] request_task validation: messages.count=\(messages.count)")
                 let incomingMessages = messages.filter { $0.senderId != session.agentId }
+                Self.log("[MCP] request_task validation: incomingMessages.count=\(incomingMessages.count)")
+                if let lastMsg = incomingMessages.last {
+                    Self.log("[MCP] request_task validation: lastMessage.senderId=\(lastMsg.senderId.value), content prefix=\(String(lastMsg.content.prefix(100)))")
+                    Self.log("[MCP] request_task validation: containsMarker=\(ChatCommandMarker.containsTaskCreateMarker(lastMsg.content))")
+                }
                 guard let lastMessage = incomingMessages.last,
                       ChatCommandMarker.containsTaskCreateMarker(lastMessage.content) else {
+                    Self.log("[MCP] request_task validation: FAILED - marker not found")
                     throw MCPError.taskRequestMarkerRequired
                 }
+                Self.log("[MCP] request_task validation: PASSED")
             }
             // タイトルにマーカーが含まれていた場合は除去（安全策）
             let cleanTitle: String
