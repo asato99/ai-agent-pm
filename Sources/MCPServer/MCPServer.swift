@@ -1098,12 +1098,22 @@ public final class MCPServer {
             guard let title = arguments["title"] as? String else {
                 throw MCPError.missingArguments(["title"])
             }
-            // チャットセッションからの呼び出しは @@タスク作成: マーカーが必要
+            // チャットセッションからの呼び出しは、ユーザーのチャットメッセージに @@タスク作成: マーカーが必要
             // 参照: docs/design/CHAT_COMMAND_MARKER.md
             if session.purpose == .chat {
-                guard ChatCommandMarker.containsTaskCreateMarker(title) else {
+                let messages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
+                let incomingMessages = messages.filter { $0.senderId != session.agentId }
+                guard let lastMessage = incomingMessages.last,
+                      ChatCommandMarker.containsTaskCreateMarker(lastMessage.content) else {
                     throw MCPError.taskRequestMarkerRequired
                 }
+            }
+            // タイトルにマーカーが含まれていた場合は除去（安全策）
+            let cleanTitle: String
+            if let extracted = ChatCommandMarker.extractTaskTitle(from: title) {
+                cleanTitle = extracted
+            } else {
+                cleanTitle = title
             }
             // assignee_id は常に自分自身（チャットから他者への割り当ては不可）
             let assigneeId = session.agentId.value
@@ -1111,7 +1121,7 @@ public final class MCPServer {
             let priority = arguments["priority"] as? String
             return try requestTask(
                 session: session,
-                title: title,
+                title: cleanTitle,
                 description: description,
                 assigneeId: assigneeId,
                 priority: priority
@@ -1205,19 +1215,29 @@ public final class MCPServer {
             guard let message = arguments["message"] as? String else {
                 throw MCPError.missingArguments(["message"])
             }
-            // チャットセッションからの呼び出しは @@タスク通知: マーカーが必要
+            // チャットセッションからの呼び出しは、ユーザーのチャットメッセージに @@タスク通知: マーカーが必要
             // 参照: docs/design/CHAT_COMMAND_MARKER.md
             if session.purpose == .chat {
-                guard ChatCommandMarker.containsTaskNotifyMarker(message) else {
+                let messages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
+                let incomingMessages = messages.filter { $0.senderId != session.agentId }
+                guard let lastMessage = incomingMessages.last,
+                      ChatCommandMarker.containsTaskNotifyMarker(lastMessage.content) else {
                     throw MCPError.taskNotifyMarkerRequired
                 }
+            }
+            // メッセージにマーカーが含まれていた場合は除去（安全策）
+            let cleanMessage: String
+            if let extracted = ChatCommandMarker.extractNotifyMessage(from: message) {
+                cleanMessage = extracted
+            } else {
+                cleanMessage = message
             }
             let conversationId = arguments["conversation_id"] as? String
             let relatedTaskId = arguments["related_task_id"] as? String
             let priority = arguments["priority"] as? String
             return try notifyTaskSession(
                 session: session,
-                message: message,
+                message: cleanMessage,
                 conversationId: conversationId,
                 relatedTaskId: relatedTaskId,
                 priority: priority
@@ -2997,10 +3017,12 @@ public final class MCPServer {
                         - 「〜を実装してください」「〜を修正してください」
                         - 「〜機能を作ってください」「〜をお願いします」
 
-                        【重要】タスク作成時は @@タスク作成: マーカーが必要です
-                        request_task の title には「@@タスク作成: タスクタイトル」の形式で指定してください。
-                        例: title = "@@タスク作成: ログイン機能を実装"
-                        応答例: 「ご依頼を承りました。タスクを登録しました」
+                        【重要】タスク作成には @@タスク作成: マーカーが必要です
+                        ■ ユーザーメッセージに「@@タスク作成: 〜」がある場合
+                          → request_task(title: "マーカー以降のテキスト") でタスク作成
+                          → 応答例: 「ご依頼を承りました。タスクを登録しました」
+                        ■ マーカーなしの作業依頼の場合
+                          → 「タスクとして登録するには @@タスク作成: をつけてお送りください」と案内
 
                         【使用できないツール】
                         create_task, update_task_status などのタスク操作ツールはチャットセッションでは使用できません。
@@ -3141,10 +3163,12 @@ public final class MCPServer {
                         - 「〜機能を作ってください」「〜をお願いします」
                         - その他、具体的な開発作業や修正を依頼された場合
 
-                        【重要】タスク作成時は @@タスク作成: マーカーが必要です
-                        request_task の title には「@@タスク作成: タスクタイトル」の形式で指定してください。
-                        例: title = "@@タスク作成: ログイン機能を実装"
-                        タスク登録後、send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください。
+                        【重要】タスク作成には @@タスク作成: マーカーが必要です
+                        ■ ユーザーメッセージに「@@タスク作成: 〜」がある場合
+                          → request_task(title: "マーカー以降のテキスト") でタスク作成
+                          → send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答
+                        ■ マーカーなしの作業依頼の場合
+                          → 「タスクとして登録するには @@タスク作成: をつけてお送りください」と案内
 
                         単なる質問や相談への応答は send_message で送信してください。
                         他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
@@ -3192,9 +3216,11 @@ public final class MCPServer {
                 現在処理待ちのメッセージがありません。
                 【待機不要】サーバー側でLong Polling待機済みです。すぐに get_next_action を呼び出してください。
 
-                【重要】作業依頼（「〜を実装してください」「〜を追加してください」など）を受けた場合は、
-                まず request_task を呼び出してタスクを登録し、send_message で「承知しました」と応答してください。
-                タスク作成時は title に「@@タスク作成: タスクタイトル」の形式でマーカーを含めてください。
+                【重要】タスク作成には @@タスク作成: マーカーが必要です
+                ■ ユーザーメッセージに「@@タスク作成: 〜」がある場合
+                  → request_task(title: "マーカー以降のテキスト") でタスク作成し、send_message で「承知しました」と応答
+                ■ マーカーなしの作業依頼の場合
+                  → 「タスクとして登録するには @@タスク作成: をつけてお送りください」と案内
 
                 他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                 その他の可能な操作は help ツールで確認できます。
@@ -6237,11 +6263,12 @@ public final class MCPServer {
             上記の pending_messages を確認してください。
             context_messages は会話の文脈理解用です（応答対象ではありません）。
 
-            【重要】メッセージが作業依頼の場合（「〜を実装してください」「〜を追加してください」など）:
-            1. まず request_task を呼び出してタスクを登録してください
-               ※ title には「@@タスク作成: タスクタイトル」の形式でマーカーを含めてください
-               例: title = "@@タスク作成: ログイン機能を実装"
-            2. その後 send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答してください
+            【重要】タスク作成には @@タスク作成: マーカーが必要です
+            ■ ユーザーメッセージに「@@タスク作成: 〜」がある場合
+              → request_task(title: "マーカー以降のテキスト") でタスク作成
+              → send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答
+            ■ マーカーなしの作業依頼の場合
+              → 「タスクとして登録するには @@タスク作成: をつけてお送りください」と案内
 
             【例外】他のエージェントとの会話・対話を依頼された場合:
             - 「〜とチャットしてください」「〜と話し合ってください」など
@@ -7364,9 +7391,9 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
         case .invalidOperation(let message):
             return "Invalid operation: \(message)"
         case .taskRequestMarkerRequired:
-            return "チャットセッションからの新規タスク作成には @@タスク作成: マーカーが必要です。タイトルに @@タスク作成: を含めてください。"
+            return "チャットセッションからの新規タスク作成には、ユーザーメッセージに @@タスク作成: マーカーが必要です。ユーザーに「@@タスク作成: タスク名」の形式で送信するよう案内してください。"
         case .taskNotifyMarkerRequired:
-            return "チャットセッションからのタスク通知には @@タスク通知: マーカーが必要です。メッセージに @@タスク通知: を含めてください。"
+            return "チャットセッションからのタスク通知には、ユーザーメッセージに @@タスク通知: マーカーが必要です。ユーザーに「@@タスク通知: 通知内容」の形式で送信するよう案内してください。"
         }
     }
 
