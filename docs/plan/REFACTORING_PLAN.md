@@ -1,7 +1,7 @@
 # 大規模リファクタリング計画
 
 > **作成日**: 2026-02-09
-> **ステータス**: Phase 3 完了
+> **ステータス**: Phase 4 完了
 > **目的**: レガシー化が進むコードベースの構造改善
 
 ---
@@ -35,9 +35,9 @@
 | RESTServer.swift | ~~2,695~~ → 568 | ~~CRITICAL~~ → HEALTHY | ~~5+~~ → 2（ルート登録+helpers） |
 | ToolDefinitions.swift | 1,570 | MAJOR | 1（ただし60定義） |
 | DatabaseSetup.swift | ~~1,257~~ → 212 | ~~MAJOR~~ → HEALTHY | 1（セットアップ）+ 5マイグレーションファイル |
-| SettingsView.swift | 1,148 | MODERATE | 4+ タブ |
-| SkillManagementView.swift | 1,085 | MODERATE | 3+ |
-| TaskDetailView.swift | 1,079 | MODERATE | 4+ セクション |
+| SettingsView.swift | ~~1,148~~ → 129 | ~~MODERATE~~ → HEALTHY | 1（タブコンテナ）+ 4分割ファイル |
+| SkillManagementView.swift | ~~1,085~~ → 223 | ~~MODERATE~~ → HEALTHY | 1（リスト管理）+ 1分割ファイル |
+| TaskDetailView.swift | ~~1,079~~ → 716 | ~~MODERATE~~ → HEALTHY | 1（詳細ビュー）+ 1分割ファイル |
 
 ### 層別健全性
 
@@ -46,7 +46,7 @@
 | Domain | 28 | 3,054 | HEALTHY |
 | UseCase | 18 | 3,869 | ~~MODERATE~~ → HEALTHY（3ファイル→サブディレクトリ分割済） |
 | Infrastructure | 40 | 6,863 | ~~MODERATE~~ → HEALTHY（DatabaseSetup 5ファイルに分割済） |
-| App | 43 | 15,559 | MAJOR |
+| App | 51 | ~15,559 | ~~MAJOR~~ → MODERATE（8新規ファイルに分割済、1,000行超ファイル解消） |
 | MCPServer | 22 | 9,625 | ~~CRITICAL~~ → MODERATE（14ファイルに分割済） |
 | RESTServer | 23 | 3,150 | ~~MAJOR~~ → MODERATE（12ファイルに分割済） |
 
@@ -59,7 +59,7 @@ Phase 0: MCPServer.swift 分割         [完了 ✅]
 Phase 1: RESTServer.swift 分割        [完了 ✅]
 Phase 2: UseCase 層の改善              [完了 ✅]
 Phase 3: Infrastructure 層の整理       [完了 ✅]
-Phase 4: App 層 View の分割            [低優先]
+Phase 4: App 層 View の分割            [完了 ✅]
 Phase 5: 横断的な改善                  [低優先]
 ```
 
@@ -447,12 +447,57 @@ struct TaskDetailView: View {
 - SettingsView → 手動確認（UIテストなし）
 - TaskDetailView → `xcodebuild test -scheme AIAgentPM -destination 'platform=macOS' -only-testing:AIAgentPMUITests/TaskDetailTests`
 
-### Phase 4 完了チェック
+### Phase 4 実施結果（2026-02-09 完了）
 
-| チェック項目 | コマンド |
-|-------------|---------|
-| ビルド成功 | `xcodebuild build -scheme AIAgentPM -destination 'platform=macOS'` |
-| 関連 UITests | 変更した View に対応するテストクラスのみ実行 |
+**アプローチ**: サブコンポーネント（Badge, Card, Row, Dialog）を独立ファイルに分離。メインのView structはそのまま維持。
+
+**4-A: SettingsView.swift 分割**（1,148行 → 129行 + 4ファイル）
+
+```
+Sources/App/Features/Settings/
+├── SettingsView.swift              （129行: タブコンテナ、General、About）
+├── DatabaseSettingsView.swift      （82行: DB設定）
+├── WebServerSettingsView.swift     （355行: Webサーバー設定）
+├── MCPSettingsView.swift           （268行: MCPサーバー設定）
+├── CoordinatorExport.swift         （320行: コーディネーター設定エクスポート）
+├── SkillManagementView.swift       （223行: スキル一覧・削除）
+└── SkillEditorView.swift           （860行: スキルエディタ）
+```
+
+**4-B: SkillManagementView.swift 分割**（1,085行 → 223行 + 1ファイル）
+- SkillEditorView, FileTreeItem, SkillArchiveDocument を SkillEditorView.swift に分離
+
+**4-C: TaskDetailView.swift 分割**（1,079行 → 716行 + 1ファイル）
+
+```
+Sources/App/Features/TaskDetail/
+├── TaskDetailView.swift            （716行: メインビュー）
+└── TaskDetailComponents.swift      （377行: StatusBadge, ContextCard, HandoffCard,
+                                      HistoryEventRow, TaskExecutionLogRow,
+                                      ApprovalStatusDetailBadge, RejectTaskDialog）
+```
+
+**4-D: AgentDetailView.swift 分割**（921行 → 425行 + 2ファイル）
+
+```
+Sources/App/Features/AgentManagement/
+├── AgentDetailView.swift           （425行: メインビュー）
+├── AgentDetailComponents.swift     （180行: ExecutionLogRow, StatItem, TaskRow,
+                                      SessionRow, RoleTypeBadge, AgentTypeBadge,
+                                      AgentStatusBadge）
+└── LogViewer.swift                 （317行: ExecutionLogDetailRow, LogViewerSheet）
+```
+
+**テスト結果**:
+
+| チェック項目 | 結果 |
+|-------------|------|
+| AIAgentPM ビルド | ✅ |
+| MCPServer ビルド | ✅ |
+| RESTServer ビルド | ✅ |
+| DomainTests | ✅ 全パス |
+| UseCaseTests | ✅ 全パス |
+| InfrastructureTests (354件) | ✅ 全パス |
 
 ---
 
@@ -634,3 +679,4 @@ Phase 5: 横断的な改善
 | 日付 | 内容 |
 |------|------|
 | 2026-02-09 | 初版作成: 6フェーズのリファクタリング計画 |
+| 2026-02-09 | Phase 4 完了: App層View分割（4ファイル → 12ファイル、1,000行超ファイル全解消） |
