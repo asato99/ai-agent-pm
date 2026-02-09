@@ -1,0 +1,293 @@
+// Sources/Infrastructure/Database/Migrations/V001_V010_CoreSchema.swift
+// v1-v10: 初期スキーマ、フルスキーマ、エージェント階層、ワークフローテンプレート
+// 参照: docs/architecture/DATABASE_SCHEMA.md
+
+import Foundation
+import GRDB
+
+extension DatabaseMigrator {
+
+    /// v1〜v10のマイグレーションを登録
+    mutating func registerV001toV010() {
+
+        // v1: 初期スキーマ
+        registerMigration("v1_initial") { db in
+            // projects テーブル
+            try db.create(table: "projects", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+            }
+
+            // agents テーブル
+            try db.create(table: "agents", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("project_id", .text).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("name", .text).notNull()
+                t.column("role", .text).notNull()
+                t.column("type", .text).notNull()
+            }
+            try db.create(indexOn: "agents", columns: ["project_id"])
+
+            // tasks テーブル
+            try db.create(table: "tasks", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("project_id", .text).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("title", .text).notNull()
+                t.column("status", .text).notNull().defaults(to: "backlog")
+                t.column("assignee_id", .text)
+                    .references("agents", onDelete: .setNull)
+            }
+            try db.create(indexOn: "tasks", columns: ["project_id", "status"])
+            try db.create(indexOn: "tasks", columns: ["assignee_id"])
+        }
+
+        // v2: Phase 2 フルスキーマ
+        registerMigration("v2_full_schema") { db in
+            // 固定のデフォルト日時 (SQLiteはALTER TABLEで非定数デフォルト値をサポートしない)
+            let defaultDate = "2024-01-01 00:00:00"
+
+            // projects テーブル拡張
+            try db.alter(table: "projects") { t in
+                t.add(column: "description", .text).defaults(to: "")
+                t.add(column: "status", .text).defaults(to: "active")
+            }
+            // 日時カラムは手動で追加（定数デフォルト値を使用）
+            try db.execute(sql: """
+                ALTER TABLE projects ADD COLUMN created_at DATETIME DEFAULT '\(defaultDate)'
+            """)
+            try db.execute(sql: """
+                ALTER TABLE projects ADD COLUMN updated_at DATETIME DEFAULT '\(defaultDate)'
+            """)
+
+            // agents テーブル拡張
+            try db.alter(table: "agents") { t in
+                t.add(column: "role_type", .text).defaults(to: "developer")
+                t.add(column: "capabilities", .text) // JSON array
+                t.add(column: "system_prompt", .text)
+                t.add(column: "status", .text).defaults(to: "active")
+            }
+            try db.execute(sql: """
+                ALTER TABLE agents ADD COLUMN created_at DATETIME DEFAULT '\(defaultDate)'
+            """)
+            try db.execute(sql: """
+                ALTER TABLE agents ADD COLUMN updated_at DATETIME DEFAULT '\(defaultDate)'
+            """)
+
+            // tasks テーブル拡張
+            try db.alter(table: "tasks") { t in
+                t.add(column: "description", .text).defaults(to: "")
+                t.add(column: "priority", .text).defaults(to: "medium")
+                t.add(column: "parent_task_id", .text)
+                t.add(column: "dependencies", .text) // JSON array
+                t.add(column: "estimated_minutes", .integer)
+                t.add(column: "actual_minutes", .integer)
+                t.add(column: "completed_at", .datetime)
+            }
+            try db.execute(sql: """
+                ALTER TABLE tasks ADD COLUMN created_at DATETIME DEFAULT '\(defaultDate)'
+            """)
+            try db.execute(sql: """
+                ALTER TABLE tasks ADD COLUMN updated_at DATETIME DEFAULT '\(defaultDate)'
+            """)
+            try db.create(indexOn: "tasks", columns: ["parent_task_id"])
+
+            // sessions テーブル
+            try db.create(table: "sessions", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("project_id", .text).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("started_at", .datetime).notNull()
+                t.column("ended_at", .datetime)
+                t.column("status", .text).notNull().defaults(to: "active")
+            }
+            try db.create(indexOn: "sessions", columns: ["agent_id", "status"])
+            try db.create(indexOn: "sessions", columns: ["project_id"])
+
+            // contexts テーブル
+            try db.create(table: "contexts", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("task_id", .text).notNull()
+                    .references("tasks", onDelete: .cascade)
+                t.column("session_id", .text).notNull()
+                    .references("sessions", onDelete: .cascade)
+                t.column("agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("progress", .text)
+                t.column("findings", .text)
+                t.column("blockers", .text)
+                t.column("next_steps", .text)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            try db.create(indexOn: "contexts", columns: ["task_id"])
+            try db.create(indexOn: "contexts", columns: ["session_id"])
+
+            // handoffs テーブル
+            try db.create(table: "handoffs", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("task_id", .text).notNull()
+                    .references("tasks", onDelete: .cascade)
+                t.column("from_agent_id", .text).notNull()
+                    .references("agents", onDelete: .cascade)
+                t.column("to_agent_id", .text)
+                    .references("agents", onDelete: .setNull)
+                t.column("summary", .text).notNull()
+                t.column("context", .text)
+                t.column("recommendations", .text)
+                t.column("accepted_at", .datetime)
+                t.column("created_at", .datetime).notNull()
+            }
+            try db.create(indexOn: "handoffs", columns: ["task_id"])
+            try db.create(indexOn: "handoffs", columns: ["to_agent_id"])
+
+            // subtasks テーブル
+            try db.create(table: "subtasks", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("task_id", .text).notNull()
+                    .references("tasks", onDelete: .cascade)
+                t.column("title", .text).notNull()
+                t.column("is_completed", .boolean).notNull().defaults(to: false)
+                t.column("order", .integer).notNull().defaults(to: 0)
+                t.column("created_at", .datetime).notNull()
+                t.column("completed_at", .datetime)
+            }
+            try db.create(indexOn: "subtasks", columns: ["task_id"])
+
+            // state_change_events テーブル
+            try db.create(table: "state_change_events", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("project_id", .text).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("entity_type", .text).notNull()
+                t.column("entity_id", .text).notNull()
+                t.column("event_type", .text).notNull()
+                t.column("agent_id", .text)
+                t.column("session_id", .text)
+                t.column("previous_state", .text)
+                t.column("new_state", .text)
+                t.column("reason", .text)
+                t.column("metadata", .text) // JSON object
+                t.column("timestamp", .datetime).notNull()
+            }
+            try db.create(indexOn: "state_change_events", columns: ["project_id", "timestamp"])
+            try db.create(indexOn: "state_change_events", columns: ["entity_type", "entity_id"])
+        }
+
+        // v3: 要件変更 - エージェント階層化、サブタスク削除
+        registerMigration("v3_agent_hierarchy") { db in
+            // subtasks テーブルを削除
+            try db.drop(table: "subtasks")
+
+            // agents テーブルを再構築（project_id削除、parent_agent_id追加）
+            // SQLiteはALTER TABLE DROP COLUMNをサポートしないため、テーブル再構築が必要
+
+            // 1. 一時テーブルを作成（self-referencing FKは後で追加）
+            try db.execute(sql: """
+                CREATE TABLE agents_new (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    role_type TEXT DEFAULT 'developer',
+                    parent_agent_id TEXT,
+                    max_parallel_tasks INTEGER DEFAULT 1,
+                    capabilities TEXT,
+                    system_prompt TEXT,
+                    status TEXT DEFAULT 'active',
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """)
+
+            // 2. データを移行（project_idは破棄）
+            try db.execute(sql: """
+                INSERT INTO agents_new (id, name, role, type, role_type, capabilities, system_prompt, status, created_at, updated_at)
+                SELECT id, name, role, type, role_type, capabilities, system_prompt, status, created_at, updated_at FROM agents
+            """)
+
+            // 3. 古いテーブルを削除
+            try db.drop(table: "agents")
+
+            // 4. 新しいテーブルをリネーム
+            try db.rename(table: "agents_new", to: "agents")
+
+            // 5. インデックス再作成
+            try db.create(indexOn: "agents", columns: ["parent_agent_id"])
+        }
+
+        // v4: エージェントキック設定追加
+        registerMigration("v4_agent_kick_settings") { db in
+            try db.alter(table: "agents") { t in
+                t.add(column: "kick_method", .text).defaults(to: "cli")
+                t.add(column: "kick_command", .text)
+            }
+        }
+
+        // v5: エージェント認証設定追加
+        registerMigration("v5_agent_auth_settings") { db in
+            try db.alter(table: "agents") { t in
+                t.add(column: "auth_level", .text).defaults(to: "level0")
+                t.add(column: "passkey", .text)
+            }
+        }
+
+        // v6: プロジェクト作業ディレクトリ追加
+        registerMigration("v6_project_working_directory") { db in
+            try db.alter(table: "projects") { t in
+                t.add(column: "working_directory", .text)
+            }
+        }
+
+        // v7: タスク成果物情報追加
+        registerMigration("v7_task_output_info") { db in
+            try db.alter(table: "tasks") { t in
+                t.add(column: "output_file_name", .text)
+                t.add(column: "output_description", .text)
+            }
+        }
+
+        // v8: 要件変更 - サブタスク不要によりparent_task_idを廃止
+        // 参照: docs/requirements/TASKS.md
+        registerMigration("v8_remove_parent_task_id") { db in
+            try? db.execute(sql: "DROP INDEX IF EXISTS index_tasks_on_parent_task_id")
+        }
+
+        // v9: 要件変更 - output_file_name/output_descriptionを廃止
+        registerMigration("v9_remove_task_output_fields") { _ in
+            // SQLiteではカラム削除が困難なため、カラム自体は残存
+        }
+
+        // v10: ワークフローテンプレート機能
+        // 参照: docs/requirements/WORKFLOW_TEMPLATES.md
+        registerMigration("v10_workflow_templates") { db in
+            try db.create(table: "workflow_templates", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("description", .text).defaults(to: "")
+                t.column("variables", .text) // JSON array
+                t.column("status", .text).notNull().defaults(to: "active")
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            try db.create(indexOn: "workflow_templates", columns: ["status"])
+
+            try db.create(table: "template_tasks", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("template_id", .text).notNull()
+                    .references("workflow_templates", onDelete: .cascade)
+                t.column("title", .text).notNull()
+                t.column("description", .text).defaults(to: "")
+                t.column("order", .integer).notNull()
+                t.column("depends_on_orders", .text) // JSON array
+                t.column("default_assignee_role", .text)
+                t.column("default_priority", .text).notNull().defaults(to: "medium")
+                t.column("estimated_minutes", .integer)
+            }
+            try db.create(indexOn: "template_tasks", columns: ["template_id"])
+        }
+    }
+}
