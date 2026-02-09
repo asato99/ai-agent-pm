@@ -40,6 +40,7 @@
 | `@@タスク作成: タイトル` | 新規タスクを作成 | `request_task` |
 | `@@タスク通知: メッセージ` | 既存タスクセッションに通知 | `notify_task_session` |
 | `@@タスク調整: 内容` | 既存タスク(backlog/todo)の修正・削除 | `update_task_from_chat` |
+| `@@タスク開始: タスクID` | backlog/todoのタスクを実行開始(in_progress) | `start_task_from_chat` |
 | (マーカーなし) | 通常の会話・質問 | `send_message` |
 
 ### マーカー形式
@@ -49,6 +50,7 @@
 ＠＠タスク作成: ログイン機能を実装  (全角も可)
 @@タスク通知: レビュー完了しました
 @@タスク調整: タスクXXXの説明を更新
+@@タスク開始: task_001
 ```
 
 ### 正規表現パターン
@@ -58,6 +60,7 @@
 let taskCreatePattern = "[@＠][@＠]タスク作成:"
 let taskNotifyPattern = "[@＠][@＠]タスク通知:"
 let taskAdjustPattern = "[@＠][@＠]タスク調整:"
+let taskStartPattern = "[@＠][@＠]タスク開始:"
 ```
 
 以下の入力はすべてマッチ：
@@ -106,6 +109,16 @@ let taskAdjustPattern = "[@＠][@＠]タスク調整:"
 エージェント: update_task_from_chat(task_id: "XXX", description: "認証機能の改善", ...)
     ↓ (バリデーション通過)
 エージェント: "タスクを更新しました"
+```
+
+### タスク開始フロー
+
+```
+ユーザー: "@@タスク開始: task_001"
+    ↓
+エージェント: start_task_from_chat(task_id: "task_001", requester_id: "ユーザーID")
+    ↓ (バリデーション通過)
+エージェント: "タスクの実行を開始しました"
 ```
 
 ### 通常会話フロー
@@ -238,6 +251,26 @@ if session.purpose == .chat {
 }
 ```
 
+#### start_task_from_chat バリデーション
+
+`Sources/MCPServer/MCPServer.swift` の `start_task_from_chat` ハンドラに追加：
+
+```swift
+// チャットセッションの場合、@@タスク開始マーカーを検証
+if session.purpose == .chat {
+    let messages = try chatRepository.findMessages(
+        projectId: session.projectId,
+        agentId: session.agentId
+    )
+    let incomingMessages = messages.filter { $0.senderId != session.agentId }
+
+    guard let lastMessage = incomingMessages.last,
+          ChatCommandMarker.containsTaskStartMarker(lastMessage.content) else {
+        throw MCPError.taskStartMarkerRequired
+    }
+}
+```
+
 ### 3. エラー定義
 
 `MCPError` に追加：
@@ -246,6 +279,7 @@ if session.purpose == .chat {
 case taskRequestMarkerRequired
 case taskNotifyMarkerRequired
 case taskAdjustMarkerRequired
+case taskStartMarkerRequired
 
 var localizedDescription: String {
     switch self {
@@ -255,10 +289,71 @@ var localizedDescription: String {
         return "タスク通知には @@タスク通知: マーカーが必要です"
     case .taskAdjustMarkerRequired:
         return "タスク調整には @@タスク調整: マーカーが必要です"
+    case .taskStartMarkerRequired:
+        return "タスク開始には @@タスク開始: マーカーが必要です"
     // ...
     }
 }
 ```
+
+---
+
+## 名前付き引数
+
+### 概要
+
+マーカー後のフリーテキストに加え、`--key value` 形式の名前付き引数でパラメータを明示的に指定できる。引数はすべてオプションであり、省略時はエージェントが文脈やタスク一覧から自主的に判断して即実行する。
+
+### 構文
+
+```
+@@マーカー: フリーテキスト [--key1 value1] [--key2 value2]
+```
+
+### 各コマンドの引数
+
+| コマンド | 引数 | 型 | 説明 |
+|----------|------|-----|------|
+| `@@タスク作成:` | `--priority` | `low\|medium\|high\|urgent` | タスク優先度（デフォルト: medium） |
+| | `--description` | `"文字列"` | タスクの詳細説明 |
+| | `--parent` | タスクID | 親タスクID（サブタスク作成時） |
+| `@@タスク通知:` | `--task` | タスクID | 関連タスクID |
+| | `--priority` | `low\|normal\|high` | 通知優先度（デフォルト: normal） |
+| `@@タスク調整:` | `--task` | タスクID | 対象タスクID |
+| | `--status` | ステータス | 変更先ステータス |
+| | `--description` | `"文字列"` | 新しい説明文 |
+| `@@タスク開始:` | （なし） | - | タスクIDはフリーテキスト部分で指定 |
+
+### 使用例
+
+```
+@@タスク作成: ログイン機能を実装 --priority high --parent task_001
+@@タスク作成: バグ修正 --description "ログイン画面でエラーが発生する問題の修正"
+@@タスク通知: レビューが完了しました --task task_002 --priority high
+@@タスク調整: 優先度を上げてください --task task_003 --status todo
+@@タスク開始: task_004
+```
+
+### 自律決定ガイドライン
+
+引数が省略された場合、エージェントは以下のように自主的に判断する：
+
+| 引数 | 判断方法 |
+|------|----------|
+| `priority` | メッセージの内容・文脈から緊急度を推測（デフォルト: medium） |
+| `description` | フリーテキスト部分から補足情報があれば設定 |
+| `parent` | 会話の文脈で親タスクが明示されていれば設定 |
+| `task` | `list_tasks` でタスク一覧を確認し、文脈から対象を特定 |
+| `status` | 調整内容から適切なステータスを推測 |
+
+### 設計判断
+
+| 項目 | 決定 | 理由 |
+|------|------|------|
+| パース責任 | エージェント側のみ | ChatCommandMarker enumの変更不要、柔軟性を確保 |
+| 引数省略時 | 確認ステップなしで即実行 | エージェントの自律性を活かし、対話の往復を減らす |
+| 構文形式 | `--key value`（CLI風） | エンジニアに馴染みのある形式、パースが容易 |
+| assignee | 常に自分自身 | チャットからの他者への割り当ては不可 |
 
 ---
 
@@ -286,6 +381,8 @@ var localizedDescription: String {
 | マーカーなし + notify_task_session | MCPError.taskNotifyMarkerRequired |
 | `@@タスク調整:` マーカーあり + update_task_from_chat | 成功 |
 | マーカーなし + update_task_from_chat | MCPError.taskAdjustMarkerRequired |
+| `@@タスク開始:` マーカーあり + start_task_from_chat | 成功 |
+| マーカーなし + start_task_from_chat | MCPError.taskStartMarkerRequired |
 | 全角`＠＠タスク作成:` + request_task | 成功 |
 | 混合`@＠タスク作成:` + request_task | 成功 |
 
@@ -296,6 +393,7 @@ var localizedDescription: String {
 | チャット経由のタスク作成 | マーカーを案内 → マーカー付きで送信 → タスク作成成功 |
 | チャット経由のタスク通知 | マーカー付き送信 → 通知成功 |
 | チャット経由のタスク調整 | マーカー付き送信 → タスク修正成功 |
+| チャット経由のタスク開始 | マーカー付き送信 → タスク開始成功(in_progress) |
 | 通常会話 | マーカーなしでも正常に会話継続 |
 
 ---
@@ -314,3 +412,4 @@ var localizedDescription: String {
 | 日付 | 内容 |
 |------|------|
 | 2026-02-08 | 初版作成 |
+| 2026-02-09 | 名前付き引数（--key value）セクション追加 |

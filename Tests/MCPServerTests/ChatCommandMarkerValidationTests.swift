@@ -387,4 +387,77 @@ final class ChatCommandMarkerValidationTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - start_task_from_chat バリデーションテスト
+
+    /// taskStartMarkerRequired エラーが定義されていることを確認
+    func testTaskStartMarkerRequiredErrorDefined() {
+        let error = MCPError.taskStartMarkerRequired
+        XCTAssertTrue(
+            error.description.contains("@@タスク開始:") || error.description.contains("マーカー"),
+            "Error message should mention the start marker requirement"
+        )
+    }
+
+    /// チャットセッションで、チャット履歴にマーカー付きメッセージがある場合 → start_task_from_chat 成功
+    func testStartTaskFromChatWithMarkerSucceeds() throws {
+        // テスト用タスクを作成
+        let task = try createTestTask()
+
+        // オーナーから開始マーカー付きメッセージを送信
+        try sendMessageFromOwnerToWorker(content: "@@タスク開始: \(task.id.value)")
+
+        // ワーカーのチャットセッションから start_task_from_chat を呼び出す
+        let (_, workerCaller) = try createWorkerChatCaller()
+
+        let result = try mcpServer.executeTool(
+            name: "start_task_from_chat",
+            arguments: [
+                "task_id": task.id.value,
+                "requester_id": ownerId.value
+            ],
+            caller: workerCaller
+        )
+
+        guard let resultDict = result as? [String: Any],
+              let success = resultDict["success"] as? Bool else {
+            XCTFail("Failed to parse result: \(result)")
+            return
+        }
+        XCTAssertTrue(success, "start_task_from_chat should succeed when marker exists in chat history")
+    }
+
+    /// チャットセッションで、チャット履歴にマーカーがない場合 → start_task_from_chat エラー
+    func testStartTaskFromChatWithoutMarkerFails() throws {
+        // テスト用タスクを作成
+        let task = try createTestTask()
+
+        // オーナーからマーカーなしメッセージを送信
+        try sendMessageFromOwnerToWorker(content: "タスクを開始してください")
+
+        // ワーカーのチャットセッションから start_task_from_chat を呼び出す
+        let (_, workerCaller) = try createWorkerChatCaller()
+
+        XCTAssertThrowsError(
+            try mcpServer.executeTool(
+                name: "start_task_from_chat",
+                arguments: [
+                    "task_id": task.id.value,
+                    "requester_id": ownerId.value
+                ],
+                caller: workerCaller
+            ),
+            "start_task_from_chat should fail when no marker in chat history"
+        ) { error in
+            guard let mcpError = error as? MCPError else {
+                XCTFail("Expected MCPError but got: \(error)")
+                return
+            }
+            XCTAssertEqual(
+                String(describing: mcpError),
+                String(describing: MCPError.taskStartMarkerRequired),
+                "Should throw taskStartMarkerRequired error"
+            )
+        }
+    }
 }

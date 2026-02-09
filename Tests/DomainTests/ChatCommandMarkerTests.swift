@@ -245,4 +245,76 @@ final class ChatCommandMarkerTests: XCTestCase {
         let extracted = ChatCommandMarker.extractAdjustContent(from: content)
         XCTAssertNil(extracted)
     }
+
+    // MARK: - タスク開始マーカー検出テスト
+
+    /// 半角@@タスク開始マーカーを検出できる
+    func testDetectsHalfWidthTaskStartMarker() {
+        let content = "@@タスク開始: task_001"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskStartMarker(content),
+            "Should detect half-width @@ task start marker"
+        )
+    }
+
+    /// 全角＠＠タスク開始マーカーを検出できる
+    func testDetectsFullWidthTaskStartMarker() {
+        let content = "＠＠タスク開始: task_001"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskStartMarker(content),
+            "Should detect full-width ＠＠ task start marker"
+        )
+    }
+
+    /// 混合マーカーを検出できる（開始）
+    func testDetectsMixedWidthTaskStartMarker() {
+        let content = "@＠タスク開始: task_001"
+        XCTAssertTrue(
+            ChatCommandMarker.containsTaskStartMarker(content),
+            "Should detect mixed width task start marker"
+        )
+    }
+
+    /// タスク作成マーカーをタスク開始として誤検出しない
+    func testDoesNotConfuseCreateWithStart() {
+        let content = "@@タスク作成: ログイン機能を実装"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskStartMarker(content),
+            "Should not confuse task create marker with start marker"
+        )
+    }
+
+    /// タスク通知マーカーをタスク開始として誤検出しない
+    func testDoesNotConfuseNotifyWithStart() {
+        let content = "@@タスク通知: レビュー完了"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskStartMarker(content),
+            "Should not confuse task notify marker with start marker"
+        )
+    }
+
+    /// タスク調整マーカーをタスク開始として誤検出しない
+    func testDoesNotConfuseAdjustWithStart() {
+        let content = "@@タスク調整: 優先度を変更"
+        XCTAssertFalse(
+            ChatCommandMarker.containsTaskStartMarker(content),
+            "Should not confuse task adjust marker with start marker"
+        )
+    }
+
+    // MARK: - 開始内容抽出テスト
+
+    /// タスク開始マーカーからタスクIDを抽出できる
+    func testExtractsStartContent() {
+        let content = "@@タスク開始: task_001"
+        let extracted = ChatCommandMarker.extractStartContent(from: content)
+        XCTAssertEqual(extracted, "task_001")
+    }
+
+    /// 開始マーカーがない場合はnilを返す
+    func testReturnsNilForMessageWithoutStartMarker() {
+        let content = "タスクを開始してください"
+        let extracted = ChatCommandMarker.extractStartContent(from: content)
+        XCTAssertNil(extracted)
+    }
 }

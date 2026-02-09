@@ -1190,6 +1190,16 @@ public final class MCPServer {
             guard let requesterId = arguments["requester_id"] as? String else {
                 throw MCPError.missingArguments(["requester_id"])
             }
+            // チャットセッションからの呼び出しは、ユーザーのチャットメッセージに @@タスク開始: マーカーが必要
+            // 参照: docs/design/CHAT_COMMAND_MARKER.md
+            if session.purpose == .chat {
+                let messages = try chatRepository.findMessages(projectId: session.projectId, agentId: session.agentId)
+                let incomingMessages = messages.filter { $0.senderId != session.agentId }
+                guard let lastMessage = incomingMessages.last,
+                      ChatCommandMarker.containsTaskStartMarker(lastMessage.content) else {
+                    throw MCPError.taskStartMarkerRequired
+                }
+            }
             return try startTaskFromChat(session: session, taskId: taskId, requesterId: requesterId)
 
         case "update_task_from_chat":
@@ -3025,29 +3035,40 @@ public final class MCPServer {
                         - 作業はタスクセッションで別途実行されます
 
                         【チャットコマンド】受信メッセージの @@マーカー に応じて適切なツールを使用してください:
+                        名前付き引数は --key value 形式で指定されます。省略された引数はあなたが判断してください。
 
-                        ■ @@タスク作成: タイトル
-                          → request_task(title: "マーカー以降のテキスト") で新規タスク作成
+                        ■ @@タスク作成: タイトル [--priority low|medium|high|urgent] [--description "説明"] [--parent タスクID]
+                          → request_task(title, description?, priority?, parent_task_id?) で新規タスク作成
+                          → 引数省略時の判断:
+                            ・priority: メッセージ内容から緊急度を判断（デフォルト: medium）
+                            ・description: メッセージ本文から補足があれば設定
                           → 応答例: 「ご依頼を承りました。タスクを登録しました」
 
-                        ■ @@タスク通知: メッセージ
-                          → notify_task_session(message: "マーカー以降のテキスト") で既存タスクセッションに通知
+                        ■ @@タスク通知: メッセージ [--task タスクID] [--priority low|normal|high]
+                          → notify_task_session(message, related_task_id?, priority?) で既存タスクセッションに通知
+                          → 引数省略時: 会話の文脈から関連タスクを特定、優先度はデフォルト normal
                           → 応答例: 「タスクセッションに通知しました」
 
-                        ■ @@タスク調整: 内容
-                          → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
+                        ■ @@タスク調整: 調整内容 [--task タスクID] [--status ステータス] [--description "説明"]
+                          → update_task_from_chat(task_id, requester_id, description?, status?) で既存タスクの修正・削除
+                          → 引数省略時: list_tasks で対象タスクを特定、status/description は調整内容から推測
                           → 応答例: 「タスクを更新しました」
+
+                        ■ @@タスク開始: タスクID
+                          → start_task_from_chat(task_id: "タスクID") でbacklog/todoのタスクを実行開始(in_progress)
+                          → 応答例: 「タスクの実行を開始しました」
 
                         ■ マーカーなし
                           → 作業依頼や通知・調整の意図がある場合:
                             「以下のマーカーをつけてお送りください:
-                             ・新規タスク作成: @@タスク作成: タイトル
-                             ・既存タスクへの通知: @@タスク通知: メッセージ
-                             ・既存タスクの修正/削除: @@タスク調整: 内容」と案内
+                             ・新規タスク作成: @@タスク作成: タイトル [--priority 優先度]
+                             ・既存タスクへの通知: @@タスク通知: メッセージ [--task ID]
+                             ・既存タスクの修正/削除: @@タスク調整: 内容 [--task ID]
+                             ・タスクの実行開始: @@タスク開始: タスクID」と案内
                           → 単なる質問や相談: send_message で通常応答
 
                         【注意】タスク関連のコマンドを実行する前に、既存のタスク一覧・状況を確認し、
-                        新規作成・通知・調整のどれが適切かを判断してください。
+                        新規作成・通知・調整・開始のどれが適切かを判断してください。
                         重複タスクの作成や、存在しないタスクへの操作を防ぐためです。
 
                         【使用できないツール】
@@ -3183,25 +3204,35 @@ public final class MCPServer {
                         get_pending_messages を呼び出して未読メッセージを取得してください。
 
                         【チャットコマンド】受信メッセージの @@マーカー に応じて適切なツールを使用してください:
+                        名前付き引数は --key value 形式で指定されます。省略された引数はあなたが判断してください。
 
-                        ■ @@タスク作成: タイトル
-                          → request_task(title: "マーカー以降のテキスト") で新規タスク作成
+                        ■ @@タスク作成: タイトル [--priority low|medium|high|urgent] [--description "説明"] [--parent タスクID]
+                          → request_task(title, description?, priority?, parent_task_id?) で新規タスク作成
+                          → 引数省略時の判断:
+                            ・priority: メッセージ内容から緊急度を判断（デフォルト: medium）
+                            ・description: メッセージ本文から補足があれば設定
                           → send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答
 
-                        ■ @@タスク通知: メッセージ
-                          → notify_task_session(message: "マーカー以降のテキスト") で既存タスクセッションに通知
+                        ■ @@タスク通知: メッセージ [--task タスクID] [--priority low|normal|high]
+                          → notify_task_session(message, related_task_id?, priority?) で既存タスクセッションに通知
+                          → 引数省略時: 会話の文脈から関連タスクを特定、優先度はデフォルト normal
                           → send_message で「タスクセッションに通知しました」と応答
 
-                        ■ @@タスク調整: 内容
-                          → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
+                        ■ @@タスク調整: 調整内容 [--task タスクID] [--status ステータス] [--description "説明"]
+                          → update_task_from_chat(task_id, requester_id, description?, status?) で既存タスクの修正・削除
+                          → 引数省略時: list_tasks で対象タスクを特定、status/description は調整内容から推測
                           → send_message で「タスクを更新しました」と応答
 
+                        ■ @@タスク開始: タスクID
+                          → start_task_from_chat(task_id: "タスクID") でbacklog/todoのタスクを実行開始(in_progress)
+                          → send_message で「タスクの実行を開始しました」と応答
+
                         ■ マーカーなし
-                          → 作業依頼・通知・調整の意図がある場合は @@マーカーの案内をしてください
+                          → 作業依頼・通知・調整・開始の意図がある場合は @@マーカーの案内をしてください
                           → 単なる質問や相談: send_message で通常応答
 
                         【注意】タスク関連のコマンドを実行する前に、既存のタスク一覧・状況を確認し、
-                        新規作成・通知・調整のどれが適切かを判断してください。
+                        新規作成・通知・調整・開始のどれが適切かを判断してください。
 
                         他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                         その他の可能な操作は help ツールで確認できます。
@@ -3249,11 +3280,12 @@ public final class MCPServer {
                 【待機不要】サーバー側でLong Polling待機済みです。すぐに get_next_action を呼び出してください。
 
                 【チャットコマンド】受信メッセージの @@マーカー に応じて適切なツールを使用してください:
-                ■ @@タスク作成: → request_task で新規タスク作成
-                ■ @@タスク通知: → notify_task_session で既存タスクセッションに通知
-                ■ @@タスク調整: → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
+                ■ @@タスク作成: タイトル [--priority 優先度 --description "説明" --parent タスクID] → request_task
+                ■ @@タスク通知: メッセージ [--task ID --priority 優先度] → notify_task_session
+                ■ @@タスク調整: 内容 [--task ID --status ステータス] → update_task_from_chat
+                ■ @@タスク開始: タスクID → start_task_from_chat
                 ■ マーカーなし → 意図がある場合は @@マーカーの案内、質問は send_message で応答
-                ※タスク関連コマンド実行前に既存タスク状況を確認し、適切な操作を選択してください。
+                ※名前付き引数省略時は、タスク一覧・エージェント一覧を確認して自主的に判断してください。
 
                 他のAIエージェントと会話する場合は start_conversation で開始し、end_conversation で終了します。
                 その他の可能な操作は help ツールで確認できます。
@@ -5270,8 +5302,8 @@ public final class MCPServer {
             "approval_status": approvalStatus.rawValue,
             "approvers": approvers,
             "message": isAncestor
-                ? "タスクが自動承認されました"
-                : "タスク依頼が作成されました。承認を待っています。"
+                ? "タスクが自動承認されました。現在のステータスは backlog です。タスクの実行を開始するには「@@タスク開始: \(newTask.id.value)」をチャットで送信してください。"
+                : "タスク依頼が作成されました。承認を待っています。承認後、「@@タスク開始: \(newTask.id.value)」でタスクの実行を開始できます。"
         ]
     }
 
@@ -6307,25 +6339,40 @@ public final class MCPServer {
             context_messages は会話の文脈理解用です（応答対象ではありません）。
 
             【チャットコマンド】受信メッセージの @@マーカー に応じて適切なツールを使用してください:
+            名前付き引数は --key value 形式で指定されます。省略された引数はあなたが判断してください。
 
-            ■ @@タスク作成: タイトル
-              → request_task(title: "マーカー以降のテキスト") で新規タスク作成
+            ■ @@タスク作成: タイトル [--priority low|medium|high|urgent] [--description "説明"] [--parent タスクID]
+              → request_task(title, description?, priority?, parent_task_id?) で新規タスク作成
+              → 引数省略時の判断:
+                ・priority: メッセージ内容から緊急度を判断（デフォルト: medium）
+                ・description: メッセージ本文から補足があれば設定
               → send_message で「ご依頼を承りました。タスクを登録し、承認待ちの状態です」と応答
 
-            ■ @@タスク通知: メッセージ
-              → notify_task_session(message: "マーカー以降のテキスト") で既存タスクセッションに通知
+            ■ @@タスク通知: メッセージ [--task タスクID] [--priority low|normal|high]
+              → notify_task_session(message, related_task_id?, priority?) で既存タスクセッションに通知
+              → 引数省略時: 会話の文脈から関連タスクを特定、優先度はデフォルト normal
               → send_message で「タスクセッションに通知しました」と応答
 
-            ■ @@タスク調整: 内容
-              → update_task_from_chat で既存タスク(backlog/todo)の修正・削除
+            ■ @@タスク調整: 調整内容 [--task タスクID] [--status ステータス] [--description "説明"]
+              → update_task_from_chat(task_id, requester_id, description?, status?) で既存タスクの修正・削除
+              → 引数省略時: list_tasks で対象タスクを特定、status/description は調整内容から推測
               → send_message で「タスクを更新しました」と応答
 
+            ■ @@タスク開始: タスクID
+              → start_task_from_chat(task_id: "タスクID") でbacklog/todoのタスクを実行開始(in_progress)
+              → send_message で「タスクの実行を開始しました」と応答
+
             ■ マーカーなし
-              → 作業依頼・通知・調整の意図がある場合は @@マーカーの案内をしてください
+              → 作業依頼や通知・調整の意図がある場合:
+                「以下のマーカーをつけてお送りください:
+                 ・新規タスク作成: @@タスク作成: タイトル [--priority 優先度]
+                 ・既存タスクへの通知: @@タスク通知: メッセージ [--task ID]
+                 ・既存タスクの修正/削除: @@タスク調整: 内容 [--task ID]
+                 ・タスクの実行開始: @@タスク開始: タスクID」と案内
               → 単なる質問や相談: send_message で直接応答
 
             【注意】タスク関連のコマンドを実行する前に、既存のタスク一覧・状況を確認し、
-            新規作成・通知・調整のどれが適切かを判断してください。
+            新規作成・通知・調整・開始のどれが適切かを判断してください。
             重複タスクの作成や、存在しないタスクへの操作を防ぐためです。
 
             【例外】他のエージェントとの会話・対話を依頼された場合:
@@ -7364,6 +7411,7 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
     case taskRequestMarkerRequired  // チャットセッションからのタスク作成にはマーカーが必要
     case taskNotifyMarkerRequired   // チャットセッションからのタスク通知にはマーカーが必要
     case taskAdjustMarkerRequired   // チャットセッションからのタスク調整にはマーカーが必要
+    case taskStartMarkerRequired    // チャットセッションからのタスク開始にはマーカーが必要
 
     var description: String {
         switch self {
@@ -7453,6 +7501,8 @@ enum MCPError: Error, CustomStringConvertible, LocalizedError {
             return "チャットセッションからのタスク通知には、ユーザーメッセージに @@タスク通知: マーカーが必要です。ユーザーに「@@タスク通知: 通知内容」の形式で送信するよう案内してください。"
         case .taskAdjustMarkerRequired:
             return "チャットセッションからのタスク調整には、ユーザーメッセージに @@タスク調整: マーカーが必要です。ユーザーに「@@タスク調整: 調整内容」の形式で送信するよう案内してください。"
+        case .taskStartMarkerRequired:
+            return "チャットセッションからのタスク開始には、ユーザーメッセージに @@タスク開始: マーカーが必要です。ユーザーに「@@タスク開始: タスクID」の形式で送信するよう案内してください。"
         }
     }
 
