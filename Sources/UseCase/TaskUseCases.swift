@@ -280,8 +280,7 @@ public struct UpdateTaskStatusUseCase: Sendable {
     ///       親タスク（parentTaskId == nil）のみがカウントされる。
     private func checkResourceAvailability(for task: Task) throws {
         guard let assigneeId = task.assigneeId else {
-            // アサインされていないタスクはリソースチェック不要
-            return
+            throw UseCaseError.validationFailed("in_progress への遷移にはエージェントの割り当て（assignee_id）が必要です")
         }
 
         guard let agent = try agentRepository.findById(assigneeId) else {

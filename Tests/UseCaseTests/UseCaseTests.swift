@@ -771,7 +771,10 @@ final class UseCaseTests: XCTestCase {
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        var task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .backlog)
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
+        agentRepo.agents[agent.id] = agent
+
+        var task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .backlog, assigneeId: agent.id)
         taskRepo.tasks[task.id] = task
 
         let useCase = UpdateTaskStatusUseCase(
@@ -823,12 +826,44 @@ final class UseCaseTests: XCTestCase {
         }
     }
 
+    func testInProgressWithoutAssigneeFails() throws {
+        // assigneeId なしのタスクを in_progress にしようとするとエラー
+        let project = Project(id: ProjectID.generate(), name: "Test")
+        projectRepo.projects[project.id] = project
+
+        let task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .todo)
+        taskRepo.tasks[task.id] = task
+
+        let useCase = UpdateTaskStatusUseCase(
+            taskRepository: taskRepo,
+            agentRepository: agentRepo,
+            eventRepository: eventRepo
+        )
+
+        XCTAssertThrowsError(try useCase.execute(
+            taskId: task.id,
+            newStatus: .inProgress,
+            agentId: nil,
+            sessionId: nil,
+            reason: nil
+        )) { error in
+            if case UseCaseError.validationFailed(let message) = error {
+                XCTAssertTrue(message.contains("assignee_id"))
+            } else {
+                XCTFail("Expected validationFailed error, got \(error)")
+            }
+        }
+    }
+
     func testUpdateTaskStatusBlockedTransition() throws {
         // PRD: inProgress → blocked への遷移
         let project = Project(id: ProjectID.generate(), name: "Test")
         projectRepo.projects[project.id] = project
 
-        var task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .inProgress)
+        let agent = Agent(id: AgentID.generate(), name: "Agent", role: "Role")
+        agentRepo.agents[agent.id] = agent
+
+        var task = Task(id: TaskID.generate(), projectId: project.id, title: "Task", status: .inProgress, assigneeId: agent.id)
         taskRepo.tasks[task.id] = task
 
         let useCase = UpdateTaskStatusUseCase(
