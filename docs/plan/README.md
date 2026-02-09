@@ -6,7 +6,9 @@ AI Agent Project Managerの実装計画ドキュメント。
 
 ## 現在進行中
 
-現在進行中の計画はありません。
+| 計画 | 概要 | ドキュメント |
+|------|------|-------------|
+| 大規模リファクタリング | God Object 分割・構造改善（6フェーズ） | [REFACTORING_PLAN.md](./REFACTORING_PLAN.md) |
 
 ---
 
