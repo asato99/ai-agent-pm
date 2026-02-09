@@ -1962,7 +1962,7 @@ public final class MCPServer {
                 "reason": "blocked_without_in_progress",
                 "task_id": blocked.id.value,
                 "provider": agent.provider ?? "claude",
-                "model": agent.modelId ?? "claude-sonnet-4-5-20250929"
+                "model": agent.modelId ?? "claude-sonnet-4-5"
             ]
         }
 
@@ -2000,7 +2000,7 @@ public final class MCPServer {
                     "reason": "worker_blocked",
                     "task_id": task.id.value,
                     "provider": agent.provider ?? "claude",
-                    "model": agent.modelId ?? "claude-sonnet-4-5-20250929"
+                    "model": agent.modelId ?? "claude-sonnet-4-5"
                 ]
             }
 
@@ -2078,7 +2078,7 @@ public final class MCPServer {
             // provider/model を返す（RunnerがCLIコマンドを選択するため）
             Self.log("[MCP] getAgentAction: agent '\(agentId)' - provider='\(agent.provider ?? "nil")', modelId='\(agent.modelId ?? "nil")'")
             result["provider"] = agent.provider ?? "claude"
-            result["model"] = agent.modelId ?? "claude-sonnet-4-5-20250929"
+            result["model"] = agent.modelId ?? "claude-sonnet-4-5"
             Self.log("[MCP] getAgentAction: returning action='start', reason='\(reason)', provider='\(result["provider"] ?? "nil")', model='\(result["model"] ?? "nil")'")
 
             return result
@@ -2416,7 +2416,7 @@ public final class MCPServer {
             let expectedProvider = expectedAiType.provider
             let expectedModelId = expectedAiType.modelId
 
-            if provider == expectedProvider && modelId == expectedModelId {
+            if provider == expectedProvider && (modelId == expectedModelId || modelId.hasPrefix(expectedModelId)) {
                 verified = true
                 verificationMessage = "モデル検証成功: 期待通りのモデルが使用されています"
             } else if provider == expectedProvider {
@@ -2817,9 +2817,9 @@ public final class MCPServer {
                     report_model ツールを呼び出し、現在使用中の provider と model_id を申告してください。
 
                     - provider: "claude", "gemini", "openai" などのプロバイダー名
-                    - model_id: バージョンを含む完全なモデルID（例: "claude-sonnet-4-5-20250929", "gemini-2.5-pro", "gpt-4o"）
+                    - model_id: 使用中のモデル名（例: "claude-sonnet-4-5", "gemini-2.5-pro", "gpt-4o"）
 
-                    ※ model_id は省略形ではなく、使用中の正確なモデル名を申告してください。
+                    ※ model_id は使用中のモデル名を申告してください。
                     申告後、get_next_action を再度呼び出してください。
                     """,
                 "state": "needs_model_verification"

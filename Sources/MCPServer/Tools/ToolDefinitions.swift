@@ -399,7 +399,7 @@ enum ToolDefinitions {
                 ],
                 "model_id": [
                     "type": "string",
-                    "description": "使用中のモデルID。バージョンを含む完全な名前を指定してください（例: claude-sonnet-4-5-20250929, claude-opus-4-20250514, gemini-2.5-pro, gpt-4o）"
+                    "description": "使用中のモデルID（例: claude-sonnet-4-5, claude-opus-4, gemini-2.5-pro, gpt-4o）"
                 ]
             ] as [String: Any],
             "required": ["session_token", "provider", "model_id"]

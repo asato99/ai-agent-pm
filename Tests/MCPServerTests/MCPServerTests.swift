@@ -801,12 +801,12 @@ final class ExecutionLogModelVerificationTests: XCTestCase {
             taskId: TaskID(value: "task-123"),
             agentId: AgentID(value: "agent-456"),
             reportedProvider: "claude",
-            reportedModel: "claude-opus-4-20250514",
+            reportedModel: "claude-opus-4",
             modelVerified: true
         )
 
         XCTAssertEqual(log.reportedProvider, "claude")
-        XCTAssertEqual(log.reportedModel, "claude-opus-4-20250514")
+        XCTAssertEqual(log.reportedModel, "claude-opus-4")
         XCTAssertEqual(log.modelVerified, true)
     }
 
@@ -2389,7 +2389,7 @@ final class WorkerBlockedStateManagementTests: XCTestCase {
             expiresAt: Date().addingTimeInterval(3600),
             createdAt: Date(),
             reportedProvider: "claude",
-            reportedModel: "claude-sonnet-4-5-20250929",
+            reportedModel: "claude-sonnet-4-5",
             modelVerified: true,  // モデル検証済み
             modelVerifiedAt: Date()
         )
@@ -2464,7 +2464,7 @@ final class WorkerBlockedStateManagementTests: XCTestCase {
             expiresAt: Date().addingTimeInterval(3600),
             createdAt: Date(),
             reportedProvider: "claude",
-            reportedModel: "claude-sonnet-4-5-20250929",
+            reportedModel: "claude-sonnet-4-5",
             modelVerified: true,  // モデル検証済み
             modelVerifiedAt: Date()
         )

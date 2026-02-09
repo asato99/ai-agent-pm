@@ -13,7 +13,7 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var type: AgentType
     public var aiType: AIType?                    // AIプロバイダー種別（AI agentの場合）- 後方互換性用
     public var provider: String?                  // プロバイダー名（"claude", "gemini", "openai"）- 直接保存
-    public var modelId: String?                   // モデルID（"gemini-2.5-pro", "claude-opus-4-20250514"）- 直接保存
+    public var modelId: String?                   // モデルID（"gemini-2.5-pro", "claude-opus-4"）- 直接保存
     public var hierarchyType: AgentHierarchyType  // 階層タイプ（Manager/Worker）
     public var roleType: AgentRoleType
     public var parentAgentId: AgentID?      // 階層構造（親エージェント）
@@ -211,9 +211,9 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
     /// 参照: https://platform.claude.com/docs/en/about-claude/models/overview
     public var modelId: String {
         switch self {
-        case .claudeOpus4: return "claude-opus-4-20250514"
-        case .claudeSonnet4_5: return "claude-sonnet-4-5-20250929"
-        case .claudeSonnet4: return "claude-sonnet-4-20250514"
+        case .claudeOpus4: return "claude-opus-4"
+        case .claudeSonnet4_5: return "claude-sonnet-4-5"
+        case .claudeSonnet4: return "claude-sonnet-4"
         case .gemini25Flash: return "gemini-2.5-flash"
         case .gemini25Pro: return "gemini-2.5-pro"
         case .gpt4o: return "gpt-4o"

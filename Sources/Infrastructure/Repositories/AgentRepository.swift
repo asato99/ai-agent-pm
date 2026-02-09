@@ -18,7 +18,7 @@ struct AgentRecord: Codable, FetchableRecord, PersistableRecord {
     var type: String
     var aiType: String?
     var provider: String?      // v29: 直接保存（"claude", "gemini", "openai"）
-    var modelId: String?       // v29: 直接保存（"gemini-2.5-pro", "claude-opus-4-20250514"）
+    var modelId: String?       // v29: 直接保存（"gemini-2.5-pro", "claude-opus-4"）
     var hierarchyType: String
     var roleType: String
     var parentAgentId: String?

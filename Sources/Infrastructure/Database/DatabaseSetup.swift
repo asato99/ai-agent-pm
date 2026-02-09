@@ -719,7 +719,7 @@ public final class DatabaseSetup {
         migrator.registerMigration("v29_agent_provider_model") { db in
             try db.alter(table: "agents") { t in
                 t.add(column: "provider", .text)   // "claude", "gemini", "openai", etc.
-                t.add(column: "model_id", .text)   // "gemini-2.5-pro", "claude-opus-4-20250514", etc.
+                t.add(column: "model_id", .text)   // "gemini-2.5-pro", "claude-opus-4", etc.
             }
 
             // 既存データのマイグレーション: ai_type から provider/model_id を設定
@@ -1156,6 +1156,23 @@ public final class DatabaseSetup {
             try db.alter(table: "notifications") { t in
                 t.add(column: "conversation_id", .text)
             }
+        }
+
+        // v51: モデルIDから日付サフィックスを除去
+        // 日付なしエイリアス（例: "claude-opus-4"）を使用し、APIが最新バージョンを自動解決
+        migrator.registerMigration("v51_remove_model_date_suffix") { db in
+            try db.execute(sql: """
+                UPDATE agents SET model_id = 'claude-opus-4'
+                WHERE model_id = 'claude-opus-4-20250514'
+            """)
+            try db.execute(sql: """
+                UPDATE agents SET model_id = 'claude-sonnet-4-5'
+                WHERE model_id = 'claude-sonnet-4-5-20250929'
+            """)
+            try db.execute(sql: """
+                UPDATE agents SET model_id = 'claude-sonnet-4'
+                WHERE model_id = 'claude-sonnet-4-20250514'
+            """)
         }
 
         try migrator.migrate(dbQueue)
