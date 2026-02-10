@@ -162,6 +162,9 @@ struct ToolAuthorization {
 
         // ヘルプ（未認証でも利用可能）
         "help": .unauthenticated,
+
+        // スキル管理（認証済み）
+        "register_skill": .authenticated,
     ]
 
     /// ツール呼び出しの認可チェック

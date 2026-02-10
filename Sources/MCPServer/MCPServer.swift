@@ -1296,6 +1296,27 @@ public final class MCPServer {
             )
 
         // ========================================
+        // スキル管理ツール（認証済み）
+        // ========================================
+        case "register_skill":
+            guard let name = arguments["name"] as? String else {
+                throw MCPError.missingArguments(["name"])
+            }
+            guard let directoryName = arguments["directory_name"] as? String else {
+                throw MCPError.missingArguments(["directory_name"])
+            }
+            let description = arguments["description"] as? String
+            let skillMdContent = arguments["skill_md_content"] as? String
+            let folderPath = arguments["folder_path"] as? String
+            return try registerSkill(
+                name: name,
+                description: description,
+                directoryName: directoryName,
+                skillMdContent: skillMdContent,
+                folderPath: folderPath
+            )
+
+        // ========================================
         // 削除済み（エラーを返す）
         // ========================================
         case "list_agents":

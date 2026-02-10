@@ -110,6 +110,11 @@ enum ToolDefinitions {
             getConversationMessages,    // タスクセッションから会話メッセージ取得
 
             // ========================================
+            // スキル管理ツール（認証済み）
+            // ========================================
+            registerSkill,              // スキル登録
+
+            // ========================================
             // 削除済み（権限なし - 呼び出し不可）
             // ========================================
             // - list_agents: → list_subordinates を使用
@@ -1565,6 +1570,49 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "task_id"]
+        ]
+    ]
+
+    // MARK: - Skill Management Tools
+
+    /// register_skill - スキルを登録
+    /// SKILL.mdテキストまたはローカルフォルダパスからスキルをDBに登録
+    static let registerSkill: [String: Any] = [
+        "name": "register_skill",
+        "description": """
+            スキルをデータベースに登録します。
+            SKILL.mdのテキスト内容またはローカルフォルダパスのいずれかを指定してください（両方指定はエラー）。
+            フォルダパスを指定する場合、フォルダ内にSKILL.mdが含まれている必要があります。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "name": [
+                    "type": "string",
+                    "description": "スキルの表示名（例：「コードレビュー」）"
+                ],
+                "description": [
+                    "type": "string",
+                    "description": "スキルの概要説明（最大256文字、任意）"
+                ],
+                "directory_name": [
+                    "type": "string",
+                    "description": "ディレクトリ名（英小文字・数字・ハイフン、2-64文字。例：code-review）"
+                ],
+                "skill_md_content": [
+                    "type": "string",
+                    "description": "SKILL.mdのテキスト内容（folder_pathと排他）"
+                ],
+                "folder_path": [
+                    "type": "string",
+                    "description": "スキルフォルダのローカルパス（SKILL.mdを含むこと。skill_md_contentと排他）"
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "name", "directory_name"]
         ]
     ]
 }

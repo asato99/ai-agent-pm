@@ -134,7 +134,7 @@ public final class DatabaseSetup {
     // MARK: - ZIP Helpers (used by v45 migration)
 
     /// content文字列からSKILL.mdのみを含むZIPアーカイブを作成
-    static func createZipArchive(skillMdContent: String) -> Data {
+    public static func createZipArchive(skillMdContent: String) -> Data {
         // 簡易的なZIP作成（SKILL.mdのみ、非圧縮）
         // ZIPフォーマット: https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
         var data = Data()
@@ -195,7 +195,7 @@ public final class DatabaseSetup {
     }
 
     /// CRC-32を計算
-    static func crc32(_ data: Data) -> UInt32 {
+    public static func crc32(_ data: Data) -> UInt32 {
         var crc: UInt32 = 0xFFFFFFFF
         let table: [UInt32] = (0..<256).map { i -> UInt32 in
             var c = UInt32(i)
