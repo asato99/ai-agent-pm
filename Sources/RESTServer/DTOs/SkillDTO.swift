@@ -25,6 +25,20 @@ public struct SkillDTO: Codable {
     }
 }
 
+/// Request body for registering a new skill
+public struct RegisterSkillRequest: Decodable {
+    let skillMdContent: String?
+    let name: String?
+    let directoryName: String?
+    let description: String?
+}
+
+/// Response for skill registration
+public struct RegisterSkillResponse: Encodable {
+    let status: String
+    let skill: SkillDTO
+}
+
 /// Request body for assigning skills to an agent
 public struct AssignSkillsRequest: Decodable {
     let skillIds: [String]

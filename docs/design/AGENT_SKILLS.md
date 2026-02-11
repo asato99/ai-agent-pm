@@ -310,7 +310,55 @@ func assign_skills_to_agent(
 ) -> Bool
 ```
 
-### 7.3 Coordinator用API
+### 7.3 CLI用スキル登録ツール（register_skill）
+
+CLI（Claude Code等）からスキルをDBに直接登録するためのMCPツール。
+アプリの既存インポートパイプライン（`SkillArchiveService` → `SkillDefinitionUseCases`）を再利用する。
+
+#### 入力ソース（排他的に1つを指定）
+
+| パラメータ | 説明 |
+|-----------|------|
+| `zip_file_path` | ZIPファイルのローカルパス（`skills-archive/*.zip` 等） |
+| `folder_path` | スキルフォルダのローカルパス（SKILL.md含む） |
+| `skill_md_content` | SKILL.mdのテキスト内容（単一ファイルスキル用） |
+
+#### オーバーライドパラメータ（任意）
+
+| パラメータ | 説明 |
+|-----------|------|
+| `name` | スキル表示名（省略時: SKILL.md frontmatterから抽出） |
+| `description` | 概要説明（省略時: SKILL.md frontmatterから抽出） |
+| `directory_name` | ディレクトリ名（省略時: ZIPファイル名/フォルダ名から自動生成） |
+
+#### 処理フロー
+
+```
+入力検証: zip_file_path / folder_path / skill_md_content の排他チェック
+    ↓
+[zip_file_path]    → Data(contentsOf:) → SkillArchiveService.importFromZip()
+[folder_path]      → SkillArchiveService.importFromFolder()
+[skill_md_content] → SkillArchiveService.createArchiveFromContent() → importFromZip()
+    ↓
+ImportedSkill から name/description/directoryName を取得（引数でオーバーライド可）
+    ↓
+SkillDefinitionUseCases.create(name:description:directoryName:archiveData:)
+    ↓
+成功レスポンス返却
+```
+
+#### アーキテクチャ
+
+```
+MCPServer (MCPServer層)
+  ├── SkillArchiveService (UseCase層 - 共有)  ← App側UIからも使用
+  └── SkillDefinitionUseCases (UseCase層)     ← バリデーション + 永続化
+```
+
+`SkillArchiveService` は UseCase 層に配置し、App側のUI（SkillImportView等）と
+MCPServer側の register_skill ツールの両方から利用する共有サービスとする。
+
+### 7.4 Coordinator用API
 
 ```swift
 // エージェント起動時に呼び出し
@@ -462,3 +510,4 @@ def _write_skills(self, config_dir: Path, skills: list[SkillInfo]):
 | 2026-01-29 | 実装計画セクションを分離 |
 | 2026-01-29 | description フィールド追加 |
 | 2026-01-29 | **アーカイブ形式に変更**: content → archiveData、スクリプト/テンプレート対応 |
+| 2026-02-10 | **register_skill MCP再設計**: SkillArchiveServiceをUseCase層に移動し、MCPハンドラからインポートパイプラインを再利用。zip_file_pathパラメータ追加、name/directory_nameをオプショナル化（frontmatter自動抽出） |

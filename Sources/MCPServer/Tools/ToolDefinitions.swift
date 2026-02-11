@@ -1576,13 +1576,14 @@ enum ToolDefinitions {
     // MARK: - Skill Management Tools
 
     /// register_skill - スキルを登録
-    /// SKILL.mdテキストまたはローカルフォルダパスからスキルをDBに登録
+    /// アプリのインポートパイプライン（SkillArchiveService → SkillDefinitionUseCases）を利用
+    /// 参照: docs/design/AGENT_SKILLS.md - 7.3 CLI用スキル登録ツール
     static let registerSkill: [String: Any] = [
         "name": "register_skill",
         "description": """
             スキルをデータベースに登録します。
-            SKILL.mdのテキスト内容またはローカルフォルダパスのいずれかを指定してください（両方指定はエラー）。
-            フォルダパスを指定する場合、フォルダ内にSKILL.mdが含まれている必要があります。
+            入力ソースとして zip_file_path / folder_path / skill_md_content のいずれか1つを指定してください（排他的）。
+            name と directory_name は省略可能です。省略時はSKILL.mdのfrontmatterやファイル名から自動抽出されます。
             """,
         "inputSchema": [
             "type": "object",
@@ -1591,28 +1592,32 @@ enum ToolDefinitions {
                     "type": "string",
                     "description": "authenticateツールで取得したセッショントークン"
                 ],
-                "name": [
+                "zip_file_path": [
                     "type": "string",
-                    "description": "スキルの表示名（例：「コードレビュー」）"
-                ],
-                "description": [
-                    "type": "string",
-                    "description": "スキルの概要説明（最大256文字、任意）"
-                ],
-                "directory_name": [
-                    "type": "string",
-                    "description": "ディレクトリ名（英小文字・数字・ハイフン、2-64文字。例：code-review）"
-                ],
-                "skill_md_content": [
-                    "type": "string",
-                    "description": "SKILL.mdのテキスト内容（folder_pathと排他）"
+                    "description": "ZIPファイルのローカルパス（例：skills-archive/code-review.zip）。folder_path / skill_md_content と排他"
                 ],
                 "folder_path": [
                     "type": "string",
-                    "description": "スキルフォルダのローカルパス（SKILL.mdを含むこと。skill_md_contentと排他）"
+                    "description": "スキルフォルダのローカルパス（SKILL.mdを含むこと）。zip_file_path / skill_md_content と排他"
+                ],
+                "skill_md_content": [
+                    "type": "string",
+                    "description": "SKILL.mdのテキスト内容（単一ファイルスキル用）。zip_file_path / folder_path と排他"
+                ],
+                "name": [
+                    "type": "string",
+                    "description": "スキルの表示名（任意。省略時はSKILL.mdのfrontmatterから抽出）"
+                ],
+                "description": [
+                    "type": "string",
+                    "description": "スキルの概要説明（最大256文字、任意。省略時はSKILL.mdのfrontmatterから抽出）"
+                ],
+                "directory_name": [
+                    "type": "string",
+                    "description": "ディレクトリ名（英小文字・数字・ハイフン、2-64文字。任意。省略時はZIPファイル名/フォルダ名から自動生成）"
                 ]
             ] as [String: Any],
-            "required": ["session_token", "name", "directory_name"]
+            "required": ["session_token"]
         ]
     ]
 }

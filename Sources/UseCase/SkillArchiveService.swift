@@ -1,4 +1,4 @@
-// Sources/App/Services/SkillArchiveService.swift
+// Sources/UseCase/SkillArchiveService.swift
 // 参照: docs/design/AGENT_SKILLS.md - スキルアーカイブ管理
 
 import Foundation
@@ -481,9 +481,18 @@ public final class SkillArchiveService: @unchecked Sendable {
         // ファイル情報を収集
         var fileInfos: [(relativePath: String, content: Data, isDirectory: Bool)] = []
 
-        let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey])
+        // シンボリックリンクを解決してパスを統一（macOSでは /var → /private/var）
+        var resolvedBuf = [CChar](repeating: 0, count: Int(PATH_MAX))
+        let basePath: String
+        if realpath(url.path, &resolvedBuf) != nil {
+            basePath = String(cString: resolvedBuf)
+        } else {
+            basePath = url.path
+        }
+        let resolvedURL = URL(fileURLWithPath: basePath)
+        let enumerator = fileManager.enumerator(at: resolvedURL, includingPropertiesForKeys: [.isDirectoryKey])
         while let fileURL = enumerator?.nextObject() as? URL {
-            let relativePath = fileURL.path.replacingOccurrences(of: url.path + "/", with: "")
+            let relativePath = fileURL.path.replacingOccurrences(of: basePath + "/", with: "")
 
             // 禁止パスのスキップ
             if isForbiddenPath(relativePath) {

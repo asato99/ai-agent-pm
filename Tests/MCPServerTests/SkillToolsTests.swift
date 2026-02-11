@@ -47,9 +47,12 @@ final class SkillToolsTests: XCTestCase {
         XCTAssertNotNil(properties["skill_md_content"], "skill_md_content property should be defined")
         XCTAssertNotNil(properties["folder_path"], "folder_path property should be defined")
         XCTAssertNotNil(properties["description"], "description property should be defined")
+        XCTAssertNotNil(properties["zip_file_path"], "zip_file_path property should be defined")
 
-        XCTAssertTrue(required.contains("name"), "name should be required")
-        XCTAssertTrue(required.contains("directory_name"), "directory_name should be required")
+        // name, directory_name は frontmatter から自動抽出されるためオプショナル
+        XCTAssertFalse(required.contains("name"), "name should not be required (auto-extracted from frontmatter)")
+        XCTAssertFalse(required.contains("directory_name"), "directory_name should not be required (auto-extracted)")
+        XCTAssertTrue(required.contains("session_token"), "session_token should be required")
     }
 
     // MARK: - Permission Tests
@@ -130,14 +133,14 @@ final class SkillToolsTests: XCTestCase {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let skillMd = "# Folder Skill\nThis skill is loaded from a folder."
+        let skillMd = "---\nname: Folder Skill\ndescription: From folder\n---\n# Folder Skill\nThis skill is loaded from a folder."
         try skillMd.write(to: tempDir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
 
         let scriptsDir = tempDir.appendingPathComponent("scripts")
         try FileManager.default.createDirectory(at: scriptsDir, withIntermediateDirectories: true)
         try "echo hello".write(to: scriptsDir.appendingPathComponent("run.sh"), atomically: true, encoding: .utf8)
 
-        // エージェントとプロジェクトをDBに作成
+        // Arrange: 認証済みセッション
         let agentId = AgentID(value: "agent-folder-test")
         let projectId = ProjectID(value: "proj-folder-test")
         try db.write { db in
@@ -197,7 +200,7 @@ final class SkillToolsTests: XCTestCase {
         let session = AgentSession(agentId: agentId, projectId: projectId, purpose: .task)
         let caller = CallerType.worker(agentId: agentId, session: session)
 
-        // name が空 → エラー
+        // name が空 → エラー（SkillError.emptyName）
         XCTAssertThrowsError(try mcpServer.executeTool(
             name: "register_skill",
             arguments: [
@@ -208,10 +211,11 @@ final class SkillToolsTests: XCTestCase {
             ],
             caller: caller
         )) { error in
-            XCTAssertTrue("\(error)".contains("name"), "Error should mention name: \(error)")
+            XCTAssertTrue(error is SkillError, "Error should be SkillError: \(error)")
+            XCTAssertEqual(error as? SkillError, .emptyName, "Error should be emptyName: \(error)")
         }
 
-        // directory_name が不正形式 → エラー
+        // directory_name が不正形式 → エラー（SkillError.invalidDirectoryName）
         XCTAssertThrowsError(try mcpServer.executeTool(
             name: "register_skill",
             arguments: [
@@ -222,7 +226,11 @@ final class SkillToolsTests: XCTestCase {
             ],
             caller: caller
         )) { error in
-            XCTAssertTrue("\(error)".contains("directory_name"), "Error should mention directory_name: \(error)")
+            if case .invalidDirectoryName? = error as? SkillError {
+                // OK
+            } else {
+                XCTFail("Error should be SkillError.invalidDirectoryName: \(error)")
+            }
         }
 
         // skill_md_content と folder_path の両方未指定 → エラー
@@ -268,7 +276,7 @@ final class SkillToolsTests: XCTestCase {
             caller: caller
         )
 
-        // 同じ directory_name で2つ目を登録 → エラー
+        // 同じ directory_name で2つ目を登録 → エラー（SkillError.directoryNameAlreadyExists）
         XCTAssertThrowsError(try mcpServer.executeTool(
             name: "register_skill",
             arguments: [
@@ -279,8 +287,129 @@ final class SkillToolsTests: XCTestCase {
             ],
             caller: caller
         )) { error in
-            XCTAssertTrue("\(error)".contains("dup") || "\(error)".contains("already exists") || "\(error)".contains("directory_name"),
-                          "Error should mention duplicate: \(error)")
+            if case .directoryNameAlreadyExists? = error as? SkillError {
+                // OK
+            } else {
+                XCTFail("Error should be SkillError.directoryNameAlreadyExists: \(error)")
+            }
         }
+    }
+
+    // MARK: - ZIP File Path Tests
+
+    /// zip_file_path パラメータでスキルが登録できること
+    func testRegisterSkillWithZipFilePath() throws {
+        // Arrange: 一時ZIPファイルを作成
+        let archiveService = SkillArchiveService()
+        let skillContent = """
+            ---
+            name: ZIP Skill
+            description: A skill from ZIP
+            ---
+            # ZIP Skill
+            This skill is loaded from a ZIP file.
+            """
+        let zipData = archiveService.createArchiveFromContent(skillContent)
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let zipPath = tempDir.appendingPathComponent("zip-skill-\(UUID().uuidString).zip")
+        try zipData.write(to: zipPath)
+        defer { try? FileManager.default.removeItem(at: zipPath) }
+
+        // エージェントとプロジェクトをDBに作成
+        let agentId = AgentID(value: "agent-zip-test")
+        let projectId = ProjectID(value: "proj-zip-test")
+        try db.write { db in
+            try db.execute(sql: """
+                INSERT INTO agents (id, name, role, type, status, role_type, created_at, updated_at)
+                VALUES (?, ?, 'developer', 'worker', 'active', 'developer', datetime('now'), datetime('now'))
+                """, arguments: [agentId.value, "ZIP Agent"])
+            try db.execute(sql: """
+                INSERT INTO projects (id, name, status, created_at, updated_at)
+                VALUES (?, 'ZIP Project', 'active', datetime('now'), datetime('now'))
+                """, arguments: [projectId.value])
+        }
+
+        let session = AgentSession(agentId: agentId, projectId: projectId, purpose: .task)
+        let caller = CallerType.worker(agentId: agentId, session: session)
+
+        // Act: zip_file_path のみで登録（name/directory_name は自動抽出）
+        let result = try mcpServer.executeTool(
+            name: "register_skill",
+            arguments: [
+                "session_token": session.token,
+                "zip_file_path": zipPath.path
+            ],
+            caller: caller
+        ) as! [String: Any]
+
+        // Assert: 成功レスポンス
+        XCTAssertEqual(result["status"] as? String, "success")
+        XCTAssertNotNil(result["skill_id"] as? String)
+        // frontmatter の name が使用される
+        XCTAssertEqual(result["name"] as? String, "ZIP Skill")
+
+        // Assert: DBに保存されている
+        let repo = SkillDefinitionRepository(database: db)
+        let dirName = result["directory_name"] as! String
+        let saved = try repo.findByDirectoryName(dirName)
+        XCTAssertNotNil(saved, "Skill should be saved in database")
+        XCTAssertEqual(saved?.name, "ZIP Skill")
+        XCTAssertEqual(saved?.description, "A skill from ZIP")
+    }
+
+    // MARK: - Override Tests
+
+    /// name / directory_name 引数が frontmatter の値をオーバーライドすること
+    func testRegisterSkillWithOverrides() throws {
+        // Arrange
+        let agentId = AgentID(value: "agent-override-test")
+        let projectId = ProjectID(value: "proj-override-test")
+        try db.write { db in
+            try db.execute(sql: """
+                INSERT INTO agents (id, name, role, type, status, role_type, created_at, updated_at)
+                VALUES (?, ?, 'developer', 'worker', 'active', 'developer', datetime('now'), datetime('now'))
+                """, arguments: [agentId.value, "Override Agent"])
+            try db.execute(sql: """
+                INSERT INTO projects (id, name, status, created_at, updated_at)
+                VALUES (?, 'Override Project', 'active', datetime('now'), datetime('now'))
+                """, arguments: [projectId.value])
+        }
+
+        let session = AgentSession(agentId: agentId, projectId: projectId, purpose: .task)
+        let caller = CallerType.worker(agentId: agentId, session: session)
+
+        // frontmatter に name/description を含むコンテンツ
+        let skillContent = """
+            ---
+            name: Original Name
+            description: Original description
+            ---
+            # Skill
+            """
+
+        // Act: name / directory_name / description をオーバーライド
+        let result = try mcpServer.executeTool(
+            name: "register_skill",
+            arguments: [
+                "session_token": session.token,
+                "skill_md_content": skillContent,
+                "name": "Overridden Name",
+                "directory_name": "overridden-dir",
+                "description": "Overridden description"
+            ],
+            caller: caller
+        ) as! [String: Any]
+
+        // Assert: オーバーライドされた値が使用される
+        XCTAssertEqual(result["status"] as? String, "success")
+        XCTAssertEqual(result["name"] as? String, "Overridden Name")
+        XCTAssertEqual(result["directory_name"] as? String, "overridden-dir")
+
+        let repo = SkillDefinitionRepository(database: db)
+        let saved = try repo.findByDirectoryName("overridden-dir")
+        XCTAssertNotNil(saved)
+        XCTAssertEqual(saved?.name, "Overridden Name")
+        XCTAssertEqual(saved?.description, "Overridden description")
     }
 }

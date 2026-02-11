@@ -406,7 +406,11 @@ final class RESTServer {
             debugLog("GET /api/skills called")
             return try await listSkills(request: request, context: context)
         }
-        debugLog("Skill routes registered: GET/skills")
+        skillRouter.post { [self] request, context in
+            debugLog("POST /api/skills called")
+            return try await registerSkill(request: request, context: context)
+        }
+        debugLog("Skill routes registered: GET/skills, POST/skills")
 
         // Handoffs
         let handoffRouter = protectedRouter.group("handoffs")

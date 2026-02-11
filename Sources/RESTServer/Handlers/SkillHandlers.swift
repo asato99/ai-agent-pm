@@ -47,6 +47,123 @@ extension RESTServer {
         return jsonResponse(response)
     }
 
+    /// POST /api/skills - スキル登録（JSON or multipart/form-data）
+    /// MCPServer.registerSkill() に委譲し、ロジック重複を排除
+    func registerSkill(request: Request, context: AuthenticatedContext) async throws -> Response {
+        guard context.agentId != nil else {
+            return errorResponse(status: .unauthorized, message: "Not authenticated")
+        }
+
+        let contentType = request.headers[.contentType] ?? ""
+
+        // HTTP リクエストからパラメータを抽出
+        var zipFilePath: String?
+        var skillMdContent: String?
+        var name: String?
+        var skillDescription: String?
+        var directoryName: String?
+
+        if contentType.contains("multipart/form-data") {
+            guard let boundaryRange = contentType.range(of: "boundary="),
+                  let boundary = contentType[boundaryRange.upperBound...].split(separator: ";").first else {
+                return errorResponse(status: .badRequest, message: "Missing boundary in Content-Type")
+            }
+
+            let body = try await request.body.collect(upTo: 2 * 1024 * 1024)
+            guard let data = body.getData(at: 0, length: body.readableBytes) else {
+                return errorResponse(status: .badRequest, message: "Empty request body")
+            }
+
+            let formData = parseMultipartFormData(data: data, boundary: String(boundary))
+
+            guard let zipData = formData.files["zip_file"] else {
+                return errorResponse(status: .badRequest, message: "zip_file field is required for multipart requests")
+            }
+
+            // ZIP データを一時ファイルに書き出し（mcpServer は file path を受け取る）
+            let tempFile = FileManager.default.temporaryDirectory
+                .appendingPathComponent("upload-\(UUID().uuidString).zip")
+            try zipData.write(to: tempFile)
+            zipFilePath = tempFile.path
+
+            name = formData.fields["name"]
+            skillDescription = formData.fields["description"]
+            directoryName = formData.fields["directory_name"]
+        } else {
+            let body = try await request.body.collect(upTo: 2 * 1024 * 1024)
+            guard let data = body.getData(at: 0, length: body.readableBytes),
+                  let req = try? JSONDecoder().decode(RegisterSkillRequest.self, from: data) else {
+                return errorResponse(status: .badRequest, message: "Invalid request body")
+            }
+
+            guard let content = req.skillMdContent, !content.isEmpty else {
+                return errorResponse(status: .badRequest, message: "skillMdContent is required for JSON requests")
+            }
+
+            skillMdContent = content
+            name = req.name
+            skillDescription = req.description
+            directoryName = req.directoryName
+        }
+
+        // 一時ファイルのクリーンアップを保証
+        defer {
+            if let tempPath = zipFilePath {
+                try? FileManager.default.removeItem(atPath: tempPath)
+            }
+        }
+
+        // MCPServer に委譲
+        do {
+            let result = try mcpServer.registerSkill(
+                zipFilePath: zipFilePath,
+                folderPath: nil,
+                skillMdContent: skillMdContent,
+                name: name,
+                description: skillDescription,
+                directoryName: directoryName
+            )
+
+            // DB からスキル全体を取得して DTO に変換
+            guard let skillId = result["skill_id"] as? String,
+                  let skill = try skillDefinitionRepository.findById(SkillID(value: skillId)) else {
+                return errorResponse(status: .internalServerError, message: "Failed to retrieve registered skill")
+            }
+
+            let response = RegisterSkillResponse(
+                status: "created",
+                skill: SkillDTO(from: skill)
+            )
+            let responseData = try JSONEncoder().encode(response)
+            return Response(
+                status: .created,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: .init(data: responseData))
+            )
+        } catch let error as SkillError {
+            switch error {
+            case .directoryNameAlreadyExists(let n, _):
+                return errorResponse(status: .conflict, message: "Directory name already exists: \(n)")
+            case .emptyName:
+                return errorResponse(status: .badRequest, message: "Skill name is required")
+            case .invalidDirectoryName(let n):
+                return errorResponse(status: .badRequest, message: "Invalid directory name: \(n)")
+            case .descriptionTooLong(let count):
+                return errorResponse(status: .badRequest, message: "Description too long: \(count) chars")
+            case .archiveTooLarge(let bytes):
+                return errorResponse(status: .badRequest, message: "Archive too large: \(bytes) bytes")
+            default:
+                return errorResponse(status: .badRequest, message: error.localizedDescription)
+            }
+        } catch let error as SkillArchiveError {
+            return errorResponse(status: .badRequest, message: "Failed to process skill archive: \(error)")
+        } catch let error as MCPError {
+            return errorResponse(status: .badRequest, message: "\(error)")
+        } catch {
+            return errorResponse(status: .internalServerError, message: "Failed to create skill: \(error.localizedDescription)")
+        }
+    }
+
     /// PUT /api/agents/:agentId/skills - エージェントにスキルを割り当て
     func assignAgentSkills(request: Request, context: AuthenticatedContext) async throws -> Response {
         guard let currentAgentId = context.agentId else {

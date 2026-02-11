@@ -61,6 +61,11 @@ public final class MCPServer {
     let skillDefinitionRepository: SkillDefinitionRepository
     let agentSkillAssignmentRepository: AgentSkillAssignmentRepository
 
+    // スキルインポートパイプライン（UseCase層の共有サービス）
+    // 参照: docs/design/AGENT_SKILLS.md - 7.3 CLI用スキル登録ツール
+    let skillArchiveService: SkillArchiveService
+    let skillDefinitionUseCases: SkillDefinitionUseCases
+
     // WorkDetectionService: 共通の仕事判定ロジック
     // 参照: docs/design/SESSION_SPAWN_ARCHITECTURE.md
     let workDetectionService: WorkDetectionService
@@ -120,6 +125,11 @@ public final class MCPServer {
         // スキルリポジトリ
         self.skillDefinitionRepository = SkillDefinitionRepository(database: database)
         self.agentSkillAssignmentRepository = AgentSkillAssignmentRepository(database: database)
+        // スキルインポートパイプライン
+        self.skillArchiveService = SkillArchiveService()
+        self.skillDefinitionUseCases = SkillDefinitionUseCases(
+            skillRepository: self.skillDefinitionRepository
+        )
         // WorkDetectionService: 共通の仕事判定ロジック
         // chatDelegationRepositoryを渡してpending委譲の検出を有効化
         self.workDetectionService = WorkDetectionService(
@@ -1299,21 +1309,19 @@ public final class MCPServer {
         // スキル管理ツール（認証済み）
         // ========================================
         case "register_skill":
-            guard let name = arguments["name"] as? String else {
-                throw MCPError.missingArguments(["name"])
-            }
-            guard let directoryName = arguments["directory_name"] as? String else {
-                throw MCPError.missingArguments(["directory_name"])
-            }
-            let description = arguments["description"] as? String
-            let skillMdContent = arguments["skill_md_content"] as? String
+            let zipFilePath = arguments["zip_file_path"] as? String
             let folderPath = arguments["folder_path"] as? String
+            let skillMdContent = arguments["skill_md_content"] as? String
+            let name = arguments["name"] as? String
+            let description = arguments["description"] as? String
+            let directoryName = arguments["directory_name"] as? String
             return try registerSkill(
+                zipFilePath: zipFilePath,
+                folderPath: folderPath,
+                skillMdContent: skillMdContent,
                 name: name,
                 description: description,
-                directoryName: directoryName,
-                skillMdContent: skillMdContent,
-                folderPath: folderPath
+                directoryName: directoryName
             )
 
         // ========================================
