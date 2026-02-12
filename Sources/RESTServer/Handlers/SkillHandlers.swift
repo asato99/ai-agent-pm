@@ -47,7 +47,7 @@ extension RESTServer {
         return jsonResponse(response)
     }
 
-    /// POST /api/skills - スキル登録（JSON or multipart/form-data）
+    /// POST /api/skills - スキル登録（multipart/form-data ZIPアップロード）
     /// MCPServer.registerSkill() に委譲し、ロジック重複を排除
     func registerSkill(request: Request, context: AuthenticatedContext) async throws -> Response {
         guard context.agentId != nil else {
@@ -56,69 +56,46 @@ extension RESTServer {
 
         let contentType = request.headers[.contentType] ?? ""
 
-        // HTTP リクエストからパラメータを抽出
-        var zipFilePath: String?
-        var skillMdContent: String?
-        var name: String?
-        var skillDescription: String?
-        var directoryName: String?
-
-        if contentType.contains("multipart/form-data") {
-            guard let boundaryRange = contentType.range(of: "boundary="),
-                  let boundary = contentType[boundaryRange.upperBound...].split(separator: ";").first else {
-                return errorResponse(status: .badRequest, message: "Missing boundary in Content-Type")
-            }
-
-            let body = try await request.body.collect(upTo: 2 * 1024 * 1024)
-            guard let data = body.getData(at: 0, length: body.readableBytes) else {
-                return errorResponse(status: .badRequest, message: "Empty request body")
-            }
-
-            let formData = parseMultipartFormData(data: data, boundary: String(boundary))
-
-            guard let zipData = formData.files["zip_file"] else {
-                return errorResponse(status: .badRequest, message: "zip_file field is required for multipart requests")
-            }
-
-            // ZIP データを一時ファイルに書き出し（mcpServer は file path を受け取る）
-            let tempFile = FileManager.default.temporaryDirectory
-                .appendingPathComponent("upload-\(UUID().uuidString).zip")
-            try zipData.write(to: tempFile)
-            zipFilePath = tempFile.path
-
-            name = formData.fields["name"]
-            skillDescription = formData.fields["description"]
-            directoryName = formData.fields["directory_name"]
-        } else {
-            let body = try await request.body.collect(upTo: 2 * 1024 * 1024)
-            guard let data = body.getData(at: 0, length: body.readableBytes),
-                  let req = try? JSONDecoder().decode(RegisterSkillRequest.self, from: data) else {
-                return errorResponse(status: .badRequest, message: "Invalid request body")
-            }
-
-            guard let content = req.skillMdContent, !content.isEmpty else {
-                return errorResponse(status: .badRequest, message: "skillMdContent is required for JSON requests")
-            }
-
-            skillMdContent = content
-            name = req.name
-            skillDescription = req.description
-            directoryName = req.directoryName
+        guard contentType.contains("multipart/form-data") else {
+            return errorResponse(status: .unsupportedMediaType, message: "Content-Type must be multipart/form-data with a zip_file field")
         }
+
+        guard let boundaryRange = contentType.range(of: "boundary="),
+              let boundary = contentType[boundaryRange.upperBound...].split(separator: ";").first else {
+            return errorResponse(status: .badRequest, message: "Missing boundary in Content-Type")
+        }
+
+        let body = try await request.body.collect(upTo: 2 * 1024 * 1024)
+        guard let data = body.getData(at: 0, length: body.readableBytes) else {
+            return errorResponse(status: .badRequest, message: "Empty request body")
+        }
+
+        let formData = parseMultipartFormData(data: data, boundary: String(boundary))
+
+        guard let zipData = formData.files["zip_file"] else {
+            return errorResponse(status: .badRequest, message: "zip_file field is required")
+        }
+
+        // ZIP データを一時ファイルに書き出し（mcpServer は file path を受け取る）
+        let tempFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("upload-\(UUID().uuidString).zip")
+        try zipData.write(to: tempFile)
 
         // 一時ファイルのクリーンアップを保証
         defer {
-            if let tempPath = zipFilePath {
-                try? FileManager.default.removeItem(atPath: tempPath)
-            }
+            try? FileManager.default.removeItem(at: tempFile)
         }
+
+        let name = formData.fields["name"]
+        let skillDescription = formData.fields["description"]
+        let directoryName = formData.fields["directory_name"]
 
         // MCPServer に委譲
         do {
             let result = try mcpServer.registerSkill(
-                zipFilePath: zipFilePath,
+                zipFilePath: tempFile.path,
                 folderPath: nil,
-                skillMdContent: skillMdContent,
+                skillMdContent: nil,
                 name: name,
                 description: skillDescription,
                 directoryName: directoryName

@@ -25,14 +25,6 @@ public struct SkillDTO: Codable {
     }
 }
 
-/// Request body for registering a new skill
-public struct RegisterSkillRequest: Decodable {
-    let skillMdContent: String?
-    let name: String?
-    let directoryName: String?
-    let description: String?
-}
-
 /// Response for skill registration
 public struct RegisterSkillResponse: Encodable {
     let status: String

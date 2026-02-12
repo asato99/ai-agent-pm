@@ -121,6 +121,23 @@ final class SkillToolsTests: XCTestCase {
         XCTAssertEqual(saved?.name, "My Test Skill")
         XCTAssertEqual(saved?.description, "A test skill for unit testing")
         XCTAssertFalse(saved!.archiveData.isEmpty, "Archive data should not be empty")
+
+        // Assert: archiveData からファイルを正しく抽出できること（SkillEditorView の loadSkillData と同等）
+        let archiveService = SkillArchiveService()
+        let extractedFiles = archiveService.extractAllFiles(from: saved!.archiveData)
+        XCTAssertFalse(extractedFiles.isEmpty, "extractAllFiles should return non-empty dictionary")
+        XCTAssertNotNil(extractedFiles["SKILL.md"], "SKILL.md should be extractable from archive")
+        XCTAssertTrue(extractedFiles["SKILL.md"]!.contains("My Skill"), "SKILL.md should contain the original content")
+
+        // Assert: getSkillMdContent でも取得できること
+        let skillMdViaGet = archiveService.getSkillMdContent(from: saved!.archiveData)
+        XCTAssertNotNil(skillMdViaGet, "getSkillMdContent should return content")
+        XCTAssertTrue(skillMdViaGet!.contains("My Skill"), "getSkillMdContent should contain the original content")
+
+        // Assert: listFiles でファイル一覧が取得できること
+        let fileEntries = try archiveService.listFiles(archiveData: saved!.archiveData)
+        XCTAssertFalse(fileEntries.isEmpty, "listFiles should return non-empty list")
+        XCTAssertTrue(fileEntries.contains(where: { $0.path == "SKILL.md" }), "listFiles should contain SKILL.md")
     }
 
     // MARK: - Registration with Folder Path Tests
