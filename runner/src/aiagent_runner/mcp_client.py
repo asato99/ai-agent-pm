@@ -509,16 +509,20 @@ class MCPClient:
 
         return result.get("success", False)
 
-    async def invalidate_session(self, agent_id: str, project_id: str) -> bool:
-        """Invalidate session for an agent-project pair.
+    async def report_process_exit(
+        self, agent_id: str, project_id: str, remaining_processes: int
+    ) -> bool:
+        """Report process exit for an agent-project pair.
 
         Called by Coordinator when Agent Instance process exits.
-        This allows shouldStart to return True again for the next instance.
-        Phase 5: Requires coordinator_token for authorization.
+        The server determines which orphan sessions to clean up based on
+        the remaining process count.
+        Reference: docs/design/SESSION_INVALIDATION_IMPROVEMENT.md
 
         Args:
             agent_id: Agent ID
             project_id: Project ID
+            remaining_processes: Number of remaining processes for this (agent_id, project_id)
 
         Returns:
             True if successful, False otherwise
@@ -528,11 +532,12 @@ class MCPClient:
         """
         args = {
             "agent_id": agent_id,
-            "project_id": project_id
+            "project_id": project_id,
+            "remaining_processes": remaining_processes
         }
         if self._coordinator_token:
             args["coordinator_token"] = self._coordinator_token
-        result = await self._call_tool("invalidate_session", args)
+        result = await self._call_tool("report_process_exit", args)
 
         return result.get("success", False)
 

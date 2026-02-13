@@ -83,7 +83,7 @@ struct ToolAuthorization {
         "list_active_projects_with_agents": .coordinatorOnly,
         "get_agent_action": .coordinatorOnly,
         "register_execution_log_file": .coordinatorOnly,
-        "invalidate_session": .coordinatorOnly,
+        "report_process_exit": .coordinatorOnly,
         "report_agent_error": .coordinatorOnly,
         "list_managed_agents": .coordinatorOnly,
         "get_app_settings": .coordinatorOnly,

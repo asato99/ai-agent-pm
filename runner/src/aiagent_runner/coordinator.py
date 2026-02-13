@@ -91,7 +91,7 @@ class Coordinator:
 
         self._running = False
         self._shutdown_event: Optional[asyncio.Event] = None
-        self._instances: dict[AgentInstanceKey, AgentInstanceInfo] = {}
+        self._instances: dict[AgentInstanceKey, list[AgentInstanceInfo]] = {}
 
         # Phase 6: Log upload configuration
         # 参照: docs/design/LOG_TRANSFER_DESIGN.md
@@ -227,32 +227,34 @@ class Coordinator:
         if self._shutdown_event:
             self._shutdown_event.set()
 
-        # Terminate all running instances and invalidate their sessions
-        for key, info in list(self._instances.items()):
-            logger.info(f"Terminating {key.agent_id}/{key.project_id}")
-            try:
-                info.process.terminate()
-                # Wait for process to finish
+        # Terminate all running instances and report process exit
+        for key, info_list in list(self._instances.items()):
+            for info in info_list:
+                logger.info(f"Terminating {key.agent_id}/{key.project_id}")
                 try:
-                    info.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    logger.warning(f"Instance {key.agent_id}/{key.project_id} did not terminate, killing")
-                    info.process.kill()
-            except Exception as e:
-                logger.warning(f"Failed to terminate {key}: {e}")
+                    info.process.terminate()
+                    # Wait for process to finish
+                    try:
+                        info.process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        logger.warning(f"Instance {key.agent_id}/{key.project_id} did not terminate, killing")
+                        info.process.kill()
+                except Exception as e:
+                    logger.warning(f"Failed to terminate {key}: {e}")
 
-            # Invalidate session so next coordinator can start fresh
+            # Report process exit with remaining_processes=0 (all terminated)
             try:
-                success = await self.mcp_client.invalidate_session(
+                success = await self.mcp_client.report_process_exit(
                     agent_id=key.agent_id,
-                    project_id=key.project_id
+                    project_id=key.project_id,
+                    remaining_processes=0
                 )
                 if success:
-                    logger.info(f"Invalidated session for {key.agent_id}/{key.project_id}")
+                    logger.info(f"Reported process exit for {key.agent_id}/{key.project_id}")
                 else:
-                    logger.warning(f"Failed to invalidate session for {key.agent_id}/{key.project_id}")
+                    logger.warning(f"Failed to report process exit for {key.agent_id}/{key.project_id}")
             except MCPError as e:
-                logger.error(f"Error invalidating session for {key.agent_id}/{key.project_id}: {e}")
+                logger.error(f"Error reporting process exit for {key.agent_id}/{key.project_id}: {e}")
 
     async def _run_once(self) -> None:
         """Run one iteration of the polling loop."""
@@ -337,23 +339,28 @@ class Coordinator:
                             f"Error reporting error for {key.agent_id}/{key.project_id}: {e}"
                         )
 
-            # Invalidate session so shouldStart returns True for next instance
+            # Report process exit with remaining process count
+            # _cleanup_finished removes finished processes from _instances before returning,
+            # so _instances.get(key, []) contains only surviving processes
+            remaining = len(self._instances.get(key, []))
             try:
-                success = await self.mcp_client.invalidate_session(
+                success = await self.mcp_client.report_process_exit(
                     agent_id=key.agent_id,
-                    project_id=key.project_id
+                    project_id=key.project_id,
+                    remaining_processes=remaining
                 )
                 if success:
                     logger.info(
-                        f"Invalidated session for {key.agent_id}/{key.project_id}"
+                        f"Reported process exit for {key.agent_id}/{key.project_id} "
+                        f"(remaining={remaining})"
                     )
                 else:
                     logger.warning(
-                        f"Failed to invalidate session for {key.agent_id}/{key.project_id}"
+                        f"Failed to report process exit for {key.agent_id}/{key.project_id}"
                     )
             except MCPError as e:
                 logger.error(
-                    f"Error invalidating session for {key.agent_id}/{key.project_id}: {e}"
+                    f"Error reporting process exit for {key.agent_id}/{key.project_id}: {e}"
                 )
 
         # Step 4: For each (agent_id, project_id), check if should start
@@ -375,7 +382,7 @@ class Coordinator:
                     continue
 
                 # Skip if at max concurrent
-                if len(self._instances) >= self.config.max_concurrent:
+                if sum(len(v) for v in self._instances.values()) >= self.config.max_concurrent:
                     logger.debug(f"At max concurrent ({self.config.max_concurrent}), skipping")
                     break
 
@@ -393,7 +400,7 @@ class Coordinator:
 
                     if result.action == "stop":
                         # UC008: Stop running instance
-                        if key in self._instances:
+                        if self._instances.get(key):
                             logger.info(f"Stopping instance {agent_id}/{project_id} due to {result.reason}")
                             await self._stop_instance(key)
                     elif result.action == "start":
@@ -439,14 +446,17 @@ class Coordinator:
     async def _stop_instance(self, key: AgentInstanceKey) -> None:
         """Stop a running Agent Instance.
 
+        Stops the first (oldest) process for the given key.
+
         Args:
             key: The AgentInstanceKey identifying the instance to stop.
         """
-        info = self._instances.get(key)
-        if not info:
+        info_list = self._instances.get(key)
+        if not info_list:
             logger.warning(f"Instance {key.agent_id}/{key.project_id} not found in _instances")
             return
 
+        info = info_list[0]
         logger.info(f"Terminating instance {key.agent_id}/{key.project_id} (PID: {info.process.pid})")
 
         try:
@@ -475,8 +485,10 @@ class Coordinator:
             except Exception:
                 pass
 
-        # Remove from instances
-        del self._instances[key]
+        # Remove from instances list
+        info_list.pop(0)
+        if not info_list:
+            del self._instances[key]
         logger.info(f"Instance {key.agent_id}/{key.project_id} stopped and removed")
 
     def _cleanup_finished(self) -> list[tuple[AgentInstanceKey, AgentInstanceInfo, int]]:
@@ -487,89 +499,96 @@ class Coordinator:
             that need log file path registration.
         """
         finished: list[tuple[AgentInstanceKey, AgentInstanceInfo, int]] = []
-        for key, info in self._instances.items():
-            retcode = info.process.poll()
-            if retcode is not None:
-                logger.info(
-                    f"Instance {key.agent_id}/{key.project_id} finished with code {retcode}"
-                )
-                # Close log file handle
-                if info.log_file_handle:
-                    try:
-                        info.log_file_handle.close()
-                    except Exception:
-                        pass
-                # Clean up MCP config temp file
-                if info.mcp_config_file:
-                    try:
-                        os.unlink(info.mcp_config_file)
-                        logger.debug(f"Removed temp MCP config: {info.mcp_config_file}")
-                    except Exception:
-                        pass
-                # Clean up prompt temp file (Windows + Gemini)
-                if info.prompt_file:
-                    try:
-                        os.unlink(info.prompt_file)
-                        logger.debug(f"Removed temp prompt file: {info.prompt_file}")
-                    except Exception:
-                        pass
-
-                # Phase 6: Start async log upload (non-blocking)
-                # 参照: docs/design/LOG_TRANSFER_DESIGN.md
-                if (self.log_uploader and info.execution_log_id and
-                    info.log_file_path and info.task_id):
-                    upload_info = _LogUploadInfo(
-                        log_file_path=info.log_file_path,
-                        execution_log_id=info.execution_log_id,
-                        agent_id=key.agent_id,
-                        task_id=info.task_id,
-                        project_id=key.project_id
+        for key, info_list in list(self._instances.items()):
+            finished_in_list: list[AgentInstanceInfo] = []
+            for info in info_list:
+                retcode = info.process.poll()
+                if retcode is not None:
+                    logger.info(
+                        f"Instance {key.agent_id}/{key.project_id} finished with code {retcode}"
                     )
-                    task = asyncio.create_task(self._upload_log_async(upload_info))
-                    self._pending_uploads[info.execution_log_id] = task
-                    logger.debug(f"Started async log upload for {info.execution_log_id}")
+                    # Close log file handle
+                    if info.log_file_handle:
+                        try:
+                            info.log_file_handle.close()
+                        except Exception:
+                            pass
+                    # Clean up MCP config temp file
+                    if info.mcp_config_file:
+                        try:
+                            os.unlink(info.mcp_config_file)
+                            logger.debug(f"Removed temp MCP config: {info.mcp_config_file}")
+                        except Exception:
+                            pass
+                    # Clean up prompt temp file (Windows + Gemini)
+                    if info.prompt_file:
+                        try:
+                            os.unlink(info.prompt_file)
+                            logger.debug(f"Removed temp prompt file: {info.prompt_file}")
+                        except Exception:
+                            pass
 
-                # Error protection: Set cooldown on error exit, clear on success
-                # Reference: docs/design/SPAWN_ERROR_PROTECTION.md
-                if self._cooldown_manager:
-                    if retcode == 0:
-                        # Successful exit - clear any existing cooldown
-                        self._cooldown_manager.clear(key)
-                        logger.debug(f"Cleared cooldown for {key.agent_id}/{key.project_id} (successful exit)")
+                    # Phase 6: Start async log upload (non-blocking)
+                    # 参照: docs/design/LOG_TRANSFER_DESIGN.md
+                    if (self.log_uploader and info.execution_log_id and
+                        info.log_file_path and info.task_id):
+                        upload_info = _LogUploadInfo(
+                            log_file_path=info.log_file_path,
+                            execution_log_id=info.execution_log_id,
+                            agent_id=key.agent_id,
+                            task_id=info.task_id,
+                            project_id=key.project_id
+                        )
+                        task = asyncio.create_task(self._upload_log_async(upload_info))
+                        self._pending_uploads[info.execution_log_id] = task
+                        logger.debug(f"Started async log upload for {info.execution_log_id}")
 
-                if retcode != 0 and self._cooldown_manager:
-                    error_msg = self._extract_error_from_log(info.log_file_path) if info.log_file_path else None
-                    cooldown_seconds: Optional[int] = None
+                    # Error protection: Set cooldown on error exit, clear on success
+                    # Reference: docs/design/SPAWN_ERROR_PROTECTION.md
+                    if self._cooldown_manager:
+                        if retcode == 0:
+                            # Successful exit - clear any existing cooldown
+                            self._cooldown_manager.clear(key)
+                            logger.debug(f"Cleared cooldown for {key.agent_id}/{key.project_id} (successful exit)")
 
-                    # Check for quota error if detection is enabled
-                    if self._quota_detector and info.log_file_path:
-                        cooldown_seconds = self._quota_detector.detect_from_file(info.log_file_path)
-                        if cooldown_seconds:
-                            self._cooldown_manager.set_quota(
+                    if retcode != 0 and self._cooldown_manager:
+                        error_msg = self._extract_error_from_log(info.log_file_path) if info.log_file_path else None
+                        cooldown_seconds: Optional[int] = None
+
+                        # Check for quota error if detection is enabled
+                        if self._quota_detector and info.log_file_path:
+                            cooldown_seconds = self._quota_detector.detect_from_file(info.log_file_path)
+                            if cooldown_seconds:
+                                self._cooldown_manager.set_quota(
+                                    key=key,
+                                    cooldown_seconds=cooldown_seconds,
+                                    error_message=error_msg or f"Quota error (exit code {retcode})"
+                                )
+                                logger.warning(
+                                    f"Quota error detected for {key.agent_id}/{key.project_id}: "
+                                    f"cooldown {cooldown_seconds}s"
+                                )
+
+                        # If not a quota error, set regular error cooldown
+                        if cooldown_seconds is None:
+                            self._cooldown_manager.set_error(
                                 key=key,
-                                cooldown_seconds=cooldown_seconds,
-                                error_message=error_msg or f"Quota error (exit code {retcode})"
+                                error_message=error_msg or f"Process exited with code {retcode}"
                             )
                             logger.warning(
-                                f"Quota error detected for {key.agent_id}/{key.project_id}: "
-                                f"cooldown {cooldown_seconds}s"
+                                f"Error cooldown set for {key.agent_id}/{key.project_id}: "
+                                f"{self.config.error_protection.default_cooldown_seconds}s"
                             )
 
-                    # If not a quota error, set regular error cooldown
-                    if cooldown_seconds is None:
-                        self._cooldown_manager.set_error(
-                            key=key,
-                            error_message=error_msg or f"Process exited with code {retcode}"
-                        )
-                        logger.warning(
-                            f"Error cooldown set for {key.agent_id}/{key.project_id}: "
-                            f"{self.config.error_protection.default_cooldown_seconds}s"
-                        )
+                    finished.append((key, info, retcode))
+                    finished_in_list.append(info)
 
-                finished.append((key, info, retcode))
-
-        for key, _, _ in finished:
-            del self._instances[key]
+            # Remove finished processes from the list
+            for info in finished_in_list:
+                info_list.remove(info)
+            # Remove key entirely if no processes remain
+            if not info_list:
+                del self._instances[key]
 
         return finished
 
@@ -1246,7 +1265,7 @@ Always prefix your file paths with `{real_working_dir}/`.
             )
 
         key = AgentInstanceKey(agent_id, project_id)
-        self._instances[key] = AgentInstanceInfo(
+        self._instances.setdefault(key, []).append(AgentInstanceInfo(
             key=key,
             process=process,
             working_directory=working_dir,
@@ -1258,7 +1277,7 @@ Always prefix your file paths with `{real_working_dir}/`.
             log_file_path=str(log_file),
             mcp_config_file=mcp_config_file_path,
             prompt_file=prompt_file_path
-        )
+        ))
 
         logger.info(f"Spawned instance {agent_id}/{project_id} (PID: {process.pid})")
 

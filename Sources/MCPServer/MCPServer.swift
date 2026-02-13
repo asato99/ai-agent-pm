@@ -747,12 +747,13 @@ public final class MCPServer {
             }
             return try registerExecutionLogFile(agentId: agentId, taskId: taskId, logFilePath: logFilePath)
 
-        case "invalidate_session":
+        case "report_process_exit":
             guard let agentId = arguments["agent_id"] as? String,
-                  let projectId = arguments["project_id"] as? String else {
-                throw MCPError.missingArguments(["agent_id", "project_id"])
+                  let projectId = arguments["project_id"] as? String,
+                  let remainingProcesses = arguments["remaining_processes"] as? Int else {
+                throw MCPError.missingArguments(["agent_id", "project_id", "remaining_processes"])
             }
-            return try invalidateSession(agentId: agentId, projectId: projectId)
+            return try reportProcessExit(agentId: agentId, projectId: projectId, remainingProcesses: remainingProcesses)
 
         case "report_agent_error":
             guard let agentId = arguments["agent_id"] as? String,

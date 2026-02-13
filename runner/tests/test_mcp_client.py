@@ -427,8 +427,8 @@ class TestMCPClientCoordinatorAPI:
             })
 
     @pytest.mark.asyncio
-    async def test_invalidate_session_with_coordinator_token(self):
-        """Should pass coordinator_token for invalidate_session."""
+    async def test_report_process_exit_with_coordinator_token(self):
+        """Should pass coordinator_token for report_process_exit."""
         client = MCPClient("/tmp/test.sock", coordinator_token="coord-token-abc")
 
         mock_response = {"success": True}
@@ -436,12 +436,13 @@ class TestMCPClientCoordinatorAPI:
         with patch.object(client, "_call_tool", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = mock_response
 
-            result = await client.invalidate_session("agent-001", "project-001")
+            result = await client.report_process_exit("agent-001", "project-001", remaining_processes=0)
 
             assert result is True
-            mock_call.assert_called_once_with("invalidate_session", {
+            mock_call.assert_called_once_with("report_process_exit", {
                 "agent_id": "agent-001",
                 "project_id": "project-001",
+                "remaining_processes": 0,
                 "coordinator_token": "coord-token-abc"
             })
 

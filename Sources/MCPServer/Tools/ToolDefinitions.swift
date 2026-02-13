@@ -26,7 +26,7 @@ enum ToolDefinitions {
             listActiveProjectsWithAgents,
             getAgentAction,
             registerExecutionLogFile,
-            invalidateSession,
+            reportProcessExit,
             reportAgentError,
             getAppSettings,
 
@@ -404,7 +404,7 @@ enum ToolDefinitions {
                 ],
                 "model_id": [
                     "type": "string",
-                    "description": "使用中のモデルID（例: claude-sonnet-4-5, claude-opus-4, gemini-2.5-pro, gpt-4o）"
+                    "description": "使用中のモデルID（例: claude-sonnet-4-5, claude-opus-4-6, gemini-2.5-pro, gpt-4o）"
                 ]
             ] as [String: Any],
             "required": ["session_token", "provider", "model_id"]
@@ -980,12 +980,14 @@ enum ToolDefinitions {
         ]
     ]
 
-    /// invalidate_session - セッションを無効化
+    /// report_process_exit - プロセス終了を報告
     /// Coordinatorがエージェントプロセス終了時に呼び出します。
+    /// 残存プロセス数に基づいて孤児セッションを判定・削除します。
     /// 認証不要（Coordinator用API）。
-    static let invalidateSession: [String: Any] = [
-        "name": "invalidate_session",
-        "description": "指定されたエージェント・プロジェクトのセッションを無効化します。Coordinatorがエージェントプロセス終了時に呼び出します。認証不要。",
+    /// 参照: docs/design/SESSION_INVALIDATION_IMPROVEMENT.md
+    static let reportProcessExit: [String: Any] = [
+        "name": "report_process_exit",
+        "description": "エージェントプロセスの終了を報告します。残存プロセス数に基づいて孤児セッションを判定・削除します。Coordinatorがプロセス終了時に呼び出します。認証不要。",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -996,9 +998,13 @@ enum ToolDefinitions {
                 "project_id": [
                     "type": "string",
                     "description": "プロジェクトID"
+                ],
+                "remaining_processes": [
+                    "type": "integer",
+                    "description": "同一(agent_id, project_id)で残存しているプロセス数"
                 ]
             ] as [String: Any],
-            "required": ["agent_id", "project_id"]
+            "required": ["agent_id", "project_id", "remaining_processes"]
         ]
     ]
 

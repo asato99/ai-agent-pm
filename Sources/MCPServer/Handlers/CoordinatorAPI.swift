@@ -388,16 +388,93 @@ extension MCPServer {
         ]
     }
 
-    /// セッションを無効化（Coordinator用）
-    /// エージェントプロセス終了時に呼び出され、shouldStartが再度trueを返せるようにする
-    func invalidateSession(agentId: String, projectId: String) throws -> [String: Any] {
-        Self.log("[MCP] invalidateSession called: agentId='\(agentId)', projectId='\(projectId)'")
+    /// プロセス終了報告（Coordinator用）
+    /// エージェントプロセス終了時に呼び出される。残存プロセス数に基づいて孤児セッションを判定・削除する。
+    /// 参照: docs/design/SESSION_INVALIDATION_IMPROVEMENT.md
+    func reportProcessExit(agentId: String, projectId: String, remainingProcesses: Int) throws -> [String: Any] {
+        Self.log("[MCP] reportProcessExit called: agentId='\(agentId)', projectId='\(projectId)', remainingProcesses=\(remainingProcesses)")
 
         let agId = AgentID(value: agentId)
         let projId = ProjectID(value: projectId)
 
-        // 該当する全セッションを取得して削除
+        if remainingProcesses == 0 {
+            // 全プロセス終了 → 全セッション削除（現行invalidateSessionと同じ）
+            return try invalidateAllSessions(agentId: agId, projectId: projId)
+        }
+
+        // remaining > 0: 他のプロセスが生存している
         let sessions = try agentSessionRepository.findByAgentIdAndProjectId(agId, projectId: projId)
+        let activeSessions = sessions.filter { $0.expiresAt > Date() }
+
+        Self.log("[MCP] reportProcessExit: \(activeSessions.count) active session(s) found")
+
+        if activeSessions.count <= 1 {
+            // 0-1個: 死んだプロセスがlogout済みか認証前に死亡。何もしない。
+            Self.log("[MCP] reportProcessExit: <= 1 active session, no action needed")
+            return [
+                "success": true,
+                "agent_id": agentId,
+                "project_id": projectId,
+                "action": "none",
+                "reason": "no_orphan_detected"
+            ]
+        }
+
+        // セッション2個以上: 孤児判定
+        // セッション存在チェックを除外した仕事判定で、残存プロセスがどちらの仕事をしているか判定
+        let hasRawTask = try workDetectionService.hasRawTaskWork(agentId: agId, projectId: projId)
+        let hasRawChat = try workDetectionService.hasRawChatWork(agentId: agId, projectId: projId)
+
+        Self.log("[MCP] reportProcessExit: hasRawTask=\(hasRawTask), hasRawChat=\(hasRawChat)")
+
+        if hasRawTask {
+            // タスク仕事がある → 残存プロセスはtask側 → chatセッションが孤児
+            let orphanSession = activeSessions.first { $0.purpose == .chat }
+            if let orphan = orphanSession {
+                try agentSessionRepository.delete(orphan.id)
+                Self.log("[MCP] reportProcessExit: deleted orphan chat session \(orphan.id.value)")
+                return [
+                    "success": true,
+                    "agent_id": agentId,
+                    "project_id": projectId,
+                    "action": "deleted_orphan",
+                    "deleted_purpose": "chat",
+                    "deleted_session_id": orphan.id.value
+                ]
+            }
+        } else if hasRawChat {
+            // チャット仕事がある → 残存プロセスはchat側 → taskセッションが孤児
+            let orphanSession = activeSessions.first { $0.purpose == .task }
+            if let orphan = orphanSession {
+                try agentSessionRepository.delete(orphan.id)
+                Self.log("[MCP] reportProcessExit: deleted orphan task session \(orphan.id.value)")
+                return [
+                    "success": true,
+                    "agent_id": agentId,
+                    "project_id": projectId,
+                    "action": "deleted_orphan",
+                    "deleted_purpose": "task",
+                    "deleted_session_id": orphan.id.value
+                ]
+            }
+        }
+
+        // どちらの仕事もない、または該当purposeのセッションが見つからない → 何もしない（TTL失効に委ねる）
+        Self.log("[MCP] reportProcessExit: cannot determine orphan, deferring to TTL expiry")
+        return [
+            "success": true,
+            "agent_id": agentId,
+            "project_id": projectId,
+            "action": "none",
+            "reason": "cannot_determine_orphan"
+        ]
+    }
+
+    /// 全セッション無効化（内部ヘルパー）
+    /// remaining_processes=0 の場合、または stop() での全プロセス終了時に使用
+    private func invalidateAllSessions(agentId: AgentID, projectId: ProjectID) throws -> [String: Any] {
+        // 該当する全セッションを取得して削除
+        let sessions = try agentSessionRepository.findByAgentIdAndProjectId(agentId, projectId: projectId)
         var deletedCount = 0
 
         for session in sessions {
@@ -406,26 +483,27 @@ extension MCPServer {
             Self.log("[MCP] Deleted session: \(session.id.value)")
         }
 
-        Self.log("[MCP] invalidateSession completed: deleted \(deletedCount) AgentSession(s)")
+        Self.log("[MCP] invalidateAllSessions completed: deleted \(deletedCount) AgentSession(s)")
 
         // ワークフローSession（作業セッション）も終了（abandoned扱い）
         let endSessionsUseCase = EndActiveSessionsUseCase(sessionRepository: sessionRepository)
         let endedWorkflowSessionCount = try endSessionsUseCase.execute(
-            agentId: agId,
-            projectId: projId,
+            agentId: agentId,
+            projectId: projectId,
             status: .abandoned
         )
-        Self.log("[MCP] invalidateSession: \(endedWorkflowSessionCount) workflow session(s) ended")
+        Self.log("[MCP] invalidateAllSessions: \(endedWorkflowSessionCount) workflow session(s) ended")
 
         // AI-to-AI会話のクリーンアップ
         // どちらかのエージェントがセッションを抜けた時点で会話は成立しないため、自動終了する
         // 参照: docs/design/AI_TO_AI_CONVERSATION.md
-        let endedConversationCount = try cleanupAgentConversations(agentId: agId, projectId: projId)
+        let endedConversationCount = try cleanupAgentConversations(agentId: agentId, projectId: projectId)
 
         return [
             "success": true,
-            "agent_id": agentId,
-            "project_id": projectId,
+            "agent_id": agentId.value,
+            "project_id": projectId.value,
+            "action": "invalidated_all",
             "deleted_agent_sessions": deletedCount,
             "ended_workflow_sessions": endedWorkflowSessionCount,
             "ended_conversations": endedConversationCount

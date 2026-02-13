@@ -58,7 +58,7 @@ final class ToolAuthorizationTests: XCTestCase {
         XCTAssertEqual(ToolAuthorization.permissions["list_active_projects_with_agents"], .coordinatorOnly)
         XCTAssertEqual(ToolAuthorization.permissions["get_agent_action"], .coordinatorOnly)
         XCTAssertEqual(ToolAuthorization.permissions["register_execution_log_file"], .coordinatorOnly)
-        XCTAssertEqual(ToolAuthorization.permissions["invalidate_session"], .coordinatorOnly)
+        XCTAssertEqual(ToolAuthorization.permissions["report_process_exit"], .coordinatorOnly)
         XCTAssertEqual(ToolAuthorization.permissions["list_managed_agents"], .coordinatorOnly)
     }
 

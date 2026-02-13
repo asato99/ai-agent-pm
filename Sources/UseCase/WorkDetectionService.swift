@@ -102,4 +102,28 @@ public struct WorkDetectionService: Sendable {
 
         return hasActiveTask ? nil : task.id
     }
+
+    // MARK: - Raw Work Detection (Session-independent)
+    // セッション存在チェックを除外した純粋な仕事判定
+    // reportProcessExit での孤児セッション判定に使用
+    // 参照: docs/design/SESSION_INVALIDATION_IMPROVEMENT.md
+
+    /// セッション存在チェック除外版: 純粋なタスク仕事判定
+    public func hasRawTaskWork(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+        let inProgressTasks = try taskRepository.findByProject(projectId, status: .inProgress)
+        return inProgressTasks.contains { $0.assigneeId == agentId }
+    }
+
+    /// セッション存在チェック除外版: 純粋なチャット仕事判定
+    public func hasRawChatWork(agentId: AgentID, projectId: ProjectID) throws -> Bool {
+        let unreadMessages = try chatRepository.findUnreadMessages(projectId: projectId, agentId: agentId)
+        let hasUnread = !unreadMessages.isEmpty
+        let hasPendingDelegation: Bool
+        if let delegationRepo = chatDelegationRepository {
+            hasPendingDelegation = try delegationRepo.hasPending(agentId: agentId, projectId: projectId)
+        } else {
+            hasPendingDelegation = false
+        }
+        return hasUnread || hasPendingDelegation
+    }
 }

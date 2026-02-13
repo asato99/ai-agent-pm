@@ -553,7 +553,7 @@ final class MCPServerTests: XCTestCase {
 
         // 現在のツール一覧: 39個
         // Unauthenticated: 2 (help, authenticate)
-        // Coordinator-only: 7 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, invalidate_session, report_agent_error)
+        // Coordinator-only: 7 (health_check, list_managed_agents, list_active_projects_with_agents, get_agent_action, register_execution_log_file, report_process_exit, report_agent_error)
         // Manager-only: 5 (list_subordinates, get_subordinate_profile, assign_task, approve_task_request, reject_task_request)
         // Task-only: 8 (create_task, create_tasks_batch, report_completed, update_task_status, report_execution_start, report_execution_complete, delegate_to_chat_session, get_task_conversations)
         // Authenticated (Manager + Worker): 12 (logout, report_model, get_my_profile, get_my_task, get_my_task_progress, get_notifications, get_next_action, get_project, list_tasks, get_task, request_task, register_skill)
@@ -589,7 +589,7 @@ final class MCPPRDComplianceTests: XCTestCase {
             "list_active_projects_with_agents",
             "get_agent_action",
             "register_execution_log_file",
-            "invalidate_session",
+            "report_process_exit",
 
             // Manager-only (Phase 5)
             "list_subordinates",

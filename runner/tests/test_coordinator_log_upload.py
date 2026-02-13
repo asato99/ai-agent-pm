@@ -69,7 +69,7 @@ class TestCoordinatorAsyncLogUpload:
         )
         # execution_log_idを追加（新フィールド）
         info.execution_log_id = "exec_001"
-        coordinator._instances[key] = info
+        coordinator._instances[key] = [info]
 
         # cleanup_finished を実行
         finished = coordinator._cleanup_finished()
@@ -174,7 +174,7 @@ class TestCoordinatorAsyncLogUpload:
             mcp_config_file=None
         )
         info.execution_log_id = "exec_001"
-        coordinator._instances[key] = info
+        coordinator._instances[key] = [info]
 
         # 時間計測
         loop = asyncio.get_event_loop()
