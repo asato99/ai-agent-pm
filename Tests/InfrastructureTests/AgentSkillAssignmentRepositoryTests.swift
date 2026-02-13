@@ -85,7 +85,7 @@ final class AgentSkillAssignmentRepositoryTests: XCTestCase {
             name: name,
             role: "Test role",
             type: .ai,
-            aiType: .claudeSonnet4,
+            aiType: .claudeSonnet4_5,
             provider: "anthropic",
             modelId: "claude-3-5-sonnet",
             hierarchyType: .worker,

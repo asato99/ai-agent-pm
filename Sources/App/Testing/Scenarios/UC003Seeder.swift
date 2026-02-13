@@ -68,14 +68,14 @@ extension TestDataSeeder {
         try await agentRepository.save(sonnetAgent)
         print("✅ UC003: Sonnet agent created - \(sonnetAgent.name) (aiType=claudeSonnet4_5)")
 
-        // UC003用エージェント2: Claude Opus 4
+        // UC003用エージェント2: Claude Opus 4.6
         let opusAgentId = AgentID(value: "agt_uc003_opus")
         let opusAgent = Agent(
             id: opusAgentId,
             name: "UC003 Opus Agent",
-            role: "Claude Opus 4エージェント",
+            role: "Claude Opus 4.6エージェント",
             type: .ai,
-            aiType: .claudeOpus4,
+            aiType: .claudeOpus4_6,
             roleType: .developer,
             parentAgentId: nil,
             maxParallelTasks: 1,
@@ -87,7 +87,7 @@ extension TestDataSeeder {
             updatedAt: Date()
         )
         try await agentRepository.save(opusAgent)
-        print("✅ UC003: Opus agent created - \(opusAgent.name) (aiType=claudeOpus4)")
+        print("✅ UC003: Opus agent created - \(opusAgent.name) (aiType=claudeOpus4_6)")
 
         // UC003用エージェント3: Gemini 2.5 Pro
         let geminiAgentId = AgentID(value: "agt_uc003_gemini")

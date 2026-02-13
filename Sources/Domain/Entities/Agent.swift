@@ -13,7 +13,7 @@ public struct Agent: Identifiable, Equatable, Sendable {
     public var type: AgentType
     public var aiType: AIType?                    // AIプロバイダー種別（AI agentの場合）- 後方互換性用
     public var provider: String?                  // プロバイダー名（"claude", "gemini", "openai"）- 直接保存
-    public var modelId: String?                   // モデルID（"gemini-2.5-pro", "claude-opus-4"）- 直接保存
+    public var modelId: String?                   // モデルID（"gemini-2.5-pro", "claude-opus-4-6"）- 直接保存
     public var hierarchyType: AgentHierarchyType  // 階層タイプ（Manager/Worker）
     public var roleType: AgentRoleType
     public var parentAgentId: AgentID?      // 階層構造（親エージェント）
@@ -150,9 +150,9 @@ public enum AgentType: String, Codable, Sendable, CaseIterable {
 /// 参照: docs/plan/MULTI_AGENT_USE_CASES.md - AIタイプ
 public enum AIType: String, Codable, Sendable, CaseIterable {
     // Claude models
-    case claudeOpus4 = "claude-opus-4"
+    case claudeOpus4_6 = "claude-opus-4-6"
     case claudeSonnet4_5 = "claude-sonnet-4-5"
-    case claudeSonnet4 = "claude-sonnet-4"
+    case claudeHaiku4_5 = "claude-haiku-4-5"
 
     // Gemini models
     case gemini25Flash = "gemini-2.5-flash"
@@ -168,9 +168,9 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
     /// 表示名
     public var displayName: String {
         switch self {
-        case .claudeOpus4: return "Claude Opus 4"
+        case .claudeOpus4_6: return "Claude Opus 4.6"
         case .claudeSonnet4_5: return "Claude Sonnet 4.5"
-        case .claudeSonnet4: return "Claude Sonnet 4"
+        case .claudeHaiku4_5: return "Claude Haiku 4.5"
         case .gemini25Flash: return "Gemini 2.5 Flash"
         case .gemini25Pro: return "Gemini 2.5 Pro"
         case .gpt4o: return "GPT-4o"
@@ -182,7 +182,7 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
     /// プロバイダー名（Coordinator設定用）
     public var provider: String {
         switch self {
-        case .claudeOpus4, .claudeSonnet4_5, .claudeSonnet4:
+        case .claudeOpus4_6, .claudeSonnet4_5, .claudeHaiku4_5:
             return "claude"
         case .gemini25Flash, .gemini25Pro:
             return "gemini"
@@ -196,7 +196,7 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
     /// CLIコマンド名（Runner用）
     public var cliCommand: String {
         switch self {
-        case .claudeOpus4, .claudeSonnet4_5, .claudeSonnet4:
+        case .claudeOpus4_6, .claudeSonnet4_5, .claudeHaiku4_5:
             return "claude"
         case .gemini25Flash, .gemini25Pro:
             return "gemini"
@@ -208,18 +208,9 @@ public enum AIType: String, Codable, Sendable, CaseIterable {
     }
 
     /// モデルID（API呼び出し用）
-    /// 参照: https://platform.claude.com/docs/en/about-claude/models/overview
+    /// 参照: https://docs.anthropic.com/en/docs/about-claude/models
     public var modelId: String {
-        switch self {
-        case .claudeOpus4: return "claude-opus-4"
-        case .claudeSonnet4_5: return "claude-sonnet-4-5"
-        case .claudeSonnet4: return "claude-sonnet-4"
-        case .gemini25Flash: return "gemini-2.5-flash"
-        case .gemini25Pro: return "gemini-2.5-pro"
-        case .gpt4o: return "gpt-4o"
-        case .gpt4oMini: return "gpt-4o-mini"
-        case .custom: return "custom"
-        }
+        return self.rawValue
     }
 }
 
