@@ -276,6 +276,7 @@ skill_assignments:
     - project-docs
     - brainstorming
     - custom-clean-architecture
+    - custom-solid
 
   worker-designer:
     - project-docs
