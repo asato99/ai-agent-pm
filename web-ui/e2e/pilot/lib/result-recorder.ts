@@ -24,12 +24,19 @@ export class ResultRecorder {
     this.variation = variation
     this.startedAt = new Date()
     this.runId = this.generateRunId()
-    this.resultsDir = path.join(
-      baseDir,
-      'results',
-      scenario,
-      `${this.runId}_${variation}`
-    )
+
+    // PILOT_RESULT_DIR が指定されていればそのディレクトリを使用（run-experiment.sh/run-pilot.sh との二重作成を防止）
+    const envResultDir = process.env.PILOT_RESULT_DIR
+    if (envResultDir) {
+      this.resultsDir = envResultDir
+    } else {
+      this.resultsDir = path.join(
+        baseDir,
+        'results',
+        scenario,
+        `${this.runId}_${variation}`
+      )
+    }
   }
 
   private generateRunId(): string {

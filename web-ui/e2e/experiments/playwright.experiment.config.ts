@@ -28,7 +28,7 @@ export default defineConfig({
     baseURL: process.env.PILOT_WEB_URL || 'http://localhost:5173',
     trace: 'on',
     screenshot: 'on',
-    video: 'on',
+    video: process.env.PILOT_RECORD === 'true' ? 'on' : 'off',
     launchOptions: {
       slowMo: process.env.PILOT_SLOW_MO ? parseInt(process.env.PILOT_SLOW_MO) : 0,
     },

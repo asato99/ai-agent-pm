@@ -449,8 +449,9 @@ timeouts:
 initial_action:
   type: chat
   from: pilot-owner
-  to: pilot-manager
+  to: pilot-dev
   message: |
+    @@タスク作成: order_processor.py のリファクタリング
     作業ディレクトリにある order_processor.py をリファクタリングしてください。
     コードの可読性と保守性を改善してください。
     test_order_processor.py のテストが全て通ることを確認してください。

@@ -27,6 +27,7 @@ VARIATION="baseline"
 SKIP_SERVER_START=false
 VERBOSE=false
 HEADED=true
+RECORD=false
 
 # テスト設定
 TEST_DB_PATH="/tmp/AIAgentPM_Pilot.db"
@@ -58,10 +59,11 @@ Options:
   -v, --variation NAME    バリエーション名 (default: baseline)
   --skip-server           サーバー起動をスキップ（すでに起動している場合）
   --headless              ブラウザを非表示で実行
+  --record                動画記録を有効化（Playwright + ffmpeg）
   --verbose               詳細出力
   -h, --help              ヘルプ表示
 
-Note: デフォルトはブラウザ表示（headed）モードです
+Note: デフォルトはブラウザ表示（headed）、動画記録OFFです
 
 Examples:
   $0                                    # baseline バリエーションで実行
@@ -181,6 +183,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --headless)
       HEADED=false
+      shift
+      ;;
+    --record)
+      RECORD=true
       shift
       ;;
     --verbose)
@@ -417,29 +423,32 @@ for i in {1..20}; do curl -s "http://localhost:$WEB_UI_PORT" > /dev/null 2>&1 &&
 echo -e "${GREEN}✓ Web UI running at :$WEB_UI_PORT${NC}"
 echo ""
 
-# Step 7.5: ffmpeg画面録画開始（Playwrightの録画が途切れる問題の対策）
-echo -e "${YELLOW}Step 7.5: Starting ffmpeg screen recording${NC}"
-FFMPEG_RECORDING="$LOG_DIR/screen_recording.mp4"
-if command -v ffmpeg &> /dev/null; then
-  # 低フレームレート（5fps）で長時間録画に最適化
-  # -movflags frag_keyframe+empty_moov: 中断しても再生可能なfragmented MP4を生成
-  ffmpeg -f avfoundation -framerate 5 -capture_cursor 1 -i "0:none" \
-    -c:v libx264 -preset ultrafast -crf 28 \
-    -pix_fmt yuv420p \
-    -movflags frag_keyframe+empty_moov \
-    "$FFMPEG_RECORDING" > "$LOG_DIR/ffmpeg.log" 2>&1 &
-  FFMPEG_PID=$!
-  sleep 2
-  if kill -0 "$FFMPEG_PID" 2>/dev/null; then
-    echo -e "${GREEN}✓ ffmpeg recording started (PID: $FFMPEG_PID)${NC}"
+# Step 7.5: ffmpeg画面録画（--record オプション時のみ）
+if [ "$RECORD" = true ]; then
+  echo -e "${YELLOW}Step 7.5: Starting ffmpeg screen recording${NC}"
+  FFMPEG_RECORDING="$LOG_DIR/screen_recording.mp4"
+  if command -v ffmpeg &> /dev/null; then
+    ffmpeg -f avfoundation -framerate 5 -capture_cursor 1 -i "0:none" \
+      -c:v libx264 -preset ultrafast -crf 28 \
+      -pix_fmt yuv420p \
+      -movflags frag_keyframe+empty_moov \
+      "$FFMPEG_RECORDING" > "$LOG_DIR/ffmpeg.log" 2>&1 &
+    FFMPEG_PID=$!
+    sleep 2
+    if kill -0 "$FFMPEG_PID" 2>/dev/null; then
+      echo -e "${GREEN}✓ ffmpeg recording started (PID: $FFMPEG_PID)${NC}"
+    else
+      echo -e "${YELLOW}⚠ ffmpeg failed to start (continuing without screen recording)${NC}"
+      FFMPEG_PID=""
+    fi
   else
-    echo -e "${YELLOW}⚠ ffmpeg failed to start (continuing without screen recording)${NC}"
-    FFMPEG_PID=""
+    echo -e "${YELLOW}⚠ ffmpeg not found (skipping screen recording)${NC}"
   fi
+  echo ""
 else
-  echo -e "${YELLOW}⚠ ffmpeg not found (skipping screen recording)${NC}"
+  echo -e "${YELLOW}Step 7.5: Screen recording skipped (use --record to enable)${NC}"
+  echo ""
 fi
-echo ""
 
 # Step 8: Playwrightテスト実行
 echo -e "${YELLOW}Step 8: Running Playwright test${NC}"
@@ -459,6 +468,11 @@ export PILOT_RESULT_DIR="$RESULT_DIR"
 # Headed mode
 if [ "$HEADED" = true ]; then
   export PILOT_HEADED="true"
+fi
+
+# Record mode
+if [ "$RECORD" = true ]; then
+  export PILOT_RECORD="true"
 fi
 
 set -o pipefail
