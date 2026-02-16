@@ -1,0 +1,456 @@
+# Refactoring Experiment - シナリオ定義
+#
+# コードの臭いを含む既存モジュールのリファクタリングを指示する。
+# リファクタリング手法は指定せず、AIに判断させる。
+# テストで外部的振る舞いが保たれていることを自動検証し、
+# コード品質の改善は目視で確認する。
+
+name: refactoring
+description: "リファクタリング実験 - コードの臭いを含むモジュールの品質改善"
+version: "1.0"
+
+# プロジェクト設定
+project:
+  id: exp-refactoring
+  name: "リファクタリング実験"
+  working_directory: /tmp/exp_refactoring_workspace
+
+# 初期ファイル
+initial_files:
+  - name: order_processor.py
+    content: |
+      """注文処理モジュール"""
+
+
+      def process_order(customer_name, customer_email, customer_type,
+                        items, shipping_city, shipping_state, shipping_zip,
+                        payment_method, discount_code=None):
+          """注文を処理し、結果を辞書で返す"""
+
+          # バリデーション
+          if not customer_name or not customer_email:
+              return {"success": False, "error": "Customer name and email required"}
+          if not items or len(items) == 0:
+              return {"success": False, "error": "At least one item required"}
+          if payment_method not in ["credit_card", "debit_card", "bank_transfer"]:
+              return {"success": False, "error": "Invalid payment method"}
+
+          for item in items:
+              if item["quantity"] <= 0:
+                  return {"success": False, "error": f"Invalid quantity for {item['name']}"}
+              if item["price"] < 0:
+                  return {"success": False, "error": f"Invalid price for {item['name']}"}
+
+          # 小計計算
+          subtotal = 0
+          item_details = []
+          for item in items:
+              line_total = item["price"] * item["quantity"]
+              subtotal += line_total
+              item_details.append({
+                  "name": item["name"],
+                  "quantity": item["quantity"],
+                  "price": item["price"],
+                  "line_total": line_total,
+              })
+
+          # 割引計算
+          discount_amount = 0
+          discount_description = ""
+          if discount_code == "SAVE10":
+              discount_amount = subtotal * 0.10
+              discount_description = "10% off"
+          elif discount_code == "SAVE20":
+              discount_amount = subtotal * 0.20
+              discount_description = "20% off"
+          elif discount_code == "VIP":
+              discount_amount = subtotal * 0.30
+              discount_description = "VIP 30% off"
+          elif discount_code is not None:
+              return {"success": False, "error": f"Invalid discount code: {discount_code}"}
+
+          # 顧客タイプ別追加割引
+          if customer_type == "gold":
+              additional = (subtotal - discount_amount) * 0.05
+              discount_amount += additional
+              if discount_description:
+                  discount_description += " + Gold 5%"
+              else:
+                  discount_description = "Gold member 5%"
+          elif customer_type == "platinum":
+              additional = (subtotal - discount_amount) * 0.10
+              discount_amount += additional
+              if discount_description:
+                  discount_description += " + Platinum 10%"
+              else:
+                  discount_description = "Platinum member 10%"
+
+          # 送料計算
+          shipping_cost = 0
+          if subtotal < 50:
+              shipping_cost = 10.00
+          elif subtotal < 100:
+              shipping_cost = 5.00
+          else:
+              shipping_cost = 0
+          if customer_type == "platinum":
+              shipping_cost = 0
+
+          # 税金計算
+          tax_rate = 0.08
+          if shipping_state == "OR":
+              tax_rate = 0.0
+          elif shipping_state == "CA":
+              tax_rate = 0.0725
+          elif shipping_state == "NY":
+              tax_rate = 0.08
+          elif shipping_state == "TX":
+              tax_rate = 0.0625
+
+          taxable_amount = subtotal - discount_amount
+          tax = taxable_amount * tax_rate
+          total = taxable_amount + tax + shipping_cost
+
+          # レシート生成
+          receipt_lines = []
+          receipt_lines.append("=" * 50)
+          receipt_lines.append("ORDER RECEIPT")
+          receipt_lines.append("=" * 50)
+          receipt_lines.append(f"Customer: {customer_name} ({customer_email})")
+          if customer_type and customer_type != "regular":
+              receipt_lines.append(f"Member: {customer_type.upper()}")
+          receipt_lines.append(f"Ship to: {shipping_city}, {shipping_state} {shipping_zip}")
+          receipt_lines.append("")
+          for detail in item_details:
+              receipt_lines.append(
+                  f"  {detail['name']:30s} x{detail['quantity']:3d}  ${detail['line_total']:>8.2f}"
+              )
+          receipt_lines.append("-" * 50)
+          receipt_lines.append(f"  {'Subtotal':34s} ${subtotal:>8.2f}")
+          if discount_amount > 0:
+              receipt_lines.append(
+                  f"  {'Discount (' + discount_description + ')':34s} -${discount_amount:>7.2f}"
+              )
+          if shipping_cost > 0:
+              receipt_lines.append(f"  {'Shipping':34s} ${shipping_cost:>8.2f}")
+          else:
+              receipt_lines.append(f"  {'Shipping':34s}     FREE")
+          receipt_lines.append(
+              f"  {'Tax (' + f'{tax_rate*100:.1f}%' + ')':34s} ${tax:>8.2f}"
+          )
+          receipt_lines.append("=" * 50)
+          receipt_lines.append(f"  {'TOTAL':34s} ${total:>8.2f}")
+          receipt_lines.append("=" * 50)
+
+          return {
+              "success": True,
+              "order": {
+                  "customer_name": customer_name,
+                  "customer_email": customer_email,
+                  "customer_type": customer_type,
+                  "items": item_details,
+                  "subtotal": round(subtotal, 2),
+                  "discount_amount": round(discount_amount, 2),
+                  "discount_description": discount_description,
+                  "shipping_cost": round(shipping_cost, 2),
+                  "tax_rate": tax_rate,
+                  "tax": round(tax, 2),
+                  "total": round(total, 2),
+                  "shipping_address": {
+                      "city": shipping_city,
+                      "state": shipping_state,
+                      "zip": shipping_zip,
+                  },
+                  "payment_method": payment_method,
+              },
+              "receipt": "\n".join(receipt_lines),
+          }
+
+
+      def generate_monthly_report(orders):
+          """月次レポートを生成"""
+          total_revenue = 0
+          total_orders = 0
+          total_items = 0
+          customer_orders = {}
+          state_revenue = {}
+
+          for order in orders:
+              if not order.get("success"):
+                  continue
+              order_data = order["order"]
+              total_revenue += order_data["total"]
+              total_orders += 1
+
+              for item in order_data["items"]:
+                  total_items += item["quantity"]
+
+              name = order_data["customer_name"]
+              if name not in customer_orders:
+                  customer_orders[name] = {"count": 0, "total": 0}
+              customer_orders[name]["count"] += 1
+              customer_orders[name]["total"] += order_data["total"]
+
+              state = order_data["shipping_address"]["state"]
+              if state not in state_revenue:
+                  state_revenue[state] = 0
+              state_revenue[state] += order_data["total"]
+
+          top_customers = sorted(
+              customer_orders.items(), key=lambda x: x[1]["total"], reverse=True
+          )[:5]
+          top_states = sorted(
+              state_revenue.items(), key=lambda x: x[1], reverse=True
+          )[:5]
+
+          report_lines = []
+          report_lines.append("=" * 50)
+          report_lines.append("MONTHLY SALES REPORT")
+          report_lines.append("=" * 50)
+          report_lines.append(f"Total Orders:  {total_orders}")
+          report_lines.append(f"Total Items:   {total_items}")
+          report_lines.append(f"Total Revenue: ${total_revenue:.2f}")
+          if total_orders > 0:
+              report_lines.append(f"Avg Order:     ${total_revenue / total_orders:.2f}")
+          report_lines.append("")
+          report_lines.append("Top Customers:")
+          for name, data in top_customers:
+              report_lines.append(
+                  f"  {name:30s} {data['count']:3d} orders  ${data['total']:>8.2f}"
+              )
+          report_lines.append("")
+          report_lines.append("Revenue by State:")
+          for state, revenue in top_states:
+              report_lines.append(f"  {state:5s} ${revenue:>8.2f}")
+          report_lines.append("=" * 50)
+
+          return "\n".join(report_lines)
+
+  - name: test_order_processor.py
+    content: |
+      """order_processor のテストスイート"""
+      import unittest
+      from order_processor import process_order, generate_monthly_report
+
+
+      class TestProcessOrderValidation(unittest.TestCase):
+          """入力バリデーションのテスト"""
+
+          def test_missing_customer_name(self):
+              result = process_order("", "test@example.com", "regular",
+                                     [{"name": "Widget", "price": 10, "quantity": 1}],
+                                     "Portland", "OR", "97201", "credit_card")
+              self.assertFalse(result["success"])
+
+          def test_empty_items(self):
+              result = process_order("Alice", "alice@example.com", "regular",
+                                     [], "Portland", "OR", "97201", "credit_card")
+              self.assertFalse(result["success"])
+
+          def test_invalid_payment_method(self):
+              result = process_order("Alice", "alice@example.com", "regular",
+                                     [{"name": "Widget", "price": 10, "quantity": 1}],
+                                     "Portland", "OR", "97201", "cash")
+              self.assertFalse(result["success"])
+
+          def test_invalid_quantity(self):
+              result = process_order("Alice", "alice@example.com", "regular",
+                                     [{"name": "Widget", "price": 10, "quantity": -1}],
+                                     "Portland", "OR", "97201", "credit_card")
+              self.assertFalse(result["success"])
+
+          def test_invalid_discount_code(self):
+              result = process_order("Alice", "alice@example.com", "regular",
+                                     [{"name": "Widget", "price": 100, "quantity": 1}],
+                                     "Portland", "OR", "97201", "credit_card",
+                                     discount_code="BOGUS")
+              self.assertFalse(result["success"])
+
+
+      class TestProcessOrderCalculation(unittest.TestCase):
+          """金額計算のテスト"""
+
+          def _basic_order(self, **kwargs):
+              defaults = {
+                  "customer_name": "Alice",
+                  "customer_email": "alice@example.com",
+                  "customer_type": "regular",
+                  "items": [{"name": "Widget", "price": 100, "quantity": 2}],
+                  "shipping_city": "Portland",
+                  "shipping_state": "OR",
+                  "shipping_zip": "97201",
+                  "payment_method": "credit_card",
+              }
+              defaults.update(kwargs)
+              return process_order(**defaults)
+
+          def test_subtotal(self):
+              result = self._basic_order()
+              self.assertEqual(result["order"]["subtotal"], 200.00)
+
+          def test_no_tax_in_oregon(self):
+              result = self._basic_order(shipping_state="OR")
+              self.assertEqual(result["order"]["tax"], 0.00)
+
+          def test_california_tax(self):
+              result = self._basic_order(shipping_state="CA")
+              self.assertAlmostEqual(result["order"]["tax"], 200 * 0.0725, places=2)
+
+          def test_texas_tax(self):
+              result = self._basic_order(shipping_state="TX")
+              self.assertAlmostEqual(result["order"]["tax"], 200 * 0.0625, places=2)
+
+          def test_default_tax_rate(self):
+              result = self._basic_order(shipping_state="WA")
+              self.assertAlmostEqual(result["order"]["tax"], 200 * 0.08, places=2)
+
+          def test_free_shipping_over_100(self):
+              result = self._basic_order()
+              self.assertEqual(result["order"]["shipping_cost"], 0)
+
+          def test_shipping_under_50(self):
+              result = self._basic_order(
+                  items=[{"name": "Pen", "price": 5, "quantity": 1}]
+              )
+              self.assertEqual(result["order"]["shipping_cost"], 10.00)
+
+          def test_shipping_between_50_and_100(self):
+              result = self._basic_order(
+                  items=[{"name": "Book", "price": 75, "quantity": 1}]
+              )
+              self.assertEqual(result["order"]["shipping_cost"], 5.00)
+
+          def test_save10_discount(self):
+              result = self._basic_order(discount_code="SAVE10")
+              self.assertEqual(result["order"]["discount_amount"], 20.00)
+
+          def test_save20_discount(self):
+              result = self._basic_order(discount_code="SAVE20")
+              self.assertEqual(result["order"]["discount_amount"], 40.00)
+
+          def test_vip_discount(self):
+              result = self._basic_order(discount_code="VIP")
+              self.assertEqual(result["order"]["discount_amount"], 60.00)
+
+          def test_gold_member_discount(self):
+              result = self._basic_order(customer_type="gold")
+              self.assertEqual(result["order"]["discount_amount"], 10.00)
+
+          def test_platinum_member_discount(self):
+              result = self._basic_order(customer_type="platinum")
+              self.assertEqual(result["order"]["discount_amount"], 20.00)
+
+          def test_platinum_free_shipping(self):
+              result = self._basic_order(
+                  customer_type="platinum",
+                  items=[{"name": "Pen", "price": 5, "quantity": 1}],
+              )
+              self.assertEqual(result["order"]["shipping_cost"], 0)
+
+          def test_combined_discount(self):
+              result = self._basic_order(customer_type="gold", discount_code="SAVE10")
+              # SAVE10: 200*0.10=20, Gold: (200-20)*0.05=9
+              self.assertEqual(result["order"]["discount_amount"], 29.00)
+
+          def test_total_calculation(self):
+              result = self._basic_order(shipping_state="OR")
+              # subtotal=200, no discount, no tax, free shipping
+              self.assertEqual(result["order"]["total"], 200.00)
+
+          def test_total_with_everything(self):
+              result = self._basic_order(
+                  shipping_state="CA",
+                  discount_code="SAVE10",
+                  items=[{"name": "Pen", "price": 30, "quantity": 1}],
+              )
+              # subtotal=30, discount=3, taxable=27, tax=27*0.0725=1.9575, ship=10
+              self.assertAlmostEqual(result["order"]["total"], 27 + 27 * 0.0725 + 10, places=2)
+
+
+      class TestProcessOrderReceipt(unittest.TestCase):
+          """レシート出力のテスト"""
+
+          def test_receipt_contains_customer_name(self):
+              result = process_order("Alice", "alice@example.com", "regular",
+                                     [{"name": "Widget", "price": 10, "quantity": 1}],
+                                     "Portland", "OR", "97201", "credit_card")
+              self.assertIn("Alice", result["receipt"])
+
+          def test_receipt_contains_item(self):
+              result = process_order("Alice", "alice@example.com", "regular",
+                                     [{"name": "SuperWidget", "price": 10, "quantity": 3}],
+                                     "Portland", "OR", "97201", "credit_card")
+              self.assertIn("SuperWidget", result["receipt"])
+
+          def test_receipt_shows_member_type(self):
+              result = process_order("Alice", "alice@example.com", "gold",
+                                     [{"name": "Widget", "price": 100, "quantity": 1}],
+                                     "Portland", "OR", "97201", "credit_card")
+              self.assertIn("GOLD", result["receipt"])
+
+
+      class TestGenerateMonthlyReport(unittest.TestCase):
+          """月次レポートのテスト"""
+
+          def _make_order(self, name, state, total_price, quantity=1):
+              return process_order(
+                  name, f"{name.lower()}@example.com", "regular",
+                  [{"name": "Item", "price": total_price, "quantity": quantity}],
+                  "City", state, "00000", "credit_card",
+              )
+
+          def test_empty_report(self):
+              report = generate_monthly_report([])
+              self.assertIn("Total Orders:  0", report)
+
+          def test_single_order_report(self):
+              orders = [self._make_order("Alice", "OR", 200)]
+              report = generate_monthly_report(orders)
+              self.assertIn("Total Orders:  1", report)
+              self.assertIn("Alice", report)
+
+          def test_multiple_orders_revenue(self):
+              orders = [
+                  self._make_order("Alice", "OR", 100),
+                  self._make_order("Bob", "OR", 200),
+              ]
+              report = generate_monthly_report(orders)
+              self.assertIn("Total Orders:  2", report)
+
+          def test_failed_orders_excluded(self):
+              orders = [
+                  self._make_order("Alice", "OR", 100),
+                  {"success": False, "error": "bad order"},
+              ]
+              report = generate_monthly_report(orders)
+              self.assertIn("Total Orders:  1", report)
+
+
+      if __name__ == "__main__":
+          unittest.main()
+
+# 期待する成果物
+expected_artifacts:
+  - path: order_processor.py
+    description: "リファクタリング済みの order_processor.py"
+  - path: test_order_processor.py
+    description: "テストスイート（全テスト通過すること）"
+    tests:
+      - name: "全テスト通過"
+        command: "python3 -m unittest test_order_processor -v"
+        expected_exit_code: 0
+
+# タイムアウト設定（秒）
+timeouts:
+  task_creation: 600
+  task_completion: 1800
+
+# 初期アクション
+initial_action:
+  type: chat
+  from: pilot-owner
+  to: pilot-manager
+  message: |
+    作業ディレクトリにある order_processor.py をリファクタリングしてください。
+    コードの可読性と保守性を改善してください。
+    test_order_processor.py のテストが全て通ることを確認してください。

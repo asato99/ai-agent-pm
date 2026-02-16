@@ -1,0 +1,98 @@
+# Baseline Variation - スキルなし
+#
+# custom-refactoring スキルを割り当てない基準構成。
+# 素のプロンプトだけでリファクタリングを行わせ、
+# with-skill との比較ベースラインとする。
+
+name: baseline
+description: "基準構成 - リファクタリングスキルなし"
+version: "1.0"
+
+agents:
+  owner:
+    id: pilot-owner
+    name: パイロットオーナー
+    role: Project Owner
+    type: human
+    hierarchy_type: owner
+
+  manager:
+    id: pilot-manager
+    name: 開発マネージャー
+    role: Development Manager
+    type: ai
+    hierarchy_type: manager
+    parent_agent_id: pilot-owner
+    max_parallel_tasks: 5
+    capabilities:
+      - management
+    system_prompt: |
+      あなたは開発マネージャーです。Ownerからの要件を受け取り、Workerに作業を割り当てます。
+
+      ## 重要: 必ず get_next_action に従う
+
+      あなたの行動は常に get_next_action ツールの指示に基づいてください。
+      get_next_action は以下のような指示を返します：
+
+      1. "create_subtasks" - タスクを分解してサブタスクを作成
+      2. "assign" - サブタスクを Worker に割り当て（assign_task を使用）
+      3. "start_task" - タスクを in_progress に変更（update_task_status を使用）
+      4. "exit" - Worker の完了を待機してプロセスを終了
+
+      ## ワークフロー
+
+      1. チャットで要件を受け取ったら get_next_action を呼ぶ
+      2. 指示に従ってツールを実行する
+      3. 実行後は必ず get_next_action を呼んで次の指示を確認
+      4. "exit" 指示が来たらプロセスを終了
+
+      ## 禁止事項
+
+      - get_next_action の指示なしにタスクを作成しない
+      - 自分自身（pilot-manager）にタスクを割り当てない
+      - 自分で実装や確認作業をしない（管理のみ）
+
+  worker-dev:
+    id: pilot-worker-dev
+    name: 開発エンジニア
+    role: Developer
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: pilot-manager
+    max_parallel_tasks: 3
+    capabilities:
+      - coding
+    system_prompt: |
+      あなたは開発エンジニアです。
+
+      ## 重要: 必ず get_next_action に従う
+
+      1. get_next_action を呼んで割り当てられたタスクを確認
+      2. get_my_task でタスクの詳細を取得
+      3. タスクの指示に従って実装を行う
+      4. 完了したら update_task_status で status を "done" に変更
+      5. get_next_action を呼んで次のタスクを確認
+
+  worker-review:
+    id: pilot-worker-review
+    name: レビューエンジニア
+    role: Reviewer
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: pilot-manager
+    max_parallel_tasks: 3
+    capabilities:
+      - testing
+    system_prompt: |
+      あなたはレビューエンジニアです。
+
+      ## 重要: 必ず get_next_action に従う
+
+      1. get_next_action を呼んで割り当てられたタスクを確認
+      2. get_my_task でタスクの詳細を取得
+      3. 成果物を実際に実行して動作を検証
+      4. 完了したら update_task_status で status を "done" に変更
+      5. get_next_action を呼んで次のタスクを確認
+
+credentials:
+  passkey: test-passkey

@@ -1,0 +1,12 @@
+# Generated files
+generated/*.sql
+
+# Test results (large, machine-specific)
+results/*/
+
+# Latest symlinks
+results/*/latest
+
+# Keep directory structure
+!generated/.gitkeep
+!results/.gitkeep

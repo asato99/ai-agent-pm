@@ -12,8 +12,9 @@ import { fileURLToPath } from 'url'
 import AdmZip from 'adm-zip'
 import { ScenarioConfig, VariationConfig, AgentConfig } from './types.js'
 
-// パイロットスキルディレクトリ
-const SKILLS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills')
+// スキルディレクトリ（e2e直下）
+const SKILLS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills')
+const CUSTOM_SKILLS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'custom-skills')
 
 interface SkillInfo {
   name: string
@@ -224,16 +225,18 @@ VALUES (
     const requiredSkills = collectRequiredSkills(variation)
     const loadedSkills = new Map<string, SkillInfo>()
 
-    // 必要なスキルをZIPから読み込み
+    // 必要なスキルをZIPから読み込み（skills → custom-skills の順で検索）
     for (const skillName of requiredSkills) {
       const zipPath = path.join(SKILLS_DIR, `${skillName}.zip`)
-      if (fs.existsSync(zipPath)) {
-        const skillInfo = loadSkillFromZip(zipPath)
+      const customZipPath = path.join(CUSTOM_SKILLS_DIR, `${skillName}.zip`)
+      const resolvedPath = fs.existsSync(zipPath) ? zipPath : fs.existsSync(customZipPath) ? customZipPath : null
+      if (resolvedPath) {
+        const skillInfo = loadSkillFromZip(resolvedPath)
         if (skillInfo) {
           loadedSkills.set(skillName, skillInfo)
         }
       } else {
-        console.error(`Skill ZIP not found: ${zipPath}`)
+        console.error(`Skill ZIP not found in skills/ or custom-skills/: ${skillName}.zip`)
       }
     }
 
@@ -303,7 +306,7 @@ export function createInitialFiles(scenario: ScenarioConfig): void {
  */
 const __filename_cli = fileURLToPath(import.meta.url)
 
-if (process.argv[1] === __filename_cli) {
+if (fs.realpathSync(process.argv[1]) === fs.realpathSync(__filename_cli)) {
   const args = process.argv.slice(2)
   if (args.length < 2) {
     console.error('Usage: npx tsx seed-generator.ts <scenario.yaml> <variation.yaml>')
