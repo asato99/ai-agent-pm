@@ -271,7 +271,6 @@ skill_assignments:
     - project-docs
     - parallel-task-dispatch
     - phased-workflow-management
-    - custom-clean-architecture
 
   worker-planner:
     - project-docs
