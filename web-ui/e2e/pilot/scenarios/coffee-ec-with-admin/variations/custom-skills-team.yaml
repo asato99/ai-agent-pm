@@ -1,0 +1,326 @@
+# Coffee EC with Admin - Custom Skills Team Variation
+#
+# specialist-team をベースに、カスタムスキルを中心とした構成
+# 9人チーム: マネージャー/プランナー/デザイナー/フロントエンド×2/バックエンド×2/QA×2
+
+name: custom-skills-team
+description: "カスタムスキルチーム - カスタムスキルを中心に装備した専門家チーム"
+version: "1.0"
+
+agents:
+  owner-coffee-admin:
+    id: owner-coffee-admin
+    name: "オーナー"
+    role: "プロジェクトオーナー"
+    type: human
+    hierarchy_type: owner
+
+  manager-dev:
+    id: manager-dev
+    name: "開発マネージャー"
+    role: "チーム調整・タスク割り当て"
+    type: ai
+    hierarchy_type: manager
+    parent_agent_id: owner-coffee-admin
+    capabilities:
+      - team_coordination
+      - task_assignment
+      - parallel_dispatch
+      - review_integration
+    system_prompt: |
+      あなたはチームのマネージャーです。計画を立て、ワーカーにタスクを割り当て、成果をレビュー・統合します。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /parallel-task-dispatch
+      - /phased-workflow-management
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+      ## チームメンバー
+      - worker-planner: 設計・計画
+      - worker-designer: ビジュアルデザイン・UI設計
+      - worker-frontend-01, worker-frontend-02: フロントエンド開発
+      - worker-backend-01, worker-backend-02: バックエンド開発
+      - worker-qa-01, worker-qa-02: テスト・検証・デバッグ
+
+      ## Git運用
+      - 作業ディレクトリでローカルGitリポジトリを作成して作業
+      - 単一ブランチ（main）で運用、ブランチ分岐は行わない
+      - 適切なタイミングでコミットを作成
+
+  worker-planner:
+    id: worker-planner
+    name: "プランナー"
+    role: "設計・計画"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - brainstorming
+      - planning
+    system_prompt: |
+      あなたは設計・計画を担当するAIエージェントです。
+      マネージャーの指示に従って設計と計画を行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /brainstorming
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+  worker-designer:
+    id: worker-designer
+    name: "デザイナー"
+    role: "ビジュアルデザイン・UI設計"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - visual_design
+      - ui_ux
+    system_prompt: |
+      あなたはビジュアルデザインを担当するAIエージェントです。
+      マネージャーの指示に従ってUI/UXデザインを行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /frontend-design
+      - /canvas-design
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+  worker-frontend-01:
+    id: worker-frontend-01
+    name: "フロントエンド1"
+    role: "フロントエンド開発"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - frontend_development
+      - html_css_js
+      - code_review
+    system_prompt: |
+      あなたはフロントエンド開発を担当するAIエージェントです。
+      マネージャーの指示に従って実装を行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /custom-clean-architecture
+      - /custom-solid
+      - /executing-plans
+      - /frontend-design
+      - /web-artifacts-builder
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+  worker-frontend-02:
+    id: worker-frontend-02
+    name: "フロントエンド2"
+    role: "フロントエンド開発"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - frontend_development
+      - html_css_js
+      - code_review
+    system_prompt: |
+      あなたはフロントエンド開発を担当するAIエージェントです。
+      マネージャーの指示に従って実装を行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /custom-clean-architecture
+      - /custom-solid
+      - /executing-plans
+      - /frontend-design
+      - /web-artifacts-builder
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+  worker-backend-01:
+    id: worker-backend-01
+    name: "バックエンド1"
+    role: "バックエンド開発"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - backend_development
+      - data_modeling
+      - test_driven_development
+      - code_review
+    system_prompt: |
+      あなたはバックエンド開発を担当するAIエージェントです。
+      マネージャーの指示に従って実装を行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /custom-tdd
+      - /custom-clean-architecture
+      - /custom-solid
+      - /executing-plans
+      - /web-artifacts-builder
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+  worker-backend-02:
+    id: worker-backend-02
+    name: "バックエンド2"
+    role: "バックエンド開発"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - backend_development
+      - data_modeling
+      - test_driven_development
+      - code_review
+    system_prompt: |
+      あなたはバックエンド開発を担当するAIエージェントです。
+      マネージャーの指示に従って実装を行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /custom-tdd
+      - /custom-clean-architecture
+      - /custom-solid
+      - /executing-plans
+      - /web-artifacts-builder
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+  worker-qa-01:
+    id: worker-qa-01
+    name: "QA1"
+    role: "テスト・検証・デバッグ"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - testing
+      - debugging
+      - verification
+      - quality_assurance
+    system_prompt: |
+      あなたは品質保証を担当するAIエージェントです。
+      マネージャーの指示に従ってテストと検証を行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /uitest-strategy
+      - /webapp-testing
+      - /systematic-debugging
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+  worker-qa-02:
+    id: worker-qa-02
+    name: "QA2"
+    role: "テスト・検証・デバッグ"
+    type: ai
+    hierarchy_type: worker
+    parent_agent_id: manager-dev
+    capabilities:
+      - testing
+      - debugging
+      - verification
+      - quality_assurance
+    system_prompt: |
+      あなたは品質保証を担当するAIエージェントです。
+      マネージャーの指示に従ってテストと検証を行います。
+
+      ## 必須: 作業開始前にスキルを読み込んでください
+      以下のスキルを必ず読み込んで内容を確認してください：
+      - /project-docs
+      - /uitest-strategy
+      - /webapp-testing
+      - /systematic-debugging
+
+      スキルを読み込まずに作業を開始することは禁止されています。
+      スキルの方法論に従わない成果物は不合格となります。
+
+credentials:
+  passkey: test-passkey
+
+initial_action:
+  type: chat
+  from: owner-coffee-admin
+  to: manager-dev
+
+skill_assignments:
+  manager-dev:
+    - project-docs
+    - parallel-task-dispatch
+    - phased-workflow-management
+
+  worker-planner:
+    - project-docs
+    - brainstorming
+
+  worker-designer:
+    - project-docs
+    - frontend-design
+    - canvas-design
+
+  worker-frontend-01:
+    - project-docs
+    - custom-clean-architecture
+    - custom-solid
+    - executing-plans
+    - frontend-design
+    - web-artifacts-builder
+
+  worker-frontend-02:
+    - project-docs
+    - custom-clean-architecture
+    - custom-solid
+    - executing-plans
+    - frontend-design
+    - web-artifacts-builder
+
+  worker-backend-01:
+    - project-docs
+    - custom-tdd
+    - custom-clean-architecture
+    - custom-solid
+    - executing-plans
+    - web-artifacts-builder
+
+  worker-backend-02:
+    - project-docs
+    - custom-tdd
+    - custom-clean-architecture
+    - custom-solid
+    - executing-plans
+    - web-artifacts-builder
+
+  worker-qa-01:
+    - project-docs
+    - uitest-strategy
+    - webapp-testing
+    - systematic-debugging
+
+  worker-qa-02:
+    - project-docs
+    - uitest-strategy
+    - webapp-testing
+    - systematic-debugging
