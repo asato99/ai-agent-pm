@@ -397,6 +397,9 @@ log_upload:
   enabled: true
 EOF
 
+# Claude Code のネスト検出を回避（Claude Code セッション内から実行した場合）
+unset CLAUDECODE CLAUDE_CODE_SSE_PORT CLAUDE_CODE_ENTRYPOINT
+
 AIAGENTPM_WEBSERVER_PORT="$REST_PORT" $PYTHON -m aiagent_runner --coordinator -c /tmp/coordinator_pilot_config.yaml -v > "$LOG_DIR/coordinator.log" 2>&1 &
 COORDINATOR_PID=$!
 sleep 2
