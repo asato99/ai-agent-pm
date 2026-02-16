@@ -97,6 +97,15 @@ collect_logs() {
     echo -e "${GREEN}✓ ffmpeg recording saved: screen_recording.mp4 ($FFMPEG_SIZE)${NC}"
   fi
 
+  # 成果物を保存（作業ディレクトリの内容をコピー）
+  if [ -n "$PILOT_WORKING_DIR" ] && [ -d "$PILOT_WORKING_DIR" ]; then
+    ARTIFACTS_DIR="$RESULT_DIR/artifacts"
+    mkdir -p "$ARTIFACTS_DIR"
+    cp -R "$PILOT_WORKING_DIR"/. "$ARTIFACTS_DIR/" 2>/dev/null || true
+    ARTIFACT_COUNT=$(find "$ARTIFACTS_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+    echo -e "${GREEN}✓ Artifacts saved: $ARTIFACT_COUNT files${NC}"
+  fi
+
   # 統合ログ生成（プレフィックス付き）
   {
     [ -f "$LOG_DIR/mcp-server.log" ] && sed 's/^/[MCP] /' "$LOG_DIR/mcp-server.log"
