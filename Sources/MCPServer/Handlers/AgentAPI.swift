@@ -320,12 +320,14 @@ extension MCPServer {
         let inProgressTasks = allAssignedTasks.filter { $0.status == .inProgress && $0.projectId == projId }
         Self.log("[MCP] reportCompleted: Found \(inProgressTasks.count) in_progress tasks in project '\(projectId)'")
 
-        // UC010: result='blocked' で呼び出され、タスクが既に blocked なら成功
+        // UC010: result='blocked' で呼び出され、タスクが既に blocked かつ in_progress タスクがない場合は成功
         // これは、ユーザーがUIでステータスを変更し、エージェントが通知を受けて完了報告する場合
+        // 注意: in_progress タスクがある場合は早期リターンせず通常フローで処理する
+        //       （子タスクが blocked でも親タスクが in_progress なら親を blocked に更新する必要がある）
         // 参照: docs/design/NOTIFICATION_SYSTEM.md
         if result == "blocked" {
             let blockedTasks = allAssignedTasks.filter { $0.status == .blocked && $0.projectId == projId }
-            if let blockedTask = blockedTasks.first {
+            if let blockedTask = blockedTasks.first, inProgressTasks.isEmpty {
                 Self.log("[MCP] reportCompleted: Task already blocked (UC010 interrupt flow). Task: \(blockedTask.id.value)")
 
                 // 重要: 早期リターンの前に実行ログを完了させる
@@ -427,38 +429,54 @@ extension MCPServer {
 
         try taskRepository.save(task)
 
-        // ワーカーがブロック報告した場合、親タスク（マネージャー）のコンテキストを更新
-        // マネージャーが waiting_for_workers 状態の場合のみ更新
-        if newStatus == .blocked, let parentTaskId = task.parentTaskId {
-            if let parentTask = try taskRepository.findById(parentTaskId),
-               let parentAssigneeId = parentTask.assigneeId {
-                // 親タスクの最新コンテキストを確認
-                let parentLatestContext = try contextRepository.findLatest(taskId: parentTaskId)
-                if parentLatestContext?.progress == "workflow:waiting_for_workers" {
-                    // 親タスク（マネージャー）のアクティブセッションを検索
-                    if let parentSession = try sessionRepository.findActiveByAgentAndProject(
-                        agentId: parentAssigneeId,
-                        projectId: projId
-                    ).first {
-                        // 親タスクのコンテキストを worker_blocked に更新
-                        let parentContext = Context(
-                            id: ContextID.generate(),
-                            taskId: parentTaskId,
-                            sessionId: parentSession.id,
-                            agentId: parentAssigneeId,
-                            progress: "workflow:worker_blocked",
-                            findings: nil,
-                            blockers: "Subtask \(task.id.value) blocked: \(summary ?? "no reason")",
-                            nextSteps: nil
-                        )
-                        try contextRepository.save(parentContext)
-                        Self.log("[MCP] reportCompleted: Updated parent task context to worker_blocked for manager '\(parentAssigneeId.value)'")
-                    } else {
-                        Self.log("[MCP] reportCompleted: No active session for parent task manager, skipping context update")
-                    }
-                } else {
-                    Self.log("[MCP] reportCompleted: Parent task not in waiting_for_workers state, skipping context update")
+        // ワーカーがブロック報告した場合、タスク階層を遡って
+        // 最も近い「別エージェント」の祖先タスク（マネージャー）のコンテキストを更新
+        // 親の親など入れ子的にタスクが存在しても正しく動作する
+        if newStatus == .blocked {
+            var currentTask = task
+            while let parentId = currentTask.parentTaskId {
+                guard let parentTask = try taskRepository.findById(parentId) else {
+                    Self.log("[MCP] reportCompleted: Parent task \(parentId.value) not found, stopping hierarchy walk")
+                    break
                 }
+
+                guard let parentAssigneeId = parentTask.assigneeId else {
+                    Self.log("[MCP] reportCompleted: Parent task \(parentId.value) has no assignee, stopping hierarchy walk")
+                    break
+                }
+
+                if parentAssigneeId != id {
+                    // 別エージェントの祖先タスクを発見 → マネージャーに通知
+                    let parentLatestContext = try contextRepository.findLatest(taskId: parentId)
+                    if parentLatestContext?.progress == "workflow:waiting_for_workers" {
+                        if let parentSession = try sessionRepository.findActiveByAgentAndProject(
+                            agentId: parentAssigneeId,
+                            projectId: projId
+                        ).first {
+                            let parentContext = Context(
+                                id: ContextID.generate(),
+                                taskId: parentId,
+                                sessionId: parentSession.id,
+                                agentId: parentAssigneeId,
+                                progress: "workflow:worker_blocked",
+                                findings: nil,
+                                blockers: "Subtask \(task.id.value) blocked: \(summary ?? "no reason")",
+                                nextSteps: nil
+                            )
+                            try contextRepository.save(parentContext)
+                            Self.log("[MCP] reportCompleted: Walked hierarchy and notified manager '\(parentAssigneeId.value)' via ancestor task \(parentId.value)")
+                        } else {
+                            Self.log("[MCP] reportCompleted: No active session for ancestor manager '\(parentAssigneeId.value)', skipping context update")
+                        }
+                    } else {
+                        Self.log("[MCP] reportCompleted: Ancestor task \(parentId.value) not in waiting_for_workers state (progress=\(parentLatestContext?.progress ?? "nil")), skipping context update")
+                    }
+                    break
+                }
+
+                // 同じエージェントの祖先タスク → さらに上に遡る
+                Self.log("[MCP] reportCompleted: Parent \(parentId.value) assigned to same agent, walking up hierarchy")
+                currentTask = parentTask
             }
         }
 
