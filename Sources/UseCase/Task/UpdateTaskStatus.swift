@@ -108,6 +108,11 @@ public struct UpdateTaskStatusUseCase: Sendable {
             try checkResourceAvailability(for: task)
         }
 
+        // doneへの遷移時はサブタスクの完了をチェック
+        if newStatus == .done {
+            try checkSubtasksCompleted(for: task)
+        }
+
         // ステータス変更権限チェック
         // 参照: docs/plan/BLOCKED_TASK_RECOVERY.md
         // 前回の更新者が自身または下位ワーカー以外の場合は変更不可
@@ -305,6 +310,23 @@ public struct UpdateTaskStatusUseCase: Sendable {
                 agentId: assigneeId,
                 maxParallel: agent.maxParallelTasks,
                 currentCount: currentInProgressParentTasks
+            )
+        }
+    }
+
+    /// サブタスク完了チェック: 未完了のサブタスクがある場合、親タスクをdoneにできない
+    private func checkSubtasksCompleted(for task: Task) throws {
+        let allTasks = try taskRepository.findByProject(task.projectId, status: nil)
+        let subtasks = allTasks.filter { $0.parentTaskId == task.id }
+
+        guard !subtasks.isEmpty else { return }
+
+        let incompleteSubtasks = subtasks.filter { $0.status != .done && $0.status != .cancelled }
+
+        if !incompleteSubtasks.isEmpty {
+            let details = incompleteSubtasks.map { "\($0.id.value)(\($0.status.rawValue))" }.joined(separator: ", ")
+            throw UseCaseError.validationFailed(
+                "Cannot mark parent task as done: \(incompleteSubtasks.count) subtask(s) not completed: \(details)"
             )
         }
     }
