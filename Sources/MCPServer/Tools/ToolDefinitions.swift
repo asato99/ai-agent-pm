@@ -43,6 +43,7 @@ enum ToolDefinitions {
             // ========================================
             createTask,            // サブタスク作成
             createTasksBatch,      // 依存関係付き一括タスク作成
+            splitTask,             // タスク分割（同階層に展開）
             reportCompleted,       // タスク完了報告
             updateTaskStatus,      // ステータス更新
             reportExecutionStart,  // 実行開始報告（非推奨）
@@ -663,6 +664,67 @@ enum ToolDefinitions {
                 ]
             ] as [String: Any],
             "required": ["session_token", "parent_task_id", "tasks"]
+        ]
+    ]
+
+    /// split_task - タスクを同階層の複数タスクに分割
+    /// 元タスクをキャンセルし、同じ親を持つ新タスクを作成。依存関係も引き継ぐ。
+    static let splitTask: [String: Any] = [
+        "name": "split_task",
+        "description": """
+            タスクを同階層の複数タスクに分割します。元タスクはキャンセルされ、同じ親タスクの下に新しいタスクが作成されます。
+            元タスクが持っていた依存関係（前方・逆方向とも）は全ての新タスクに引き継がれます。
+            自分が作成したタスク（createdByAgentId が自分）かつ、ステータスが todo または backlog のタスクのみ分割可能です。
+            """,
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "authenticateツールで取得したセッショントークン"
+                ],
+                "task_id": [
+                    "type": "string",
+                    "description": "分割対象のタスクID"
+                ],
+                "tasks": [
+                    "type": "array",
+                    "description": "分割後のタスクの配列",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "local_id": [
+                                "type": "string",
+                                "description": "バッチ内でこのタスクを参照するためのローカルID（例: 'task_1'）"
+                            ],
+                            "title": [
+                                "type": "string",
+                                "description": "タスクタイトル"
+                            ],
+                            "description": [
+                                "type": "string",
+                                "description": "タスク詳細"
+                            ],
+                            "assignee_id": [
+                                "type": "string",
+                                "description": "担当者のエージェントID（省略可）"
+                            ],
+                            "priority": [
+                                "type": "string",
+                                "description": "優先度（省略時は元タスクの優先度を引き継ぐ）",
+                                "enum": ["low", "medium", "high", "urgent"]
+                            ],
+                            "dependencies": [
+                                "type": "array",
+                                "items": ["type": "string"],
+                                "description": "依存タスクのlocal_id配列（分割バッチ内の他タスクを参照）"
+                            ]
+                        ] as [String: Any],
+                        "required": ["local_id", "title", "description"]
+                    ] as [String: Any]
+                ]
+            ] as [String: Any],
+            "required": ["session_token", "task_id", "tasks"]
         ]
     ]
 

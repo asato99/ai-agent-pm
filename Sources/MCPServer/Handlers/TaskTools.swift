@@ -515,6 +515,159 @@ extension MCPServer {
         ]
     }
 
+    /// split_task - タスクを同階層の複数タスクに分割
+    /// 元タスクをキャンセルし、同じ親を持つ新タスクを作成。依存関係（前方・逆方向）も引き継ぐ。
+    /// 制約: 呼び出し元が作成したタスクのみ、ステータスが todo または backlog のみ
+    func splitTask(
+        agentId: AgentID,
+        projectId: ProjectID,
+        taskId: String,
+        tasks: [[String: Any]]
+    ) throws -> [String: Any] {
+        Self.log("[MCP] splitTask: agentId=\(agentId.value), taskId=\(taskId), newTaskCount=\(tasks.count)")
+
+        // 分割対象タスクの取得と検証
+        let originalTaskId = TaskID(value: taskId)
+        guard var originalTask = try taskRepository.findById(originalTaskId) else {
+            throw MCPError.taskNotFound(taskId)
+        }
+
+        // 自分が作成したタスクのみ分割可能
+        guard originalTask.createdByAgentId == agentId else {
+            throw MCPError.validationError("自分が作成したタスクのみ分割できます（作成者: \(originalTask.createdByAgentId?.value ?? "nil")）")
+        }
+
+        // todo または backlog のみ分割可能
+        guard originalTask.status == .todo || originalTask.status == .backlog else {
+            throw MCPError.validationError("ステータスが todo または backlog のタスクのみ分割できます（現在: \(originalTask.status.rawValue)）")
+        }
+
+        // 分割先タスクが2つ以上であること
+        guard tasks.count >= 2 else {
+            throw MCPError.validationError("分割先は2つ以上のタスクを指定してください")
+        }
+
+        // 元タスクの依存関係を取得
+        let originalDependencies = originalTask.dependencies
+
+        // 逆依存の取得（元タスクに依存しているタスク一覧）
+        let allTasks = try taskRepository.findAll(projectId: projectId)
+        let reverseDependentTasks = allTasks.filter { $0.dependencies.contains(originalTaskId) }
+
+        // Phase 1: 全タスクを作成し、local_id → real_id のマッピングを構築
+        var localIdToRealId: [String: TaskID] = [:]
+        var createdTasks: [(Task, [String])] = []  // (task, local_dependencies)
+
+        for taskDef in tasks {
+            guard let localId = taskDef["local_id"] as? String,
+                  let title = taskDef["title"] as? String,
+                  let description = taskDef["description"] as? String else {
+                throw MCPError.validationError("Each task must have local_id, title, and description")
+            }
+
+            // 優先度: 指定がなければ元タスクの優先度を引き継ぐ
+            let taskPriority: TaskPriority
+            if let priorityStr = taskDef["priority"] as? String,
+               let parsed = TaskPriority(rawValue: priorityStr) {
+                taskPriority = parsed
+            } else {
+                taskPriority = originalTask.priority
+            }
+
+            // assignee_id（オプション）
+            let assigneeId: AgentID?
+            if let assigneeStr = taskDef["assignee_id"] as? String {
+                assigneeId = AgentID(value: assigneeStr)
+            } else {
+                assigneeId = nil
+            }
+
+            // ローカル依存関係を保存（後で解決する）
+            let localDependencies = taskDef["dependencies"] as? [String] ?? []
+
+            let newTask = Task(
+                id: TaskID.generate(),
+                projectId: projectId,
+                title: title,
+                description: description,
+                status: .todo,
+                priority: taskPriority,
+                assigneeId: assigneeId,
+                createdByAgentId: agentId,
+                dependencies: [],  // 後で設定
+                parentTaskId: originalTask.parentTaskId  // 同じ親を引き継ぐ
+            )
+
+            localIdToRealId[localId] = newTask.id
+            createdTasks.append((newTask, localDependencies))
+
+            Self.log("[MCP] splitTask: Created task local_id=\(localId) → real_id=\(newTask.id.value)")
+        }
+
+        // Phase 2: 依存関係を解決して保存
+        var savedTasks: [[String: Any]] = []
+        var newTaskIds: [TaskID] = []
+
+        for (var task, localDependencies) in createdTasks {
+            // ローカル依存関係を実IDに解決
+            var resolvedDependencies: [TaskID] = []
+            for localDep in localDependencies {
+                guard let realId = localIdToRealId[localDep] else {
+                    throw MCPError.validationError("Unknown dependency local_id: \(localDep)")
+                }
+                resolvedDependencies.append(realId)
+            }
+
+            // 元タスクの依存関係を引き継ぐ
+            resolvedDependencies.append(contentsOf: originalDependencies)
+
+            task.dependencies = resolvedDependencies
+            try taskRepository.save(task)
+            newTaskIds.append(task.id)
+
+            let depsStr = resolvedDependencies.map { $0.value }.joined(separator: ", ")
+            Self.log("[MCP] splitTask: Saved task \(task.id.value) with dependencies: [\(depsStr)]")
+
+            savedTasks.append([
+                "id": task.id.value,
+                "title": task.title,
+                "description": task.description,
+                "status": task.status.rawValue,
+                "priority": task.priority.rawValue,
+                "assignee_id": task.assigneeId?.value as Any,
+                "parent_task_id": task.parentTaskId?.value as Any,
+                "dependencies": resolvedDependencies.map { $0.value }
+            ])
+        }
+
+        // Phase 3: 逆依存の付け替え（元タスクへの依存を全新タスクへ）
+        for var depTask in reverseDependentTasks {
+            // 元タスクIDを除去し、全新タスクIDを追加
+            depTask.dependencies = depTask.dependencies.filter { $0 != originalTaskId }
+            depTask.dependencies.append(contentsOf: newTaskIds)
+            try taskRepository.save(depTask)
+            Self.log("[MCP] splitTask: Updated reverse dependency \(depTask.id.value) → now depends on \(newTaskIds.map { $0.value })")
+        }
+
+        // Phase 4: 元タスクをキャンセル
+        originalTask.status = .cancelled
+        try taskRepository.save(originalTask)
+        Self.log("[MCP] splitTask: Original task \(taskId) cancelled")
+
+        let instruction = "タスク「\(originalTask.title)」（\(taskId)）を\(tasks.count)個のタスクに分割しました。元タスクはキャンセルされ、依存関係は全て新タスクに引き継がれています。"
+
+        return [
+            "success": true,
+            "original_task_id": taskId,
+            "original_task_title": originalTask.title,
+            "tasks": savedTasks,
+            "task_count": savedTasks.count,
+            "local_id_to_real_id": localIdToRealId.mapValues { $0.value },
+            "reverse_dependencies_updated": reverseDependentTasks.count,
+            "instruction": instruction
+        ]
+    }
+
     /// assign_task - タスクを指定のエージェントに割り当て
     /// バリデーション:
     /// 1. 呼び出し元がマネージャーであること

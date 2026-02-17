@@ -97,6 +97,7 @@ struct ToolAuthorization {
         // タスクセッション専用 - サブタスク作成用
         "create_task": .taskOnly,  // Workers can create sub-tasks for self-execution
         "create_tasks_batch": .taskOnly,  // Batch creation with local dependency references
+        "split_task": .taskOnly,  // Split a task into sibling tasks (creator only, todo/backlog)
 
         // タスクセッション専用 - タスク完了報告
         "report_completed": .taskOnly,

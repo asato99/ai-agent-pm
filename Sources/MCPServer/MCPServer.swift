@@ -828,6 +828,21 @@ public final class MCPServer {
                 tasks: tasks
             )
 
+        case "split_task":
+            guard let session = caller.session else {
+                throw MCPError.sessionTokenRequired
+            }
+            guard let taskId = arguments["task_id"] as? String,
+                  let tasks = arguments["tasks"] as? [[String: Any]] else {
+                throw MCPError.missingArguments(["task_id", "tasks"])
+            }
+            return try splitTask(
+                agentId: session.agentId,
+                projectId: session.projectId,
+                taskId: taskId,
+                tasks: tasks
+            )
+
         case "assign_task":
             guard case .manager(_, let session) = caller else {
                 throw ToolAuthorizationError.managerRequired("assign_task")
