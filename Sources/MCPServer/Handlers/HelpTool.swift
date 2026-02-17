@@ -233,4 +233,114 @@ extension MCPServer {
             return "" // 未認証ツールは常に利用可能
         }
     }
+
+    // MARK: - Session Guide Tool
+
+    /// セッション構造と役割のガイドを返す
+    func executeSessionGuide(caller: CallerType) -> [String: Any] {
+        guard let session = caller.session else {
+            return [
+                "success": false,
+                "error": "認証が必要です。authenticate を先に呼び出してください。"
+            ]
+        }
+
+        let agentName: String
+        if let agent = try? agentRepository.findById(session.agentId) {
+            agentName = agent.name
+        } else {
+            agentName = session.agentId.value
+        }
+
+        let hierarchyType: String
+        if let agent = try? agentRepository.findById(session.agentId) {
+            hierarchyType = agent.hierarchyType.rawValue
+        } else {
+            hierarchyType = "unknown"
+        }
+
+        let guide: String
+        switch session.purpose {
+        case .task:
+            guide = buildTaskSessionGuide(agentName: agentName, hierarchyType: hierarchyType)
+        case .chat:
+            guide = buildChatSessionGuide(agentName: agentName, hierarchyType: hierarchyType)
+        }
+
+        return [
+            "success": true,
+            "session_purpose": session.purpose.rawValue,
+            "agent_name": agentName,
+            "hierarchy_type": hierarchyType,
+            "guide": guide
+        ]
+    }
+
+    private func buildTaskSessionGuide(agentName: String, hierarchyType: String) -> String {
+        var guide = """
+            ■ あなたのセッション構造【現在: タスクセッション】
+
+            あなた（\(agentName)）は、同時に2つのセッションを持つことがあります。
+
+            【タスクセッション】 ← あなたは今ここにいます
+            - get_next_action → select_action のループで駆動
+            - タスクの実行・管理はここでのみ行う
+            """
+
+        if hierarchyType == "manager" {
+            guide += """
+
+                - ワーカーとの対話が必要な場合は delegate_to_chat_session で起動する
+                """
+        }
+
+        guide += """
+
+
+            【チャットセッション】
+            - マネージャーやワーカーとの会話を行う
+            - 作業そのものは行わない
+            - 会話の結果は通知を介してタスクセッションに伝達される
+
+            ■ 協調の原則
+
+            - 2つのセッションは同じあなたの一部であり、責務を共有している
+            - チャットで得た情報や指示は、通知としてこのセッションに届く
+            - このセッションでチャットツール（start_conversation, get_pending_messages等）は使えない
+            """
+
+        if hierarchyType == "manager" {
+            guide += """
+
+            - ワーカーとの対話が必要な場合は delegate_to_chat_session を使う
+              これにより別プロセスでチャットセッションが起動される
+            """
+        }
+
+        return guide
+    }
+
+    private func buildChatSessionGuide(agentName: String, hierarchyType: String) -> String {
+        return """
+            ■ あなたのセッション構造【現在: チャットセッション】
+
+            あなた（\(agentName)）は、同時に2つのセッションを持つことがあります。
+
+            【タスクセッション】
+            - タスクの実行・管理を行っている
+            - get_next_action → select_action のループで駆動
+
+            【チャットセッション】 ← あなたは今ここにいます
+            - マネージャーやワーカーとの対話を行う
+            - この会話で得た合意や指示は、通知を介してタスクセッションに伝達する
+            - ここで直接タスクを操作してはならない
+
+            ■ 協調の原則
+
+            - 2つのセッションは同じあなたの一部であり、責務を共有している
+            - タスクの調整が必要な場合は notify_task_session でタスクセッションに伝える
+            - このセッションでタスク管理ツール（create_task, update_task_status等）は使えない
+            - 対話の結論をタスクセッションに伝え、実行はそちらに委ねる
+            """
+    }
 }

@@ -16,6 +16,7 @@ enum ToolDefinitions {
             // 未認証でも呼び出し可能
             // ========================================
             help,          // ヘルプ（利用可能ツール一覧）
+            getSessionGuide, // セッション構造ガイド
             authenticate,
 
             // ========================================
@@ -274,6 +275,23 @@ enum ToolDefinitions {
                 ] as [String: Any]
             ] as [String: Any],
             "required": [] as [String]
+        ] as [String: Any]
+    ]
+
+    /// get_session_guide - セッション構造と役割のガイド
+    /// 認証済みエージェントに対して、タスク/チャットセッションの構造と協調の仕組みを説明する
+    static let getSessionGuide: [String: Any] = [
+        "name": "get_session_guide",
+        "description": "現在のセッションの役割と、タスク/チャットセッションの協調構造を説明します。認証後に呼び出して、セッションの役割を確認してください。",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "session_token": [
+                    "type": "string",
+                    "description": "認証時に取得したセッショントークン"
+                ] as [String: Any]
+            ] as [String: Any],
+            "required": ["session_token"]
         ] as [String: Any]
     ]
 

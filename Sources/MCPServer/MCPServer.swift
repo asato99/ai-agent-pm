@@ -717,6 +717,9 @@ public final class MCPServer {
             let toolName = arguments["tool_name"] as? String
             return executeHelp(caller: caller, toolName: toolName)
 
+        case "get_session_guide":
+            return executeSessionGuide(caller: caller)
+
         // ========================================
         // Coordinator専用
         // ========================================

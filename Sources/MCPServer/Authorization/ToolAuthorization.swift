@@ -161,8 +161,9 @@ struct ToolAuthorization {
         "notify_task_session": .chatOnly,         // チャット→タスクセッションへ通知
         "get_conversation_messages": .taskOnly,   // タスクセッションから会話メッセージ取得
 
-        // ヘルプ（未認証でも利用可能）
+        // ヘルプ・ガイド
         "help": .unauthenticated,
+        "get_session_guide": .authenticated,
 
         // スキル管理（認証済み）
         "register_skill": .authenticated,

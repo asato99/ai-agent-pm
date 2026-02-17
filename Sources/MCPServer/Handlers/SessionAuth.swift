@@ -232,7 +232,8 @@ extension MCPServer {
             let instruction: String
             if let workingDir = effectiveWorkingDir {
                 instruction = """
-                    get_next_action を呼び出して次の指示を確認してください。
+                    まず get_session_guide を呼び出して、セッションの役割を確認してください。
+                    その後 get_next_action を呼び出して次の指示を確認してください。
 
                     【重要】作業ディレクトリ: \(workingDir)
                     - すべてのファイル操作には絶対パスを使用してください
@@ -246,7 +247,8 @@ extension MCPServer {
                     """
             } else {
                 instruction = """
-                    get_next_action を呼び出して次の指示を確認してください。
+                    まず get_session_guide を呼び出して、セッションの役割を確認してください。
+                    その後 get_next_action を呼び出して次の指示を確認してください。
 
                     【重要】セッション終了時
                     - プロセスを終了する前に必ず `logout` ツールを呼び出してください
