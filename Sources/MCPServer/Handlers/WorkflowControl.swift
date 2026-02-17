@@ -1177,6 +1177,7 @@ extension MCPServer {
                             - assign_task: 担当者変更・振り直し
                             - update_task_status: ステータス変更
                             - create_tasks_batch: 追加タスク作成
+                            - split_task: 既存タスクを同階層の複数タスクに分割（元タスクはキャンセル、依存関係は引き継ぎ）
 
                             ■ ワーカーとのコミュニケーション
                             - delegate_to_chat_session: 下位ワーカーとチャットで対話
