@@ -349,7 +349,7 @@ RUNNER_DIR="$PROJECT_ROOT/runner"
 PYTHON="${RUNNER_DIR}/.venv/bin/python"
 [ ! -x "$PYTHON" ] && PYTHON="python3"
 
-# バリエーションからエージェントIDを取得（web-ui ディレクトリで実行してnode_modulesにアクセス）
+# バリエーションからエージェントIDとcoordinator設定を取得（web-ui ディレクトリで実行してnode_modulesにアクセス）
 cd "$WEB_UI_DIR"
 AGENT_IDS=$(npx tsx -e "
 import * as yaml from 'js-yaml';
@@ -359,10 +359,18 @@ const aiAgents = Object.values(v.agents).filter(a => a.type === 'ai');
 console.log(aiAgents.map(a => a.id).join(' '));
 ")
 
+# バリエーションからmax_concurrent取得（未指定時はデフォルト3）
+MAX_CONCURRENT=$(npx tsx -e "
+import * as yaml from 'js-yaml';
+import * as fs from 'fs';
+const v = yaml.load(fs.readFileSync('$VARIATION_YAML', 'utf8'));
+console.log(v.coordinator?.max_concurrent ?? 3);
+")
+
 # Coordinator設定ファイル生成
 cat > /tmp/coordinator_pilot_config.yaml << EOF
 polling_interval: 2
-max_concurrent: 3
+max_concurrent: $MAX_CONCURRENT
 coordinator_token: ${MCP_COORDINATOR_TOKEN}
 mcp_socket_path: $MCP_SOCKET_PATH
 ai_providers:
