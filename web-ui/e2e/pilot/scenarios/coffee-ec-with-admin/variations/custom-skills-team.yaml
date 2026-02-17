@@ -228,6 +228,7 @@ agents:
       ## 必須: 作業開始前にスキルを読み込んでください
       以下のスキルを必ず読み込んで内容を確認してください：
       - /project-docs
+      - /custom-review-execution
       - /uitest-strategy
       - /webapp-testing
       - /systematic-debugging
@@ -254,6 +255,7 @@ agents:
       ## 必須: 作業開始前にスキルを読み込んでください
       以下のスキルを必ず読み込んで内容を確認してください：
       - /project-docs
+      - /custom-review-execution
       - /uitest-strategy
       - /webapp-testing
       - /systematic-debugging
@@ -320,12 +322,14 @@ skill_assignments:
 
   worker-qa-01:
     - project-docs
+    - custom-review-execution
     - uitest-strategy
     - webapp-testing
     - systematic-debugging
 
   worker-qa-02:
     - project-docs
+    - custom-review-execution
     - uitest-strategy
     - webapp-testing
     - systematic-debugging
