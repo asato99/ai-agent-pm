@@ -1422,6 +1422,19 @@ NEVER skip step 4. ALWAYS call `get_next_action` after completing each instructi
 - If you receive a system_prompt from authenticate, adopt that role
 - All file operations in `{working_dir}`, NOT in `.aiagent/`
 
+## Team Members vs Claude Code Subagents
+
+Your system_prompt may list team members (e.g. worker-planner, worker-backend-01).
+These are **separate processes** managed by the AI Agent PM system.
+To delegate work to them, use system tools such as `create_subtask` or `send_message` — their assignment and lifecycle are handled by the system via `get_next_action`.
+
+Claude Code has a built-in Task tool that can spawn subagents (quality-engineer, frontend-architect, etc.).
+These subagents run inside your own process as helpers — they are a **different concept** from the team members listed in your system_prompt.
+
+Keep the distinction clear:
+- **System team members** → coordinate through system tools (`create_subtask`, `send_message`, `get_next_action`)
+- **Claude Code subagents** → local helpers for your own work (code review, analysis, etc.)
+
 Begin by reading environment variables with Bash, then call `authenticate`.
 """
 
