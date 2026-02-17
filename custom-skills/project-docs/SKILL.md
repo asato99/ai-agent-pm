@@ -8,6 +8,7 @@ description: >
   (2) project_docs/ 内のファイルを参照・編集する時
   (3) ドキュメントのライフサイクル遷移（アーカイブ等）を行う時
   (4) ドキュメントの配置先を判断する時
+  (5) レビュー結果・バグ報告・検証結果などの報告ドキュメントを作成する時
 ---
 
 # Project Docs
@@ -25,6 +26,9 @@ project_docs/
 ├── plans/              # 実装計画・フェーズ計画
 │   ├── active/         # 進行中
 │   └── archive/        # 完了
+├── reports/            # ワークフロー上の報告（レビュー・バグ・検証）
+│   ├── active/         # 未対応・対応中
+│   └── archive/        # 対応完了
 ├── issues/             # 問題の記録・追跡
 │   ├── active/         # 未解決
 │   └── archive/        # 解決済み
@@ -46,7 +50,8 @@ project_docs/
 |---------|------|----------------|
 | designs | 機能の設計書。実装前に作成し、実装の指針とする | - |
 | plans | 実装計画。タスク分解とフェーズ管理 | - |
-| issues | 問題の記録・追跡。何が起き、どう対応したかの簡潔な記録 | 事実と対応の記録 |
+| reports | ワークフロー上の報告。レビュー結果・バグ報告・検証結果など、フェーズゲートで確認される | フェーズに紐づく公式な報告 |
+| issues | 問題の記録・追跡。何が起き、どう対応したかの簡潔な記録 | アドホックな事実と対応の記録 |
 | investigations | 技術的な深掘り分析。仮説検証・原因究明の過程を含む | 分析過程と技術的知見 |
 | guides | 運用ガイド・手順書。繰り返し参照する手続き的な知識 | - |
 | references | 技術参考資料。アーキテクチャ比較、技術選定の根拠など | - |
@@ -66,13 +71,14 @@ project_docs/
 ```
 designs:        active → stable（実装完了時） → archive（大幅改修で陳腐化時）
 plans:          active → archive（全タスク完了時）
+reports:        active → archive（承認完了時）
 issues:         active → archive（問題解決時）
 investigations: active → stable（解決済み、再発可能性あり） → archive（完全解決）
 guides:         active ⇄ stable（参照頻度の変化で双方向移動）
 references:     active ⇄ stable（参照頻度の変化で双方向移動）
 ```
 
-- plans, issues は完了=用済みのため stable なし
+- plans, reports, issues は完了=用済みのため stable なし
 - guides, references は陳腐化したら内容を更新するか削除。archive なし
 
 ### 遷移の判断基準
@@ -88,6 +94,7 @@ references:     active ⇄ stable（参照頻度の変化で双方向移動）
 
 **active → archive**（stable を経由しない）:
 - plans: 全タスクが完了
+- reports: マネージャーが承認し、対応が完了
 - issues: 問題が解決
 
 ## ドキュメント作成
@@ -101,6 +108,9 @@ references:     active ⇄ stable（参照頻度の変化で双方向移動）
 v2-exercise-part-navigation-design.md
 uitest-completion-flow-timeout.md
 sampler-latency-measurement-plan.md
+cart-api-review.md
+cart-api-bug.md
+cart-api-verification.md
 
 # Bad
 EXERCISE_PART_NAVIGATION_DESIGN.md   # SCREAMING_SNAKE は避ける
@@ -120,10 +130,56 @@ design.md                             # 内容不明
 |---------|---------|
 | 新機能の仕様を決める | designs |
 | 実装のタスク分解・順序を決める | plans |
+| レビュー結果・バグ報告・検証結果を残す | reports |
 | バグや不具合を記録する | issues |
 | 原因不明の問題を分析する | investigations |
 | 繰り返し使う手順をまとめる | guides |
 | 技術選定の根拠や比較をまとめる | references |
+
+## 報告ドキュメント（reports）
+
+### 種別
+
+| 種別 | 用途 | 命名例 |
+|------|------|--------|
+| review | 計画に対するレビュー結果 | `cart-api-review.md` |
+| bug | 検証で発見した不具合 | `cart-api-bug.md` |
+| verification | QA検証の結果 | `cart-api-verification.md` |
+
+### ドキュメント構造
+
+```markdown
+# <タイトル>
+
+- 種別: review | bug | verification
+- 対象: <関連する計画・成果物へのパス>
+- 報告者: <役割>
+- 判定: APPROVED | CHANGES_REQUESTED
+
+## 指摘事項
+
+### 1. <指摘タイトル>
+- 対象箇所: <計画のステップ / ファイル / コンポーネント>
+- 内容: <具体的な不整合・問題>
+- 状態: open | resolved
+```
+
+### ハンドオフプロトコル
+
+報告ドキュメントは、報告者とマネージャーの間のハンドオフに使う。
+
+```
+1. 報告者が reports/active/ に報告を作成する
+2. マネージャーがフェーズゲートで reports/active/ を確認する
+3. APPROVED → マネージャーが archive/ へ遷移する
+4. CHANGES_REQUESTED → マネージャーがワーカーに修正を指示する
+5. 修正後、報告者が同じドキュメントの指摘事項を更新する（open → resolved）
+6. 全指摘が resolved → 報告者が判定を APPROVED に更新する
+7. 2 に戻る
+```
+
+- 報告者はドキュメントの作成と更新を行う。フェーズ遷移の判断はしない
+- マネージャーは報告を確認しフェーズ遷移を判断する。報告の内容は編集しない
 
 ## ドキュメント参照
 
@@ -155,4 +211,3 @@ stable のドキュメントに大幅な更新が必要な場合:
 1. active に移動する
 2. 内容を更新する
 3. 完了後に stable に戻す
-
