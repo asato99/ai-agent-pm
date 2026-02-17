@@ -333,14 +333,33 @@ extension MCPServer {
         let depsStr = taskDependencies.map { $0.value }.joined(separator: ", ")
         Self.log("[MCP] Task created: \(newTask.id.value) (parent: \(parentTaskId ?? "none"), dependencies: [\(depsStr)], assignee: \(assigneeId?.value ?? "nil"))")
 
+        // Manager がサブタスクを作成した場合、親タスクの assignee をマネージャー自身に戻す
+        // 親タスクは「管理タスク」としてマネージャーが監督する意味合いになる
+        var parentTaskReassigned = false
+        if let parentId = parentId, assigneeId == nil {
+            if var parentTask = try taskRepository.findById(parentId) {
+                if parentTask.assigneeId != agentId {
+                    let previousAssignee = parentTask.assigneeId?.value ?? "nil"
+                    parentTask.assigneeId = agentId
+                    try taskRepository.save(parentTask)
+                    parentTaskReassigned = true
+                    Self.log("[MCP] Parent task \(parentId.value) reassigned to manager \(agentId.value) (was: \(previousAssignee)) - now a supervisory task")
+                }
+            }
+        }
+
         // 作成者に応じた instruction を決定
-        let instruction: String
+        var instruction: String
         if assigneeId != nil {
             // Worker の場合: タスクは既に自分にアサインされている
             instruction = "サブタスクが作成され、あなたに自動的に割り当てられました。全てのサブタスク作成後、get_next_action を呼び出してください。"
         } else {
             // Manager の場合: assign_task で Worker に割り当てが必要
             instruction = "サブタスクが作成されました。assign_task で適切なワーカーに割り当て、update_task_status で in_progress に変更してください。未割り当てのままのタスクは実行されません。"
+        }
+
+        if parentTaskReassigned {
+            instruction += " 親タスク（\(parentId!.value)）はサブタスクに分割されたため、管理タスクとしてあなた（マネージャー）の担当に変更されました。"
         }
 
         return [
@@ -355,6 +374,7 @@ extension MCPServer {
                 "parent_task_id": parentTaskId as Any,
                 "dependencies": taskDependencies.map { $0.value }
             ],
+            "parent_task_reassigned": parentTaskReassigned,
             "instruction": instruction
         ]
     }
@@ -459,12 +479,30 @@ extension MCPServer {
             ])
         }
 
+        // Manager がサブタスクを作成した場合、親タスクの assignee をマネージャー自身に戻す
+        var parentTaskReassigned = false
+        if !isWorker {
+            if var parentTask = try taskRepository.findById(parentId) {
+                if parentTask.assigneeId != agentId {
+                    let previousAssignee = parentTask.assigneeId?.value ?? "nil"
+                    parentTask.assigneeId = agentId
+                    try taskRepository.save(parentTask)
+                    parentTaskReassigned = true
+                    Self.log("[MCP] Parent task \(parentId.value) reassigned to manager \(agentId.value) (was: \(previousAssignee)) - now a supervisory task")
+                }
+            }
+        }
+
         // 作成者に応じた instruction を決定
-        let instruction: String
+        var instruction: String
         if isWorker {
             instruction = "\(tasks.count)個のサブタスクが作成され、あなたに自動的に割り当てられました。get_next_action を呼び出してください。"
         } else {
             instruction = "\(tasks.count)個のサブタスクが作成されました。assign_task で適切なワーカーに割り当ててください。"
+        }
+
+        if parentTaskReassigned {
+            instruction += " 親タスク（\(parentTaskId)）はサブタスクに分割されたため、管理タスクとしてあなた（マネージャー）の担当に変更されました。"
         }
 
         return [
@@ -472,6 +510,7 @@ extension MCPServer {
             "tasks": savedTasks,
             "task_count": savedTasks.count,
             "local_id_to_real_id": localIdToRealId.mapValues { $0.value },
+            "parent_task_reassigned": parentTaskReassigned,
             "instruction": instruction
         ]
     }
