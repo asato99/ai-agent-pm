@@ -326,12 +326,35 @@ extension MCPServer {
 
         // モデル検証チェック
         if session.modelVerified == nil {
-            return try getNextAction(session: session)
+            Self.log("[MCP] getNextActionAsync: Model not verified, returning report_model")
+            return [
+                "action": "report_model",
+                "instruction": """
+                    モデル情報を申告してください。
+                    report_model ツールを呼び出し、現在使用中の provider と model_id を申告してください。
+
+                    - provider: "claude", "gemini", "openai" などのプロバイダー名
+                    - model_id: 使用中のモデル名（例: "claude-sonnet-4-5", "gemini-2.5-pro", "gpt-4o"）
+
+                    ※ model_id は使用中のモデル名を申告してください。
+                    申告後、get_next_action を再度呼び出してください。
+                    """,
+                "state": "needs_model_verification"
+            ]
         }
 
         // セッション終了チェック
         if session.state == .terminating {
-            return try getNextAction(session: session)
+            Self.log("[MCP] getNextActionAsync: Session terminating, returning exit")
+            return [
+                "action": "exit",
+                "instruction": """
+                    ユーザーがチャットを閉じました。
+                    logout を呼び出してセッションを終了してください。
+                    """,
+                "state": "session_terminating",
+                "reason": "user_closed_chat"
+            ]
         }
 
         let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
