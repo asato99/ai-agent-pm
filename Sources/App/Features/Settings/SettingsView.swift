@@ -62,9 +62,18 @@ enum AppAppearance: String, CaseIterable {
 // MARK: - General Settings
 
 struct GeneralSettingsView: View {
+    @EnvironmentObject var container: DependencyContainer
     @Binding var appearance: AppAppearance
     @Binding var showCompletedTasks: Bool
     @Binding var autoRefreshInterval: Int
+
+    @State private var basePromptText: String = ""
+    @State private var savedBasePromptText: String = ""
+    @State private var isSaving = false
+
+    private var hasChanges: Bool {
+        basePromptText != savedBasePromptText
+    }
 
     var body: some View {
         Form {
@@ -88,9 +97,99 @@ struct GeneralSettingsView: View {
                     Text("Never").tag(0)
                 }
             }
+
+            Section("Agent Base Prompt") {
+                TextEditor(text: $basePromptText)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minHeight: 160)
+                    .scrollContentBackground(.hidden)
+                    .padding(4)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                    )
+
+                HStack {
+                    Button("Save") {
+                        Task { await saveBasePrompt() }
+                    }
+                    .disabled(!hasChanges || isSaving)
+
+                    if !savedBasePromptText.isEmpty {
+                        Button("Clear", role: .destructive) {
+                            Task { await clearBasePrompt() }
+                        }
+                        .disabled(isSaving)
+                    }
+
+                    Spacer()
+
+                    Text("\(basePromptText.count) characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("A base prompt applied to all agents when started by the Coordinator. Use this to define shared instructions, policies, or behavioral guidelines.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()
+        .task {
+            await loadBasePrompt()
+        }
+    }
+
+    @MainActor
+    private func loadBasePrompt() async {
+        let repo = container.appSettingsRepository
+        do {
+            let settings = try repo.get()
+            let prompt = settings.agentBasePrompt ?? ""
+            basePromptText = prompt
+            savedBasePromptText = prompt
+        } catch {
+            NSLog("[GeneralSettingsView] Failed to load base prompt: \(error)")
+        }
+    }
+
+    @MainActor
+    private func saveBasePrompt() async {
+        isSaving = true
+        defer { isSaving = false }
+
+        let repo = container.appSettingsRepository
+        do {
+            var settings = try repo.get()
+            let prompt = basePromptText.isEmpty ? nil : basePromptText
+            settings = settings.withAgentBasePrompt(prompt)
+            try repo.save(settings)
+            savedBasePromptText = basePromptText
+            NSLog("[GeneralSettingsView] Base prompt saved (\(basePromptText.count) chars)")
+        } catch {
+            NSLog("[GeneralSettingsView] Failed to save base prompt: \(error)")
+        }
+    }
+
+    @MainActor
+    private func clearBasePrompt() async {
+        isSaving = true
+        defer { isSaving = false }
+
+        let repo = container.appSettingsRepository
+        do {
+            var settings = try repo.get()
+            settings = settings.withAgentBasePrompt(nil)
+            try repo.save(settings)
+            basePromptText = ""
+            savedBasePromptText = ""
+            NSLog("[GeneralSettingsView] Base prompt cleared")
+        } catch {
+            NSLog("[GeneralSettingsView] Failed to clear base prompt: \(error)")
+        }
     }
 }
 
