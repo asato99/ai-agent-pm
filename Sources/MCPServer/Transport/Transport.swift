@@ -7,7 +7,7 @@ import Infrastructure
 
 /// MCPトランスポート層のプロトコル
 /// stdio（Claude Code用）とUnixソケット（Runner用）の両方をサポート
-protocol MCPTransport {
+public protocol MCPTransport {
     /// メッセージを読み取る
     func readMessage() throws -> JSONRPCRequest
 
@@ -21,7 +21,7 @@ protocol MCPTransport {
 // MARK: - TransportError
 
 /// トランスポート層で発生するエラー
-enum TransportError: Error, CustomStringConvertible {
+public enum TransportError: Error, CustomStringConvertible {
     case invalidHeader(String)
     case invalidContentLength(String)
     case incompleteRead
@@ -29,7 +29,7 @@ enum TransportError: Error, CustomStringConvertible {
     case invalidJSON(Error)
     case encodingFailed
 
-    var description: String {
+    public var description: String {
         switch self {
         case .invalidHeader(let header):
             return "Invalid header: \(header)"
@@ -52,16 +52,18 @@ enum TransportError: Error, CustomStringConvertible {
 /// HTTPトランスポート用のダミートランスポート
 /// HTTPモードではread/writeは使用されず、processHTTPRequestで直接処理される
 /// 参照: docs/design/MULTI_DEVICE_IMPLEMENTATION_PLAN.md - フェーズ1.2
-final class NullTransport: MCPTransport {
-    func readMessage() throws -> JSONRPCRequest {
+public final class NullTransport: MCPTransport {
+    public init() {}
+
+    public func readMessage() throws -> JSONRPCRequest {
         throw TransportError.endOfInput
     }
 
-    func writeMessage(_ response: JSONRPCResponse) throws {
+    public func writeMessage(_ response: JSONRPCResponse) throws {
         // HTTP mode uses direct request/response, not transport
     }
 
-    func log(_ message: String) {
+    public func log(_ message: String) {
         // MCPLoggerに委譲（transport カテゴリで出力）
         MCPLogger.shared.debug("[HTTP] \(message)", category: .transport)
     }

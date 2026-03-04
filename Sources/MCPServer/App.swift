@@ -6,6 +6,15 @@ import Foundation
 import Infrastructure
 import Domain
 
+// C exit() をParsableCommand.exit()と区別するためのヘルパー
+private func cExit(_ code: Int32) -> Never {
+    #if canImport(Darwin)
+    Darwin.exit(code)
+    #elseif canImport(Glibc)
+    Glibc.exit(code)
+    #endif
+}
+
 // MARK: - Constants
 
 /// MCPServer固有の設定（共通設定はInfrastructure.AppConfigを使用）
@@ -37,9 +46,10 @@ private func earlyDebugLog(_ msg: String) {
     }
 }
 
-@main
-struct MCPServerCommand: ParsableCommand {
-    static func main() {
+public struct MCPServerCommand: ParsableCommand {
+    public init() {}
+
+    public static func main() {
         earlyDebugLog("MCPServerCommand.main() starting, args: \(CommandLine.arguments)")
         do {
             var command = try parseAsRoot()
@@ -51,7 +61,7 @@ struct MCPServerCommand: ParsableCommand {
             exit(withError: error)
         }
     }
-    static let configuration = CommandConfiguration(
+    public static let configuration = CommandConfiguration(
         commandName: "mcp-server-pm",
         abstract: "AI Agent Project Manager - MCP Server",
         version: "0.2.0",
@@ -187,7 +197,7 @@ struct Daemon: ParsableCommand {
         source.setEventHandler {
             server.stop()
             try? FileManager.default.removeItem(atPath: pidPath)
-            Darwin.exit(0)
+            cExit(0)
         }
         source.resume()
         signal(SIGTERM, SIG_IGN)
@@ -197,7 +207,7 @@ struct Daemon: ParsableCommand {
         intSource.setEventHandler {
             server.stop()
             try? FileManager.default.removeItem(atPath: pidPath)
-            Darwin.exit(0)
+            cExit(0)
         }
         intSource.resume()
         signal(SIGINT, SIG_IGN)

@@ -13,20 +13,29 @@ public enum AppConfig {
     /// DBパス切り替え用の環境変数名
     public static let databasePathEnvKey = "AIAGENTPM_DB_PATH"
 
-    /// ~/Library/Application Support/AIAgentPM/
+    /// アプリケーションデータ格納ディレクトリ
+    /// macOS: ~/Library/Application Support/AIAgentPM/
+    /// Linux: $XDG_DATA_HOME/AIAgentPM/ or ~/.local/share/AIAgentPM/
     public static var appSupportDirectory: URL {
+        #if os(Linux)
+        let baseDir = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+            ?? "\(NSHomeDirectory())/.local/share"
+        return URL(fileURLWithPath: baseDir).appendingPathComponent(appName)
+        #else
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first!
         return appSupport.appendingPathComponent(appName)
+        #endif
     }
 
     /// データベースファイル名
     public static let databaseFileName = "pm.db"
 
     /// デフォルトのデータベースパス
-    /// ~/Library/Application Support/AIAgentPM/pm.db
+    /// macOS: ~/Library/Application Support/AIAgentPM/pm.db
+    /// Linux: ~/.local/share/AIAgentPM/pm.db
     public static var defaultDatabasePath: String {
         appSupportDirectory.appendingPathComponent(databaseFileName).path
     }
@@ -56,14 +65,14 @@ public enum AppConfig {
         /// ポート設定用の環境変数名
         public static let portEnvKey = "AIAGENTPM_WEBSERVER_PORT"
 
-        /// ポート設定用のUserDefaultsキー
+        /// ポート設定用のUserDefaultsキー（macOSのみ使用）
         public static let portUserDefaultsKey = "webServerPort"
 
         /// デフォルトのポート番号
         public static let defaultPort = 8080
 
         /// 実際に使用するポート番号
-        /// 優先順位: 環境変数 > UserDefaults > デフォルト値
+        /// 優先順位: 環境変数 > UserDefaults(macOSのみ) > デフォルト値
         public static var port: Int {
             // 1. 環境変数を優先
             if let envPort = ProcessInfo.processInfo.environment[portEnvKey],
@@ -71,11 +80,13 @@ public enum AppConfig {
                 return port
             }
 
-            // 2. UserDefaultsを確認
+            #if !os(Linux)
+            // 2. UserDefaultsを確認（macOSのみ）
             let userDefaultsPort = UserDefaults.standard.integer(forKey: portUserDefaultsKey)
             if userDefaultsPort != 0 && isValidPort(userDefaultsPort) {
                 return userDefaultsPort
             }
+            #endif
 
             // 3. デフォルト値
             return defaultPort
@@ -84,13 +95,17 @@ public enum AppConfig {
         /// ポートをUserDefaultsに保存し、web-ui用の設定ファイルも更新
         public static func setPort(_ port: Int) {
             guard isValidPort(port) else { return }
+            #if !os(Linux)
             UserDefaults.standard.set(port, forKey: portUserDefaultsKey)
+            #endif
             writePortConfigFile(port)
         }
 
         /// ポートをデフォルトにリセット
         public static func resetPort() {
+            #if !os(Linux)
             UserDefaults.standard.removeObject(forKey: portUserDefaultsKey)
+            #endif
             writePortConfigFile(defaultPort)
         }
 
@@ -100,14 +115,10 @@ public enum AppConfig {
         }
 
         /// web-ui開発用のポート設定ファイルを書き出す
-        /// ファイル場所: ~/Library/Application Support/AIAgentPM/webserver-port
+        /// macOS: ~/Library/Application Support/AIAgentPM/webserver-port
+        /// Linux: ~/.local/share/AIAgentPM/webserver-port
         private static func writePortConfigFile(_ port: Int) {
-            let appSupportDir = FileManager.default.urls(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask
-            ).first?.appendingPathComponent("AIAgentPM")
-
-            guard let dir = appSupportDir else { return }
+            let dir = appSupportDirectory
 
             // ディレクトリがなければ作成
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
