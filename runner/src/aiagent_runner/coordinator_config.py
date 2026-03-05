@@ -286,6 +286,90 @@ class CoordinatorConfig:
             config_path=str(path),
         )
 
+    @classmethod
+    async def from_server(
+        cls,
+        server_url: str,
+        token: str,
+        root_agent_id: Optional[str] = None,
+    ) -> "CoordinatorConfig":
+        """Fetch configuration dynamically from the server.
+
+        Args:
+            server_url: Base URL of the AI Agent PM server
+            token: Coordinator token for authentication
+            root_agent_id: Optional root agent ID for scoped configuration
+
+        Returns:
+            CoordinatorConfig instance
+
+        Raises:
+            ValueError: If authentication fails
+            ConnectionError: If server is unreachable
+        """
+        try:
+            import aiohttp
+        except ImportError:
+            raise ImportError(
+                "aiohttp is required for dynamic config. "
+                "Install with: pip install aiagent-runner[http]"
+            )
+
+        url = f"{server_url.rstrip('/')}/api/coordinator/config"
+        params = {}
+        if root_agent_id:
+            params["root_agent_id"] = root_agent_id
+        headers = {"Authorization": f"Bearer {token}"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params=params) as resp:
+                if resp.status == 401:
+                    raise ValueError("Invalid coordinator token")
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise ConnectionError(
+                        f"Failed to fetch config: HTTP {resp.status} - {text}"
+                    )
+                data = await resp.json()
+
+        return cls._from_server_response(data, token)
+
+    @classmethod
+    def _from_server_response(cls, data: dict, token: str) -> "CoordinatorConfig":
+        """Build CoordinatorConfig from server API response.
+
+        Args:
+            data: JSON response from /api/coordinator/config
+            token: Coordinator token used for the request
+
+        Returns:
+            CoordinatorConfig instance
+        """
+        # Parse AI providers
+        ai_providers = {}
+        for name, provider_data in data.get("ai_providers", {}).items():
+            ai_providers[name] = AIProviderConfig(
+                cli_command=provider_data.get("cli_command", name),
+                cli_args=provider_data.get("cli_args", []),
+            )
+
+        # Parse agents
+        agents = {}
+        for agent_id, agent_data in data.get("agents", {}).items():
+            passkey = agent_data.get("passkey", "")
+            if passkey:
+                agents[agent_id] = AgentConfig(passkey=passkey)
+
+        return cls(
+            polling_interval=data.get("polling_interval", 10),
+            max_concurrent=data.get("max_concurrent", 3),
+            server_url=data.get("server_url"),
+            coordinator_token=token,
+            root_agent_id=data.get("root_agent_id"),
+            ai_providers=ai_providers,
+            agents=agents,
+        )
+
     def get_provider(self, ai_type: str) -> AIProviderConfig:
         """Get AI provider configuration.
 

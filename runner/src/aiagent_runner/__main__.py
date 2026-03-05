@@ -4,6 +4,7 @@
 # Reference: docs/plan/PHASE4_COORDINATOR_ARCHITECTURE.md (Coordinator)
 
 import argparse
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -91,6 +92,23 @@ def parse_args() -> argparse.Namespace:
         help="Directory for execution logs"
     )
 
+    # Dynamic config from server (Coordinator mode)
+    parser.add_argument(
+        "--server",
+        type=str,
+        help="Server URL for dynamic config (e.g., http://192.168.1.100:8080)"
+    )
+    parser.add_argument(
+        "--token",
+        type=str,
+        help="Coordinator token for server authentication"
+    )
+    parser.add_argument(
+        "--root-agent-id",
+        type=str,
+        help="Root agent ID for scoped configuration (multi-device)"
+    )
+
     return parser.parse_args()
 
 
@@ -166,8 +184,9 @@ def load_coordinator_config(args: argparse.Namespace) -> CoordinatorConfig:
     """Load configuration for Coordinator mode.
 
     Configuration loading priority:
-    1. User-specified config file (-c/--config) - full override
-    2. Default config file (runner/config/coordinator_default.yaml)
+    1. --server + --token: Dynamic config from server (new)
+    2. User-specified config file (-c/--config) - full override
+    3. Default config file (runner/config/coordinator_default.yaml)
 
     Note: When using default config, agents must be configured via
     environment variables or a separate config file.
@@ -180,7 +199,20 @@ def load_coordinator_config(args: argparse.Namespace) -> CoordinatorConfig:
     """
     logger = logging.getLogger(__name__)
 
-    if args.config and args.config.exists():
+    if args.server and args.token:
+        # Dynamic config from server
+        logger.info(f"Fetching config from server: {args.server}")
+        config = asyncio.run(
+            CoordinatorConfig.from_server(
+                server_url=args.server,
+                token=args.token,
+                root_agent_id=args.root_agent_id,
+            )
+        )
+        logger.info(f"Config loaded from server ({len(config.agents)} agents)")
+    elif args.server or args.token:
+        raise ValueError("Both --server and --token must be specified together")
+    elif args.config and args.config.exists():
         # User specified a config file - use it directly
         logger.info(f"Loading config from: {args.config}")
         config = CoordinatorConfig.from_yaml(args.config)

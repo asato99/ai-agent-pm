@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { LoginPage, ProjectListPage, TaskBoardPage, AgentDetailPage } from '@/pages'
+import { LoginPage, ProjectListPage, TaskBoardPage, AgentDetailPage, SettingsPage } from '@/pages'
 import { ProtectedRoute } from '@/components/auth'
 
 function App() {
@@ -28,6 +28,14 @@ function App() {
         element={
           <ProtectedRoute>
             <AgentDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <SettingsPage />
           </ProtectedRoute>
         }
       />

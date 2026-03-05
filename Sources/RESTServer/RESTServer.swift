@@ -493,6 +493,26 @@ final class RESTServer {
             return try await getUnreadCounts(request: request, context: context)
         }
         debugLog("Unread counts route registered: GET/:projectId/unread-counts")
+
+        // Settings
+        let settingsRouter = protectedRouter.group("settings")
+        settingsRouter.get { [self] request, context in
+            debugLog("GET /api/settings called")
+            return try await getSettings(request: request, context: context)
+        }
+        settingsRouter.patch { [self] request, context in
+            debugLog("PATCH /api/settings called")
+            return try await patchSettings(request: request, context: context)
+        }
+        settingsRouter.post("regenerate-token") { [self] request, context in
+            debugLog("POST /api/settings/regenerate-token called")
+            return try await regenerateToken(request: request, context: context)
+        }
+        settingsRouter.delete("coordinator-token") { [self] request, context in
+            debugLog("DELETE /api/settings/coordinator-token called")
+            return try await clearCoordinatorToken(request: request, context: context)
+        }
+        debugLog("Settings routes registered")
     }
 
     // MARK: - Helpers
@@ -567,6 +587,11 @@ final class RESTServer {
         // 参照: docs/design/LOG_TRANSFER_DESIGN.md
         router.post("api/v1/execution-logs/upload") { [self] request, context in
             try await handleLogUpload(request: request, context: context)
+        }
+
+        // GET /api/coordinator/config - 動的設定取得 (coordinator_token認証)
+        router.get("api/coordinator/config") { [self] request, context in
+            try await getCoordinatorConfig(request: request, context: context)
         }
     }
 }
